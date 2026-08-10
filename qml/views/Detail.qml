@@ -16,6 +16,9 @@ Item {
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
 
+    // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
+    readonly property bool isDetailPage: true
+
     property var detail: ({})
 
     Component.onCompleted: {

@@ -92,7 +92,9 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_set_option_string(m_mpv, "terminal", "yes");
     mpv_set_option_string(m_mpv, "vo", "libmpv");
     mpv_set_option_string(m_mpv, "gpu-api", "opengl");
-    mpv_set_option_string(m_mpv, "hwdec", "auto-safe");
+    // 软解:vaapi-copy 在播放中会偶发解码失败且不会中途回退(打开时探测
+    // 已选定后不再切换),表现为 "Video: no video";软解保证画面稳定。
+    mpv_set_option_string(m_mpv, "hwdec", "no");
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     mpv_set_option_string(m_mpv, "idle", "yes");
     mpv_set_option_string(m_mpv, "volume", "100");
