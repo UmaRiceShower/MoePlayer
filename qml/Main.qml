@@ -18,17 +18,19 @@ ApplicationWindow {
     }
 
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
-    function openPlayerWindow(url, headers) {
+    // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
+    function openPlayerWindow(url, headers, meta) {
         return playerWindowComponent.createObject(null, {
             source: url,
             headers: headers || [],
+            meta: meta || {},
             visible: true
         })
     }
 
     Component.onCompleted: {
         if (startupUrl !== "")
-            openPlayerWindow(startupUrl)
+            openPlayerWindow(startupUrl, [], {})
     }
 
     StackView {
@@ -59,7 +61,20 @@ ApplicationWindow {
     Component {
         id: libraryPage
         Library {
-            onPlayRequested: root.openPlayerWindow(url, headers)
+            onPlayRequested: root.openPlayerWindow(url, headers, meta)
+            onShowDetail: stackView.push(detailPage, {
+                itemId: itemId,
+                posterId: posterId,
+                title: title
+            })
+        }
+    }
+
+    Component {
+        id: detailPage
+        Detail {
+            onPlayRequested: root.openPlayerWindow(url, headers, meta)
+            onBackRequested: stackView.pop()
         }
     }
 

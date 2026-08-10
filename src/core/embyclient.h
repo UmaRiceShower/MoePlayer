@@ -49,6 +49,18 @@ public:
     Q_INVOKABLE void fetchItems(const QString &viewId, int startIndex, int limit);
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
+    // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
+    Q_INVOKABLE void fetchItemDetail(const QString &itemId);
+    // 播放状态回传四件套(/Sessions/Playing*,PlaySessionId 贯穿)。
+    Q_INVOKABLE void reportPlaybackStart(const QString &itemId, const QString &mediaSourceId,
+                                         const QString &playSessionId, const QString &playMethod,
+                                         double positionSecs);
+    Q_INVOKABLE void reportPlaybackProgress(const QString &itemId, const QString &mediaSourceId,
+                                            const QString &playSessionId, const QString &playMethod,
+                                            double positionSecs, bool paused);
+    Q_INVOKABLE void reportPlaybackStopped(const QString &itemId, const QString &mediaSourceId,
+                                           const QString &playSessionId, double positionSecs);
+    Q_INVOKABLE void reportPlaybackPing(const QString &playSessionId);
     // 登出并清空模型与令牌。
     Q_INVOKABLE void disconnectServer();
 
@@ -67,8 +79,11 @@ signals:
     void loginSucceeded();
     void viewsReceived();
     void itemsReceived();
-    // url 为绝对播放地址,headers 为流请求所需的 "Name: Value" 头列表。
-    void playbackReady(const QString &url, const QVariantList &headers);
+    // url 为绝对播放地址;headers 为流请求所需的 "Name: Value" 头列表;
+    // meta 含 itemId/mediaSourceId/playSessionId/playMethod,供播放回传使用。
+    void playbackReady(const QString &url, const QVariantList &headers, const QVariantMap &meta);
+    // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
+    void itemDetailReady(const QVariantMap &detail);
     void errorOccurred(const QString &message);
 
 private:
@@ -82,6 +97,8 @@ private:
     void postJson(const QString &path, const QJsonObject &body, bool auth,
                   std::function<void(const QJsonDocument &)> onOk,
                   const QString &what);
+    // 发送播放状态回传(失败仅记日志,不阻断播放)。
+    void postReport(const QString &endpoint, const QJsonObject &body);
     // 构造 X-Emby-Authorization 头(官方 "Emby ..." 格式),带 Token 与否可选。
     QString authHeader(bool withToken) const;
 

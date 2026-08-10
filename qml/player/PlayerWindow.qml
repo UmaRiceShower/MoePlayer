@@ -1,10 +1,13 @@
 import QtQuick
 import QtQuick.Controls
+import MoePlayer.Core
 import MoePlayer.Playback
 import "qrc:/qml/theme"
 
 //! 播放窗口:MpvItem 播放视频,官方 OSC(进度条/按钮/时间)由 mpv 直接绘制。
 //! 无自绘控件,鼠标/键盘事件转发给 mpv 以驱动 OSC 交互。
+//! 携带播放元数据(meta)时执行 Emby 播放状态回传:
+//! 起播 reportStart,播放中每 10s reportProgress,结束/关窗 reportStopped,每 10 分钟 Ping。
 Window {
     id: root
     width: 960
@@ -15,11 +18,64 @@ Window {
 
     property string source: ""
     property var headers: []
+    // 播放元数据:{itemId, mediaSourceId, playSessionId, playMethod};演示流为空对象。
+    property var meta: ({})
+
+    readonly property bool reporting: meta && meta.playSessionId !== undefined && meta.playSessionId !== ""
+    property double lastProgressReport: 0
 
     MpvItem {
         id: mpv
         anchors.fill: parent
         Component.onCompleted: load(root.source, root.headers)
+
+        // 开始解码(时长首次有效) → 上报播放开始。
+        onPlaybackStarted: {
+            if (root.reporting)
+                EmbyClient.reportPlaybackStart(root.meta.itemId, root.meta.mediaSourceId,
+                                               root.meta.playSessionId, root.meta.playMethod, 0)
+        }
+        // 播放中每 10 秒上报一次进度。
+        onPositionChanged: {
+            if (!root.reporting || mpv.state !== "playing")
+                return
+            const now = Date.now()
+            if (now - root.lastProgressReport >= 10000) {
+                root.lastProgressReport = now
+                EmbyClient.reportPlaybackProgress(root.meta.itemId, root.meta.mediaSourceId,
+                                                  root.meta.playSessionId, root.meta.playMethod,
+                                                  mpv.position, false)
+            }
+        }
+        // 暂停/恢复等状态变化立即上报一次(携带 IsPaused)。
+        onStateChanged: {
+            if (!root.reporting || mpv.state === "idle")
+                return
+            EmbyClient.reportPlaybackProgress(root.meta.itemId, root.meta.mediaSourceId,
+                                              root.meta.playSessionId, root.meta.playMethod,
+                                              mpv.position, mpv.state === "paused")
+        }
+        // 播放结束(正常播完或出错) → 上报停止。
+        onPlaybackEnded: function (error) {
+            if (root.reporting)
+                EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
+                                                 root.meta.playSessionId, mpv.position)
+        }
+    }
+
+    // 播放中每 10 分钟 Ping 一次,维持服务器会话。
+    Timer {
+        interval: 600000
+        running: root.reporting && mpv.state !== "idle"
+        repeat: true
+        onTriggered: EmbyClient.reportPlaybackPing(root.meta.playSessionId)
+    }
+
+    // 关窗时上报最终位置。
+    onClosing: {
+        if (root.reporting)
+            EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
+                                             root.meta.playSessionId, mpv.position)
     }
 
     // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);

@@ -222,6 +222,10 @@ void EmbyClient::fetchPlaybackInfo(const QString &itemId)
                  }
                  const QJsonObject src = sources.first().toObject();
                  const QString mediaSourceId = src.value(QLatin1String("Id")).toString();
+                 // 服务器生成的会话 id,播放回传三件套共用(缺省则本地兜底)。
+                 QString playSessionId = o.value(QLatin1String("PlaySessionId")).toString();
+                 if (playSessionId.isEmpty())
+                     playSessionId = QStringLiteral("%1-%2").arg(m_userId, itemId);
                  const QStringList headers = requiredHeaders(src);
 
                  // 补全 server 前缀,并在 URL 中附带 api_key,使 mpv 拉流无需自定义请求头。
@@ -244,12 +248,14 @@ void EmbyClient::fetchPlaybackInfo(const QString &itemId)
                  const bool directPlay = src.value(QLatin1String("SupportsDirectPlay")).toBool();
 
                  QString url;
+                 QString playMethod = QStringLiteral("DirectStream");
                  bool probeRange = false;
                  if (!direct.isEmpty()) {
                      url = absUrl(direct);
                      probeRange = true;
                  } else if (!transcode.isEmpty()) {
                      url = absUrl(transcode);
+                     playMethod = QStringLiteral("Transcode");
                  } else if (directPlay) {
                      url = serverUrl() + QStringLiteral("/Videos/%1/stream?static=true&MediaSourceId=%2")
                                             .arg(itemId, mediaSourceId);
@@ -260,18 +266,107 @@ void EmbyClient::fetchPlaybackInfo(const QString &itemId)
                  }
                  url = withApiKey(url);
 
+                 QVariantMap meta;
+                 meta.insert(QStringLiteral("itemId"), itemId);
+                 meta.insert(QStringLiteral("mediaSourceId"), mediaSourceId);
+                 meta.insert(QStringLiteral("playSessionId"), playSessionId);
+                 meta.insert(QStringLiteral("playMethod"), playMethod);
+
+                 const auto emitReady = [this, headers, meta](const QString &finalUrl) {
+                     qInfo() << "Emby: playback url =" << finalUrl << "method =" << meta.value("playMethod").toString();
+                     emit playbackReady(finalUrl, QVariantList(headers.begin(), headers.end()), meta);
+                 };
                  if (probeRange) {
                      // 反代服务器可能只在 /emby/ 前缀正确处理 Range —— 探测一次并缓存。
                      // 探测失败绝不挡起播(回原 URL)。
-                     probeSeekableUrl(url, [this, headers](const QString &finalUrl) {
-                         qInfo() << "Emby: playback url =" << finalUrl << "headers =" << headers.size();
-                         emit playbackReady(finalUrl, QVariantList(headers.begin(), headers.end()));
-                     });
+                     probeSeekableUrl(url, emitReady);
                  } else {
-                     qInfo() << "Emby: playback url =" << url << "headers =" << headers.size();
-                     emit playbackReady(url, QVariantList(headers.begin(), headers.end()));
+                     emitReady(url);
                  }
              }, QStringLiteral("播放协商"));
+}
+
+void EmbyClient::fetchItemDetail(const QString &itemId)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources"));
+    get(QStringLiteral("/Users/%1/Items/%2?%3").arg(m_userId, itemId, q.toString()), true,
+        [this](const QJsonDocument &doc) {
+            const QJsonObject o = doc.object();
+            QVariantMap m;
+            m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+            m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+            m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
+            m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
+            m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
+            m.insert(QStringLiteral("runtimeSecs"), o.value(QLatin1String("RunTimeTicks")).toDouble(0) / 1e7);
+            m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
+            QVariantList genres;
+            for (const auto &g : o.value(QLatin1String("Genres")).toArray())
+                genres.append(g.toString());
+            m.insert(QStringLiteral("genres"), genres);
+            emit itemDetailReady(m);
+        }, QStringLiteral("获取条目详情"));
+}
+
+// ---------- 播放状态回传(/Sessions/Playing 三件套 + Ping) ----------
+
+void EmbyClient::postReport(const QString &endpoint, const QJsonObject &body)
+{
+    // 回传失败不阻断播放,仅记录日志。
+    postJson(endpoint, body, true, [](const QJsonDocument &) {}, QStringLiteral("播放状态上报"));
+}
+
+void EmbyClient::reportPlaybackStart(const QString &itemId, const QString &mediaSourceId,
+                                     const QString &playSessionId, const QString &playMethod,
+                                     double positionSecs)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("ItemId"), itemId);
+    b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
+    b.insert(QStringLiteral("PlaySessionId"), playSessionId);
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    b.insert(QStringLiteral("PlayMethod"), playMethod);
+    b.insert(QStringLiteral("CanSeek"), true);
+    b.insert(QStringLiteral("IsPaused"), false);
+    b.insert(QStringLiteral("RepeatMode"), QStringLiteral("RepeatNone"));
+    postReport(QStringLiteral("/Sessions/Playing"), b);
+}
+
+void EmbyClient::reportPlaybackProgress(const QString &itemId, const QString &mediaSourceId,
+                                        const QString &playSessionId, const QString &playMethod,
+                                        double positionSecs, bool paused)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("ItemId"), itemId);
+    b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
+    b.insert(QStringLiteral("PlaySessionId"), playSessionId);
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    b.insert(QStringLiteral("PlayMethod"), playMethod);
+    b.insert(QStringLiteral("CanSeek"), true);
+    b.insert(QStringLiteral("IsPaused"), paused);
+    b.insert(QStringLiteral("RepeatMode"), QStringLiteral("RepeatNone"));
+    b.insert(QStringLiteral("EventName"), QStringLiteral("timeupdate"));
+    postReport(QStringLiteral("/Sessions/Playing/Progress"), b);
+}
+
+void EmbyClient::reportPlaybackStopped(const QString &itemId, const QString &mediaSourceId,
+                                       const QString &playSessionId, double positionSecs)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("ItemId"), itemId);
+    b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
+    b.insert(QStringLiteral("PlaySessionId"), playSessionId);
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    postReport(QStringLiteral("/Sessions/Playing/Stopped"), b);
+}
+
+void EmbyClient::reportPlaybackPing(const QString &playSessionId)
+{
+    QJsonObject b;
+    b.insert(QStringLiteral("PlaySessionId"), playSessionId);
+    postReport(QStringLiteral("/Sessions/Playing/Ping"), b);
 }
 
 void EmbyClient::probeRange(const QString &url, std::function<void(bool ok)> onDone)

@@ -8,7 +8,9 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    signal playRequested(string url, var headers)
+    signal playRequested(string url, var headers, var meta)
+    // 点击条目进入详情页。
+    signal showDetail(string itemId, string posterId, string title)
 
     property bool busy: false
     // 当前浏览的视图 id(分页加载用)。
@@ -143,11 +145,7 @@ Item {
                 }
                 MouseArea {
                     anchors.fill: parent
-                    onClicked: {
-                        root.busy = true
-                        statusText.text = "协商播放…"
-                        EmbyClient.fetchPlaybackInfo(model.id)
-                    }
+                    onClicked: root.showDetail(model.id, model.posterId, model.name)
                 }
             }
         }
@@ -161,11 +159,11 @@ Item {
             spacing: 12
             Button {
                 text: "测试流 A（Sintel）"
-                onClicked: root.playRequested(SettingsStore.testStreamUrl, [])
+                onClicked: root.playRequested(SettingsStore.testStreamUrl, [], {})
             }
             Button {
                 text: "测试流 B（Bunny）"
-                onClicked: root.playRequested("https://media.w3.org/2010/05/bunny/trailer.mp4", [])
+                onClicked: root.playRequested("https://media.w3.org/2010/05/bunny/trailer.mp4", [], {})
             }
         }
     }
@@ -195,11 +193,6 @@ Item {
             statusText.text = "已加载 " + EmbyClient.itemsModel.count + " / "
                               + EmbyClient.itemsModel.totalCount + " 个条目"
             root.busy = false
-        }
-        function onPlaybackReady(url, headers) {
-            root.busy = false
-            statusText.text = ""
-            root.playRequested(url, headers)
         }
         function onErrorOccurred(message) {
             root.busy = false
