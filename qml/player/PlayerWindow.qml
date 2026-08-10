@@ -24,6 +24,11 @@ Window {
     readonly property bool reporting: meta && meta.playSessionId !== undefined && meta.playSessionId !== ""
     property double lastProgressReport: 0
 
+    // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
+    // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
+    // 持有的是实例引用,不经过运行时 id 查找。
+    readonly property var owner: root
+
     MpvItem {
         id: mpv
         anchors.fill: parent
@@ -36,35 +41,35 @@ Window {
         target: mpv
         // 开始解码(时长首次有效) → 上报播放开始。
         function onPlaybackStarted() {
-            if (root.reporting)
-                EmbyClient.reportPlaybackStart(root.meta.itemId, root.meta.mediaSourceId,
-                                               root.meta.playSessionId, root.meta.playMethod, 0)
+            if (owner.reporting)
+                EmbyClient.reportPlaybackStart(owner.meta.itemId, owner.meta.mediaSourceId,
+                                               owner.meta.playSessionId, owner.meta.playMethod, 0)
         }
         // 播放中每 10 秒上报一次进度。
         function onPositionChanged() {
-            if (!root.reporting || mpv.state !== "playing")
+            if (!owner.reporting || mpv.state !== "playing")
                 return
             const now = Date.now()
-            if (now - root.lastProgressReport >= 10000) {
-                root.lastProgressReport = now
-                EmbyClient.reportPlaybackProgress(root.meta.itemId, root.meta.mediaSourceId,
-                                                  root.meta.playSessionId, root.meta.playMethod,
+            if (now - owner.lastProgressReport >= 10000) {
+                owner.lastProgressReport = now
+                EmbyClient.reportPlaybackProgress(owner.meta.itemId, owner.meta.mediaSourceId,
+                                                  owner.meta.playSessionId, owner.meta.playMethod,
                                                   mpv.position, false)
             }
         }
         // 暂停/恢复等状态变化立即上报一次(携带 IsPaused)。
         function onStateChanged() {
-            if (!root.reporting || mpv.state === "idle")
+            if (!owner.reporting || mpv.state === "idle")
                 return
-            EmbyClient.reportPlaybackProgress(root.meta.itemId, root.meta.mediaSourceId,
-                                              root.meta.playSessionId, root.meta.playMethod,
+            EmbyClient.reportPlaybackProgress(owner.meta.itemId, owner.meta.mediaSourceId,
+                                              owner.meta.playSessionId, owner.meta.playMethod,
                                               mpv.position, mpv.state === "paused")
         }
         // 播放结束(正常播完或出错) → 上报停止。
         function onPlaybackEnded(error) {
-            if (root.reporting)
-                EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
-                                                 root.meta.playSessionId, mpv.position)
+            if (owner.reporting)
+                EmbyClient.reportPlaybackStopped(owner.meta.itemId, owner.meta.mediaSourceId,
+                                                 owner.meta.playSessionId, mpv.position)
         }
     }
 

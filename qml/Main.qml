@@ -65,6 +65,9 @@ ApplicationWindow {
                 root.openPlayerWindow(url, headers, meta)
             }
             onShowDetail: function (itemId, posterId, title) {
+                // 双击卡片会连发两次 showDetail,已打开详情页时忽略,避免叠出双实例。
+                if (stackView.currentItem && stackView.currentItem.isDetailPage)
+                    return
                 stackView.push(detailPage, {
                     itemId: itemId,
                     posterId: posterId,
