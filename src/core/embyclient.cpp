@@ -126,6 +126,9 @@ void EmbyClient::login(const QString &username, const QString &password)
 {
     QJsonObject body;
     body.insert(QStringLiteral("Username"), username);
+    // Emby 4.9 的 AuthenticateByName 实际接收 Pw 字段(官方 OpenAPI 文档写的是 Password,
+    // 但 4.9 只认 Pw);双字段发送兼容新旧服务器。
+    body.insert(QStringLiteral("Pw"), password);
     body.insert(QStringLiteral("Password"), password);
     postJson(QStringLiteral("/Users/AuthenticateByName"), body, false,
              [this](const QJsonDocument &doc) {
