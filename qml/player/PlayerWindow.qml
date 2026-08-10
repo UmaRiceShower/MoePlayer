@@ -28,15 +28,20 @@ Window {
         id: mpv
         anchors.fill: parent
         Component.onCompleted: load(root.source, root.headers)
+    }
 
+    // 播放状态回传驱动。用 Connections 而非 MpvItem 内联 handler:
+    // Qt 6.11 中属性 change 信号的内联 handler 作用域异常,引用 root 会得到 null。
+    Connections {
+        target: mpv
         // 开始解码(时长首次有效) → 上报播放开始。
-        onPlaybackStarted: {
+        function onPlaybackStarted() {
             if (root.reporting)
                 EmbyClient.reportPlaybackStart(root.meta.itemId, root.meta.mediaSourceId,
                                                root.meta.playSessionId, root.meta.playMethod, 0)
         }
         // 播放中每 10 秒上报一次进度。
-        onPositionChanged: {
+        function onPositionChanged() {
             if (!root.reporting || mpv.state !== "playing")
                 return
             const now = Date.now()
@@ -48,7 +53,7 @@ Window {
             }
         }
         // 暂停/恢复等状态变化立即上报一次(携带 IsPaused)。
-        onStateChanged: {
+        function onStateChanged() {
             if (!root.reporting || mpv.state === "idle")
                 return
             EmbyClient.reportPlaybackProgress(root.meta.itemId, root.meta.mediaSourceId,
@@ -56,7 +61,7 @@ Window {
                                               mpv.position, mpv.state === "paused")
         }
         // 播放结束(正常播完或出错) → 上报停止。
-        onPlaybackEnded: function (error) {
+        function onPlaybackEnded(error) {
             if (root.reporting)
                 EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
                                                  root.meta.playSessionId, mpv.position)
@@ -79,15 +84,15 @@ Window {
     }
 
     // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);
-    // 滚轮经 `keypress WHEEL_UP|WHEEL_DOWN` 转发。
+    // 坐标为整数(mpv 的 mouse 命令不接受浮点),滚轮经 keypress WHEEL_UP|WHEEL_DOWN 转发。
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
-        onPositionChanged: mpv.command(["mouse", x, y, -1])
+        onPositionChanged: mpv.command(["mouse", Math.round(x), Math.round(y), -1])
         onPressed: function (mouse) {
             const btn = mouse.button === Qt.LeftButton ? 0
                       : mouse.button === Qt.MiddleButton ? 1 : 2
-            mpv.command(["mouse", mouse.x, mouse.y, btn, "single"])
+            mpv.command(["mouse", Math.round(mouse.x), Math.round(mouse.y), btn, "single"])
         }
         onWheel: function (wheel) {
             if (wheel.angleDelta.y > 0)

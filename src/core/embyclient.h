@@ -107,6 +107,7 @@ private:
     MediaItemModel m_viewsModel;
     MediaItemModel m_itemsModel;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）
+    int m_itemsSeq = 0; // 条目请求序号,丢弃过期响应(视图快速切换时)
     QString m_serverName;
     QString m_serverVersion;
     QString m_userId;

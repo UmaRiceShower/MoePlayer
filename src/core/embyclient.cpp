@@ -161,8 +161,12 @@ void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
+    const int seq = ++m_itemsSeq;
     get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
-        [this, startIndex](const QJsonDocument &doc) {
+        [this, startIndex, seq](const QJsonDocument &doc) {
+            // 视图快速切换时可能已有更新的请求,过期响应直接丢弃。
+            if (seq != m_itemsSeq)
+                return;
             const QJsonObject o = doc.object();
             const QJsonArray items = o.value(QLatin1String("Items")).toArray();
             const int total = o.value(QLatin1String("TotalRecordCount")).toInt(0);

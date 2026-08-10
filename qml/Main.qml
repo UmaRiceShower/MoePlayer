@@ -61,19 +61,25 @@ ApplicationWindow {
     Component {
         id: libraryPage
         Library {
-            onPlayRequested: root.openPlayerWindow(url, headers, meta)
-            onShowDetail: stackView.push(detailPage, {
-                itemId: itemId,
-                posterId: posterId,
-                title: title
-            })
+            onPlayRequested: function (url, headers, meta) {
+                root.openPlayerWindow(url, headers, meta)
+            }
+            onShowDetail: function (itemId, posterId, title) {
+                stackView.push(detailPage, {
+                    itemId: itemId,
+                    posterId: posterId,
+                    title: title
+                })
+            }
         }
     }
 
     Component {
         id: detailPage
         Detail {
-            onPlayRequested: root.openPlayerWindow(url, headers, meta)
+            onPlayRequested: function (url, headers, meta) {
+                root.openPlayerWindow(url, headers, meta)
+            }
             onBackRequested: stackView.pop()
         }
     }
