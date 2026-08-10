@@ -12,7 +12,7 @@ struct MediaItem {
 };
 
 //! Emby 视图/媒体库条目列表模型,由 EmbyClient 填充。
-//! 角色:name(名称)、id(条目 id)、posterId("<itemId>|<tag>",无主图则为空)、
+//! 角色:name(名称)、id(条目 id)、posterId("<itemId>~<tag>",无主图则为空)、
 //! type(条目类型,如 "Movie")。
 class MediaItemModel : public QAbstractListModel
 {

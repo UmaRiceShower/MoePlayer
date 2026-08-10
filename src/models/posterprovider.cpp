@@ -13,19 +13,16 @@
 PosterProvider::PosterProvider(EmbyClient *client)
     : m_client(client)
 {
-    m_cache.setCacheDirectory(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                              + QStringLiteral("/emby-images"));
-    m_nam.setCache(&m_cache);
-    m_nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理(同 EmbyClient)
-    m_nam.setTransferTimeout(10000);
 }
 
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
-    // id = "<itemId>|<tag>"
-    const int sep = id.indexOf(QLatin1Char('|'));
-    const QString itemId = sep > 0 ? id.left(sep) : id;
+    // id = "<itemId>~<tag>",分隔符用 ~ 而非 |(| 在 image:// URL 中会被转义为
+    // %7C,导致按错误 id 查询);再做一次百分号解码以防万一。
+    const int sep = id.indexOf(QLatin1Char('~'));
+    const QString rawItem = sep > 0 ? id.left(sep) : id;
+    const QString itemId = QUrl::fromPercentEncoding(rawItem.toUtf8());
     const QString tag = sep > 0 ? id.mid(sep + 1) : QString();
 
     QUrlQuery q;
@@ -37,15 +34,22 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
 
     const QUrl url(m_client->serverUrl() + QStringLiteral("/Items/%1/Images/Primary?%2")
                                            .arg(itemId, q.toString()));
-    auto *resp = new PosterResponse(url, &m_nam);
-    return resp;
+    return new PosterResponse(url);
 }
 
-PosterResponse::PosterResponse(const QUrl &url, QNetworkAccessManager *nam)
+PosterResponse::PosterResponse(const QUrl &url)
 {
+    // 本对象在 QML 图片加载线程创建,网络管理器与磁盘缓存也在该线程
+    // 创建并使用,避免跨线程操作(共享主线程 QNAM 属未定义行为)。
+    m_cache.setCacheDirectory(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                              + QStringLiteral("/emby-images"));
+    m_nam.setCache(&m_cache);
+    m_nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理(同 EmbyClient)
+    m_nam.setTransferTimeout(10000);
+
     QNetworkRequest req(url);
     req.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
-    m_reply = nam->get(req);
+    m_reply = m_nam.get(req);
     connect(m_reply, &QNetworkReply::finished, this, [this]() {
         if (m_reply->error() == QNetworkReply::NoError) {
             if (!m_image.loadFromData(m_reply->readAll()))
