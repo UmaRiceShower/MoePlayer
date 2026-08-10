@@ -44,8 +44,9 @@ public:
     Q_INVOKABLE void login(const QString &username, const QString &password);
     // 获取当前用户的媒体库视图列表(/Users/{id}/Views),填充 viewsModel。
     Q_INVOKABLE void fetchViews();
-    // 获取指定视图下的影片条目(/Users/{id}/Items),填充 itemsModel。
-    Q_INVOKABLE void fetchItems(const QString &viewId);
+    // 获取指定视图下的影片条目(/Users/{id}/Items,分页),填充 itemsModel。
+    // startIndex=0 时替换模型,否则追加;TotalRecordCount 写入 itemsModel.totalCount。
+    Q_INVOKABLE void fetchItems(const QString &viewId, int startIndex, int limit);
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 登出并清空模型与令牌。

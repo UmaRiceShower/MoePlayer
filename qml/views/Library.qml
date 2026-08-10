@@ -11,6 +11,8 @@ Item {
     signal playRequested(string url, var headers)
 
     property bool busy: false
+    // 当前浏览的视图 id(分页加载用)。
+    property string currentViewId: ""
 
     function connectServer() {
         EmbyClient.serverUrl = serverField.text
@@ -83,7 +85,10 @@ Item {
                 model: EmbyClient.viewsModel
                 Button {
                     text: model.name
-                    onClicked: EmbyClient.fetchItems(model.id)
+                    onClicked: {
+                        root.currentViewId = model.id
+                        EmbyClient.fetchItems(model.id, 0, 200)
+                    }
                 }
             }
         }
@@ -98,6 +103,16 @@ Item {
             cellHeight: 260
             clip: true
             model: EmbyClient.itemsModel
+            // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
+            onAtYEndChanged: {
+                if (!atYEnd)
+                    return
+                const m = EmbyClient.itemsModel
+                if (root.currentViewId !== "" && m.count < m.totalCount && !root.busy) {
+                    root.busy = true
+                    EmbyClient.fetchItems(root.currentViewId, m.count, 200)
+                }
+            }
             BusyIndicator {
                 anchors.centerIn: parent
                 running: root.busy && grid.visible
@@ -170,12 +185,15 @@ Item {
             EmbyClient.fetchViews()
         }
         function onViewsReceived() {
-            if (EmbyClient.viewsModel.count > 0)
-                EmbyClient.fetchItems(EmbyClient.viewsModel.idAt(0))
+            if (EmbyClient.viewsModel.count > 0) {
+                root.currentViewId = EmbyClient.viewsModel.idAt(0)
+                EmbyClient.fetchItems(root.currentViewId, 0, 200)
+            }
             root.busy = false
         }
         function onItemsReceived() {
-            statusText.text = "已加载 " + EmbyClient.itemsModel.count + " 个条目"
+            statusText.text = "已加载 " + EmbyClient.itemsModel.count + " / "
+                              + EmbyClient.itemsModel.totalCount + " 个条目"
             root.busy = false
         }
         function onPlaybackReady(url, headers) {

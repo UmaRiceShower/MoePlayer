@@ -152,18 +152,26 @@ void EmbyClient::fetchViews()
     }, QStringLiteral("获取媒体库视图"));
 }
 
-void EmbyClient::fetchItems(const QString &viewId)
+void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie"));
     q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
+    q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
     get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
-        [this](const QJsonDocument &doc) {
-            const QJsonArray items = doc.object().value(QLatin1String("Items")).toArray();
-            m_itemsModel.setItems(items, true);
-            qInfo() << "Emby: items =" << m_itemsModel.count();
+        [this, startIndex](const QJsonDocument &doc) {
+            const QJsonObject o = doc.object();
+            const QJsonArray items = o.value(QLatin1String("Items")).toArray();
+            const int total = o.value(QLatin1String("TotalRecordCount")).toInt(0);
+            if (startIndex == 0)
+                m_itemsModel.setItems(items, true);
+            else
+                m_itemsModel.appendItems(items, true);
+            m_itemsModel.setTotal(total);
+            qInfo() << "Emby: items =" << m_itemsModel.count() << "/" << total;
             emit itemsReceived();
         }, QStringLiteral("获取媒体库条目"));
 }

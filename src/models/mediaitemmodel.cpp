@@ -16,7 +16,7 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
 {
     if (!index.isValid() || index.row() >= m_items.size())
         return {};
-    const Item &it = m_items.at(index.row());
+    const MediaItem &it = m_items.at(index.row());
     switch (role) {
     case NameRole:     return it.name;
     case IdRole:       return it.id;
@@ -36,28 +36,61 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
     };
 }
 
+// 解析一条 Emby Items JSON 为模型条目;withPosters 为真时解析 ImageTags.Primary。
+static MediaItem parseItem(const QJsonValue &v, bool withPosters)
+{
+    const QJsonObject o = v.toObject();
+    MediaItem it;
+    it.name = o.value(QLatin1String("Name")).toString();
+    it.id = o.value(QLatin1String("Id")).toString();
+    it.type = o.value(QLatin1String("Type")).toString();
+    if (withPosters) {
+        const QString tag = o.value(QLatin1String("ImageTags"))
+                                .toObject().value(QLatin1String("Primary")).toString();
+        if (!tag.isEmpty())
+            it.posterId = it.id + QLatin1Char('|') + tag;
+    }
+    return it;
+}
+
 void MediaItemModel::setItems(const QJsonArray &items, bool withPosters)
 {
     beginResetModel();
     m_items.clear();
     m_items.reserve(items.size());
     for (const auto &v : items) {
-        const QJsonObject o = v.toObject();
-        Item it;
-        it.name = o.value(QLatin1String("Name")).toString();
-        it.id = o.value(QLatin1String("Id")).toString();
-        it.type = o.value(QLatin1String("Type")).toString();
-        if (withPosters) {
-            const QString tag = o.value(QLatin1String("ImageTags"))
-                                    .toObject().value(QLatin1String("Primary")).toString();
-            if (!tag.isEmpty())
-                it.posterId = it.id + QLatin1Char('|') + tag;
-        }
+        const MediaItem it = parseItem(v, withPosters);
         if (!it.id.isEmpty())
             m_items.append(it);
     }
     endResetModel();
     emit countChanged();
+}
+
+void MediaItemModel::appendItems(const QJsonArray &items, bool withPosters)
+{
+    const int first = m_items.size();
+    QList<MediaItem> page;
+    page.reserve(items.size());
+    for (const auto &v : items) {
+        const MediaItem it = parseItem(v, withPosters);
+        if (!it.id.isEmpty())
+            page.append(it);
+    }
+    if (page.isEmpty())
+        return;
+    beginInsertRows(QModelIndex(), first, first + page.size() - 1);
+    m_items.append(page);
+    endInsertRows();
+    emit countChanged();
+}
+
+void MediaItemModel::setTotal(int total)
+{
+    if (total == m_total)
+        return;
+    m_total = total;
+    emit totalCountChanged();
 }
 
 void MediaItemModel::clear()
