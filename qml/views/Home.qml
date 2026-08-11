@@ -13,6 +13,16 @@ Item {
     signal openLibrary()
 
     property var rows: EmbyClient.homeRows
+    // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
+    // 实现无限循环(网上通用做法:首尾复制模型作缓冲)。
+    property var loopRows: []
+
+    function rebuildLoop() {
+        root.loopRows = root.rows.concat(root.rows).concat(root.rows)
+        // 中间副本第 1 行初始居中(第一个媒体库即可在中间)。
+        if (root.rows.length > 0)
+            list.positionViewAtIndex(root.rows.length, ListView.Center)
+    }
 
     Component.onCompleted: EmbyClient.fetchHomeRows(7)
     Connections {
@@ -21,8 +31,12 @@ Item {
         function onLoginSucceeded() { EmbyClient.fetchViews() }
         // 视图就绪 → 重建首页行。
         function onViewsReceived() { EmbyClient.fetchHomeRows(7) }
-        function onHomeRowsReceived() { root.rows = EmbyClient.homeRows }
+        function onHomeRowsReceived() {
+            root.rows = EmbyClient.homeRows
+            root.rebuildLoop()
+        }
     }
+    onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
 
     // 每行条目卡片(库海报或媒体条目)。
     component RowCard: Rectangle {
@@ -69,16 +83,25 @@ Item {
         id: list
         anchors.fill: parent
         clip: true
-        model: root.rows
+        model: root.loopRows
         spacing: 12
         // 选中项(highlight)固定在视口中心,滚动时 currentIndex 随之更新。
         highlightRangeMode: ListView.StrictlyEnforceRange
         preferredHighlightBegin: 0.5
         preferredHighlightEnd: 0.5
         snapMode: ListView.SnapToItem
-        // 首尾各留半视口空段:首行/尾行均可滚到中心。
-        header: Item { width: 1; height: Math.max(1, list.height / 2 - 80) }
-        footer: Item { width: 1; height: Math.max(1, list.height / 2 - 80) }
+
+        // 无限循环:滚出中间副本边界时瞬间跳回对应项(前后内容相同,视觉无缝)。
+        onCurrentIndexChanged: {
+            const n = root.rows.length
+            if (n === 0)
+                return
+            const idx = list.currentIndex
+            if (idx < n)
+                list.positionViewAtIndex(idx + n, ListView.Center)
+            else if (idx >= n * 2)
+                list.positionViewAtIndex(idx - n, ListView.Center)
+        }
 
         delegate: Column {
             id: rowDelegate
