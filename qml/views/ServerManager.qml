@@ -87,9 +87,12 @@ Item {
                         width: parent.width
                         height: 64
                         radius: 6
-                        color: ListView.isCurrentItem ? Theme.accent : "transparent"
-                        border.width: ListView.isCurrentItem ? 0 : 1
-                        border.color: Theme.bg
+                        // 失效账号(重登失败)标红底;选中用强调色。
+                        color: ListView.isCurrentItem ? Theme.accent
+                               : (modelData.tokenValid === false ? "#4a2226" : "transparent")
+                        border.width: ListView.isCurrentItem ? 0
+                                   : (modelData.tokenValid === false ? 2 : 1)
+                        border.color: modelData.tokenValid === false ? "#e5534b" : Theme.bg
 
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
@@ -99,6 +102,7 @@ Item {
                             Text {
                                 // 未填名称时显示用户名(首页聚合前缀此时用 ServerName)。
                                 text: (modelData.name !== "" ? modelData.name : modelData.userName)
+                                      + (modelData.tokenValid === false ? "  [凭据失效]" : "")
                                       + (modelData.id === AccountManager.activeAccountId
                                          ? "  [当前]" : "")
                                 color: ListView.isCurrentItem ? "white" : Theme.textPrimary

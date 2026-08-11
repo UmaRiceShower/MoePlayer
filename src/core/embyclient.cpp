@@ -135,7 +135,7 @@ void EmbyClient::get(const QString &path, bool auth,
 
 void EmbyClient::getFrom(const QString &serverUrl, const QString &token, const QString &userId,
                          const QString &path, std::function<void(const QJsonDocument &)> onOk,
-                         const QString &what)
+                         std::function<void()> onFail, const QString &what)
 {
     QNetworkRequest req(QUrl(serverUrl + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
@@ -146,16 +146,73 @@ void EmbyClient::getFrom(const QString &serverUrl, const QString &token, const Q
         req.setRawHeader("X-Emby-Token", token.toUtf8());
     req.setTransferTimeout(10000);
     QNetworkReply *reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [this, reply, onOk, what]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
-                               + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
+            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+                                + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            emit serverRequestFailed(serverUrl, msg);
+            emit errorOccurred(msg);
+            if (onFail)
+                onFail();
             return;
         }
         onOk(QJsonDocument::fromJson(reply->readAll()));
     });
+}
+
+void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
+                          std::function<void(const QJsonDocument &)> onOk,
+                          std::function<void()> onFail, const QString &what)
+{
+    QNetworkRequest req(QUrl(serverUrl + path));
+    // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
+    req.setRawHeader("User-Agent",
+                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
+    // 认证头无 token 版本:Emby 4.9 的 AuthenticateByName 要求携带
+    // X-Emby-Authorization(缺 appName 字段返回 400)。
+    req.setRawHeader("X-Emby-Authorization", authHeaderFor(QString(), QString()).toUtf8());
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setTransferTimeout(10000);
+    QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+                                + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            emit serverRequestFailed(serverUrl, msg);
+            emit errorOccurred(msg);
+            if (onFail)
+                onFail();
+            return;
+        }
+        onOk(QJsonDocument::fromJson(reply->readAll()));
+    });
+}
+
+void EmbyClient::loginFor(const QString &serverUrl, const QString &username,
+                          const QString &password)
+{
+    QJsonObject body;
+    body.insert(QStringLiteral("Username"), username);
+    // 与 login 一致:Pw 为 4.9 实际接收字段,双字段兼容新旧服务器。
+    body.insert(QStringLiteral("Pw"), password);
+    body.insert(QStringLiteral("Password"), password);
+    postFrom(serverUrl, QStringLiteral("/Users/AuthenticateByName"), body,
+             [this, serverUrl](const QJsonDocument &doc) {
+                 const QJsonObject o = doc.object();
+                 const QString token = o.value(QLatin1String("AccessToken")).toString();
+                 const QJsonObject u = o.value(QLatin1String("User")).toObject();
+                 emit serverLoginFinished(serverUrl, !token.isEmpty(), token,
+                                          u.value(QLatin1String("Id")).toString(),
+                                          u.value(QLatin1String("Name")).toString());
+             },
+             [this, serverUrl] {
+                 emit serverLoginFinished(serverUrl, false, QString(), QString(), QString());
+             },
+             QStringLiteral("登录"));
 }
 
 void EmbyClient::postJson(const QString &path, const QJsonObject &body, bool auth,
@@ -428,7 +485,7 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
             [this, serverUrl](const QJsonDocument &doc) {
                 emit serverPublicInfoReceived(
                     serverUrl, doc.object().value(QLatin1String("ServerName")).toString());
-            }, QStringLiteral("获取服务器信息"));
+            }, nullptr, QStringLiteral("获取服务器信息"));
 }
 
 void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &token,
@@ -451,7 +508,10 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &token
                     out.append(m);
                 }
                 emit serverViewsReceived(serverUrl, out);
-            }, QStringLiteral("获取媒体库视图"));
+            },
+            // 失败:发空视图推进聚合计数,原因经 serverRequestFailed 通知。
+            [this, serverUrl] { emit serverViewsReceived(serverUrl, QVariantList()); },
+            QStringLiteral("获取媒体库视图"));
 }
 
 void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token,
@@ -482,7 +542,10 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
                     items.append(m);
                 }
                 emit serverItemsReceived(serverUrl, viewId, items);
-            }, QStringLiteral("获取首页行"));
+            },
+            // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
+            [this, serverUrl, viewId] { emit serverItemsReceived(serverUrl, viewId, QVariantList()); },
+            QStringLiteral("获取首页行"));
 }
 
 // ---------- 剧集导航(/Shows/{id}/Seasons + Episodes) ----------

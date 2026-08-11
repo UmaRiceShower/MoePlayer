@@ -75,6 +75,10 @@ public:
     // 拉取指定库按加入时间倒序的前 limit 条,items 为 [{id,name,posterId,type}]。
     Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &token,
                                       const QString &userId, const QString &viewId, int limit);
+    // 跨服务器账密登录(不改当前会话),供 token 失效后重登。
+    // 结果经 serverLoginFinished 通知。
+    Q_INVOKABLE void loginFor(const QString &serverUrl, const QString &username,
+                              const QString &password);
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
@@ -117,10 +121,17 @@ signals:
     void seasonsReceived();
     void episodesReceived();
     // 跨服务器拉取结果(见 fetchServer*):serverUrl 标识来源服务器。
+    // 请求失败时 views/items 仍发空结果(推进调用方计数),并另发
+    // serverRequestFailed 携带失败原因。
     void serverPublicInfoReceived(const QString &serverUrl, const QString &serverName);
     void serverViewsReceived(const QString &serverUrl, const QVariantList &views);
     void serverItemsReceived(const QString &serverUrl, const QString &viewId,
                              const QVariantList &items);
+    // 跨服务器请求失败:message 含 "HTTP 401" 表示 token 失效,否则为网络/服务器错误。
+    void serverRequestFailed(const QString &serverUrl, const QString &message);
+    // 跨服务器账密登录结果(见 loginFor)。
+    void serverLoginFinished(const QString &serverUrl, bool ok, const QString &token,
+                             const QString &userId, const QString &userName);
     // WebSocket 连接状态变化(登录成功后建立,断线自动重连)。
     void wsConnectedChanged();
     // 服务器实时推送(Emby 4.9 仅广播 UserDataChanged/LibraryChanged/
@@ -140,10 +151,15 @@ private:
     void get(const QString &path, bool auth,
              std::function<void(const QJsonDocument &)> onOk,
              const QString &what);
-    // 跨服务器 GET(显式 serverUrl/token/userId,不改会话状态),失败发 errorOccurred。
+    // 跨服务器 GET(显式 serverUrl/token/userId,不改会话状态)。
+    // 失败发 serverRequestFailed + errorOccurred,并调用 onFail(推进计数)。
     void getFrom(const QString &serverUrl, const QString &token, const QString &userId,
                  const QString &path, std::function<void(const QJsonDocument &)> onOk,
-                 const QString &what);
+                 std::function<void()> onFail, const QString &what);
+    // 跨服务器 POST(无认证头,登录端点用),失败发 serverRequestFailed 并调用 onFail。
+    void postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
+                  std::function<void(const QJsonDocument &)> onOk,
+                  std::function<void()> onFail, const QString &what);
     // POST JSON 请求,成功回调解析后的 JSON,失败发 errorOccurred。
     void postJson(const QString &path, const QJsonObject &body, bool auth,
                   std::function<void(const QJsonDocument &)> onOk,

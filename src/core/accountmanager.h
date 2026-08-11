@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QSettings>
+#include <QSet>
 #include <QVariantList>
 
 class EmbyClient;
@@ -111,6 +112,8 @@ private:
     void persistServerNames();
     // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
     int accountIndexByServer(const QString &serverUrl) const;
+    // 按账号 id 取账号(只读),找不到返回 nullptr。
+    const AccountInfo *accountById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
     static QString serverPosterId(const QString &serverUrl, const QString &posterId);
 
@@ -132,4 +135,11 @@ private:
     QHash<int, QVariantList> m_homeViews; // 账号索引 -> 该服视图列表
     QHash<QString, QVariantMap> m_homeRowByKey; // "<账号索引>|<viewId>" -> 行(含 items)
     QVariantList m_homeAccountOrder; // 本次聚合的账号顺序快照 [{index,id,serverUrl,name}]
+    // 账号检测状态(见 autoLogin/聚合 401 处理)。
+    QSet<QString> m_invalidServers; // 确认 token 失效且重登失败的服务器(UI 标红)
+    QSet<QString> m_loggingInServers; // 正在账密重登的服务器(失败回调忽略重复处理)
+    bool m_autoRetry = false; // 自动登录的 token 失效,正在用账密重登
+    // 首页聚合缓存:上次成功数据,启动先展示再后台刷新。
+    void loadHomeCache();
+    void saveHomeCache();
 };

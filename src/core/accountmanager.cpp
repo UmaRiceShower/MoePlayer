@@ -1,9 +1,13 @@
 #include "accountmanager.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QUuid>
 
 #include <algorithm>
@@ -71,12 +75,86 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
             emit autoLoginFinished(false);
         }
     });
+    // 会话 401(autoLogin 的 configureSession 拉视图失败):token 失效。
+    // 记住密码的账号尝试账密重登并写回新 token,成功则重建会话;
+    // 无密码或重登失败才报 autoLoginFinished(false)。
     connect(m_client, &EmbyClient::authFailed, this, [this] {
-        if (m_autoLoginInFlight) {
-            m_autoLoginInFlight = false;
-            emit autoLoginFinished(false);
+        if (!m_autoLoginInFlight)
+            return;
+        m_autoLoginInFlight = false;
+        const AccountInfo *a = accountById(m_activeId);
+        if (a && a->rememberPassword && !deobfuscate(a->password).isEmpty()) {
+            m_autoRetry = true;
+            m_loggingInServers.insert(a->serverUrl);
+            qInfo() << "Emby: token invalid, relogin on" << a->serverUrl;
+            m_client->loginFor(a->serverUrl, a->userName, deobfuscate(a->password));
+            return;
         }
+        if (a) {
+            m_invalidServers.insert(a->serverUrl);
+            emit accountsChanged();
+        }
+        emit autoLoginFinished(false);
     });
+
+    // 跨服务器请求失败:401 且账号记住密码 → 尝试账密重登(token 刷新);
+    // 401 且无密码 → 标失效;其余为网络错误,数据已按空处理,不标红。
+    connect(m_client, &EmbyClient::serverRequestFailed, this,
+            [this](const QString &serverUrl, const QString &message) {
+                if (m_loggingInServers.contains(serverUrl))
+                    return; // 登录请求自身的失败,由 serverLoginFinished 处理
+                const int idx = accountIndexByServer(serverUrl);
+                if (idx < 0 || !message.contains(QLatin1String("401")))
+                    return;
+                if (m_invalidServers.contains(serverUrl))
+                    return; // 已确认失效(重登失败过),不再重复尝试,避免循环
+                const AccountInfo &a = m_accounts.at(idx);
+                if (a.rememberPassword && !deobfuscate(a.password).isEmpty()) {
+                    m_loggingInServers.insert(serverUrl);
+                    m_client->loginFor(serverUrl, a.userName, deobfuscate(a.password));
+                } else {
+                    m_invalidServers.insert(serverUrl);
+                    emit accountsChanged();
+                }
+            });
+    // 账密重登结果:成功写回新 token(持久化)并解标失效;
+    // 自动登录场景重建会话,聚合场景重拉数据(缓存先展示)。
+    connect(m_client, &EmbyClient::serverLoginFinished, this,
+            [this](const QString &serverUrl, bool ok, const QString &token,
+                   const QString &userId, const QString &userName) {
+                m_loggingInServers.remove(serverUrl);
+                const int idx = accountIndexByServer(serverUrl);
+                if (idx < 0)
+                    return;
+                AccountInfo &a = m_accounts[idx];
+                if (!ok) {
+                    m_invalidServers.insert(serverUrl);
+                    emit accountsChanged();
+                    if (m_autoRetry) {
+                        m_autoRetry = false;
+                        emit autoLoginFinished(false);
+                    }
+                    return;
+                }
+                qInfo() << "Emby: relogin ok on" << serverUrl;
+                a.token = token;
+                if (!userId.isEmpty())
+                    a.userId = userId;
+                if (!userName.isEmpty())
+                    a.userName = userName;
+                a.lastUsed = QDateTime::currentMSecsSinceEpoch();
+                m_invalidServers.remove(serverUrl);
+                save();
+                emit accountsChanged();
+                if (m_autoRetry) {
+                    m_autoRetry = false;
+                    applySession(a); // 新 token 重建活动会话
+                    emit autoLoginFinished(true);
+                }
+                // token 已换:重拉各库数据(先展示缓存),恢复该服首页行。
+                // 并行 fetchHomeRows 已因旧 token 401 把该服按空处理,必须刷新。
+                fetchHomeRows(m_homeLimit);
+            });
 
     // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知。
     connect(m_client, &EmbyClient::serverPublicInfoReceived, this,
@@ -91,6 +169,8 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 const int idx = accountIndexByServer(serverUrl);
                 if (idx < 0 || m_homeReqGen.value(idx) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
+                if (m_homeViews.contains(idx))
+                    return; // 本代已处理(旧代残留同数据回调),避免重复计数/发请求
                 m_homeViews.insert(idx, views);
                 --m_homePending;
                 const AccountInfo &a = m_accounts.at(idx);
@@ -107,10 +187,13 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 const int idx = accountIndexByServer(serverUrl);
                 if (idx < 0 || m_homeReqGen.value(idx) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
+                const QString key = QString::number(idx) + QLatin1Char('|') + viewId;
+                if (m_homeRowByKey.contains(key))
+                    return; // 本代已处理(旧代残留),避免重复递减计数
                 QVariantMap row;
                 row.insert(QStringLiteral("viewId"), viewId);
                 row.insert(QStringLiteral("items"), items);
-                m_homeRowByKey.insert(QString::number(idx) + QLatin1Char('|') + viewId, row);
+                m_homeRowByKey.insert(key, row);
                 --m_homePending;
                 maybeAssembleHomeRows();
             });
@@ -127,6 +210,8 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("userName"), a.userName);
         m.insert(QStringLiteral("rememberPassword"), a.rememberPassword);
         m.insert(QStringLiteral("lastUsed"), a.lastUsed);
+        // 确认 token 失效且重登失败的服务器为 false(UI 标红);未知/正常为 true。
+        m.insert(QStringLiteral("tokenValid"), !m_invalidServers.contains(a.serverUrl));
         out.append(m);
     }
     return out;
@@ -189,13 +274,15 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     // 失效,须按代次丢弃;否则会污染本次聚合的视图与计数。
     ++m_homeGen;
     const int gen = m_homeGen;
-    m_homeRows.clear();
     m_homeViews.clear();
     m_homeRowByKey.clear();
     m_homeAccountOrder.clear();
     m_homeLimit = qBound(1, perLibraryLimit, 20);
     m_homePending = 0;
-    emit homeRowsReady(); // 先清空旧行,结果到达后再发一次
+    // 先展示缓存(上次成功数据),网络刷新完成后再覆盖;无缓存则清空等待。
+    m_homeRows.clear();
+    loadHomeCache();
+    emit homeRowsReady();
 
     for (int i = 0; i < m_accounts.size(); ++i) {
         const AccountInfo &a = m_accounts.at(i);
@@ -245,10 +332,21 @@ void AccountManager::maybeAssembleHomeRows()
             row.insert(QStringLiteral("posterId"),
                        serverPosterId(serverUrl,
                                       vm.value(QStringLiteral("posterId")).toString()));
+            // 条目海报同样加服务器前缀,否则渲染时按活动会话请求到错误的服务器。
+            QVariantList items = row.value(QStringLiteral("items")).toList();
+            for (int i = 0; i < items.size(); ++i) {
+                QVariantMap it = items.at(i).toMap();
+                const QString pid = it.value(QStringLiteral("posterId")).toString();
+                if (!pid.isEmpty())
+                    it.insert(QStringLiteral("posterId"), serverPosterId(serverUrl, pid));
+                items[i] = it;
+            }
+            row.insert(QStringLiteral("items"), items);
             out.append(row);
         }
     }
     m_homeRows = out;
+    saveHomeCache(); // 缓存本次成功数据,下次启动先展示
     emit homeRowsReady();
 }
 
@@ -290,6 +388,39 @@ int AccountManager::accountIndexByServer(const QString &serverUrl) const
         if (m_accounts.at(i).serverUrl == serverUrl)
             return i;
     return -1;
+}
+
+const AccountManager::AccountInfo *AccountManager::accountById(const QString &id) const
+{
+    for (const auto &a : m_accounts)
+        if (a.id == id)
+            return &a;
+    return nullptr;
+}
+
+// 首页聚合缓存:上次成功数据落盘(视图列表 + 每库最近条目),启动先展示。
+void AccountManager::loadHomeCache()
+{
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                         + QStringLiteral("/home-rows.json");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return;
+    m_homeRows = QJsonDocument::fromJson(f.readAll()).array().toVariantList();
+}
+
+void AccountManager::saveHomeCache()
+{
+    if (m_homeRows.isEmpty())
+        return;
+    const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                         + QStringLiteral("/home-rows.json");
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly))
+        return;
+    f.write(QJsonDocument(QJsonArray::fromVariantList(m_homeRows))
+                .toJson(QJsonDocument::Compact));
 }
 
 QString AccountManager::serverPosterId(const QString &serverUrl, const QString &posterId)
