@@ -22,28 +22,81 @@ Item {
     property var loopRows: []
     // 跨服导航:等待账号切换成功后再执行的跳转(见 ensureAccount)。
     property var pendingNav: null
+    // 平滑滚动门控:单步滚动时 contentY 走动画(行随位置实时缩放/透明,
+    // 形成滚动式堆叠动画);大步/回绕时瞬间定位,避免拖沓。
+    property bool smoothScroll: true
+    // 当前逻辑行(0..rows-1)与实测行距(负间距布局下相邻行 y 之差)。
+    // 滚动直接按逻辑行换算 contentY(夹取在副本范围内),不依赖
+    // indexAt/positionViewAtIndex 的估计定位——堆叠负间距下它们会错位,
+    // 导致单格滚动不推进。
+    property int rowIndex: 0
+    // 连续绝对行索引(从中间副本起点 n 起,可滚入第三副本):回绕时
+    // 跳回同逻辑行(对 rows 取模相同),视口内容不变,循环无缝。
+    property int absRow: 0
+    property real rowStep: 0
 
     function rebuildLoop() {
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
         // 模型重建后旧 contentY 可能越界(视口外全黑),延迟到布局更新后
-        // 定位到中间副本起点;positionViewAtIndex 内部保证位置合法。
+        // 定位到中间副本起点。行距尚未测量时先兜底,布局稳定后由
+        // ensureRowStep 实测修正。
         if (root.rows.length > 0) {
+            root.rowIndex = 0
+            root.absRow = root.rows.length
+            root.rowStep = 0
             Qt.callLater(function () {
-                list.positionViewAtIndex(root.rows.length, ListView.Center)
+                list.contentY = root.absRow * root.rowStep
             })
         }
     }
 
-    // 循环滚动:按可见行索引滚动,目标索引对中间副本取模后经
-    // positionViewAtIndex 定位(内部 clamp,不会产生越界 contentY)。
-    function scrollBy(step) {
-        if (root.rows.length === 0)
+    // 实测行距:从相邻可见行取 y 差(负间距下为 行高 + 负间距)。
+    // 内容起点行数(第一副本)可能未被实例化,故从可见区取样。
+    function ensureRowStep() {
+        if (root.rowStep > 0)
             return
+        for (let i = 0; i < list.count - 1; i++) {
+            const a = list.itemAtIndex(i)
+            const b = list.itemAtIndex(i + 1)
+            if (a && b && b.y > a.y) {
+                root.rowStep = b.y - a.y
+                return
+            }
+        }
+        // 兜底:行高(标题约 24 + 卡片 172)减重叠 44。
+        root.rowStep = 152
+    }
+
+    // 循环滚动:绝对行索引推进,contentY = 绝对行位置。
+    // 单步走动画(contentY 连续变化驱动行的缩放/透明实时过渡);
+    // 回绕时目标 = 与当前视口顶行同逻辑行(对 rows 取模相同)的副本,
+    // 视口内容不变,循环无缝。大步瞬间定位避免拖沓。
+    function scrollBy(step) {
         const n = root.rows.length
-        const cur = list.indexAt(0, list.contentY + 1)
-        const base = cur < 0 ? n : cur
-        let target = ((base + step - n) % n + n) % n + n // 取模到 [n, 2n)
-        list.positionViewAtIndex(target, ListView.Beginning)
+        if (n === 0)
+            return
+        root.ensureRowStep()
+        root.absRow += step
+        const maxY = list.contentHeight - list.height
+        // 向下滚出可达范围(模型末尾 clamp):回绕到与当前视口顶行
+        // 同逻辑行的中间副本,内容一致,肉眼无跳变。
+        if (root.absRow * root.rowStep > maxY) {
+            const curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep + 0.5))
+            root.absRow = ((curAbs - n) % n + n) % n + n
+        }
+        // 向上越界(第一副本起点前):回绕到与当前视口顶行同逻辑行
+        // 的中间副本,内容不变;下一格起从该逻辑行继续上滚。
+        if (root.absRow < 0) {
+            const curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep + 0.5))
+            root.absRow = ((curAbs - n) % n + n) % n + n
+        }
+        // 副本范围兜底 [0, 3n)。
+        root.absRow = Math.max(0, Math.min(3 * n - 1, root.absRow))
+        root.rowIndex = root.absRow % n
+        const target = root.absRow * root.rowStep
+        // 目标与当前相差 3 行以内走平滑动画,否则(回绕)瞬间跳。
+        root.smoothScroll = Math.abs(target - list.contentY) <= root.rowStep * 3
+        list.contentY = target
     }
 
     // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
@@ -188,10 +241,21 @@ Item {
         // 缓冲只保留约 1.5 行:堆叠行内容较重(每行多张海报),
         // 过大的默认缓冲会让大量行同时实例化拖慢滚动。
         cacheBuffer: 300
-        // 不强制 highlight 居中:由滚轮按可见行索引定位并做无缝循环,
-        // StrictlyEnforceRange 会拉回手动跳转位置导致边界不可达。
+        // 不强制 highlight 居中:contentY 由 scrollBy 按逻辑行精确设置,
+        // 且不启用 snap(负间距堆叠下 snap 会把 contentY 吸回旧位置,
+        // 导致单格滚动不推进)。
         highlightRangeMode: ListView.NoHighlightRange
-        snapMode: ListView.SnapToItem
+        // 纯滚轮驱动(外层 MouseArea):禁拖拽,避免与滚动动画冲突。
+        interactive: false
+        // 单步滚动动画:contentY 连续变化,行随位置实时缩放/透明,
+        // 形成滚动式堆叠过渡;大步/回绕时 smoothScroll 置 false 瞬间定位。
+        Behavior on contentY {
+            enabled: root.smoothScroll
+            NumberAnimation {
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+        }
 
         delegate: Column {
             id: rowDelegate
@@ -205,16 +269,25 @@ Item {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
                 return Math.abs(centerY - list.height / 2)
             }
-            // 堆叠层级:距视口中心越近越靠前,保证中间行卡片可点。
-            z: Math.max(1, 10 - rowDelegate.centerDist() / 80)
-            scale: {
+            // 堆叠缩放/透明度:距中心越远越小越暗。
+            function stackScale() {
                 const maxDist = Math.max(1, list.height / 2 - 60)
                 return Math.max(0.55, 1 - 0.14 * rowDelegate.centerDist() / maxDist)
             }
-            opacity: {
+            function stackOpacity() {
                 const maxDist = Math.max(1, list.height / 2 - 60)
                 return Math.max(0.3, 1 - 0.7 * rowDelegate.centerDist() / maxDist)
             }
+            // 堆叠层级:距视口中心越近越靠前(离散三档,滚动动画中跨档
+            // 才重排场景图,比逐帧浮点 z 便宜得多);中间行最前可点,
+            // 上下行被相邻行覆盖。
+            z: {
+                const d = rowDelegate.centerDist()
+                return d < 90 ? 3 : (d < 220 ? 2 : 1)
+            }
+            // 滚动动画中实时过渡:行随距中心距离连续缩放/变暗。
+            scale: rowDelegate.stackScale()
+            opacity: rowDelegate.stackOpacity()
 
             // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
             Text {
@@ -228,7 +301,7 @@ Item {
             }
             // 行内容:宽度为视口宽,条目多时右侧裁剪(拉取数量保证
             // 首屏尽量填满)。条目用横向 ListView 虚拟化,只实例化
-            // 可见卡片,避免每行 20 张海报全部加载拖慢滚动。
+            // 可见卡片,避免每行 1 张海报全部加载拖慢滚动。
             Item {
                 width: list.width
                 height: 172
@@ -275,13 +348,16 @@ Item {
         }
     }
 
-    // 滚轮无缝循环:每格按一个"可见行"滚动,边界对中间副本取模
-    // (positionViewAtIndex 定位,不会像手动改 contentY 那样越界黑屏)。
+    // 滚轮无缝循环:每格按一个"可见行"滚动,回绕跳回同逻辑行
+    // (视觉内容不变)。向上滚上移,向下滚下移。
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
-            root.scrollBy(Math.max(1, Math.round(-wheel.angleDelta.y / 120)))
+            // angleDelta.y 向上为正:向上滚(正)则逻辑行减,向下滚(负)则加。
+            const delta = Math.round(wheel.angleDelta.y / 120)
+            if (delta !== 0)
+                root.scrollBy(-delta)
             wheel.accepted = true
         }
     }
