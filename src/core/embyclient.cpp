@@ -355,6 +355,29 @@ void EmbyClient::setWatched(const QString &itemId, bool played, double positionT
              [](const QJsonDocument &) {}, QStringLiteral("标记已看"));
 }
 
+// ---------- 剧集导航(/Shows/{id}/Seasons + Episodes) ----------
+
+void EmbyClient::fetchSeasons(const QString &seriesId)
+{
+    get(QStringLiteral("/Shows/%1/Seasons?Fields=PrimaryImageAspectRatio").arg(seriesId), true,
+        [this](const QJsonDocument &doc) {
+            m_seasonsModel.setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
+            qInfo() << "Emby: seasons =" << m_seasonsModel.count();
+            emit seasonsReceived();
+        }, QStringLiteral("获取剧集分季"));
+}
+
+void EmbyClient::fetchEpisodes(const QString &seriesId, const QString &seasonId)
+{
+    get(QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&Fields=PrimaryImageAspectRatio")
+            .arg(seriesId, seasonId),
+        true, [this](const QJsonDocument &doc) {
+            m_episodesModel.setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
+            qInfo() << "Emby: episodes =" << m_episodesModel.count();
+            emit episodesReceived();
+        }, QStringLiteral("获取分集"));
+}
+
 // ---------- WebSocket 实时通道(/embywebsocket) ----------
 
 QString EmbyClient::webSocketUrl() const
