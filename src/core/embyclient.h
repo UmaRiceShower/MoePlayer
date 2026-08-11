@@ -51,6 +51,11 @@ public:
     Q_INVOKABLE void fetchPublicInfo();
     // 用户名密码登录(/Users/AuthenticateByName),成功后填 accessToken/userId。
     Q_INVOKABLE void login(const QString &username, const QString &password);
+    // 用已保存的凭据配置会话(多账号切换/启动自动登录):设 serverUrl/token/
+    // userId 后直接拉取视图,请求 401 即 token 失效(发 authFailed)。
+    // Emby 4.9 无 /Users/Me 端点,userId 由登录时保存。
+    Q_INVOKABLE void configureSession(const QString &serverUrl, const QString &token,
+                                      const QString &userId, const QString &userName);
     // 获取当前用户的媒体库视图列表(/Users/{id}/Views),填充 viewsModel。
     Q_INVOKABLE void fetchViews();
     // 获取指定视图下的影片条目(/Users/{id}/Items,分页),填充 itemsModel。
@@ -95,6 +100,8 @@ signals:
     void loginChanged();
     void publicInfoReceived();
     void loginSucceeded();
+    // 认证失败(HTTP 401):token 失效或权限不足,应回到登录流程。
+    void authFailed();
     void viewsReceived();
     void itemsReceived();
     void seasonsReceived();

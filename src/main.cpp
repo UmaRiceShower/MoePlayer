@@ -9,6 +9,7 @@
 
 #include <clocale>
 
+#include "core/accountmanager.h"
 #include "core/embyclient.h"
 #include "core/settingsstore.h"
 #include "models/posterprovider.h"
@@ -62,8 +63,10 @@ int main(int argc, char *argv[])
     // 向 QML 暴露 C++ 类型与单例。
     SettingsStore settingsStore;
     EmbyClient embyClient;
+    AccountManager accountManager(&embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", 1, 0, "SettingsStore", &settingsStore);
     qmlRegisterSingletonInstance("MoePlayer.Core", 1, 0, "EmbyClient", &embyClient);
+    qmlRegisterSingletonInstance("MoePlayer.Core", 1, 0, "AccountManager", &accountManager);
     qmlRegisterType<MpvItem>("MoePlayer.Playback", 1, 0, "MpvItem");
 
     QQmlApplicationEngine engine;
