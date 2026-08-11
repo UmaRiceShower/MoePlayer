@@ -10,7 +10,8 @@ Item {
     id: root
 
     signal showDetail(string itemId, string posterId, string title)
-    signal openLibrary()
+    // viewId 为被点击的媒体库 id,媒体库页打开时直接选中该库。
+    signal openLibrary(string viewId)
     // 打开服务器管理页(未登录提示条入口)。
     signal openServerManager()
 
@@ -190,7 +191,7 @@ Item {
                     cardText: modelData.viewName
                     isLibrary: true
                     cardArea.onClicked: root.ensureAccount(modelData.accountId,
-                        function () { root.openLibrary() })
+                        function () { root.openLibrary(modelData.viewId) })
                 }
                 // 该库最近条目
                 Repeater {

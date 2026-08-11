@@ -119,7 +119,9 @@ ApplicationWindow {
                     title: title
                 })
             }
-            onOpenLibrary: stackView.push(libraryPage)
+            onOpenLibrary: function (viewId) {
+                stackView.push(libraryPage, { initialViewId: viewId || "" })
+            }
             onOpenServerManager: stackView.push(serverManagerPage)
         }
     }
