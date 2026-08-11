@@ -58,11 +58,17 @@ Item {
         color: Theme.bg
 
         // ---- 概览模式:Movie/Episode 详情,Series 元数据 + Seasons 行 ----
-        Column {
+        Flickable {
             visible: root.browseSeasonId === ""
             anchors.fill: parent
-            spacing: 16
-            padding: 24
+            clip: true
+            contentHeight: overviewColumn.implicitHeight
+
+            Column {
+                id: overviewColumn
+                width: parent.width
+                spacing: 16
+                padding: 24
 
             Row {
                 spacing: 12
@@ -198,17 +204,20 @@ Item {
                 visible: root.detail.type === "Series"
                 orientation: ListView.Horizontal
                 spacing: 12
-                height: 200
+                width: parent.width
+                height: 210
                 clip: true
                 model: EmbyClient.seasonsModel
                 delegate: Item {
                     width: 120
-                    height: 190
+                    height: 200
                     Rectangle {
                         width: 110
                         height: 155
                         color: Theme.surface
                         radius: 6
+                        border.width: hover.hovered ? 2 : 0
+                        border.color: Theme.accent
                         Image {
                             anchors.fill: parent
                             anchors.margins: 3
@@ -227,12 +236,23 @@ Item {
                         elide: Text.ElideRight
                         horizontalAlignment: Text.AlignHCenter
                     }
+                    Text {
+                        anchors.top: parent.bottom
+                        anchors.topMargin: -16
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "查看分集 ▸"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                    }
                     MouseArea {
+                        id: hover
                         anchors.fill: parent
+                        hoverEnabled: true
                         onClicked: root.openSeason(model.id, model.name)
                     }
                 }
             }
+        }
         }
 
         // ---- 分集浏览模式:某季的 Episodes 网格 ----
