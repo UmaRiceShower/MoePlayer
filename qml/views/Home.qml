@@ -139,6 +139,8 @@ Item {
             source: cardImage !== "" ? "image://emby/" + cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
+            // 异步解码:大量海报同时加载时避免阻塞 UI 线程导致滚动卡顿。
+            asynchronous: true
         }
         Text {
             visible: cardImage === ""
@@ -183,6 +185,9 @@ Item {
         clip: true
         model: root.loopRows
         spacing: -44
+        // 缓冲只保留约 1.5 行:堆叠行内容较重(每行多张海报),
+        // 过大的默认缓冲会让大量行同时实例化拖慢滚动。
+        cacheBuffer: 300
         // 不强制 highlight 居中:由滚轮按可见行索引定位并做无缝循环,
         // StrictlyEnforceRange 会拉回手动跳转位置导致边界不可达。
         highlightRangeMode: ListView.NoHighlightRange
@@ -221,8 +226,9 @@ Item {
                 font.pixelSize: 17
                 font.bold: true
             }
-            // 行内容:宽度为视口宽,条目多时右侧溢出裁剪(拉取数量保证
-            // 首屏尽量填满)。
+            // 行内容:宽度为视口宽,条目多时右侧裁剪(拉取数量保证
+            // 首屏尽量填满)。条目用横向 ListView 虚拟化,只实例化
+            // 可见卡片,避免每行 20 张海报全部加载拖慢滚动。
             Item {
                 width: list.width
                 height: 172
@@ -241,8 +247,15 @@ Item {
                         cardArea.onClicked: root.ensureAccount(modelData.accountId,
                             function () { root.openLibrary(modelData.viewId) })
                     }
-                    // 该库最近条目
-                    Repeater {
+                    // 该库最近条目:横向滚动列表,虚拟化渲染。
+                    ListView {
+                        id: rowItems
+                        width: list.width - 24 - 124 - 12
+                        height: 172
+                        orientation: ListView.Horizontal
+                        spacing: 12
+                        // 纯展示:滚轮由外层竖向处理,避免嵌套滚动冲突。
+                        interactive: false
                         model: modelData.items
                         delegate: RowCard {
                             cardImage: modelData.posterId || ""
