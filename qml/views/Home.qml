@@ -25,9 +25,25 @@ Item {
 
     function rebuildLoop() {
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
-        // 中间副本第 1 行初始居中(第一个媒体库即可在中间)。
-        if (root.rows.length > 0)
-            list.positionViewAtIndex(root.rows.length, ListView.Center)
+        // 模型重建后旧 contentY 可能越界(视口外全黑),延迟到布局更新后
+        // 定位到中间副本起点;positionViewAtIndex 内部保证位置合法。
+        if (root.rows.length > 0) {
+            Qt.callLater(function () {
+                list.positionViewAtIndex(root.rows.length, ListView.Center)
+            })
+        }
+    }
+
+    // 循环滚动:按可见行索引滚动,目标索引对中间副本取模后经
+    // positionViewAtIndex 定位(内部 clamp,不会产生越界 contentY)。
+    function scrollBy(step) {
+        if (root.rows.length === 0)
+            return
+        const n = root.rows.length
+        const cur = list.indexAt(0, list.contentY + 1)
+        const base = cur < 0 ? n : cur
+        let target = ((base + step - n) % n + n) % n + n // 取模到 [n, 2n)
+        list.positionViewAtIndex(target, ListView.Beginning)
     }
 
     // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
@@ -211,21 +227,13 @@ Item {
         }
     }
 
-    // 滚轮无缝循环:contentY 越界时按模型长度取余回绕(同步生效,
-    // 按住滚轮连续滚动时每格立即循环,不会等松手才跳转)。
+    // 滚轮无缝循环:每格按一个"可见行"滚动,边界对中间副本取模
+    // (positionViewAtIndex 定位,不会像手动改 contentY 那样越界黑屏)。
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
-            if (root.rows.length === 0)
-                return
-            const maxY = list.contentHeight - list.height
-            let newY = list.contentY - wheel.angleDelta.y * 0.6
-            if (newY > maxY)
-                newY = newY - maxY // 滚过末行 → 从首行继续
-            else if (newY < 0)
-                newY = maxY + newY // 滚过首行 → 从末行继续
-            list.contentY = newY
+            root.scrollBy(Math.max(1, Math.round(-wheel.angleDelta.y / 120)))
             wheel.accepted = true
         }
     }
