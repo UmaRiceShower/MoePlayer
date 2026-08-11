@@ -42,6 +42,28 @@ EmbyClient::EmbyClient(QObject *parent)
     // 且网络管理器会在构造时读取环境代理,故此处显式指定 NoProxy。
     m_nam.setProxy(QNetworkProxy::NoProxy);
     m_nam.setTransferTimeout(10000);
+
+    // WebSocket 长连接:断线自动重连(3s 起指数退避至 30s)。
+    // 保活由 QWebSocket 协议层处理(Emby 4.9 不发 Ping,收到时回 Pong 即可)。
+    m_ws.setProxy(QNetworkProxy::NoProxy);
+    connect(&m_ws, &QWebSocket::connected, this, [this] {
+        m_wsReconnectDelay = 3000;
+        qInfo() << "Emby: websocket connected";
+        emit wsConnectedChanged();
+    });
+    connect(&m_ws, &QWebSocket::disconnected, this, [this] {
+        qInfo() << "Emby: websocket disconnected";
+        emit wsConnectedChanged();
+        if (connected() && !m_wsReconnect.isActive())
+            m_wsReconnect.start();
+    });
+    connect(&m_ws, &QWebSocket::textMessageReceived, this,
+            [this](const QString &message) { handleWsMessage(QJsonDocument::fromJson(message.toUtf8()).object()); });
+    m_wsReconnect.setSingleShot(true);
+    connect(&m_wsReconnect, &QTimer::timeout, this, [this] {
+        connectWebSocket();
+        m_wsReconnectDelay = qMin(m_wsReconnectDelay * 2, 30000);
+    });
 }
 
 void EmbyClient::setServerUrl(const QString &v)
@@ -138,6 +160,8 @@ void EmbyClient::login(const QString &username, const QString &password)
                  m_userName = o.value(QLatin1String("User")).toObject().value(QLatin1String("Name")).toString();
                  qInfo() << "Emby: logged in as" << m_userName << "token" << (m_accessToken.isEmpty() ? "EMPTY" : "set");
                  emit loginChanged();
+                 if (!m_accessToken.isEmpty())
+                     connectWebSocket();
                  emit loginSucceeded();
              }, QStringLiteral("登录"));
 }
@@ -293,11 +317,13 @@ void EmbyClient::fetchPlaybackInfo(const QString &itemId)
 void EmbyClient::fetchItemDetail(const QString &itemId)
 {
     QUrlQuery q;
+    // UserData 携带已看状态与播放位置(继续观看数据源)。
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources"));
+                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData"));
     get(QStringLiteral("/Users/%1/Items/%2?%3").arg(m_userId, itemId, q.toString()), true,
         [this](const QJsonDocument &doc) {
             const QJsonObject o = doc.object();
+            const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
             QVariantMap m;
             m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
             m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
@@ -306,12 +332,66 @@ void EmbyClient::fetchItemDetail(const QString &itemId)
             m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
             m.insert(QStringLiteral("runtimeSecs"), o.value(QLatin1String("RunTimeTicks")).toDouble(0) / 1e7);
             m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
+            // 继续观看:上次停止位置(100ns ticks),未看或已播完为 0。
+            m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
+            m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
             QVariantList genres;
             for (const auto &g : o.value(QLatin1String("Genres")).toArray())
                 genres.append(g.toString());
             m.insert(QStringLiteral("genres"), genres);
             emit itemDetailReady(m);
         }, QStringLiteral("获取条目详情"));
+}
+
+void EmbyClient::setWatched(const QString &itemId, bool played, double positionTicks,
+                            double playedPercentage)
+{
+    QJsonObject body;
+    body.insert(QStringLiteral("Played"), played);
+    body.insert(QStringLiteral("PlaybackPositionTicks"), qint64(positionTicks));
+    body.insert(QStringLiteral("PlayedPercentage"),
+                playedPercentage >= 0 ? playedPercentage : (played ? 100.0 : 0.0));
+    postJson(QStringLiteral("/Users/%1/Items/%2/UserData").arg(m_userId, itemId), body, true,
+             [](const QJsonDocument &) {}, QStringLiteral("标记已看"));
+}
+
+// ---------- WebSocket 实时通道(/embywebsocket) ----------
+
+QString EmbyClient::webSocketUrl() const
+{
+    QUrl u(serverUrl());
+    u.setScheme(u.scheme() == QLatin1String("https") ? QStringLiteral("wss") : QStringLiteral("ws"));
+    u.setPath(QStringLiteral("/embywebsocket"));
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("api_key"), m_accessToken);
+    u.setQuery(q);
+    return u.toString();
+}
+
+void EmbyClient::connectWebSocket()
+{
+    if (m_ws.state() == QAbstractSocket::ConnectedState
+        || m_ws.state() == QAbstractSocket::ConnectingState)
+        return;
+    m_ws.open(QUrl(webSocketUrl()));
+}
+
+void EmbyClient::handleWsMessage(const QJsonObject &msg)
+{
+    const QString type = msg.value(QLatin1String("MessageType")).toString();
+    const QJsonObject data = msg.value(QLatin1String("Data")).toObject();
+    if (type.isEmpty())
+        return;
+    // 服务器保活探测 → 回 Pong(Emby 4.9 不发 Ping,保留兼容旧版)。
+    if (type == QLatin1String("Ping")) {
+        m_ws.sendTextMessage(QStringLiteral("{\"MessageType\":\"Pong\"}"));
+        return;
+    }
+    // 已看状态变化(其他客户端标记/本客户端播完自动标记)与库变化:广播给全部 WS 连接。
+    qInfo() << "Emby: ws event" << type;
+    if (type == QLatin1String("UserDataChanged") || type == QLatin1String("LibraryChanged")
+        || type == QLatin1String("RefreshProgress"))
+        emit serverEventReceived(type, data.toVariantMap());
 }
 
 // ---------- 播放状态回传(/Sessions/Playing 三件套 + Ping) ----------
@@ -439,5 +519,7 @@ void EmbyClient::disconnectServer()
     m_userName.clear();
     m_itemsModel.clear();
     m_viewsModel.clear();
+    m_ws.close();
+    m_wsReconnect.stop();
     emit loginChanged();
 }

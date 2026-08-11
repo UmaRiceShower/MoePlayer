@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import MoePlayer.Core
 import "qrc:/qml/player"
 import "qrc:/qml/views"
 import "qrc:/qml/theme"
