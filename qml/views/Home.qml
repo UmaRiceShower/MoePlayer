@@ -91,23 +91,10 @@ Item {
         preferredHighlightEnd: 0.5
         snapMode: ListView.SnapToItem
 
-        // 无限循环:滚出中间副本边界时瞬间跳回对应项(前后内容相同,视觉无缝)。
-        onCurrentIndexChanged: {
-            const n = root.rows.length
-            if (n === 0)
-                return
-            const idx = list.currentIndex
-            if (idx < n)
-                list.positionViewAtIndex(idx + n, ListView.Center)
-            else if (idx >= n * 2)
-                list.positionViewAtIndex(idx - n, ListView.Center)
-        }
-
         delegate: Column {
             id: rowDelegate
             width: list.width
             transformOrigin: Item.Top
-
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
             function centerDist() {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
@@ -150,6 +137,33 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // 滚轮边界循环:滚到首行再向上 → 跳到末行,滚到末行再向下 → 跳回首行。
+    // 本 MouseArea 覆盖 ListView 会拦截其原生滚轮,故全部手动推进 contentY;
+    // 边界检测用 currentIndex+方向(原 onCurrentIndexChanged 方案在边界
+    // 不触发,导致向上滚不循环)。
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
+        onWheel: function (wheel) {
+            const n = root.rows.length
+            if (n === 0)
+                return
+            if (wheel.angleDelta.y > 0 && list.currentIndex <= 0) {
+                list.contentY = list.contentHeight - list.height // 末行在视口底
+                wheel.accepted = true
+                return
+            }
+            if (wheel.angleDelta.y < 0 && list.currentIndex >= root.loopRows.length - 1) {
+                list.contentY = 0 // 首行在视口顶
+                wheel.accepted = true
+                return
+            }
+            // 正常滚动(像素推进;StrictlyEnforceRange 会吸附居中)。
+            list.contentY -= wheel.angleDelta.y * 0.6
+            wheel.accepted = true
         }
     }
 }
