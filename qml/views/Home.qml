@@ -13,12 +13,15 @@ Item {
     signal openLibrary()
 
     property var rows: EmbyClient.homeRows
-    readonly property int midIndex: Math.floor(root.rows.length / 2)
 
-    // 行缩放:中间 1.0,向两端线性递减。
+    // 行缩放:中间 1.0,向两端线性递减(mid 实时计算,避免属性绑定不刷新)。
     function rowScale(i) {
-        const maxDist = Math.max(root.midIndex, root.rows.length - 1 - root.midIndex)
-        return maxDist === 0 ? 1.0 : 1.0 - 0.16 * Math.abs(i - root.midIndex) / maxDist
+        const len = root.rows.length
+        if (len <= 1)
+            return 1.0
+        const mid = Math.floor(len / 2)
+        const maxDist = Math.max(mid, len - 1 - mid)
+        return 1.0 - 0.16 * Math.abs(i - mid) / maxDist
     }
     // 行透明度:随缩放递减(最小 0.35)。
     function rowOpacity(i) {
@@ -87,8 +90,10 @@ Item {
             Repeater {
                 model: root.rows
                 delegate: Column {
-                    // 行索引:嵌套 Repeater 的 delegate 里 index 指条目,行缩放须用此值。
-                    readonly property int rowIndex: index
+                    // 行级缩放/透明度:index 即行号,整行(标题+卡片)一并缩放。
+                    scale: root.rowScale(index)
+                    opacity: root.rowOpacity(index)
+                    transformOrigin: Item.Top
                     // 行标题
                     Text {
                         text: modelData.viewName
@@ -103,9 +108,6 @@ Item {
                             cardImage: modelData.posterId || ""
                             cardText: modelData.viewName
                             isLibrary: true
-                            scale: root.rowScale(rowIndex)
-                            opacity: root.rowOpacity(rowIndex)
-                            transformOrigin: Item.Top
                             cardArea.onClicked: root.openLibrary()
                         }
                         // 该库最近条目
@@ -114,9 +116,6 @@ Item {
                             delegate: RowCard {
                                 cardImage: modelData.posterId || ""
                                 cardText: modelData.name
-                                scale: root.rowScale(rowIndex)
-                                opacity: root.rowOpacity(rowIndex)
-                                transformOrigin: Item.Top
                                 cardArea.onClicked: root.showDetail(modelData.id, modelData.posterId || "", modelData.name)
                             }
                         }
