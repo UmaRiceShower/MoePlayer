@@ -31,6 +31,31 @@ Item {
     // 跳回同逻辑行(对 rows 取模相同),视口内容不变,循环无缝。
     property int absRow: 0
     property real rowStep: 0
+    // 滚轮速度(px/s):最近 350ms 窗口内滚轮步长换算,驱动滚动动画
+    // 时长(距离/速度)——滚得越快动画越快,内容跟得上节奏不丢动画。
+    property real scrollVelocity: 800
+    property var wheelLog: []
+
+    // 记录滚轮事件步长并换算滚动速度(行/秒 → px/s,夹到合理范围)。
+    function noteWheel(step) {
+        const now = Date.now()
+        root.wheelLog.push([now, step])
+        while (root.wheelLog.length > 0 && now - root.wheelLog[0][0] > 350)
+            root.wheelLog.shift()
+        let total = 0
+        for (let i = 0; i < root.wheelLog.length; i++)
+            total += root.wheelLog[i][1]
+        const first = root.wheelLog[0]
+        const last = root.wheelLog[root.wheelLog.length - 1]
+        const span = last[0] - first[0]
+        const rowsPerSec = span > 0 ? total * 1000 / span : 0
+        root.scrollVelocity = Math.max(300, Math.min(3200, rowsPerSec * root.rowStep))
+    }
+
+    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
+    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
+    // 时长按滚轮速度动态换算,快速滚动时动画更快,内容跟得上节奏。
+    property var scrollAnim: null
 
     function rebuildLoop() {
         const prevAbs = root.absRow
@@ -70,29 +95,33 @@ Item {
         root.rowStep = 152
     }
 
-    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
-    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
-    property var scrollAnim: null
-
-    // 循环滚动:绝对行索引推进,contentY = 绝对行位置。
-    // 单步走动画(contentY 连续变化驱动行的缩放/透明实时过渡);
-    // 回绕(超出可达范围/副本边界)时跳回与 absRow 同逻辑行的副本,
-    // 逻辑位置连续。大步/回绕瞬间定位避免拖沓。
+    // 循环滚动:绝对行索引推进,目标 contentY 经 NumberAnimation 动画
+    // (每次新建对象,时长按滚轮速度动态换算:快速滚动动画更快,
+    // contentY 跟得上节奏,不累积滞后丢动画)。回绕/首滚的不可见
+    // 传送:销毁动画对象后瞬间定位(同逻辑行,视觉不变)。
     function scrollBy(step) {
         const n = root.rows.length
         if (n === 0)
             return
         root.ensureRowStep()
+        root.noteWheel(step)
         // 首次/模型重建后 contentY 可能停在 0(第一副本起点,定位未生效):
         // 中间副本及之后的滚动瞬间校正到对应行,避免首滚跳变。
-        if (root.absRow >= n && list.contentY < n * root.rowStep)
+        if (root.absRow >= n && list.contentY < n * root.rowStep) {
+            if (root.scrollAnim) {
+                // destroy 延迟到安全点才真正删除,先 stop 停止写 contentY,
+                // 避免旧动画继续朝旧目标走和新动画打架。
+                root.scrollAnim.stop()
+                root.scrollAnim.destroy()
+                root.scrollAnim = null
+            }
             list.contentY = root.absRow * root.rowStep
+        }
         root.absRow += step
         const maxY = list.contentHeight - list.height
         // 回绕:先把 contentY 传送到"当前视觉行"的中间副本——逻辑行
         // 相同、内容一致,视觉无感(不可见传送);absRow 同步后再按
-        // step 正常步进,dist 回到 1 行,回绕那格就是普通一格的
-        // 平滑动画,不再瞬间跳。
+        // step 正常步进,回绕那格就是普通一格的平滑滚动。
         if (root.absRow * root.rowStep > maxY || root.absRow < 0) {
             let curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep))
             let mid = curAbs
@@ -101,6 +130,11 @@ Item {
             else if (curAbs < n)
                 mid = curAbs + n
             root.absRow = mid
+            if (root.scrollAnim) {
+                root.scrollAnim.stop()
+                root.scrollAnim.destroy()
+                root.scrollAnim = null
+            }
             list.contentY = mid * root.rowStep
             root.absRow += step
         }
@@ -109,10 +143,9 @@ Item {
         root.rowIndex = root.absRow % n
         const target = root.absRow * root.rowStep
         const dist = Math.abs(target - list.contentY)
-        if (dist <= root.rowStep * 3 && dist > 0.5) {
-            // 每次新建动画对象:QML 动画对象复用(先 stop 再 start)时有
-            // 状态残留——已知行为是 start() 可能无效、属性停在旧值,后续
-            // 距离累积到阈值外就瞬间跳;新对象保证 start 必然生效。
+        if (dist > 0.5) {
+            // 每次新建动画对象,start 必然生效;旧对象先 stop 再 destroy,
+            // 避免延迟删除期间旧动画继续写 contentY。
             if (root.scrollAnim) {
                 root.scrollAnim.stop()
                 root.scrollAnim.destroy()
@@ -123,11 +156,11 @@ Item {
                 root)
             root.scrollAnim.from = list.contentY
             root.scrollAnim.to = target
-            // 时长按距离自适应(约 8 行/秒):滚动越快单步越远动画越快。
-            root.scrollAnim.duration = Math.max(60, Math.min(200, dist / root.rowStep * 120))
+            // 动态时长:距离/滚轮速度(px/s)。慢速滚动长动画平滑,
+            // 快速滚动动画更快,内容移动速度与滚轮一致,不丢动画。
+            root.scrollAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
             root.scrollAnim.start()
         } else {
-            // 回绕/大步:先停动画再赋值,避免旧动画把 contentY 拉回。
             if (root.scrollAnim) {
                 root.scrollAnim.stop()
                 root.scrollAnim.destroy()
@@ -384,6 +417,7 @@ Item {
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
             // angleDelta.y 向上为正:向上滚(正)则逻辑行减,向下滚(负)则加。
+            // 速度记账在 scrollBy 内统一做(noteWheel),这里不重复。
             const delta = Math.round(wheel.angleDelta.y / 120)
             if (delta !== 0)
                 root.scrollBy(-delta)
