@@ -27,22 +27,22 @@ private:
     AccountManager *m_accounts;
 };
 
-//! 一次海报请求的异步响应:下载完成后解码图片并发出 finished()。
+//! 一次海报请求的异步响应:内存/磁盘缓存命中直接完成,未命中经回源闸
+//! (最多 6 张并发)拉取并回填缓存。
 //! 注意:QQuickAsyncImageProvider 的请求在 QML 图片加载线程执行,
 //! 本类持有的网络管理器必须在同一线程创建与使用(见构造函数)。
 class PosterResponse : public QQuickImageResponse
 {
     Q_OBJECT
 public:
-    explicit PosterResponse(const QUrl &url);
+    // token 用于 X-Emby-Token 请求头(URL 不含凭据,保证缓存键稳定)。
+    explicit PosterResponse(const QUrl &url, const QString &token);
     ~PosterResponse() override;
 
     QQuickTextureFactory *textureFactory() const override;
     QString errorString() const override;
 
 private:
-    QNetworkAccessManager m_nam; // 与创建本对象的线程亲和
-    QNetworkDiskCache m_cache;
     QNetworkReply *m_reply = nullptr;
     QImage m_image;
     QString m_error;
