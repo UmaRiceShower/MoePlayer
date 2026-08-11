@@ -88,6 +88,16 @@ QString EmbyClient::authHeader(bool withToken) const
     return h;
 }
 
+QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) const
+{
+    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"MoePlayer\", Device=\"Desktop\", "
+                               "DeviceId=\"%2\", Version=\"0.1.0\"")
+                    .arg(userId, deviceId());
+    if (!token.isEmpty())
+        h += QStringLiteral(", Token=\"%1\"").arg(token);
+    return h;
+}
+
 QNetworkRequest EmbyClient::makeRequest(const QString &path, bool auth, bool json) const
 {
     QNetworkRequest req(QUrl(serverUrl() + path));
@@ -115,6 +125,31 @@ void EmbyClient::get(const QString &path, bool auth,
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             if (status == 401)
                 emit authFailed();
+            emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
+                               + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
+            return;
+        }
+        onOk(QJsonDocument::fromJson(reply->readAll()));
+    });
+}
+
+void EmbyClient::getFrom(const QString &serverUrl, const QString &token, const QString &userId,
+                         const QString &path, std::function<void(const QJsonDocument &)> onOk,
+                         const QString &what)
+{
+    QNetworkRequest req(QUrl(serverUrl + path));
+    // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
+    req.setRawHeader("User-Agent",
+                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
+    req.setRawHeader("X-Emby-Authorization", authHeaderFor(userId, token).toUtf8());
+    if (!token.isEmpty())
+        req.setRawHeader("X-Emby-Token", token.toUtf8());
+    req.setTransferTimeout(10000);
+    QNetworkReply *reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this, [this, reply, onOk, what]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
                                + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
             return;
@@ -385,39 +420,57 @@ void EmbyClient::setWatched(const QString &itemId, bool played, double positionT
              [](const QJsonDocument &) {}, QStringLiteral("标记已看"));
 }
 
-// ---------- 首页聚合(每库按加入时间取前 N 条) ----------
+// ---------- 跨服务器只读拉取(首页聚合用,不改会话状态) ----------
 
-void EmbyClient::fetchHomeRows(int perLibraryLimit)
+void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
 {
-    m_homeRows.clear();
-    const int n = m_viewsModel.count();
-    if (n == 0) {
-        emit homeRowsReceived();
-        return;
-    }
-    m_homeRowsPending = n;
-    const int limit = qBound(1, perLibraryLimit, 20);
-    for (int i = 0; i < n; ++i) {
-        const QString viewId = m_viewsModel.idAt(i);
-        const QString viewName = m_viewsModel.nameAt(i);
-        const QString viewPoster = m_viewsModel.posterIdAt(i);
-        QUrlQuery q;
-        q.addQueryItem(QStringLiteral("ParentId"), viewId);
-        q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateCreated"));
-        q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
-        q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
-        q.addQueryItem(QStringLiteral("Limit"), QString::number(limit));
-        get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
-            [this, viewId, viewName, viewPoster](const QJsonDocument &doc) {
-                QVariantMap row;
-                row.insert(QStringLiteral("viewId"), viewId);
-                row.insert(QStringLiteral("viewName"), viewName);
-                row.insert(QStringLiteral("posterId"), viewPoster);
+    getFrom(serverUrl, QString(), QString(), QStringLiteral("/System/Info/Public"),
+            [this, serverUrl](const QJsonDocument &doc) {
+                emit serverPublicInfoReceived(
+                    serverUrl, doc.object().value(QLatin1String("ServerName")).toString());
+            }, QStringLiteral("获取服务器信息"));
+}
+
+void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &token,
+                                  const QString &userId)
+{
+    getFrom(serverUrl, token, userId, QStringLiteral("/Users/%1/Views").arg(userId),
+            [this, serverUrl](const QJsonDocument &doc) {
+                QVariantList out;
+                for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
+                    const QJsonObject o = v.toObject();
+                    const QString tag = o.value(QLatin1String("ImageTags"))
+                                            .toObject().value(QLatin1String("Primary")).toString();
+                    QVariantMap m;
+                    m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+                    m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+                    m.insert(QStringLiteral("posterId"),
+                             tag.isEmpty() ? QString()
+                                           : o.value(QLatin1String("Id")).toString()
+                                                 + QLatin1Char('~') + tag);
+                    out.append(m);
+                }
+                emit serverViewsReceived(serverUrl, out);
+            }, QStringLiteral("获取媒体库视图"));
+}
+
+void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token,
+                                  const QString &userId, const QString &viewId, int limit)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("ParentId"), viewId);
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateCreated"));
+    q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
+    q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 20)));
+    getFrom(serverUrl, token, userId,
+            QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
+            [this, serverUrl, viewId](const QJsonDocument &doc) {
                 QVariantList items;
                 for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
                     const QJsonObject o = v.toObject();
-                    const QString tag = o.value(QLatin1String("ImageTags")).toObject()
-                                            .value(QLatin1String("Primary")).toString();
+                    const QString tag = o.value(QLatin1String("ImageTags"))
+                                            .toObject().value(QLatin1String("Primary")).toString();
                     QVariantMap m;
                     m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
                     m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
@@ -428,12 +481,8 @@ void EmbyClient::fetchHomeRows(int perLibraryLimit)
                                                  + QLatin1Char('~') + tag);
                     items.append(m);
                 }
-                row.insert(QStringLiteral("items"), items);
-                m_homeRows.append(row);
-                if (--m_homeRowsPending <= 0)
-                    emit homeRowsReceived();
+                emit serverItemsReceived(serverUrl, viewId, items);
             }, QStringLiteral("获取首页行"));
-    }
 }
 
 // ---------- 剧集导航(/Shows/{id}/Seasons + Episodes) ----------

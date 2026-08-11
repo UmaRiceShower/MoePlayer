@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/qml"));
-    engine.addImageProvider(QStringLiteral("emby"), new PosterProvider(&embyClient));
+    engine.addImageProvider(QStringLiteral("emby"), new PosterProvider(&embyClient, &accountManager));
     engine.rootContext()->setContextProperty(QStringLiteral("startupUrl"), initialUrl);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,

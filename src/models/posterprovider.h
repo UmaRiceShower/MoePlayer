@@ -5,20 +5,26 @@
 #include <QNetworkDiskCache>
 
 class EmbyClient;
+class AccountManager;
 
-//! 异步图片提供器,注册为 "image://emby/<itemId>~<tag>"。
-//! 拉取 /Items/{id}/Images/Primary(maxWidth + tag + api_key)。
+//! 异步图片提供器,注册为 "image://emby/<id>"。
+//! id 两种格式:
+//! - 会话内: <itemId>~<tag>,按当前会话的服务器与 token 请求;
+//! - 跨服务器(首页聚合行): <encodeServerKey(serverUrl)>~<itemId>~<tag>,
+//!   按编码的服务器地址取对应账号 token 请求。
+//! 请求路径 /Items/{id}/Images/Primary(maxWidth + tag + api_key)。
 class PosterProvider : public QQuickAsyncImageProvider
 {
 public:
-    explicit PosterProvider(EmbyClient *client);
+    explicit PosterProvider(EmbyClient *client, AccountManager *accounts);
 
-    // 按 id("<itemId>~<tag>")构造海报请求,返回异步响应对象。
+    // 按 id 构造海报请求,返回异步响应对象。
     QQuickImageResponse *requestImageResponse(const QString &id,
                                               const QSize &requestedSize) override;
 
 private:
     EmbyClient *m_client;
+    AccountManager *m_accounts;
 };
 
 //! 一次海报请求的异步响应:下载完成后解码图片并发出 finished()。
