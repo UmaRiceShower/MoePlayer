@@ -35,9 +35,14 @@ Item {
 
     // 本次播放是否续播(起播位置由 playbackReady 的 meta.resumePositionTicks 携带)。
     property var resumeTicks: 0
+    // 播放协商进行中(防连点重复发起 PlaybackInfo → 重复开窗)。
+    property bool playbackPending: false
 
     // 发起播放:resume 为 true 时从上次位置续播。
     function startPlayback(resume) {
+        if (root.playbackPending)
+            return
+        root.playbackPending = true
         root.resumeTicks = resume ? root.detail.positionTicks : 0
         EmbyClient.fetchPlaybackInfo(root.itemId)
     }
@@ -339,6 +344,7 @@ Item {
                 EmbyClient.fetchSeasons(d.id)
         }
         function onPlaybackReady(url, headers, meta) {
+            root.playbackPending = false
             if (meta.itemId === root.itemId) {
                 const m = Object.assign({}, meta)
                 m.resumePositionTicks = root.resumeTicks || 0
@@ -358,6 +364,10 @@ Item {
                     })
                 }
             }
+        }
+        // 播放协商失败时复位防抖,允许重试。
+        function onErrorOccurred() {
+            root.playbackPending = false
         }
     }
 }

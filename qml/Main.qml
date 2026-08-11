@@ -117,8 +117,10 @@ ApplicationWindow {
                 root.openPlayerWindow(url, headers, meta)
             }
             onBackRequested: stackView.pop()
-            // 剧集导航:点某集 → 压入该集详情页。
+            // 剧集导航:点某集 → 压入该集详情页(防双击重复 push)。
             onShowEpisodeDetail: function (itemId, posterId, title) {
+                if (stackView.currentItem && stackView.currentItem.isDetailPage)
+                    return
                 stackView.push(detailPage, {
                     itemId: itemId,
                     posterId: posterId,
