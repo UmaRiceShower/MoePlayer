@@ -85,10 +85,9 @@ Item {
         clip: true
         model: root.loopRows
         spacing: 12
-        // 选中项(highlight)固定在视口中心,滚动时 currentIndex 随之更新。
-        highlightRangeMode: ListView.StrictlyEnforceRange
-        preferredHighlightBegin: 0.5
-        preferredHighlightEnd: 0.5
+        // 不强制 highlight 居中:由滚轮手动控制 contentY 并做无缝循环,
+        // StrictlyEnforceRange 会拉回手动跳转位置导致边界不可达。
+        highlightRangeMode: ListView.NoHighlightRange
         snapMode: ListView.SnapToItem
 
         delegate: Column {
@@ -140,29 +139,21 @@ Item {
         }
     }
 
-    // 滚轮边界循环:滚到首行再向上 → 跳到末行,滚到末行再向下 → 跳回首行。
-    // 本 MouseArea 覆盖 ListView 会拦截其原生滚轮,故全部手动推进 contentY;
-    // 边界检测用 currentIndex+方向(原 onCurrentIndexChanged 方案在边界
-    // 不触发,导致向上滚不循环)。
+    // 滚轮无缝循环:contentY 越界时按模型长度取余回绕(同步生效,
+    // 按住滚轮连续滚动时每格立即循环,不会等松手才跳转)。
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
-            const n = root.rows.length
-            if (n === 0)
+            if (root.rows.length === 0)
                 return
-            if (wheel.angleDelta.y > 0 && list.currentIndex <= 0) {
-                list.contentY = list.contentHeight - list.height // 末行在视口底
-                wheel.accepted = true
-                return
-            }
-            if (wheel.angleDelta.y < 0 && list.currentIndex >= root.loopRows.length - 1) {
-                list.contentY = 0 // 首行在视口顶
-                wheel.accepted = true
-                return
-            }
-            // 正常滚动(像素推进;StrictlyEnforceRange 会吸附居中)。
-            list.contentY -= wheel.angleDelta.y * 0.6
+            const maxY = list.contentHeight - list.height
+            let newY = list.contentY - wheel.angleDelta.y * 0.6
+            if (newY > maxY)
+                newY = newY - maxY // 滚过末行 → 从首行继续
+            else if (newY < 0)
+                newY = maxY + newY // 滚过首行 → 从末行继续
+            list.contentY = newY
             wheel.accepted = true
         }
     }
