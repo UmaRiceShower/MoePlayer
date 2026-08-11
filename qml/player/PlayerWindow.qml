@@ -18,7 +18,7 @@ Window {
 
     property string source: ""
     property var headers: []
-    // 播放元数据:{itemId, mediaSourceId, playSessionId, playMethod};演示流为空对象。
+    // 播放元数据:{itemId, mediaSourceId, playSessionId, playMethod}。
     property var meta: ({})
 
     readonly property bool reporting: meta && meta.playSessionId !== undefined && meta.playSessionId !== ""
