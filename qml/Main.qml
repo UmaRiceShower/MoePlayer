@@ -184,7 +184,12 @@ ApplicationWindow {
         }
     }
 
-    // 快捷键打开页面:服务器管理 Ctrl+O,设置 Ctrl+S。
+    // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S。
+    Shortcut {
+        sequence: "Ctrl+F"
+        // pop 到根即返回首页(initialItem);已在首页时无操作。
+        onActivated: stackView.pop(null)
+    }
     Shortcut {
         sequence: "Ctrl+O"
         onActivated: stackView.push(serverManagerPage)
