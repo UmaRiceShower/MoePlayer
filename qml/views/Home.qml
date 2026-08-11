@@ -154,6 +154,9 @@ Item {
             id: rowDelegate
             width: list.width
             transformOrigin: Item.Top
+            // 行数据快照:modelData 是委托上下文变量,不能作为对象属性
+            // (rowDelegate.modelData)访问;存入显式属性供嵌套卡片取行级信息。
+            property var rowData: modelData
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
             function centerDist() {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
@@ -195,8 +198,8 @@ Item {
                     delegate: RowCard {
                         cardImage: modelData.posterId || ""
                         cardText: modelData.name
-                        // 内层 modelData 是条目,行级 accountId 从外层取。
-                        cardArea.onClicked: root.ensureAccount(rowDelegate.modelData.accountId,
+                        // 内层 modelData 是条目,行级 accountId 从 rowData 取。
+                        cardArea.onClicked: root.ensureAccount(rowDelegate.rowData.accountId,
                             function () {
                                 root.showDetail(modelData.id, modelData.posterId || "",
                                                 modelData.name)
