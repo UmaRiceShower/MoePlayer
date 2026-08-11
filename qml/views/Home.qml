@@ -14,10 +14,13 @@ Item {
     // 打开服务器管理页(未登录提示条入口)。
     signal openServerManager()
 
-    property var rows: EmbyClient.homeRows
+    // 聚合行(所有账号的媒体库,顺序按服务器管理中的账号排序)。
+    property var rows: AccountManager.homeRows
     // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
     // 实现无限循环(网上通用做法:首尾复制模型作缓冲)。
     property var loopRows: []
+    // 跨服导航:等待账号切换成功后再执行的跳转(见 ensureAccount)。
+    property var pendingNav: null
 
     function rebuildLoop() {
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
@@ -26,16 +29,27 @@ Item {
             list.positionViewAtIndex(root.rows.length, ListView.Center)
     }
 
-    // 未登录时首屏不发起请求(避免无 token 请求干扰启动自动登录判定),
-    // 数据由登录/会话信号驱动(见下方 Connections)。
-    Component.onCompleted: {
-        if (EmbyClient.connected)
-            EmbyClient.fetchHomeRows(7)
+    // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
+    // 行跨服时切换会话后详情/媒体库页按该服数据打开。
+    function ensureAccount(accountId, action) {
+        if (accountId === "" || accountId === AccountManager.activeAccountId) {
+            action()
+            return
+        }
+        root.pendingNav = action
+        AccountManager.switchAccount(accountId)
     }
 
-    // 未登录提示条:无会话时覆盖在首页上方,提供服务器管理入口。
+    // 聚合拉取不依赖当前会话(每服用各自缓存的 token),有账号即拉;
+    // 账号增删/排序变化(accountsChanged)时按新顺序重拉。
+    Component.onCompleted: {
+        if (AccountManager.hasAccounts)
+            AccountManager.fetchHomeRows(7)
+    }
+
+    // 未登录提示条:没有任何已保存账号时覆盖在首页上方,提供服务器管理入口。
     Rectangle {
-        visible: !EmbyClient.connected
+        visible: !AccountManager.hasAccounts
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 16
@@ -51,7 +65,7 @@ Item {
             spacing: 12
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: "未登录，添加或切换服务器后即可浏览"
+                text: "未添加服务器，添加后即可浏览媒体库"
                 color: Theme.textPrimary
                 font.pixelSize: 13
             }
@@ -63,14 +77,23 @@ Item {
     }
 
     Connections {
-        target: EmbyClient
-        // 登录成功即拉视图(Home 为首页时 Library 未必实例化,流程在此闭环)。
-        function onLoginSucceeded() { EmbyClient.fetchViews() }
-        // 视图就绪 → 重建首页行。
-        function onViewsReceived() { EmbyClient.fetchHomeRows(7) }
-        function onHomeRowsReceived() {
-            root.rows = EmbyClient.homeRows
+        target: AccountManager
+        function onHomeRowsReady() {
+            root.rows = AccountManager.homeRows
             root.rebuildLoop()
+        }
+        function onAccountsChanged() {
+            if (AccountManager.hasAccounts)
+                AccountManager.fetchHomeRows(7)
+        }
+        function onAccountLoginFinished(ok) {
+            if (ok && root.pendingNav) {
+                const nav = root.pendingNav
+                root.pendingNav = null
+                nav()
+            } else if (!ok) {
+                root.pendingNav = null
+            }
         }
     }
     onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
@@ -145,10 +168,12 @@ Item {
                 return Math.max(0.25, 1 - 0.75 * rowDelegate.centerDist() / maxDist)
             }
 
-            // 行标题
+            // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: modelData.viewName
+                text: modelData.serverName !== ""
+                        ? modelData.serverName + " - " + modelData.viewName
+                        : modelData.viewName
                 color: Theme.textPrimary
                 font.pixelSize: 14
                 font.bold: true
@@ -161,7 +186,8 @@ Item {
                     cardImage: modelData.posterId || ""
                     cardText: modelData.viewName
                     isLibrary: true
-                    cardArea.onClicked: root.openLibrary()
+                    cardArea.onClicked: root.ensureAccount(modelData.accountId,
+                        function () { root.openLibrary() })
                 }
                 // 该库最近条目
                 Repeater {
@@ -169,7 +195,12 @@ Item {
                     delegate: RowCard {
                         cardImage: modelData.posterId || ""
                         cardText: modelData.name
-                        cardArea.onClicked: root.showDetail(modelData.id, modelData.posterId || "", modelData.name)
+                        // 内层 modelData 是条目,行级 accountId 从外层取。
+                        cardArea.onClicked: root.ensureAccount(rowDelegate.modelData.accountId,
+                            function () {
+                                root.showDetail(modelData.id, modelData.posterId || "",
+                                                modelData.name)
+                            })
                     }
                 }
             }

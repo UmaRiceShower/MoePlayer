@@ -18,12 +18,16 @@ class AccountManager : public QObject
     Q_PROPERTY(QString activeAccountId READ activeAccountId NOTIFY activeAccountChanged)
     // 当前激活账号的显示名(供 UI 展示,空表示未登录)。
     Q_PROPERTY(QString activeAccountName READ activeAccountName NOTIFY activeAccountChanged)
+    // 首页聚合行:所有账号的媒体库按账号顺序排列,每行含
+    // {accountId, serverUrl, serverName, viewName, posterId, items}。
+    Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReady)
 public:
     explicit AccountManager(EmbyClient *client, QObject *parent = nullptr);
 
     QVariantList accounts() const;
     QString activeAccountId() const { return m_activeId; }
     QString activeAccountName() const;
+    QVariantList homeRows() const { return m_homeRows; }
 
     // 是否已保存任何账号。
     Q_INVOKABLE bool hasAccounts() const;
@@ -52,8 +56,21 @@ public:
     // 返回 false 表示无账号或 token 为空(调用方应展示登录入口)。
     Q_INVOKABLE bool autoLogin();
 
+    // 首页聚合:遍历全部账号(顺序即账号列表顺序),每服拉公开信息/视图/最近条目,
+    // 全部就绪后填充 homeRows 并发 homeRowsReady。perLibraryLimit 为每库条目上限。
+    Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
+    // 供海报提供方按服务器取 token(聚合行的跨服务器海报用)。
+    QString tokenForServer(const QString &serverUrl) const;
+    // 账号排序:在账号列表中上移/下移,顺序即首页聚合顺序与列表展示顺序。
+    Q_INVOKABLE void moveAccountUp(const QString &id);
+    Q_INVOKABLE void moveAccountDown(const QString &id);
+
     // 供 UI 读取某账号的明文密码(仅当 rememberPassword;混淆解码)。
     Q_INVOKABLE QString passwordFor(const QString &id) const;
+
+    // 跨服务器海报 id 前缀编码(URL 安全):<encodeServerKey(serverUrl)>~<itemId>~<tag>。
+    static QString encodeServerKey(const QString &serverUrl);
+    static QString decodeServerKey(const QString &key);
 
 signals:
     void accountsChanged();
@@ -62,6 +79,8 @@ signals:
     void accountLoginFinished(bool ok, const QString &message);
     // 启动自动登录结果(ok=false 表示 token 失效或网络失败,应回登录流程)。
     void autoLoginFinished(bool ok);
+    // 首页聚合行就绪(见 fetchHomeRows)。
+    void homeRowsReady();
 
 private:
     struct AccountInfo {
@@ -85,6 +104,15 @@ private:
     void applySession(const AccountInfo &acc);
     void setActive(const QString &id);
     QString findIdByName(const QString &name) const;
+    // 首页聚合:全部请求完成后按账号顺序组装 homeRows 并发 homeRowsReady。
+    void maybeAssembleHomeRows();
+    // 服务器显示名(ServerName)持久化于 QSettings,启动时读入,拉取成功后刷新。
+    void loadServerNames();
+    void persistServerNames();
+    // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
+    int accountIndexByServer(const QString &serverUrl) const;
+    // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
+    static QString serverPosterId(const QString &serverUrl, const QString &posterId);
 
     EmbyClient *m_client;
     QSettings m_settings;
@@ -94,4 +122,14 @@ private:
     QVariantMap m_pending;
     // 自动登录校验进行中(401 时据此发 autoLoginFinished(false))。
     bool m_autoLoginInFlight = false;
+    // 首页聚合状态(见 fetchHomeRows)。
+    QVariantList m_homeRows;
+    QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
+    int m_homeLimit = 7;
+    int m_homePending = 0; // 聚合请求未完成计数
+    int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
+    QHash<int, int> m_homeReqGen; // 账号索引 -> 发起聚合的代次
+    QHash<int, QVariantList> m_homeViews; // 账号索引 -> 该服视图列表
+    QHash<QString, QVariantMap> m_homeRowByKey; // "<账号索引>|<viewId>" -> 行(含 items)
+    QVariantList m_homeAccountOrder; // 本次聚合的账号顺序快照 [{index,id,serverUrl,name}]
 };

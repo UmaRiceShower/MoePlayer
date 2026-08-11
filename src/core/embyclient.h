@@ -27,8 +27,6 @@ class EmbyClient : public QObject
     Q_PROPERTY(MediaItemModel *itemsModel READ itemsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *seasonsModel READ seasonsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *episodesModel READ episodesModel CONSTANT)
-    // 首页每库最近条目(见 fetchHomeRows)。
-    Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReceived)
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
@@ -67,10 +65,16 @@ public:
     Q_INVOKABLE void fetchSeasons(const QString &seriesId);
     // 获取指定季的分集列表(/Shows/{id}/Episodes?SeasonId=),填充 episodesModel。
     Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId);
-    // 首页聚合:每个媒体库取按加入时间倒序的前 N 条,填充 homeRows。
-    Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
-    // 首页数据: [{viewId, viewName, posterId, items:[{id,name,posterId,type}]}]
-    QVariantList homeRows() const { return m_homeRows; }
+    // 跨服务器只读拉取(不改变当前会话):按显式凭据请求,结果经对应信号返回。
+    // 供首页聚合遍历所有账号时使用;认证头与服务器地址均取参数而非会话状态。
+    // 拉取服务器公开信息(/System/Info/Public,无需认证),取 ServerName 作聚合行前缀。
+    Q_INVOKABLE void fetchServerPublicInfo(const QString &serverUrl);
+    // 拉取指定服务器的视图列表,views 为 [{id,name,posterId}]。
+    Q_INVOKABLE void fetchServerViews(const QString &serverUrl, const QString &token,
+                                      const QString &userId);
+    // 拉取指定库按加入时间倒序的前 limit 条,items 为 [{id,name,posterId,type}]。
+    Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &token,
+                                      const QString &userId, const QString &viewId, int limit);
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
@@ -112,7 +116,11 @@ signals:
     void itemsReceived();
     void seasonsReceived();
     void episodesReceived();
-    void homeRowsReceived();
+    // 跨服务器拉取结果(见 fetchServer*):serverUrl 标识来源服务器。
+    void serverPublicInfoReceived(const QString &serverUrl, const QString &serverName);
+    void serverViewsReceived(const QString &serverUrl, const QVariantList &views);
+    void serverItemsReceived(const QString &serverUrl, const QString &viewId,
+                             const QVariantList &items);
     // WebSocket 连接状态变化(登录成功后建立,断线自动重连)。
     void wsConnectedChanged();
     // 服务器实时推送(Emby 4.9 仅广播 UserDataChanged/LibraryChanged/
@@ -132,6 +140,10 @@ private:
     void get(const QString &path, bool auth,
              std::function<void(const QJsonDocument &)> onOk,
              const QString &what);
+    // 跨服务器 GET(显式 serverUrl/token/userId,不改会话状态),失败发 errorOccurred。
+    void getFrom(const QString &serverUrl, const QString &token, const QString &userId,
+                 const QString &path, std::function<void(const QJsonDocument &)> onOk,
+                 const QString &what);
     // POST JSON 请求,成功回调解析后的 JSON,失败发 errorOccurred。
     void postJson(const QString &path, const QJsonObject &body, bool auth,
                   std::function<void(const QJsonDocument &)> onOk,
@@ -146,6 +158,8 @@ private:
     QString webSocketUrl() const;
     // 构造 X-Emby-Authorization 头(官方 "Emby ..." 格式),带 Token 与否可选。
     QString authHeader(bool withToken) const;
+    // 按显式凭据构造 X-Emby-Authorization 头(跨服务器请求用)。
+    QString authHeaderFor(const QString &userId, const QString &token) const;
 
     QNetworkAccessManager m_nam;
     QSettings m_settings;
@@ -156,8 +170,6 @@ private:
     MediaItemModel m_itemsModel;
     MediaItemModel m_seasonsModel;
     MediaItemModel m_episodesModel;
-    QVariantList m_homeRows; // 首页每库条目(见 fetchHomeRows)
-    int m_homeRowsPending = 0; // 首页行请求未完成计数
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）
     int m_itemsSeq = 0; // 条目请求序号,丢弃过期响应(视图快速切换时)
     QString m_serverName;

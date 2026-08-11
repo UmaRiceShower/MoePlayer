@@ -107,7 +107,30 @@ Item {
                                 color: ListView.isCurrentItem ? "#dddddd" : Theme.textMuted
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
-                                width: 380
+                                width: 330
+                            }
+                        }
+                        // 排序按钮:账号顺序即首页聚合顺序(Home 在 accountsChanged 时重拉)。
+                        // z 置顶:整行选中 MouseArea 声明在其后,默认覆盖并拦截按钮点击。
+                        Row {
+                            z: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.right: parent.right
+                            anchors.rightMargin: 8
+                            spacing: 4
+                            Button {
+                                width: 28
+                                height: 28
+                                text: "↑"
+                                padding: 0
+                                onClicked: AccountManager.moveAccountUp(modelData.id)
+                            }
+                            Button {
+                                width: 28
+                                height: 28
+                                text: "↓"
+                                padding: 0
+                                onClicked: AccountManager.moveAccountDown(modelData.id)
                             }
                         }
                         MouseArea {
