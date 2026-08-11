@@ -42,6 +42,11 @@ public:
     // 删除账号(当前激活账号被删除后自动清空会话)。
     Q_INVOKABLE void removeAccount(const QString &id);
 
+    // 修改账号元数据(名称/服务器/用户名),token 与密码保留;
+    // 仅改存储,切换或下次 autoLogin 时按新值生效。
+    Q_INVOKABLE void updateAccount(const QString &id, const QString &name,
+                                   const QString &serverUrl, const QString &userName);
+
     // 启动自动登录:取最后使用的账号,用保存的 token 直接配置会话。
     // 返回 true 表示有可用账号且已发起登录,结果经 autoLoginFinished(ok) 通知;
     // 返回 false 表示无账号或 token 为空(调用方应展示登录入口)。

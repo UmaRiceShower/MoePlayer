@@ -163,6 +163,24 @@ ApplicationWindow {
         Settings {}
     }
 
+    // 服务器管理页(Ctrl+O):添加/删除/修改要连接的 Emby 服务器。
+    Component {
+        id: serverManagerPage
+        ServerManager {
+            onBackRequested: stackView.pop()
+        }
+    }
+
+    // 快捷键打开页面:服务器管理 Ctrl+O,设置 Ctrl+S。
+    Shortcut {
+        sequence: "Ctrl+O"
+        onActivated: stackView.push(serverManagerPage)
+    }
+    Shortcut {
+        sequence: "Ctrl+S"
+        onActivated: stackView.push(settingsPage)
+    }
+
     Component {
         id: playerWindowComponent
         PlayerWindow {}
