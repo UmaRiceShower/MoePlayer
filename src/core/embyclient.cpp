@@ -9,6 +9,7 @@
 #include <QUrlQuery>
 #include <QUuid>
 #include <QDebug>
+#include <QCoreApplication>
 
 namespace {
 
@@ -90,6 +91,9 @@ QString EmbyClient::authHeader(bool withToken) const
 QNetworkRequest EmbyClient::makeRequest(const QString &path, bool auth, bool json) const
 {
     QNetworkRequest req(QUrl(serverUrl() + path));
+    // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
+    req.setRawHeader("User-Agent",
+                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
     req.setRawHeader("X-Emby-Authorization", authHeader(auth).toUtf8());
     // 官方文档(dev.emby.media User-Authentication)规定登录后的 AccessToken
     // 用 X-Emby-Token 头发送,同时保留 X-Emby-Authorization 以兼容按该头认证的服务器。
@@ -456,7 +460,6 @@ void EmbyClient::fetchEpisodes(const QString &seriesId, const QString &seasonId)
 }
 
 // ---------- WebSocket 实时通道(/embywebsocket) ----------
-
 QString EmbyClient::webSocketUrl() const
 {
     QUrl u(serverUrl());
@@ -556,6 +559,8 @@ void EmbyClient::reportPlaybackPing(const QString &playSessionId)
 void EmbyClient::probeRange(const QString &url, std::function<void(bool ok)> onDone)
 {
     QNetworkRequest req(url);
+    req.setRawHeader("User-Agent",
+                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
     req.setRawHeader("Range", "bytes=0-0"); // 只取一个字节,探测代价可忽略
     req.setRawHeader("X-Emby-Authorization", authHeader(true).toUtf8());
     if (!m_accessToken.isEmpty())

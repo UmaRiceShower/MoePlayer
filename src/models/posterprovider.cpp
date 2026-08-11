@@ -7,6 +7,7 @@
 #include <QStandardPaths>
 #include <QUrlQuery>
 #include <QDebug>
+#include <QCoreApplication>
 
 #include "core/embyclient.h"
 
@@ -48,6 +49,9 @@ PosterResponse::PosterResponse(const QUrl &url)
     m_nam.setTransferTimeout(10000);
 
     QNetworkRequest req(url);
+    // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
+    req.setRawHeader("User-Agent",
+                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
     req.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
     m_reply = m_nam.get(req);
     connect(m_reply, &QNetworkReply::finished, this, [this]() {

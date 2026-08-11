@@ -5,6 +5,7 @@
 #include <QOpenGLFramebufferObject>
 #include <QQuickWindow>
 #include <QMetaObject>
+#include <QCoreApplication>
 
 #include <stdexcept>
 
@@ -95,6 +96,11 @@ MpvItem::MpvItem(QQuickItem *parent)
     // 软解:vaapi-copy 在播放中会偶发解码失败且不会中途回退(打开时探测
     // 已选定后不再切换),表现为 "Video: no video";软解保证画面稳定。
     mpv_set_option_string(m_mpv, "hwdec", "no");
+    // 统一 UA(软件名/版本号):mpv 取流(Emby DirectStream)用应用 UA,不用默认。
+    mpv_set_option_string(m_mpv, "user-agent",
+                          (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion())
+                              .toUtf8()
+                              .constData());
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     mpv_set_option_string(m_mpv, "idle", "yes");
     mpv_set_option_string(m_mpv, "volume", "100");
