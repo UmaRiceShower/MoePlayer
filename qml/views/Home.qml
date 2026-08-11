@@ -22,9 +22,6 @@ Item {
     property var loopRows: []
     // 跨服导航:等待账号切换成功后再执行的跳转(见 ensureAccount)。
     property var pendingNav: null
-    // 平滑滚动门控:单步滚动时 contentY 走动画(行随位置实时缩放/透明,
-    // 形成滚动式堆叠动画);大步/回绕时瞬间定位,避免拖沓。
-    property bool smoothScroll: true
     // 当前逻辑行(0..rows-1)与实测行距(负间距布局下相邻行 y 之差)。
     // 滚动直接按逻辑行换算 contentY(夹取在副本范围内),不依赖
     // indexAt/positionViewAtIndex 的估计定位——堆叠负间距下它们会错位,
@@ -36,15 +33,21 @@ Item {
     property real rowStep: 0
 
     function rebuildLoop() {
+        const prevAbs = root.absRow
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
         // 模型重建后旧 contentY 可能越界(视口外全黑),延迟到布局更新后
-        // 定位到中间副本起点。行距尚未测量时先兜底,布局稳定后由
-        // ensureRowStep 实测修正。
+        // 按逻辑行定位。保留滚动位置:rows 异步刷新完成触发 rebuildLoop
+        // 时若跳回起点,滚动中会瞬间跳变(动画"消失")。
         if (root.rows.length > 0) {
-            root.rowIndex = 0
-            root.absRow = root.rows.length
+            if (prevAbs >= 0 && prevAbs < 3 * root.rows.length) {
+                root.absRow = prevAbs
+            } else {
+                root.absRow = root.rows.length
+            }
+            root.rowIndex = root.absRow % root.rows.length
             root.rowStep = 0
             Qt.callLater(function () {
+                root.ensureRowStep()
                 list.contentY = root.absRow * root.rowStep
             })
         }
@@ -67,36 +70,71 @@ Item {
         root.rowStep = 152
     }
 
+    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
+    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
+    property var scrollAnim: null
+
     // 循环滚动:绝对行索引推进,contentY = 绝对行位置。
     // 单步走动画(contentY 连续变化驱动行的缩放/透明实时过渡);
-    // 回绕时目标 = 与当前视口顶行同逻辑行(对 rows 取模相同)的副本,
-    // 视口内容不变,循环无缝。大步瞬间定位避免拖沓。
+    // 回绕(超出可达范围/副本边界)时跳回与 absRow 同逻辑行的副本,
+    // 逻辑位置连续。大步/回绕瞬间定位避免拖沓。
     function scrollBy(step) {
         const n = root.rows.length
         if (n === 0)
             return
         root.ensureRowStep()
+        // 首次/模型重建后 contentY 可能停在 0(第一副本起点,定位未生效):
+        // 中间副本及之后的滚动瞬间校正到对应行,避免首滚跳变。
+        if (root.absRow >= n && list.contentY < n * root.rowStep)
+            list.contentY = root.absRow * root.rowStep
         root.absRow += step
         const maxY = list.contentHeight - list.height
-        // 向下滚出可达范围(模型末尾 clamp):回绕到与当前视口顶行
-        // 同逻辑行的中间副本,内容一致,肉眼无跳变。
-        if (root.absRow * root.rowStep > maxY) {
-            const curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep + 0.5))
-            root.absRow = ((curAbs - n) % n + n) % n + n
-        }
-        // 向上越界(第一副本起点前):回绕到与当前视口顶行同逻辑行
-        // 的中间副本,内容不变;下一格起从该逻辑行继续上滚。
-        if (root.absRow < 0) {
-            const curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep + 0.5))
-            root.absRow = ((curAbs - n) % n + n) % n + n
+        // 回绕:先把 contentY 传送到"当前视觉行"的中间副本——逻辑行
+        // 相同、内容一致,视觉无感(不可见传送);absRow 同步后再按
+        // step 正常步进,dist 回到 1 行,回绕那格就是普通一格的
+        // 平滑动画,不再瞬间跳。
+        if (root.absRow * root.rowStep > maxY || root.absRow < 0) {
+            let curAbs = Math.max(0, Math.floor(list.contentY / root.rowStep))
+            let mid = curAbs
+            if (curAbs >= 2 * n)
+                mid = curAbs - n
+            else if (curAbs < n)
+                mid = curAbs + n
+            root.absRow = mid
+            list.contentY = mid * root.rowStep
+            root.absRow += step
         }
         // 副本范围兜底 [0, 3n)。
         root.absRow = Math.max(0, Math.min(3 * n - 1, root.absRow))
         root.rowIndex = root.absRow % n
         const target = root.absRow * root.rowStep
-        // 目标与当前相差 3 行以内走平滑动画,否则(回绕)瞬间跳。
-        root.smoothScroll = Math.abs(target - list.contentY) <= root.rowStep * 3
-        list.contentY = target
+        const dist = Math.abs(target - list.contentY)
+        if (dist <= root.rowStep * 3 && dist > 0.5) {
+            // 每次新建动画对象:QML 动画对象复用(先 stop 再 start)时有
+            // 状态残留——已知行为是 start() 可能无效、属性停在旧值,后续
+            // 距离累积到阈值外就瞬间跳;新对象保证 start 必然生效。
+            if (root.scrollAnim) {
+                root.scrollAnim.stop()
+                root.scrollAnim.destroy()
+                root.scrollAnim = null
+            }
+            root.scrollAnim = Qt.createQmlObject(
+                'import QtQuick; NumberAnimation { target: list; property: "contentY"; easing.type: Easing.OutCubic }',
+                root)
+            root.scrollAnim.from = list.contentY
+            root.scrollAnim.to = target
+            // 时长按距离自适应(约 8 行/秒):滚动越快单步越远动画越快。
+            root.scrollAnim.duration = Math.max(60, Math.min(200, dist / root.rowStep * 120))
+            root.scrollAnim.start()
+        } else {
+            // 回绕/大步:先停动画再赋值,避免旧动画把 contentY 拉回。
+            if (root.scrollAnim) {
+                root.scrollAnim.stop()
+                root.scrollAnim.destroy()
+                root.scrollAnim = null
+            }
+            list.contentY = target
+        }
     }
 
     // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
@@ -247,15 +285,6 @@ Item {
         highlightRangeMode: ListView.NoHighlightRange
         // 纯滚轮驱动(外层 MouseArea):禁拖拽,避免与滚动动画冲突。
         interactive: false
-        // 单步滚动动画:contentY 连续变化,行随位置实时缩放/透明,
-        // 形成滚动式堆叠过渡;大步/回绕时 smoothScroll 置 false 瞬间定位。
-        Behavior on contentY {
-            enabled: root.smoothScroll
-            NumberAnimation {
-                duration: 220
-                easing.type: Easing.OutCubic
-            }
-        }
 
         delegate: Column {
             id: rowDelegate
