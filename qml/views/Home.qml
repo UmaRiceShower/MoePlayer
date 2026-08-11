@@ -14,20 +14,6 @@ Item {
 
     property var rows: EmbyClient.homeRows
 
-    // 行缩放:中间 1.0,向两端线性递减(mid 实时计算,避免属性绑定不刷新)。
-    function rowScale(i) {
-        const len = root.rows.length
-        if (len <= 1)
-            return 1.0
-        const mid = Math.floor(len / 2)
-        const maxDist = Math.max(mid, len - 1 - mid)
-        return 1.0 - 0.16 * Math.abs(i - mid) / maxDist
-    }
-    // 行透明度:随缩放递减(最小 0.35)。
-    function rowOpacity(i) {
-        return 0.35 + 0.65 * root.rowScale(i)
-    }
-
     Component.onCompleted: EmbyClient.fetchHomeRows(7)
     Connections {
         target: EmbyClient
@@ -76,49 +62,68 @@ Item {
         }
     }
 
-    Flickable {
+    // 轮盘选择:ListView 垂直滚动,当前项(highlight)强制居中;
+    // 每行缩放/透明度由"行中心到视口中心的距离"动态决定(中间最大,
+    // 两端逐级缩小变暗),滚轮/拖拽滚动,任意行(含第一个媒体库)可滚到中间。
+    ListView {
+        id: list
         anchors.fill: parent
         clip: true
-        contentHeight: homeColumn.height
+        model: root.rows
+        spacing: 12
+        // 选中项(highlight)固定在视口中心,滚动时 currentIndex 随之更新。
+        highlightRangeMode: ListView.StrictlyEnforceRange
+        preferredHighlightBegin: 0.5
+        preferredHighlightEnd: 0.5
+        snapMode: ListView.SnapToItem
+        // 首尾各留半视口空段:首行/尾行均可滚到中心。
+        header: Item { width: 1; height: Math.max(1, list.height / 2 - 80) }
+        footer: Item { width: 1; height: Math.max(1, list.height / 2 - 80) }
 
-        Column {
-            id: homeColumn
-            anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 10
-            padding: 16
+        delegate: Column {
+            id: rowDelegate
+            width: list.width
+            transformOrigin: Item.Top
 
-            Repeater {
-                model: root.rows
-                delegate: Column {
-                    // 行级缩放/透明度:index 即行号,整行(标题+卡片)一并缩放。
-                    scale: root.rowScale(index)
-                    opacity: root.rowOpacity(index)
-                    transformOrigin: Item.Top
-                    // 行标题
-                    Text {
-                        text: modelData.viewName
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Row {
-                        spacing: 10
-                        // 库海报(行首)
-                        RowCard {
-                            cardImage: modelData.posterId || ""
-                            cardText: modelData.viewName
-                            isLibrary: true
-                            cardArea.onClicked: root.openLibrary()
-                        }
-                        // 该库最近条目
-                        Repeater {
-                            model: modelData.items
-                            delegate: RowCard {
-                                cardImage: modelData.posterId || ""
-                                cardText: modelData.name
-                                cardArea.onClicked: root.showDetail(modelData.id, modelData.posterId || "", modelData.name)
-                            }
-                        }
+            // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
+            function centerDist() {
+                const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
+                return Math.abs(centerY - list.height / 2)
+            }
+            scale: {
+                const maxDist = Math.max(1, list.height / 2 - 60)
+                return Math.max(0.5, 1 - 0.16 * rowDelegate.centerDist() / maxDist)
+            }
+            opacity: {
+                const maxDist = Math.max(1, list.height / 2 - 60)
+                return Math.max(0.25, 1 - 0.75 * rowDelegate.centerDist() / maxDist)
+            }
+
+            // 行标题
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: modelData.viewName
+                color: Theme.textPrimary
+                font.pixelSize: 14
+                font.bold: true
+            }
+            Row {
+                anchors.horizontalCenter: parent.horizontalCenter
+                spacing: 10
+                // 库海报(行首)
+                RowCard {
+                    cardImage: modelData.posterId || ""
+                    cardText: modelData.viewName
+                    isLibrary: true
+                    cardArea.onClicked: root.openLibrary()
+                }
+                // 该库最近条目
+                Repeater {
+                    model: modelData.items
+                    delegate: RowCard {
+                        cardImage: modelData.posterId || ""
+                        cardText: modelData.name
+                        cardArea.onClicked: root.showDetail(modelData.id, modelData.posterId || "", modelData.name)
                     }
                 }
             }
