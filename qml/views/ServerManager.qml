@@ -39,7 +39,7 @@ Item {
                 root.statusText = "新增需要填写密码"
                 return
             }
-            const started = AccountManager.addAccount(root.fName || root.fUser, root.fServer,
+            const started = AccountManager.addAccount(root.fName, root.fServer,
                                                       root.fUser, root.fPassword, true)
             if (!started)
                 root.statusText = "参数不完整"
@@ -97,8 +97,10 @@ Item {
                             anchors.leftMargin: 10
                             spacing: 2
                             Text {
-                                text: modelData.name + (modelData.id === AccountManager.activeAccountId
-                                                        ? "  [当前]" : "")
+                                // 未填名称时显示用户名(首页聚合前缀此时用 ServerName)。
+                                text: (modelData.name !== "" ? modelData.name : modelData.userName)
+                                      + (modelData.id === AccountManager.activeAccountId
+                                         ? "  [当前]" : "")
                                 color: ListView.isCurrentItem ? "white" : Theme.textPrimary
                                 font.bold: true
                             }
