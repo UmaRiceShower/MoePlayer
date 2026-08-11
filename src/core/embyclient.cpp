@@ -519,7 +519,9 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
-    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateCreated"));
+    // 按更新时间(文件修改时间)倒序,新更新/入库的内容靠前;
+    // DateLastMediaAdded 在部分服务器条目级排序会异常,改用 DateModified。
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateModified"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 20)));

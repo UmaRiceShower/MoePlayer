@@ -61,7 +61,7 @@ Item {
     // 账号增删/排序变化(accountsChanged)时按新顺序重拉。
     Component.onCompleted: {
         if (AccountManager.hasAccounts)
-            AccountManager.fetchHomeRows(7)
+            AccountManager.fetchHomeRows(20)
     }
 
     // 未登录提示条:没有任何已保存账号时覆盖在首页上方,提供服务器管理入口。
@@ -101,7 +101,7 @@ Item {
         }
         function onAccountsChanged() {
             if (AccountManager.hasAccounts)
-                AccountManager.fetchHomeRows(7)
+                AccountManager.fetchHomeRows(20)
         }
         function onAccountLoginFinished(ok) {
             if (ok && root.pendingNav) {
@@ -115,21 +115,27 @@ Item {
     }
     onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
 
-    // 每行条目卡片(库海报或媒体条目)。
+    // 每行条目卡片(库海报或媒体条目)。尺寸由调用处指定(cardW/cardH),
+    // 有图时底部显示标题,无图时居中显示占位文字。
     component RowCard: Rectangle {
         property string cardImage: ""
         property string cardText: ""
         property bool isLibrary: false
+        property int cardW: 112
+        property int cardH: 168
         property alias cardArea: cardArea
-        width: isLibrary ? 92 : 88
-        height: isLibrary ? 128 : 122
+        width: cardW
+        height: cardH
         color: Theme.surface
-        radius: 8
+        radius: 10
         border.width: cardArea.hovered ? 2 : 0
         border.color: Theme.accent
         Image {
             anchors.fill: parent
-            anchors.margins: 4
+            anchors.leftMargin: 5
+            anchors.rightMargin: 5
+            anchors.topMargin: 5
+            anchors.bottomMargin: 22
             source: cardImage !== "" ? "image://emby/" + cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
@@ -139,12 +145,27 @@ Item {
             anchors.centerIn: parent
             text: cardText
             color: Theme.textPrimary
-            font.pixelSize: isLibrary ? 15 : 11
+            font.pixelSize: isLibrary ? 16 : 13
             font.bold: isLibrary
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             width: parent.width - 8
             wrapMode: Text.Wrap
+        }
+        Text {
+            visible: cardImage !== ""
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            anchors.bottomMargin: 3
+            text: cardText
+            color: Theme.textPrimary
+            font.pixelSize: isLibrary ? 13 : 12
+            font.bold: isLibrary
+            elide: Text.ElideRight
+            horizontalAlignment: Text.AlignHCenter
         }
         MouseArea {
             id: cardArea
@@ -153,16 +174,16 @@ Item {
         }
     }
 
-    // 轮盘选择:ListView 垂直滚动,当前项(highlight)强制居中;
-    // 每行缩放/透明度由"行中心到视口中心的距离"动态决定(中间最大,
-    // 两端逐级缩小变暗),滚轮/拖拽滚动,任意行(含第一个媒体库)可滚到中间。
+    // 堆叠式竖向轮盘:行与行部分重叠(负间距),中间行最前最亮,
+    // 上下行被相邻行覆盖一部分并逐级缩小变暗(类似应用库的堆叠效果,
+    // 但间距更大,适合媒体库浏览)。
     ListView {
         id: list
         anchors.fill: parent
         clip: true
         model: root.loopRows
-        spacing: 12
-        // 不强制 highlight 居中:由滚轮手动控制 contentY 并做无缝循环,
+        spacing: -44
+        // 不强制 highlight 居中:由滚轮按可见行索引定位并做无缝循环,
         // StrictlyEnforceRange 会拉回手动跳转位置导致边界不可达。
         highlightRangeMode: ListView.NoHighlightRange
         snapMode: ListView.SnapToItem
@@ -179,13 +200,15 @@ Item {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
                 return Math.abs(centerY - list.height / 2)
             }
+            // 堆叠层级:距视口中心越近越靠前,保证中间行卡片可点。
+            z: Math.max(1, 10 - rowDelegate.centerDist() / 80)
             scale: {
                 const maxDist = Math.max(1, list.height / 2 - 60)
-                return Math.max(0.5, 1 - 0.16 * rowDelegate.centerDist() / maxDist)
+                return Math.max(0.55, 1 - 0.14 * rowDelegate.centerDist() / maxDist)
             }
             opacity: {
                 const maxDist = Math.max(1, list.height / 2 - 60)
-                return Math.max(0.25, 1 - 0.75 * rowDelegate.centerDist() / maxDist)
+                return Math.max(0.3, 1 - 0.7 * rowDelegate.centerDist() / maxDist)
             }
 
             // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
@@ -195,32 +218,44 @@ Item {
                         ? modelData.serverName + " - " + modelData.viewName
                         : modelData.viewName
                 color: Theme.textPrimary
-                font.pixelSize: 14
+                font.pixelSize: 17
                 font.bold: true
             }
-            Row {
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 10
-                // 库海报(行首)
-                RowCard {
-                    cardImage: modelData.posterId || ""
-                    cardText: modelData.viewName
-                    isLibrary: true
-                    cardArea.onClicked: root.ensureAccount(modelData.accountId,
-                        function () { root.openLibrary(modelData.viewId) })
-                }
-                // 该库最近条目
-                Repeater {
-                    model: modelData.items
-                    delegate: RowCard {
+            // 行内容:宽度为视口宽,条目多时右侧溢出裁剪(拉取数量保证
+            // 首屏尽量填满)。
+            Item {
+                width: list.width
+                height: 172
+                clip: true
+                Row {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 24
+                    spacing: 12
+                    // 库海报(行首)
+                    RowCard {
                         cardImage: modelData.posterId || ""
-                        cardText: modelData.name
-                        // 内层 modelData 是条目,行级 accountId 从 rowData 取。
-                        cardArea.onClicked: root.ensureAccount(rowDelegate.rowData.accountId,
-                            function () {
-                                root.showDetail(modelData.id, modelData.posterId || "",
-                                                modelData.name)
-                            })
+                        cardText: modelData.viewName
+                        isLibrary: true
+                        cardW: 124
+                        cardH: 172
+                        cardArea.onClicked: root.ensureAccount(modelData.accountId,
+                            function () { root.openLibrary(modelData.viewId) })
+                    }
+                    // 该库最近条目
+                    Repeater {
+                        model: modelData.items
+                        delegate: RowCard {
+                            cardImage: modelData.posterId || ""
+                            cardText: modelData.name
+                            cardW: 112
+                            cardH: 172
+                            // 内层 modelData 是条目,行级 accountId 从 rowData 取。
+                            cardArea.onClicked: root.ensureAccount(rowDelegate.rowData.accountId,
+                                function () {
+                                    root.showDetail(modelData.id, modelData.posterId || "",
+                                                    modelData.name)
+                                })
+                        }
                     }
                 }
             }
