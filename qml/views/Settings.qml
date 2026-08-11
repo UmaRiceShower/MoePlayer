@@ -33,21 +33,6 @@ Item {
             }
         }
 
-        Column {
-            spacing: 8
-
-            Text {
-                text: "演示测试流 URL"
-                color: Theme.textMuted
-                font.pixelSize: 13
-            }
-            TextField {
-                width: 480
-                text: SettingsStore.testStreamUrl
-                onEditingFinished: SettingsStore.testStreamUrl = text
-            }
-        }
-
         Text {
             text: "MoePlayer " + Qt.application.version
             color: Theme.textMuted

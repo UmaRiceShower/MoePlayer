@@ -149,23 +149,6 @@ Item {
                 }
             }
         }
-
-        // --- demo streams (work without any server) ---
-        Text {
-            text: "演示影片（无需服务器）"
-            color: Theme.textMuted
-        }
-        Row {
-            spacing: 12
-            Button {
-                text: "测试流 A（Sintel）"
-                onClicked: root.playRequested(SettingsStore.testStreamUrl, [], {})
-            }
-            Button {
-                text: "测试流 B（Bunny）"
-                onClicked: root.playRequested("https://media.w3.org/2010/05/bunny/trailer.mp4", [], {})
-            }
-        }
     }
 
     // EmbyClient 异步结果:按信号推进连接状态并更新界面。
