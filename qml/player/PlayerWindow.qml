@@ -79,9 +79,11 @@ Window {
         // resume 位置与已看由服务器维护(Progress 每 10s 写入位置,
         // 播完 ≥90% 时服务器自动标已看)。
         function onPlaybackEnded(error) {
-            if (owner.reporting)
+            if (owner.reporting && !owner.stoppedReported) {
+                owner.stoppedReported = true
                 EmbyClient.reportPlaybackStopped(owner.meta.itemId, owner.meta.mediaSourceId,
                                                  owner.meta.playSessionId, owner.lastPosition)
+            }
         }
     }
 
@@ -93,11 +95,24 @@ Window {
         onTriggered: EmbyClient.reportPlaybackPing(root.meta.playSessionId)
     }
 
-    // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)。
+    // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
+    property bool stoppedReported: false
+
+    // 窗口关闭完成(Main 据此从播放窗口列表移除)。
+    signal windowClosed()
+
+    // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)并停止播放:
+    // Window.close() 只隐藏窗口,对象与 mpv 继续存活、音频照播。
     onClosing: {
-        if (root.reporting)
+        if (root.reporting && !root.stoppedReported) {
+            root.stoppedReported = true
             EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
                                              root.meta.playSessionId, root.lastPosition)
+        }
+        mpv.command(["stop"])
+        root.windowClosed()
+        // 隐藏窗口的 MpvItem/mpv 残留,显式销毁释放。
+        root.destroy()
     }
 
     // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);
