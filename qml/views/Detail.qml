@@ -15,11 +15,23 @@ Item {
 
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
+    // 剧集条目点击 → 主窗口 push 该集详情页。
+    signal showEpisodeDetail(string itemId, string posterId, string title)
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
 
     property var detail: ({})
+    // 剧集导航:非空时处于"某季分集"浏览模式(显示该季 Episodes 网格)。
+    property string browseSeasonId: ""
+    property string browseSeasonName: ""
+
+    // 进入某季的分集浏览。
+    function openSeason(seasonId, seasonName) {
+        root.browseSeasonId = seasonId
+        root.browseSeasonName = seasonName
+        EmbyClient.fetchEpisodes(root.itemId, seasonId)
+    }
 
     // 本次播放是否续播(起播位置由 playbackReady 的 meta.resumePositionTicks 携带)。
     property var resumeTicks: 0
@@ -45,7 +57,9 @@ Item {
         anchors.fill: parent
         color: Theme.bg
 
+        // ---- 概览模式:Movie/Episode 详情,Series 元数据 + Seasons 行 ----
         Column {
+            visible: root.browseSeasonId === ""
             anchors.fill: parent
             spacing: 16
             padding: 24
@@ -127,6 +141,8 @@ Item {
 
                     Row {
                         spacing: 10
+                        // 剧集(Series)不可直接播放,隐藏播放入口,保留整剧已看标记。
+                        visible: root.detail.type !== "Series"
                         Button {
                             text: root.playButtonText()
                             width: 200
@@ -166,6 +182,115 @@ Item {
                                                       played ? 100 : 0)
                             }
                         }
+                    }
+                }
+            }
+
+            // ---- Series:分季横向列表 ----
+            Text {
+                text: "剧集"
+                visible: root.detail.type === "Series"
+                color: Theme.textPrimary
+                font.pixelSize: 18
+                font.bold: true
+            }
+            ListView {
+                visible: root.detail.type === "Series"
+                orientation: ListView.Horizontal
+                spacing: 12
+                height: 200
+                clip: true
+                model: EmbyClient.seasonsModel
+                delegate: Item {
+                    width: 120
+                    height: 190
+                    Rectangle {
+                        width: 110
+                        height: 155
+                        color: Theme.surface
+                        radius: 6
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 3
+                            source: model.posterId ? "image://emby/" + model.posterId : ""
+                            fillMode: Image.PreserveAspectCrop
+                            cache: true
+                        }
+                    }
+                    Text {
+                        anchors.top: parent.bottom
+                        anchors.topMargin: -34
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 120
+                        text: model.name
+                        color: Theme.textPrimary
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.openSeason(model.id, model.name)
+                    }
+                }
+            }
+        }
+
+        // ---- 分集浏览模式:某季的 Episodes 网格 ----
+        Column {
+            visible: root.browseSeasonId !== ""
+            anchors.fill: parent
+            spacing: 16
+            padding: 24
+
+            Row {
+                spacing: 12
+                Button {
+                    text: "← 返回"
+                    onClicked: root.browseSeasonId = ""
+                }
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.browseSeasonName
+                    color: Theme.textPrimary
+                    font.pixelSize: 24
+                    font.bold: true
+                }
+            }
+
+            GridView {
+                width: parent.width
+                height: parent.height - 60
+                cellWidth: 176
+                cellHeight: 260
+                clip: true
+                model: EmbyClient.episodesModel
+                delegate: Item {
+                    width: 168
+                    height: 252
+                    Rectangle {
+                        anchors.fill: parent
+                        color: Theme.surface
+                        radius: 8
+                        Image {
+                            anchors.fill: parent
+                            anchors.margins: 4
+                            source: model.posterId ? "image://emby/" + model.posterId : ""
+                            fillMode: Image.PreserveAspectCrop
+                            cache: true
+                        }
+                        Text {
+                            anchors.bottom: parent.bottom
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.margins: 8
+                            text: model.name
+                            color: Theme.textPrimary
+                            elide: Text.ElideRight
+                        }
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: root.showEpisodeDetail(model.id, model.posterId, model.name)
                     }
                 }
             }

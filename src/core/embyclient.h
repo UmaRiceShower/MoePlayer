@@ -25,6 +25,8 @@ class EmbyClient : public QObject
     Q_PROPERTY(bool wsConnected READ wsConnected NOTIFY wsConnectedChanged)
     Q_PROPERTY(MediaItemModel *viewsModel READ viewsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *itemsModel READ itemsModel CONSTANT)
+    Q_PROPERTY(MediaItemModel *seasonsModel READ seasonsModel CONSTANT)
+    Q_PROPERTY(MediaItemModel *episodesModel READ episodesModel CONSTANT)
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
@@ -42,6 +44,8 @@ public:
     QString userId() const { return m_userId; }
     MediaItemModel *viewsModel() { return &m_viewsModel; }
     MediaItemModel *itemsModel() { return &m_itemsModel; }
+    MediaItemModel *seasonsModel() { return &m_seasonsModel; }
+    MediaItemModel *episodesModel() { return &m_episodesModel; }
 
     // 获取服务器公开信息(/System/Info/Public,无需认证)。
     Q_INVOKABLE void fetchPublicInfo();
@@ -52,6 +56,10 @@ public:
     // 获取指定视图下的影片条目(/Users/{id}/Items,分页),填充 itemsModel。
     // startIndex=0 时替换模型,否则追加;TotalRecordCount 写入 itemsModel.totalCount。
     Q_INVOKABLE void fetchItems(const QString &viewId, int startIndex, int limit);
+    // 获取剧集的分季列表(/Shows/{id}/Seasons),填充 seasonsModel。
+    Q_INVOKABLE void fetchSeasons(const QString &seriesId);
+    // 获取指定季的分集列表(/Shows/{id}/Episodes?SeasonId=),填充 episodesModel。
+    Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId);
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
@@ -89,6 +97,8 @@ signals:
     void loginSucceeded();
     void viewsReceived();
     void itemsReceived();
+    void seasonsReceived();
+    void episodesReceived();
     // WebSocket 连接状态变化(登录成功后建立,断线自动重连)。
     void wsConnectedChanged();
     // 服务器实时推送(Emby 4.9 仅广播 UserDataChanged/LibraryChanged/
@@ -130,6 +140,8 @@ private:
     int m_wsReconnectDelay = 3000;
     MediaItemModel m_viewsModel;
     MediaItemModel m_itemsModel;
+    MediaItemModel m_seasonsModel;
+    MediaItemModel m_episodesModel;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）
     int m_itemsSeq = 0; // 条目请求序号,丢弃过期响应(视图快速切换时)
     QString m_serverName;
