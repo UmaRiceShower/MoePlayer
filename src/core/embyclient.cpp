@@ -180,8 +180,8 @@ void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
-    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie"));
-    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    // 不限制类型、不递归:返回库的顶层条目(Movies→Movie,TV Shows→Series,
+    // Home Videos/Music Videos→Movie),分页与 TotalRecordCount 仍适用。
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
