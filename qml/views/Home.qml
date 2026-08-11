@@ -11,6 +11,8 @@ Item {
 
     signal showDetail(string itemId, string posterId, string title)
     signal openLibrary()
+    // 打开服务器管理页(未登录提示条入口)。
+    signal openServerManager()
 
     property var rows: EmbyClient.homeRows
     // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
@@ -24,7 +26,42 @@ Item {
             list.positionViewAtIndex(root.rows.length, ListView.Center)
     }
 
-    Component.onCompleted: EmbyClient.fetchHomeRows(7)
+    // 未登录时首屏不发起请求(避免无 token 请求干扰启动自动登录判定),
+    // 数据由登录/会话信号驱动(见下方 Connections)。
+    Component.onCompleted: {
+        if (EmbyClient.connected)
+            EmbyClient.fetchHomeRows(7)
+    }
+
+    // 未登录提示条:无会话时覆盖在首页上方,提供服务器管理入口。
+    Rectangle {
+        visible: !EmbyClient.connected
+        anchors.top: parent.top
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.topMargin: 16
+        width: Math.min(420, parent.width - 32)
+        height: 44
+        radius: 8
+        color: Theme.surface
+        border.width: 1
+        border.color: Theme.accent
+
+        Row {
+            anchors.centerIn: parent
+            spacing: 12
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "未登录，添加或切换服务器后即可浏览"
+                color: Theme.textPrimary
+                font.pixelSize: 13
+            }
+            Button {
+                text: "服务器管理"
+                onClicked: root.openServerManager()
+            }
+        }
+    }
+
     Connections {
         target: EmbyClient
         // 登录成功即拉视图(Home 为首页时 Library 未必实例化,流程在此闭环)。

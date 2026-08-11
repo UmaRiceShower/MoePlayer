@@ -70,6 +70,16 @@ ApplicationWindow {
             openPlayerWindow(startupUrl, [], {})
     }
 
+    // 启动自动登录失败(token 失效):清掉无效会话(connected 变 false),
+    // 首页显示未登录提示条,引导回服务器管理重登。
+    Connections {
+        target: AccountManager
+        function onAutoLoginFinished(ok) {
+            if (!ok)
+                EmbyClient.disconnectServer()
+        }
+    }
+
     StackView {
         id: stackView
         anchors.fill: parent
@@ -110,6 +120,7 @@ ApplicationWindow {
                 })
             }
             onOpenLibrary: stackView.push(libraryPage)
+            onOpenServerManager: stackView.push(serverManagerPage)
         }
     }
 

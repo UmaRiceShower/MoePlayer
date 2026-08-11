@@ -26,6 +26,25 @@ Item {
             EmbyClient.fetchPublicInfo()
     }
 
+    // 进入页面时若会话已在(启动自动登录/切换账号拉好了视图),直接载入第一个
+    // 视图;未登录则用当前账号信息预填连接表单(密码仅已保存时填入),便于重登。
+    Component.onCompleted: {
+        if (EmbyClient.connected && EmbyClient.viewsModel.count > 0) {
+            root.currentViewId = EmbyClient.viewsModel.idAt(0)
+            EmbyClient.fetchItems(root.currentViewId, 0, 200)
+        } else if (AccountManager.activeAccountId !== "") {
+            serverField.text = EmbyClient.serverUrl
+            const acc = AccountManager.accounts
+            for (const a of acc) {
+                if (a.id === AccountManager.activeAccountId) {
+                    userField.text = a.userName
+                    passField.text = AccountManager.passwordFor(a.id)
+                    break
+                }
+            }
+        }
+    }
+
     Column {
         anchors.fill: parent
         spacing: 16
