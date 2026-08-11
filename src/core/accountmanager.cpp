@@ -225,9 +225,11 @@ void AccountManager::maybeAssembleHomeRows()
         const QVariantMap om = ord.toMap();
         const int idx = om.value(QStringLiteral("index")).toInt();
         const QString serverUrl = om.value(QStringLiteral("serverUrl")).toString();
-        // ServerName 未拉到(网络慢/失败)时回退账号名,与登录链接的显示名口径一致。
-        const QString serverName = m_serverNames.value(serverUrl,
-                                                       om.value(QStringLiteral("name")).toString());
+        // 服务器显示名:用户填的账号名优先,未填(名称为空)才用拉取的
+        // ServerName;两者皆空时留空,前端仅显示媒体库名。
+        QString serverName = om.value(QStringLiteral("name")).toString();
+        if (serverName.isEmpty())
+            serverName = m_serverNames.value(serverUrl);
         const QVariantList views = m_homeViews.value(idx);
         for (const auto &v : views) {
             const QVariantMap vm = v.toMap();
