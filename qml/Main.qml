@@ -23,6 +23,10 @@ ApplicationWindow {
     // 若不处理则播放窗口会残留继续播放、应用也不退出。
     property var playerWindows: []
 
+    // 剧集详情跳转防抖(同集 500ms 内只 push 一次)。
+    property string lastEpisodePush: ""
+    property int lastEpisodePushTime: 0
+
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
     function openPlayerWindow(url, headers, meta) {
@@ -117,10 +121,16 @@ ApplicationWindow {
                 root.openPlayerWindow(url, headers, meta)
             }
             onBackRequested: stackView.pop()
-            // 剧集导航:点某集 → 压入该集详情页(防双击重复 push)。
+            // 剧集导航:点某集 → 压入该集详情页。
+            // 注意不能用"当前页是详情页"判断防重复:点击某集时当前页本就是
+            // 详情页(季浏览模式),会拦截全部点击;改用同集短时间防抖
+            // (StackView 切换动画窗口期内双击会命中旧页面两次)。
             onShowEpisodeDetail: function (itemId, posterId, title) {
-                if (stackView.currentItem && stackView.currentItem.isDetailPage)
+                const now = Date.now()
+                if (itemId === root.lastEpisodePush && now - root.lastEpisodePushTime < 500)
                     return
+                root.lastEpisodePush = itemId
+                root.lastEpisodePushTime = now
                 stackView.push(detailPage, {
                     itemId: itemId,
                     posterId: posterId,
