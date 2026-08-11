@@ -1,7 +1,7 @@
 #include "settingsstore.h"
 
 namespace {
-// 默认 Emby 服务器地址(本机回环),用户可在设置页覆盖。
+// 默认 Emby 服务器地址(本地回环),用户可在设置页覆盖。
 const QString kDefaultServerUrl = QStringLiteral("http://127.0.0.1:8096");
 } // namespace
 

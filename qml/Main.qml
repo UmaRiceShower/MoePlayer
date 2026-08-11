@@ -76,7 +76,7 @@ ApplicationWindow {
         initialItem: homePage
     }
 
-    // 临时布局:功能入口先集中在右下角,后续按首页效果重新设计。
+    // 功能入口集中右下角(布局待按首页效果重新设计)。
     footer: Rectangle {
         height: 44
         color: "transparent"

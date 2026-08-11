@@ -32,7 +32,7 @@ class EmbyClient : public QObject
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
-    // 服务器地址,持久化于 QSettings("network/serverUrl"),默认本机 8096 端口。
+    // 服务器地址,持久化于 QSettings("network/serverUrl"),默认本地回环 8096 端口。
     QString serverUrl() const { return m_settings.value("network/serverUrl", QStringLiteral("http://127.0.0.1:8096")).toString(); }
     void setServerUrl(const QString &v);
     QString serverName() const { return m_serverName; }

@@ -45,7 +45,7 @@ PosterResponse::PosterResponse(const QUrl &url)
     m_cache.setCacheDirectory(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                               + QStringLiteral("/emby-images"));
     m_nam.setCache(&m_cache);
-    m_nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理(同 EmbyClient)
+    m_nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理
     m_nam.setTransferTimeout(10000);
 
     QNetworkRequest req(url);
