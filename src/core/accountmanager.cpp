@@ -157,6 +157,22 @@ void AccountManager::removeAccount(const QString &id)
     emit activeAccountChanged();
 }
 
+void AccountManager::updateAccount(const QString &id, const QString &name,
+                                   const QString &serverUrl, const QString &userName)
+{
+    for (auto &a : m_accounts) {
+        if (a.id != id)
+            continue;
+        a.name = name.trimmed();
+        a.serverUrl = serverUrl.trimmed();
+        a.userName = userName.trimmed();
+        save();
+        emit accountsChanged();
+        emit activeAccountChanged();
+        return;
+    }
+}
+
 bool AccountManager::autoLogin()
 {
     if (m_accounts.isEmpty())
