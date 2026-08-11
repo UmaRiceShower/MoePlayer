@@ -23,6 +23,12 @@ Window {
 
     readonly property bool reporting: meta && meta.playSessionId !== undefined && meta.playSessionId !== ""
     property double lastProgressReport: 0
+    // 最后已知播放位置:关窗时 mpv 已复位(time-pos 失效),回传须用缓存值。
+    property double lastPosition: 0
+    // 媒体总时长缓存(播完判定用)。
+    property double lastDuration: 0
+    // 续播位置(100ns ticks,来自详情页继续观看),起播后跳转。
+    readonly property double resumeTicks: (meta && meta.resumePositionTicks) || 0
 
     // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
     // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
@@ -39,14 +45,18 @@ Window {
     // Qt 6.11 中属性 change 信号的内联 handler 作用域异常,引用 root 会得到 null。
     Connections {
         target: mpv
-        // 开始解码(时长首次有效) → 上报播放开始。
+        // 开始解码(时长首次有效) → 上报播放开始;续播则跳到上次位置。
         function onPlaybackStarted() {
+            owner.lastDuration = mpv.duration
             if (owner.reporting)
                 EmbyClient.reportPlaybackStart(owner.meta.itemId, owner.meta.mediaSourceId,
                                                owner.meta.playSessionId, owner.meta.playMethod, 0)
+            if (owner.resumeTicks > 0)
+                mpv.seek(owner.resumeTicks / 10000000)
         }
         // 播放中每 10 秒上报一次进度。
         function onPositionChanged() {
+            owner.lastPosition = mpv.position
             if (!owner.reporting || mpv.state !== "playing")
                 return
             const now = Date.now()
@@ -66,10 +76,12 @@ Window {
                                               mpv.position, mpv.state === "paused")
         }
         // 播放结束(正常播完或出错) → 上报停止。
+        // resume 位置与已看由服务器维护(Progress 每 10s 写入位置,
+        // 播完 ≥90% 时服务器自动标已看)。
         function onPlaybackEnded(error) {
             if (owner.reporting)
                 EmbyClient.reportPlaybackStopped(owner.meta.itemId, owner.meta.mediaSourceId,
-                                                 owner.meta.playSessionId, mpv.position)
+                                                 owner.meta.playSessionId, owner.lastPosition)
         }
     }
 
@@ -81,11 +93,11 @@ Window {
         onTriggered: EmbyClient.reportPlaybackPing(root.meta.playSessionId)
     }
 
-    // 关窗时上报最终位置。
+    // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)。
     onClosing: {
         if (root.reporting)
             EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
-                                             root.meta.playSessionId, mpv.position)
+                                             root.meta.playSessionId, root.lastPosition)
     }
 
     // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);

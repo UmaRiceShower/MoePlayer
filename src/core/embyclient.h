@@ -4,6 +4,8 @@
 #include <QNetworkAccessManager>
 #include <QJsonArray>
 #include <QSettings>
+#include <QTimer>
+#include <QWebSocket>
 
 #include <functional>
 
@@ -20,6 +22,7 @@ class EmbyClient : public QObject
     Q_PROPERTY(QString serverVersion READ serverVersion NOTIFY serverInfoChanged)
     Q_PROPERTY(QString userName READ userName NOTIFY loginChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY loginChanged)
+    Q_PROPERTY(bool wsConnected READ wsConnected NOTIFY wsConnectedChanged)
     Q_PROPERTY(MediaItemModel *viewsModel READ viewsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *itemsModel READ itemsModel CONSTANT)
 public:
@@ -33,6 +36,8 @@ public:
     QString userName() const { return m_userName; }
     // 已登录(持有 AccessToken)。
     bool connected() const { return !m_accessToken.isEmpty(); }
+    // WebSocket 实时通道已连接。
+    bool wsConnected() const { return m_ws.state() == QAbstractSocket::ConnectedState; }
     QString accessToken() const { return m_accessToken; }
     QString userId() const { return m_userId; }
     MediaItemModel *viewsModel() { return &m_viewsModel; }
@@ -51,6 +56,11 @@ public:
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
     Q_INVOKABLE void fetchItemDetail(const QString &itemId);
+    // 写入已看/继续观看状态(/Users/{id}/Items/{itemId}/UserData)。
+    // played=true 表示看完(位置清零);否则写入上次播放位置供继续观看。
+    // 服务器不会自动维护继续观看位置,须由客户端在停止时写入。
+    Q_INVOKABLE void setWatched(const QString &itemId, bool played,
+                                double positionTicks = 0, double playedPercentage = -1);
     // 播放状态回传四件套(/Sessions/Playing*,PlaySessionId 贯穿)。
     Q_INVOKABLE void reportPlaybackStart(const QString &itemId, const QString &mediaSourceId,
                                          const QString &playSessionId, const QString &playMethod,
@@ -79,6 +89,11 @@ signals:
     void loginSucceeded();
     void viewsReceived();
     void itemsReceived();
+    // WebSocket 连接状态变化(登录成功后建立,断线自动重连)。
+    void wsConnectedChanged();
+    // 服务器实时推送(Emby 4.9 仅广播 UserDataChanged/LibraryChanged/
+    // RefreshProgress,不广播播放事件):data 为消息 Data 对象。
+    void serverEventReceived(const QString &messageType, const QVariantMap &data);
     // url 为绝对播放地址;headers 为流请求所需的 "Name: Value" 头列表;
     // meta 含 itemId/mediaSourceId/playSessionId/playMethod,供播放回传使用。
     void playbackReady(const QString &url, const QVariantList &headers, const QVariantMap &meta);
@@ -99,11 +114,20 @@ private:
                   const QString &what);
     // 发送播放状态回传(失败仅记日志,不阻断播放)。
     void postReport(const QString &endpoint, const QJsonObject &body);
+    // 建立/重连 WebSocket(/embywebsocket,带 api_key 认证)。
+    void connectWebSocket();
+    // 处理服务器推送消息,按 MessageType 分发。
+    void handleWsMessage(const QJsonObject &msg);
+    // 构造 WebSocket 地址:http(s)://host[:port] → ws(s)://host[:port]/embywebsocket。
+    QString webSocketUrl() const;
     // 构造 X-Emby-Authorization 头(官方 "Emby ..." 格式),带 Token 与否可选。
     QString authHeader(bool withToken) const;
 
     QNetworkAccessManager m_nam;
     QSettings m_settings;
+    QWebSocket m_ws; // /embywebsocket 长连接(登录后建立)
+    QTimer m_wsReconnect; // 断线重连定时器(指数退避)
+    int m_wsReconnectDelay = 3000;
     MediaItemModel m_viewsModel;
     MediaItemModel m_itemsModel;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）

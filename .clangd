@@ -1,0 +1,6 @@
+# clangd 解析 compile_commands.json 时会遇到 GCC 专用编译标志,
+# 其中 -mno-direct-extern-access(GCC 13+ 链接安全标志,Qt6 注入)不被 clang 识别。
+# 此处让 clangd 丢弃该标志;clang 侧等价行为由 Qt 的
+# -fno-direct-access-external-data 提供,无需手动添加。
+CompileFlags:
+  Remove: -mno-direct-extern-access

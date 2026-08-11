@@ -198,5 +198,10 @@ Item {
             root.busy = false
             statusText.text = "失败：" + message
         }
+        // 实时通道状态(连接成功后建立)。
+        function onWsConnectedChanged() {
+            if (EmbyClient.wsConnected)
+                statusText.text = "实时通道已连接"
+        }
     }
 }

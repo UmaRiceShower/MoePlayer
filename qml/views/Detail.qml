@@ -21,6 +21,21 @@ Item {
 
     property var detail: ({})
 
+    // 本次播放是否续播(起播位置由 playbackReady 的 meta.resumePositionTicks 携带)。
+    property var resumeTicks: 0
+
+    // 发起播放:resume 为 true 时从上次位置续播。
+    function startPlayback(resume) {
+        root.resumeTicks = resume ? root.detail.positionTicks : 0
+        EmbyClient.fetchPlaybackInfo(root.itemId)
+    }
+    // 已看标记文案:有进度且未看完 → 继续播放;否则从头播放。
+    function playButtonText() {
+        if (root.detail.positionTicks > 0 && !root.detail.played)
+            return "从 " + formatTime(root.detail.positionTicks / 1e7) + " 继续播放"
+        return "播放"
+    }
+
     Component.onCompleted: {
         if (root.itemId !== "")
             EmbyClient.fetchItemDetail(root.itemId)
@@ -110,22 +125,46 @@ Item {
                         lineHeight: 1.5
                     }
 
-                    Button {
-                        text: "播放"
-                        width: 160
-                        height: 44
-                        font.pixelSize: 16
-                        onClicked: EmbyClient.fetchPlaybackInfo(root.itemId)
-                        background: Rectangle {
-                            radius: 10
-                            color: Theme.accent
-                        }
-                        contentItem: Text {
-                            text: "播放"
-                            color: "white"
+                    Row {
+                        spacing: 10
+                        Button {
+                            text: root.playButtonText()
+                            width: 200
+                            height: 44
                             font.pixelSize: 16
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                            onClicked: root.startPlayback(true)
+                            background: Rectangle {
+                                radius: 10
+                                color: Theme.accent
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: 16
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        Button {
+                            text: root.detail.positionTicks > 0 && !root.detail.played
+                                  ? "从头播放" : ""
+                            visible: text !== ""
+                            width: 110
+                            height: 44
+                            font.pixelSize: 14
+                            onClicked: root.startPlayback(false)
+                        }
+                        Button {
+                            text: root.detail.played ? "标记未看" : "标记已看"
+                            width: 110
+                            height: 44
+                            font.pixelSize: 14
+                            onClicked: {
+                                const played = !root.detail.played
+                                // 手动标记:写入服务器(UserData),位置清零。
+                                EmbyClient.setWatched(root.itemId, played, 0,
+                                                      played ? 100 : 0)
+                            }
                         }
                     }
                 }
@@ -151,8 +190,25 @@ Item {
                 root.detail = d
         }
         function onPlaybackReady(url, headers, meta) {
-            if (meta.itemId === root.itemId)
-                root.playRequested(url, headers, meta)
+            if (meta.itemId === root.itemId) {
+                const m = Object.assign({}, meta)
+                m.resumePositionTicks = root.resumeTicks || 0
+                root.playRequested(url, headers, m)
+            }
+        }
+        // 已看/进度被其他客户端修改(或本客户端播完自动标记)时实时刷新。
+        function onServerEventReceived(type, data) {
+            if (type !== "UserDataChanged")
+                return
+            const list = data.UserDataList || []
+            for (const e of list) {
+                if (String(e.ItemId) === root.itemId) {
+                    root.detail = Object.assign({}, root.detail, {
+                        positionTicks: e.PlaybackPositionTicks || 0,
+                        played: !!e.Played
+                    })
+                }
+            }
         }
     }
 }
