@@ -69,6 +69,11 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("MoePlayer.Core", 1, 0, "AccountManager", &accountManager);
     qmlRegisterType<MpvItem>("MoePlayer.Playback", 1, 0, "MpvItem");
 
+    // 启动自动登录:用最后使用的账号 token 配置会话(异步拉取视图)。
+    // 无账号或 token 为空时返回 false,QML 侧显示登录入口;token 失效时
+    // 经 autoLoginFinished(false) 通知回登录流程。
+    accountManager.autoLogin();
+
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/qml"));
     engine.addImageProvider(QStringLiteral("emby"), new PosterProvider(&embyClient));

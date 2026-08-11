@@ -57,13 +57,15 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
         emit accountLoginFinished(true, QString());
     });
 
-    // 登录/会话失败:带 pending 的 addAccount 或会话请求 401 → 通知失败。
+    // 登录/会话失败:带 pending 的 addAccount 或自动登录在途 → 通知失败。
+    // autoLogin 的会话请求无论 401(token 失效)还是网络错误都视为失败,
+    // 由 UI 回登录流程;authFailed 已单独处理 401,这里兜底其余错误。
     connect(m_client, &EmbyClient::errorOccurred, this, [this](const QString &message) {
         if (!m_pending.isEmpty()) {
             m_pending.clear();
             emit accountLoginFinished(false, message);
         }
-        if (m_autoLoginInFlight && message.contains(QLatin1String("401"))) {
+        if (m_autoLoginInFlight) {
             m_autoLoginInFlight = false;
             emit autoLoginFinished(false);
         }
