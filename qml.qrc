@@ -7,6 +7,7 @@
     <file>qml/player/PlayerWindow.qml</file>
     <file>qml/views/Library.qml</file>
     <file>qml/views/Detail.qml</file>
+    <file>qml/views/Home.qml</file>
     <file>qml/views/Settings.qml</file>
   </qresource>
 </RCC>

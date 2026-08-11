@@ -27,6 +27,8 @@ class EmbyClient : public QObject
     Q_PROPERTY(MediaItemModel *itemsModel READ itemsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *seasonsModel READ seasonsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *episodesModel READ episodesModel CONSTANT)
+    // 首页每库最近条目(见 fetchHomeRows)。
+    Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReceived)
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
@@ -65,6 +67,10 @@ public:
     Q_INVOKABLE void fetchSeasons(const QString &seriesId);
     // 获取指定季的分集列表(/Shows/{id}/Episodes?SeasonId=),填充 episodesModel。
     Q_INVOKABLE void fetchEpisodes(const QString &seriesId, const QString &seasonId);
+    // 首页聚合:每个媒体库取按加入时间倒序的前 N 条,填充 homeRows。
+    Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
+    // 首页数据: [{viewId, viewName, posterId, items:[{id,name,posterId,type}]}]
+    QVariantList homeRows() const { return m_homeRows; }
     // 播放协商(/Items/{id}/PlaybackInfo),解析出可播放地址后发 playbackReady。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &itemId);
     // 获取条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
@@ -106,6 +112,7 @@ signals:
     void itemsReceived();
     void seasonsReceived();
     void episodesReceived();
+    void homeRowsReceived();
     // WebSocket 连接状态变化(登录成功后建立,断线自动重连)。
     void wsConnectedChanged();
     // 服务器实时推送(Emby 4.9 仅广播 UserDataChanged/LibraryChanged/
@@ -149,6 +156,8 @@ private:
     MediaItemModel m_itemsModel;
     MediaItemModel m_seasonsModel;
     MediaItemModel m_episodesModel;
+    QVariantList m_homeRows; // 首页每库条目(见 fetchHomeRows)
+    int m_homeRowsPending = 0; // 首页行请求未完成计数
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）
     int m_itemsSeq = 0; // 条目请求序号,丢弃过期响应(视图快速切换时)
     QString m_serverName;

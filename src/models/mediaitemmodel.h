@@ -49,6 +49,8 @@ public:
     Q_INVOKABLE QString idAt(int row) const;
     // 取第 row 条的名称,越界返回空串。
     Q_INVOKABLE QString nameAt(int row) const;
+    // 取第 row 条的海报 id(<itemId>~<tag>),越界返回空串。
+    Q_INVOKABLE QString posterIdAt(int row) const;
 
 signals:
     void countChanged();

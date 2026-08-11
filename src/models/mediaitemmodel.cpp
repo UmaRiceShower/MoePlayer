@@ -111,3 +111,8 @@ QString MediaItemModel::nameAt(int row) const
 {
     return (row >= 0 && row < m_items.size()) ? m_items.at(row).name : QString();
 }
+
+QString MediaItemModel::posterIdAt(int row) const
+{
+    return (row >= 0 && row < m_items.size()) ? m_items.at(row).posterId : QString();
+}
