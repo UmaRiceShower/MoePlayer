@@ -18,15 +18,47 @@ ApplicationWindow {
         color: Theme.bg
     }
 
+    // 打开的播放窗口:主窗口关闭时一并关闭。
+    // niri/常规窗口管理器下关闭快捷键作用于焦点窗口,焦点常在主窗口,
+    // 若不处理则播放窗口会残留继续播放、应用也不退出。
+    property var playerWindows: []
+
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
     function openPlayerWindow(url, headers, meta) {
-        return playerWindowComponent.createObject(null, {
+        const w = playerWindowComponent.createObject(null, {
             source: url,
             headers: headers || [],
             meta: meta || {},
             visible: true
         })
+        root.playerWindows.push(w)
+        w.windowClosed.connect(function () {
+            root.playerWindows = root.playerWindows.filter(function (x) { return x !== w })
+        })
+        return w
+    }
+
+    // 主窗口关闭 → 关闭全部播放窗口,应用随之退出。
+    // 两阶段:第一次关闭播放窗口并暂缓退出(等播放窗口的 Stopped 异步回传
+    // 发出),随后真正关闭;立即退出会中断网络请求导致服务器收不到回传。
+    property bool pendingQuit: false
+    onClosing: function (close) {
+        if (!root.playerWindows.length || root.pendingQuit) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
+        root.pendingQuit = true
+        for (const w of root.playerWindows)
+            w.close()
+        quitTimer.start()
+    }
+    Timer {
+        id: quitTimer
+        interval: 400
+        running: false
+        onTriggered: root.close()
     }
 
     Component.onCompleted: {
