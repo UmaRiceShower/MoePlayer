@@ -311,8 +311,12 @@ Item {
     Connections {
         target: EmbyClient
         function onItemDetailReady(d) {
-            if (d.id === root.itemId)
-                root.detail = d
+            if (d.id !== root.itemId)
+                return
+            root.detail = d
+            // 剧集:加载分季列表,驱动 Seasons 横向行。
+            if (d.type === "Series")
+                EmbyClient.fetchSeasons(d.id)
         }
         function onPlaybackReady(url, headers, meta) {
             if (meta.itemId === root.itemId) {
