@@ -15,6 +15,7 @@ add_executable(MoePlayer
     src/main.cpp
     src/core/settingsstore.cpp
     src/core/embyclient.cpp
+    src/core/accountmanager.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvitem.cpp

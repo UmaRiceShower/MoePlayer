@@ -108,8 +108,11 @@ void EmbyClient::get(const QString &path, bool auth,
     connect(reply, &QNetworkReply::finished, this, [this, reply, onOk, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 401)
+                emit authFailed();
             emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
-                               + QStringLiteral(" (HTTP ") + QString::number(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()) + QLatin1Char(')'));
+                               + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
             return;
         }
         onOk(QJsonDocument::fromJson(reply->readAll()));
@@ -124,8 +127,11 @@ void EmbyClient::postJson(const QString &path, const QJsonObject &body, bool aut
     connect(reply, &QNetworkReply::finished, this, [this, reply, onOk, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 401)
+                emit authFailed();
             emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
-                               + QStringLiteral(" (HTTP ") + QString::number(reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt()) + QLatin1Char(')'));
+                               + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
             return;
         }
         onOk(QJsonDocument::fromJson(reply->readAll()));
@@ -174,6 +180,25 @@ void EmbyClient::fetchViews()
         qInfo() << "Emby: views =" << m_viewsModel.count();
         emit viewsReceived();
     }, QStringLiteral("获取媒体库视图"));
+}
+
+// ---------- 会话配置(多账号切换/启动自动登录) ----------
+
+void EmbyClient::configureSession(const QString &serverUrl, const QString &token,
+                                  const QString &userId, const QString &userName)
+{
+    setServerUrl(serverUrl);
+    m_accessToken = token;
+    m_userId = userId;
+    m_userName = userName;
+    m_itemsModel.clear();
+    m_viewsModel.clear();
+    if (!token.isEmpty())
+        connectWebSocket();
+    emit loginChanged();
+    // 直接拉视图:请求 401 时 get 失败发 authFailed,即 token 失效。
+    qInfo() << "Emby: session configured as" << m_userName;
+    fetchViews();
 }
 
 void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
