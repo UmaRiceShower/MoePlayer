@@ -176,7 +176,8 @@ void EmbyClient::fetchViews()
 {
     get(QStringLiteral("/Users/%1/Views").arg(m_userId), true, [this](const QJsonDocument &doc) {
         const QJsonArray items = doc.object().value(QLatin1String("Items")).toArray();
-        m_viewsModel.setItems(items, false);
+        // 解析库海报(首页媒体库行首图用)。
+        m_viewsModel.setItems(items, true);
         qInfo() << "Emby: views =" << m_viewsModel.count();
         emit viewsReceived();
     }, QStringLiteral("获取媒体库视图"));
@@ -378,6 +379,57 @@ void EmbyClient::setWatched(const QString &itemId, bool played, double positionT
                 playedPercentage >= 0 ? playedPercentage : (played ? 100.0 : 0.0));
     postJson(QStringLiteral("/Users/%1/Items/%2/UserData").arg(m_userId, itemId), body, true,
              [](const QJsonDocument &) {}, QStringLiteral("标记已看"));
+}
+
+// ---------- 首页聚合(每库按加入时间取前 N 条) ----------
+
+void EmbyClient::fetchHomeRows(int perLibraryLimit)
+{
+    m_homeRows.clear();
+    const int n = m_viewsModel.count();
+    if (n == 0) {
+        emit homeRowsReceived();
+        return;
+    }
+    m_homeRowsPending = n;
+    const int limit = qBound(1, perLibraryLimit, 20);
+    for (int i = 0; i < n; ++i) {
+        const QString viewId = m_viewsModel.idAt(i);
+        const QString viewName = m_viewsModel.nameAt(i);
+        const QString viewPoster = m_viewsModel.posterIdAt(i);
+        QUrlQuery q;
+        q.addQueryItem(QStringLiteral("ParentId"), viewId);
+        q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateCreated"));
+        q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
+        q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
+        q.addQueryItem(QStringLiteral("Limit"), QString::number(limit));
+        get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
+            [this, viewId, viewName, viewPoster](const QJsonDocument &doc) {
+                QVariantMap row;
+                row.insert(QStringLiteral("viewId"), viewId);
+                row.insert(QStringLiteral("viewName"), viewName);
+                row.insert(QStringLiteral("posterId"), viewPoster);
+                QVariantList items;
+                for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
+                    const QJsonObject o = v.toObject();
+                    const QString tag = o.value(QLatin1String("ImageTags")).toObject()
+                                            .value(QLatin1String("Primary")).toString();
+                    QVariantMap m;
+                    m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+                    m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+                    m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
+                    m.insert(QStringLiteral("posterId"),
+                             tag.isEmpty() ? QString()
+                                           : o.value(QLatin1String("Id")).toString()
+                                                 + QLatin1Char('~') + tag);
+                    items.append(m);
+                }
+                row.insert(QStringLiteral("items"), items);
+                m_homeRows.append(row);
+                if (--m_homeRowsPending <= 0)
+                    emit homeRowsReceived();
+            }, QStringLiteral("获取首页行"));
+    }
 }
 
 // ---------- 剧集导航(/Shows/{id}/Seasons + Episodes) ----------

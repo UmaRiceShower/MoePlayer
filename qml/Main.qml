@@ -73,25 +73,43 @@ ApplicationWindow {
     StackView {
         id: stackView
         anchors.fill: parent
-        initialItem: libraryPage
+        initialItem: homePage
     }
 
+    // 临时布局:功能入口先集中在右下角,后续按首页效果重新设计。
     footer: Rectangle {
-        height: 56
-        color: Theme.surface
+        height: 44
+        color: "transparent"
 
         Row {
-            anchors.centerIn: parent
-            spacing: 24
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 8
 
             Button {
                 text: "媒体库"
-                onClicked: stackView.pop(null)
+                onClicked: stackView.push(libraryPage)
             }
             Button {
                 text: "设置"
                 onClicked: stackView.push(settingsPage)
             }
+        }
+    }
+
+    // 首页:每行一库聚合;其他控件(媒体库/设置)暂置于右下角,后续再调整布局。
+    Component {
+        id: homePage
+        Home {
+            onShowDetail: function (itemId, posterId, title) {
+                stackView.push(detailPage, {
+                    itemId: itemId,
+                    posterId: posterId,
+                    title: title
+                })
+            }
+            onOpenLibrary: stackView.push(libraryPage)
         }
     }
 
