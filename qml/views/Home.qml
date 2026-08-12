@@ -121,8 +121,8 @@ Item {
         if (!row || !row.rowItemsView)
             return
         const v = row.rowItemsView
-        // 每次滚两卡(美观:一格一张太碎,两张是流畅浏览的常用节奏)。
-        const cell = 2 * (112 + 12)
+        // 每次滚一格(卡片宽+间距)。
+        const cell = 112 + 12
         const from = v.contentX
         const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
         if (Math.abs(target - from) < 0.5)
@@ -577,7 +577,10 @@ Item {
                     anchors.leftMargin: 24
                     spacing: 12
                     // 库海报(行首):焦点在库海报且本行为居中行时高亮。
+                    // z 置顶:左拉动画(contentX 负)时条目卡可能短暂越出
+                    // ListView 边界,保证库海报始终在条目海报上层。
                     RowCard {
+                        z: 1
                         cardImage: modelData.posterId || ""
                         cardText: modelData.viewName
                         isLibrary: true
@@ -594,6 +597,9 @@ Item {
                         height: 172
                         orientation: ListView.Horizontal
                         spacing: 12
+                        // 裁剪到自身边界:拉动画/回滚时 contentX 会短暂越界,
+                        // 不裁剪则条目卡会覆盖到左侧库海报上。
+                        clip: true
                         // 纯展示:滚轮由外层竖向处理,避免嵌套滚动冲突。
                         interactive: false
                         model: modelData.items
