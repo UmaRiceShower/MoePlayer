@@ -119,29 +119,10 @@ ApplicationWindow {
         }
     }
 
-    // 功能入口集中右下角(布局待按首页效果重新设计)。
-    footer: Rectangle {
-        height: 44
-        color: "transparent"
+    // 功能入口:媒体库经首页库海报进入,设置 Ctrl+S、服务器管理 Ctrl+O、
+    // 搜索 Ctrl+K(见下方快捷键),右下角临时入口已随首页布局完善移除。
 
-        Row {
-            anchors.right: parent.right
-            anchors.rightMargin: 12
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 8
-
-            Button {
-                text: "媒体库"
-                onClicked: root.pushLibrary("", root.currentServerUrl)
-            }
-            Button {
-                text: "设置"
-                onClicked: stackView.push(settingsPage)
-            }
-        }
-    }
-
-    // 首页:每行一库聚合;其他控件(媒体库/设置)暂置于右下角,后续再调整布局。
+    // 首页:每行一库聚合(库海报进媒体库,条目进详情)。
     Component {
         id: homePage
         Home {
