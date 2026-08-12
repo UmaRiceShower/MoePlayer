@@ -357,6 +357,27 @@ Item {
         }
     }
 
+    // Enter/回车进入当前选中的块:库海报打开媒体库页,条目进详情。
+    // 与卡片点击走同一路径(跨账号先切换会话)。
+    function activateFocus() {
+        const row = root.focusRow()
+        if (!row || !row.rowData)
+            return
+        if (root.focusCol === -1) {
+            root.ensureAccount(row.rowData.accountId, function () {
+                root.openLibrary(row.rowData.viewId)
+            })
+            return
+        }
+        const items = row.rowData.items
+        if (root.focusCol >= items.length)
+            return
+        const item = items[root.focusCol]
+        root.ensureAccount(row.rowData.accountId, function () {
+            root.showDetail(item.id, item.posterId || "", item.name)
+        })
+    }
+
     // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
     // 行跨服时切换会话后详情/媒体库页按该服数据打开。
     function ensureAccount(accountId, action) {
@@ -499,6 +520,9 @@ Item {
     Keys.onDownPressed: root.moveRow(1)
     Keys.onLeftPressed: root.moveCol(-1)
     Keys.onRightPressed: root.moveCol(1)
+    // Enter/回车:进入当前选中的块。
+    Keys.onReturnPressed: root.activateFocus()
+    Keys.onEnterPressed: root.activateFocus()
     // 页面回到前台时恢复键盘焦点。
     onVisibleChanged: if (root.visible) root.forceActiveFocus()
     // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
