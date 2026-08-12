@@ -18,8 +18,7 @@
 namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
-const QString kActiveKey = QStringLiteral("accounts/active");
-const QString kServerNamesKey = kServerNamesKey;
+const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 首页聚合缓存文件名(CacheLocation 下)。
@@ -33,73 +32,58 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     load();
     loadServerNames();
 
-    // 登录成功:若来自 addAccount(有 pending),保存账号并激活;手动登录不保存。
-    connect(m_client, &EmbyClient::loginSucceeded, this, [this] {
-        if (m_pending.isEmpty())
-            return;
-        AccountInfo acc;
-        acc.id = m_pending.value(QStringLiteral("id")).toString();
-        acc.name = m_pending.value(QStringLiteral("name")).toString();
-        acc.serverUrl = m_pending.value(QStringLiteral("serverUrl")).toString();
-        acc.userName = m_pending.value(QStringLiteral("userName")).toString();
-        acc.rememberPassword = m_pending.value(QStringLiteral("rememberPassword")).toBool();
-        acc.password = acc.rememberPassword
-                           ? obfuscate(m_pending.value(QStringLiteral("password")).toString())
-                           : QString();
-        acc.token = m_client->accessToken();
-        acc.userId = m_client->userId();
-        acc.lastUsed = QDateTime::currentMSecsSinceEpoch();
-        m_pending.clear();
+    // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
+    // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
+    connect(m_client, &EmbyClient::loginSucceeded, this,
+            [this](const QString &serverUrl, const QString &token, const QString &userId,
+                   const QString &userName) {
+                if (m_pending.isEmpty()
+                    || m_pending.value(QStringLiteral("serverUrl")).toString().trimmed() != serverUrl.trimmed())
+                    return;
+                AccountInfo acc;
+                acc.id = m_pending.value(QStringLiteral("id")).toString();
+                acc.name = m_pending.value(QStringLiteral("name")).toString();
+                acc.serverUrl = serverUrl.trimmed();
+                acc.userName = userName.isEmpty()
+                                   ? m_pending.value(QStringLiteral("userName")).toString()
+                                   : userName;
+                acc.rememberPassword = m_pending.value(QStringLiteral("rememberPassword")).toBool();
+                acc.password = acc.rememberPassword
+                                   ? obfuscate(m_pending.value(QStringLiteral("password")).toString())
+                                   : QString();
+                acc.token = token;
+                acc.userId = userId;
+                acc.lastUsed = QDateTime::currentMSecsSinceEpoch();
+                m_pending.clear();
 
-        // 同服务器+用户已存在则更新,否则新增。
-        auto it = std::find_if(m_accounts.begin(), m_accounts.end(),
-                               [&acc](const AccountInfo &a) {
-                                   return a.serverUrl == acc.serverUrl && a.userName == acc.userName;
-                               });
-        if (it != m_accounts.end())
-            *it = acc;
-        else
-            m_accounts.append(acc);
-        setActive(acc.id);
-        save();
-        emit accountsChanged();
-        emit accountLoginFinished(true, QString());
-    });
+                // 同服务器+用户已存在则更新,否则新增。
+                auto it = std::find_if(m_accounts.begin(), m_accounts.end(),
+                                       [&acc](const AccountInfo &a) {
+                                           return a.serverUrl == acc.serverUrl
+                                                  && a.userName == acc.userName;
+                                       });
+                if (it != m_accounts.end())
+                    *it = acc;
+                else
+                    m_accounts.append(acc);
+                save();
+                emit accountsChanged();
+                emit accountLoginFinished(true, QString());
+            });
 
-    // 登录/会话失败:带 pending 的 addAccount 或自动登录在途 → 通知失败。
-    // autoLogin 的会话请求无论 401(token 失效)还是网络错误都视为失败,
-    // 由 UI 回登录流程;authFailed 已单独处理 401,这里兜底其余错误。
-    connect(m_client, &EmbyClient::errorOccurred, this, [this](const QString &message) {
-        if (!m_pending.isEmpty()) {
-            m_pending.clear();
-            emit accountLoginFinished(false, message);
-        }
-        if (m_autoLoginInFlight) {
-            m_autoLoginInFlight = false;
-            emit autoLoginFinished(false);
-        }
-    });
-    // 会话 401(autoLogin 的 configureSession 拉视图失败):token 失效。
-    // 记住密码的账号尝试账密重登并写回新 token,成功则重建会话;
-    // 无密码或重登失败才报 autoLoginFinished(false)。
-    connect(m_client, &EmbyClient::authFailed, this, [this] {
-        if (!m_autoLoginInFlight)
-            return;
-        m_autoLoginInFlight = false;
-        const AccountInfo *a = accountById(m_activeId);
-        if (a && a->rememberPassword && !deobfuscate(a->password).isEmpty()) {
-            m_autoRetry = true;
-            m_loggingInServers.insert(a->serverUrl);
-            qInfo() << "Emby: token invalid, relogin on" << a->serverUrl;
-            m_client->loginFor(a->serverUrl, a->userName, deobfuscate(a->password));
-            return;
-        }
-        if (a) {
-            m_invalidServers.insert(a->serverUrl);
-            emit accountsChanged();
-        }
-        emit autoLoginFinished(false);
-    });
+    // 登录失败(带 pending 的 addAccount):通知失败,清除待保存状态。
+    // 浏览类请求失败也走此信号,但 pending 为空时不产生副作用。
+    connect(m_client, &EmbyClient::errorOccurred, this,
+            [this](const QString &serverUrl, const QString &message) {
+                if (m_pending.isEmpty())
+                    return;
+                const QString pendingServer =
+                    m_pending.value(QStringLiteral("serverUrl")).toString().trimmed();
+                if (pendingServer != serverUrl.trimmed())
+                    return;
+                m_pending.clear();
+                emit accountLoginFinished(false, message);
+            });
 
     // 跨服务器请求失败:401 且账号记住密码 → 尝试账密重登(token 刷新);
     // 401 且无密码 → 标失效;其余为网络错误,数据已按空处理,不标红。
@@ -122,7 +106,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 }
             });
     // 账密重登结果:成功写回新 token(持久化)并解标失效;
-    // 自动登录场景重建会话,聚合场景重拉数据(缓存先展示)。
+    // 之后重拉各库数据(先展示缓存),恢复该服首页行。
     connect(m_client, &EmbyClient::serverLoginFinished, this,
             [this](const QString &serverUrl, bool ok, const QString &token,
                    const QString &userId, const QString &userName) {
@@ -134,10 +118,6 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 if (!ok) {
                     m_invalidServers.insert(serverUrl);
                     emit accountsChanged();
-                    if (m_autoRetry) {
-                        m_autoRetry = false;
-                        emit autoLoginFinished(false);
-                    }
                     return;
                 }
                 qInfo() << "Emby: relogin ok on" << serverUrl;
@@ -150,11 +130,6 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 m_invalidServers.remove(serverUrl);
                 save();
                 emit accountsChanged();
-                if (m_autoRetry) {
-                    m_autoRetry = false;
-                    applySession(a); // 新 token 重建活动会话
-                    emit autoLoginFinished(true);
-                }
                 // token 已换:重拉各库数据(先展示缓存),恢复该服首页行。
                 // 并行 fetchHomeRows 已因旧 token 401 把该服按空处理,必须刷新。
                 fetchHomeRows(m_homeLimit);
@@ -221,17 +196,23 @@ QVariantList AccountManager::accounts() const
     return out;
 }
 
-QString AccountManager::activeAccountName() const
-{
-    for (const auto &a : m_accounts)
-        if (a.id == m_activeId)
-            return a.name;
-    return QString();
-}
-
 bool AccountManager::hasAccounts() const
 {
     return !m_accounts.isEmpty();
+}
+
+QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
+{
+    const QString url = serverUrl.trimmed();
+    for (const auto &a : m_accounts) {
+        if (a.serverUrl == url && !a.token.isEmpty()) {
+            QVariantMap m;
+            m.insert(QStringLiteral("token"), a.token);
+            m.insert(QStringLiteral("userId"), a.userId);
+            return m;
+        }
+    }
+    return QVariantMap();
 }
 
 bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
@@ -248,26 +229,8 @@ bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
         { QStringLiteral("password"), password },
         { QStringLiteral("rememberPassword"), rememberPassword },
     };
-    m_client->setServerUrl(serverUrl.trimmed());
-    m_client->login(userName.trimmed(), password);
+    m_client->login(serverUrl.trimmed(), userName.trimmed(), password);
     return true;
-}
-
-bool AccountManager::switchAccount(const QString &id)
-{
-    for (const auto &a : m_accounts) {
-        if (a.id == id) {
-            if (a.token.isEmpty()) {
-                emit accountLoginFinished(false, QStringLiteral("账号未保存登录凭据"));
-                return false;
-            }
-            applySession(a);
-            emit accountLoginFinished(true, QString());
-            return true;
-        }
-    }
-    emit accountLoginFinished(false, QStringLiteral("账号不存在"));
-    return false;
 }
 
 // ---------- 首页聚合(所有账号的媒体库,顺序即账号列表顺序) ----------
@@ -473,14 +436,11 @@ void AccountManager::removeAccount(const QString &id)
                              [id](const AccountInfo &a) { return a.id == id; });
     if (it == m_accounts.end())
         return;
+    const QString serverUrl = it->serverUrl;
     m_accounts.erase(it, m_accounts.end());
-    if (m_activeId == id) {
-        m_activeId.clear();
-        m_client->disconnectServer();
-    }
+    m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
     save();
     emit accountsChanged();
-    emit activeAccountChanged();
 }
 
 void AccountManager::updateAccount(const QString &id, const QString &name,
@@ -494,27 +454,8 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
         a.userName = userName.trimmed();
         save();
         emit accountsChanged();
-        emit activeAccountChanged();
         return;
     }
-}
-
-bool AccountManager::autoLogin()
-{
-    if (m_accounts.isEmpty())
-        return false;
-    // 取最后使用的账号。
-    auto best = std::max_element(m_accounts.begin(), m_accounts.end(),
-                                 [](const AccountInfo &a, const AccountInfo &b) {
-                                     return a.lastUsed < b.lastUsed;
-                                 });
-    if (best->token.isEmpty())
-        return false;
-    m_activeId = best->id;
-    m_autoLoginInFlight = true;
-    applySession(*best);
-    save();
-    return true;
 }
 
 QString AccountManager::passwordFor(const QString &id) const
@@ -523,19 +464,6 @@ QString AccountManager::passwordFor(const QString &id) const
         if (a.id == id && a.rememberPassword && !a.password.isEmpty())
             return deobfuscate(a.password);
     return QString();
-}
-
-void AccountManager::applySession(const AccountInfo &acc)
-{
-    m_client->configureSession(acc.serverUrl, acc.token, acc.userId, acc.userName);
-}
-
-void AccountManager::setActive(const QString &id)
-{
-    if (m_activeId == id)
-        return;
-    m_activeId = id;
-    emit activeAccountChanged();
 }
 
 void AccountManager::load()
@@ -557,14 +485,6 @@ void AccountManager::load()
         if (!a.id.isEmpty())
             m_accounts.append(a);
     }
-    m_activeId = m_settings.value(kActiveKey).toString();
-    // 激活账号被删除等情况下回退到空。
-    if (!m_activeId.isEmpty()) {
-        const bool exists = std::any_of(m_accounts.begin(), m_accounts.end(),
-                                        [this](const AccountInfo &a) { return a.id == m_activeId; });
-        if (!exists)
-            m_activeId.clear();
-    }
 }
 
 void AccountManager::save()
@@ -584,7 +504,6 @@ void AccountManager::save()
         arr.append(o);
     }
     m_settings.setValue(kAccountsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
-    m_settings.setValue(kActiveKey, m_activeId);
     m_settings.sync();
 }
 

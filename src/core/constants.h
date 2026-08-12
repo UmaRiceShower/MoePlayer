@@ -26,9 +26,6 @@ inline constexpr int kHomePerLibraryLimit = 20;
 inline constexpr int kSearchLimit = 40;
 // 海报请求固定取图宽度(缓存键稳定,换 token 不清缓存)。
 inline constexpr int kPosterMaxWidth = 320;
-// WebSocket 断线重连:3s 起指数退避至 30s。
-inline constexpr int kWsReconnectStartMs = 3000;
-inline constexpr int kWsReconnectMaxMs = 30000;
 // Emby 时间单位:100ns ticks 换算秒。
 inline constexpr double kTicksPerSecond = 1e7;
 // 列表请求 Fields:已看/进度/收藏/未看集数/评分/年份随列表返回,零额外请求。

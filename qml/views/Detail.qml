@@ -12,11 +12,18 @@ Item {
     property string itemId: ""
     property string posterId: ""
     property string title: ""
+    // 条目所在服务器:浏览/播放协商/已看标记均按该服务器凭据路由(无状态)。
+    property string serverUrl: ""
 
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
-    // 剧集条目点击 → 主窗口 push 该集详情页。
-    signal showEpisodeDetail(string itemId, string posterId, string title)
+    // 剧集条目点击 → 主窗口 push 该集详情页(携带所在服务器)。
+    signal showEpisodeDetail(string itemId, string posterId, string title, string serverUrl)
+
+    // 该服务器凭据(账号缺失返回空 map)。
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
@@ -30,7 +37,8 @@ Item {
     function openSeason(seasonId, seasonName) {
         root.browseSeasonId = seasonId
         root.browseSeasonName = seasonName
-        EmbyClient.fetchEpisodes(root.itemId, seasonId)
+        const c = root.creds()
+        EmbyClient.fetchEpisodes(root.serverUrl, c.token, c.userId, root.itemId, seasonId)
     }
 
     // 本次播放是否续播(起播位置由 playbackReady 的 meta.resumePositionTicks 携带)。
@@ -44,7 +52,8 @@ Item {
             return
         root.playbackPending = true
         root.resumeTicks = resume ? root.detail.positionTicks : 0
-        EmbyClient.fetchPlaybackInfo(root.itemId)
+        const c = root.creds()
+        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, root.itemId)
     }
     // 已看标记文案:有进度且未看完 → 继续播放;否则从头播放。
     function playButtonText() {
@@ -54,8 +63,10 @@ Item {
     }
 
     Component.onCompleted: {
-        if (root.itemId !== "")
-            EmbyClient.fetchItemDetail(root.itemId)
+        if (root.itemId !== "") {
+            const c = root.creds()
+            EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
+        }
     }
 
     Rectangle {
@@ -189,8 +200,9 @@ Item {
                             onClicked: {
                                 const played = !root.detail.played
                                 // 手动标记:写入服务器(UserData),位置清零。
-                                EmbyClient.setWatched(root.itemId, played, 0,
-                                                      played ? 100 : 0)
+                                const c = root.creds()
+                                EmbyClient.setWatched(root.serverUrl, c.token, c.userId,
+                                                      root.itemId, played, 0, played ? 100 : 0)
                             }
                         }
                     }
@@ -212,7 +224,7 @@ Item {
                 width: parent.width
                 height: 210
                 clip: true
-                model: EmbyClient.seasonsModel
+                model: EmbyClient.seasonsModelFor(root.serverUrl)
                 delegate: Item {
                     width: 120
                     height: 200
@@ -288,7 +300,7 @@ Item {
                 cellWidth: Constants.cellW
                 cellHeight: Constants.cellH
                 clip: true
-                model: EmbyClient.episodesModel
+                model: EmbyClient.episodesModelFor(root.serverUrl)
                 delegate: Item {
                     width: Constants.cardW
                     height: Constants.cardH
@@ -315,7 +327,8 @@ Item {
                     }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: root.showEpisodeDetail(model.id, model.posterId, model.name)
+                        onClicked: root.showEpisodeDetail(model.id, model.posterId, model.name,
+                                                          root.serverUrl)
                     }
                 }
             }
@@ -335,38 +348,28 @@ Item {
 
     Connections {
         target: EmbyClient
-        function onItemDetailReady(d) {
-            if (d.id !== root.itemId)
+        function onItemDetailReady(serverUrl, d) {
+            if (serverUrl !== root.serverUrl || d.id !== root.itemId)
                 return
             root.detail = d
             // 剧集:加载分季列表,驱动 Seasons 横向行。
-            if (d.type === "Series")
-                EmbyClient.fetchSeasons(d.id)
+            if (d.type === "Series") {
+                const c = root.creds()
+                EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
+            }
         }
-        function onPlaybackReady(url, headers, meta) {
+        function onPlaybackReady(serverUrl, url, headers, meta) {
             root.playbackPending = false
-            if (meta.itemId === root.itemId) {
+            if (serverUrl === root.serverUrl && meta.itemId === root.itemId) {
                 const m = Object.assign({}, meta)
                 m.resumePositionTicks = root.resumeTicks || 0
                 root.playRequested(url, headers, m)
             }
         }
-        // 已看/进度被其他客户端修改(或本客户端播完自动标记)时实时刷新。
-        function onServerEventReceived(type, data) {
-            if (type !== "UserDataChanged")
-                return
-            const list = data.UserDataList || []
-            for (const e of list) {
-                if (String(e.ItemId) === root.itemId) {
-                    root.detail = Object.assign({}, root.detail, {
-                        positionTicks: e.PlaybackPositionTicks || 0,
-                        played: !!e.Played
-                    })
-                }
-            }
-        }
         // 播放协商失败时复位防抖,允许重试。
-        function onErrorOccurred() {
+        function onErrorOccurred(serverUrl, message) {
+            if (serverUrl !== root.serverUrl)
+                return
             root.playbackPending = false
         }
     }

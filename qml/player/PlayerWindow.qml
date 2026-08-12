@@ -49,8 +49,11 @@ Window {
         function onPlaybackStarted() {
             owner.lastDuration = mpv.duration
             if (owner.reporting)
-                EmbyClient.reportPlaybackStart(owner.meta.itemId, owner.meta.mediaSourceId,
-                                               owner.meta.playSessionId, owner.meta.playMethod, 0)
+                // 回传按源路由:凭据随 meta 携带(见 fetchPlaybackInfo)。
+                EmbyClient.reportPlaybackStart(owner.meta.serverUrl, owner.meta.token,
+                                               owner.meta.userId, owner.meta.itemId,
+                                               owner.meta.mediaSourceId, owner.meta.playSessionId,
+                                               owner.meta.playMethod, 0)
             if (owner.resumeTicks > 0)
                 mpv.seek(owner.resumeTicks / Constants.ticksPerSecond)
         }
@@ -62,18 +65,21 @@ Window {
             const now = Date.now()
             if (now - owner.lastProgressReport >= Constants.progressReportMs) {
                 owner.lastProgressReport = now
-                EmbyClient.reportPlaybackProgress(owner.meta.itemId, owner.meta.mediaSourceId,
-                                                  owner.meta.playSessionId, owner.meta.playMethod,
-                                                  mpv.position, false)
+                EmbyClient.reportPlaybackProgress(owner.meta.serverUrl, owner.meta.token,
+                                                  owner.meta.userId, owner.meta.itemId,
+                                                  owner.meta.mediaSourceId, owner.meta.playSessionId,
+                                                  owner.meta.playMethod, mpv.position, false)
             }
         }
         // 暂停/恢复等状态变化立即上报一次(携带 IsPaused)。
         function onStateChanged() {
             if (!owner.reporting || mpv.state === "idle")
                 return
-            EmbyClient.reportPlaybackProgress(owner.meta.itemId, owner.meta.mediaSourceId,
-                                              owner.meta.playSessionId, owner.meta.playMethod,
-                                              mpv.position, mpv.state === "paused")
+            EmbyClient.reportPlaybackProgress(owner.meta.serverUrl, owner.meta.token,
+                                              owner.meta.userId, owner.meta.itemId,
+                                              owner.meta.mediaSourceId, owner.meta.playSessionId,
+                                              owner.meta.playMethod, mpv.position,
+                                              mpv.state === "paused")
         }
         // 播放结束(正常播完或出错) → 上报停止。
         // resume 位置与已看由服务器维护(Progress 每 10s 写入位置,
@@ -81,8 +87,10 @@ Window {
         function onPlaybackEnded(error) {
             if (owner.reporting && !owner.stoppedReported) {
                 owner.stoppedReported = true
-                EmbyClient.reportPlaybackStopped(owner.meta.itemId, owner.meta.mediaSourceId,
-                                                 owner.meta.playSessionId, owner.lastPosition)
+                EmbyClient.reportPlaybackStopped(owner.meta.serverUrl, owner.meta.token,
+                                                 owner.meta.userId, owner.meta.itemId,
+                                                 owner.meta.mediaSourceId, owner.meta.playSessionId,
+                                                 owner.lastPosition)
             }
         }
     }
@@ -92,7 +100,8 @@ Window {
         interval: Constants.pingIntervalMs
         running: root.reporting && mpv.state !== "idle"
         repeat: true
-        onTriggered: EmbyClient.reportPlaybackPing(root.meta.playSessionId)
+        onTriggered: EmbyClient.reportPlaybackPing(root.meta.serverUrl, root.meta.token,
+                                                   root.meta.userId, root.meta.playSessionId)
     }
 
     // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
@@ -106,8 +115,10 @@ Window {
     onClosing: {
         if (root.reporting && !root.stoppedReported) {
             root.stoppedReported = true
-            EmbyClient.reportPlaybackStopped(root.meta.itemId, root.meta.mediaSourceId,
-                                             root.meta.playSessionId, root.lastPosition)
+            EmbyClient.reportPlaybackStopped(root.meta.serverUrl, root.meta.token,
+                                             root.meta.userId, root.meta.itemId,
+                                             root.meta.mediaSourceId, root.meta.playSessionId,
+                                             root.lastPosition)
         }
         mpv.command(["stop"])
         root.windowClosed()

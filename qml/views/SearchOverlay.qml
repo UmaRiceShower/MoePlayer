@@ -3,19 +3,38 @@ import QtQuick.Controls
 import MoePlayer.Core
 import "qrc:/qml/theme"
 
-//! 全局搜索浮层(Ctrl+K 开关):服务端搜索跨库递归(影片/剧集/单集),
-//! 输入 300ms 防抖后请求,结果网格点击进详情;Esc / 点击背景关闭。
+//! 全局搜索浮层(Ctrl+K 开关):按最近浏览的服务器搜索(主窗口注入 serverUrl),
+//! 服务端搜索跨库递归(影片/剧集/单集),输入 300ms 防抖后请求,
+//! 结果网格点击进详情;Esc / 点击背景关闭。
 Item {
     id: root
 
-    // 点击结果进详情。
-    signal showDetail(string itemId, string posterId, string title)
+    // 点击结果进详情(携带所在服务器)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+
+    // 搜索目标服务器(主窗口按最近浏览的页面注入;空则不可搜索)。
+    property string serverUrl: ""
+    // 该服务器的搜索结果模型(serverUrl 就绪后一次性取引用)。
+    property var sm: null
+
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
+    readonly property bool canSearch: root.serverUrl !== "" && root.creds().token !== ""
+
+    onServerUrlChanged: {
+        if (root.serverUrl !== "")
+            root.sm = EmbyClient.searchModelFor(root.serverUrl)
+    }
 
     // 打开:清空旧结果并聚焦输入框。
     function open() {
         root.visible = true
         searchField.text = ""
-        EmbyClient.search("")
+        if (root.canSearch) {
+            const c = root.creds()
+            EmbyClient.search(root.serverUrl, c.token, c.userId, "")
+        }
         searchField.forceActiveFocus()
     }
     function close() {
@@ -49,7 +68,9 @@ Item {
                 id: searchField
                 width: parent.width
                 height: 40
-                placeholderText: "搜索影片 / 剧集 / 单集(Esc 关闭)"
+                placeholderText: root.canSearch ? "搜索影片 / 剧集 / 单集(Esc 关闭)"
+                                                : "先在首页打开一个媒体库再搜索(Esc 关闭)"
+                enabled: root.canSearch
                 font.pixelSize: 15
                 // 输入防抖:停止输入 300ms 后才发服务端搜索。
                 onTextChanged: searchDebounce.restart()
@@ -57,16 +78,16 @@ Item {
 
             // 未输入提示。
             Text {
-                visible: searchField.text.length === 0
+                visible: root.canSearch && searchField.text.length === 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: 32
-                text: "输入关键词,搜索全部媒体库"
+                text: "输入关键词,搜索当前服务器的全部媒体库"
                 color: Theme.textMuted
                 font.pixelSize: 14
             }
             // 已搜索无结果。
             Text {
-                visible: searchField.text.length > 0 && EmbyClient.searchModel.count === 0
+                visible: root.canSearch && searchField.text.length > 0 && root.sm && root.sm.count === 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: 32
                 text: "无匹配结果"
@@ -81,7 +102,7 @@ Item {
                 clip: true
                 cellWidth: Constants.cellW
                 cellHeight: Constants.cellH
-                model: EmbyClient.searchModel
+                model: root.sm
                 // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
                 delegate: PosterCard {
                     width: 152
@@ -98,7 +119,7 @@ Item {
                     runtimeTicks: model.runtimeTicks
                     unplayedCount: model.unplayedCount
                     itemType: model.type
-                    onClicked: root.showDetail(model.id, model.posterId, model.name)
+                    onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
                 }
             }
         }
@@ -108,7 +129,12 @@ Item {
     Timer {
         id: searchDebounce
         interval: Constants.searchDebounceMs
-        onTriggered: EmbyClient.search(searchField.text)
+        onTriggered: {
+            if (root.canSearch) {
+                const c = root.creds()
+                EmbyClient.search(root.serverUrl, c.token, c.userId, searchField.text)
+            }
+        }
     }
 
     // Esc 关闭。

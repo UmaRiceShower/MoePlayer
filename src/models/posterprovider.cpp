@@ -142,11 +142,12 @@ private:
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
-    // id 两种格式(见头文件):含两个 ~ 为跨服务器格式,第一个 ~ 前是
-    // Base64URL 编码的服务器地址;否则为会话内格式(itemId~tag)。
+    // 无状态浏览下海报 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>
+    // (模型填充时统一加前缀),PosterProvider 按前缀路由到对应服务器凭据;
+    // 缺前缀/凭据的 id 直接返回空图(不发起请求)。
     // 分隔符用 ~ 而非 |(| 在 image:// URL 中会被转义为 %7C)。
-    QString serverUrl = m_client->serverUrl();
-    QString token = m_client->accessToken();
+    QString serverUrl;
+    QString token;
     QString itemId;
     QString tag;
     if (id.count(QLatin1Char('~')) >= 2) {
@@ -156,11 +157,9 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
         token = m_accounts->tokenForServer(serverUrl);
         itemId = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
         tag = id.mid(s2 + 1);
-    } else {
-        const int sep = id.indexOf(QLatin1Char('~'));
-        itemId = QUrl::fromPercentEncoding((sep > 0 ? id.left(sep) : id).toUtf8());
-        tag = sep > 0 ? id.mid(sep + 1) : QString();
     }
+    if (serverUrl.isEmpty() || itemId.isEmpty() || token.isEmpty())
+        return new PosterResponse(QUrl(), QImage()); // 空图直接完成
 
     // 固定尺寸(卡片显示宽度足够)且 URL 不含 api_key:缓存键稳定,
     // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。

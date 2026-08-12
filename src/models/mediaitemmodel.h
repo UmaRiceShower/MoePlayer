@@ -19,9 +19,9 @@ struct MediaItem {
 };
 
 //! Emby 视图/媒体库条目列表模型,由 EmbyClient 填充。
-//! 角色:name(名称)、id(条目 id)、posterId("<itemId>~<tag>",无主图则为空)、
-//! type(条目类型,如 "Movie")、year(年份)、rating(评分)、played(已看完)、
-//! favorite(收藏)、positionTicks/runtimeTicks(观看进度/总时长)、
+//! 角色:name(名称)、id(条目 id)、posterId("<serverKey>~<itemId>~<tag>",
+//! 无主图则为空)、type(条目类型,如 "Movie")、year(年份)、rating(评分)、
+//! played(已看完)、favorite(收藏)、positionTicks/runtimeTicks(观看进度/总时长)、
 //! unplayedCount(未看集数)。
 class MediaItemModel : public QAbstractListModel
 {
@@ -53,6 +53,11 @@ public:
     int count() const { return m_items.size(); }
     int totalCount() const { return m_total; }
 
+    // 设置海报服务器前缀(encodeServerKey(serverUrl)),此后填充的海报
+    // id 形如 <前缀>~<itemId>~<tag>;无状态浏览下所有海报必须带前缀,
+    // PosterProvider 据此路由到对应服务器的凭据。
+    void setServerPrefix(const QString &prefix) { m_serverPrefix = prefix; }
+
     // 用 Emby Items JSON 数组重建模型;withPosters 为真时解析 ImageTags.Primary 拼 posterId。
     Q_INVOKABLE void setItems(const QJsonArray &items, bool withPosters);
     // 追加一页条目(分页加载用)。
@@ -82,4 +87,5 @@ signals:
 private:
     QList<MediaItem> m_items;
     int m_total = 0;
+    QString m_serverPrefix; // 海报 id 服务器前缀(见 setServerPrefix)。
 };

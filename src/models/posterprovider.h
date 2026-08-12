@@ -8,10 +8,8 @@ class EmbyClient;
 class AccountManager;
 
 //! 异步图片提供器,注册为 "image://emby/<id>"。
-//! id 两种格式:
-//! - 会话内: <itemId>~<tag>,按当前会话的服务器与 token 请求;
-//! - 跨服务器(首页聚合行): <encodeServerKey(serverUrl)>~<itemId>~<tag>,
-//!   按编码的服务器地址取对应账号 token 请求。
+//! 无状态浏览下海报 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>
+//! (模型填充时统一加前缀),提供器按前缀路由到对应服务器的账号 token。
 //! 请求路径 /Items/{id}/Images/Primary(maxWidth + tag + api_key)。
 class PosterProvider : public QQuickAsyncImageProvider
 {
