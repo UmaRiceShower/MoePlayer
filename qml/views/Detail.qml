@@ -62,6 +62,14 @@ Item {
         return "播放"
     }
 
+    // 播放结束(主窗口通知)后重拉详情:刷新已看/进度/继续观看位置。
+    function refreshAfterPlayback() {
+        if (root.itemId === "")
+            return
+        const c = root.creds()
+        EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
+    }
+
     Component.onCompleted: {
         if (root.itemId !== "") {
             const c = root.creds()
