@@ -385,10 +385,14 @@ Item {
     }
 
     // 聚合拉取不依赖当前会话(每服用各自缓存的 token),有账号即拉;
-    // 账号增删/排序变化(accountsChanged)时按新顺序重拉。
+    // 启动同时校验各服 token(/System/Info 轻量认证,401 即失效,见
+    // AccountManager.validateTokens);账号增删/排序变化(accountsChanged)
+    // 时按新顺序重拉。
     Component.onCompleted: {
-        if (AccountManager.hasAccounts)
+        if (AccountManager.hasAccounts) {
             AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
+            AccountManager.validateTokens()
+        }
         root.forceActiveFocus()
     }
 

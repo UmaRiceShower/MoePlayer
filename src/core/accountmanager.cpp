@@ -215,6 +215,16 @@ QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
     return QVariantMap();
 }
 
+// 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
+// 401 经 serverRequestFailed 回到这里 → 记住密码的账号自动账密重登,
+// 无密码的标失效(UI 红);网络错误/超时不算失效(不打扰用户)。
+void AccountManager::validateTokens()
+{
+    for (const auto &a : m_accounts)
+        if (!a.token.isEmpty())
+            m_client->validateToken(a.serverUrl, a.token, a.userId);
+}
+
 bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
                                 const QString &userName, const QString &password,
                                 bool rememberPassword)
@@ -234,7 +244,7 @@ bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
 }
 
 // ---------- 首页聚合(所有账号的媒体库,顺序即账号列表顺序) ----------
-
+//TODO:逐媒体库拉取并刷新
 void AccountManager::fetchHomeRows(int perLibraryLimit)
 {
     // 重叠重拉(排序/增删快速操作)时旧代次的回调可能仍在途,其归位索引已
