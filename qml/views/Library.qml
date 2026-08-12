@@ -88,6 +88,17 @@ Item {
                               0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
     }
 
+    // 播放结束(主窗口通知)后重拉当前库第一页:刷新已看/进度角标,
+    // 恢复滚动位置(onItemsReceived 消费 pendingRestoreY)。
+    function refreshAfterPlayback() {
+        if (!root.browseReady || root.currentViewId === "")
+            return
+        root.pendingRestoreY = grid.contentY
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+    }
+
     // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
     function connectServer() {
         const started = AccountManager.addAccount("", serverField.text, userField.text,

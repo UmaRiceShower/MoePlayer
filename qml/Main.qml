@@ -39,10 +39,22 @@ ApplicationWindow {
             visible: true
         })
         root.playerWindows.push(w)
+        // 播放结束(播完或关窗):重拉当前页面已看/进度——等效替代 WS
+        // UserDataChanged 推送(该事件唯一真实触发点即本客户端播放,
+        // 主动拉取延迟等效而无需每服长连接)。
+        const refreshCur = function () { root.refreshCurrentAfterPlayback() }
+        w.playbackFinished.connect(refreshCur)
         w.windowClosed.connect(function () {
             root.playerWindows = root.playerWindows.filter(function (x) { return x !== w })
+            refreshCur()
         })
         return w
+    }
+    // 通知当前页面重拉(Detail/Library 各自实现 refreshAfterPlayback)。
+    function refreshCurrentAfterPlayback() {
+        const cur = stackView.currentItem
+        if (cur && typeof cur.refreshAfterPlayback === "function")
+            cur.refreshAfterPlayback()
     }
 
     // 主窗口关闭 → 关闭全部播放窗口,应用随之退出。

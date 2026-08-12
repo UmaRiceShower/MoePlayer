@@ -92,6 +92,9 @@ Window {
                                                  owner.meta.mediaSourceId, owner.meta.playSessionId,
                                                  owner.lastPosition)
             }
+            // 正常播完:通知主窗口重拉当前页(等效替代 WS 实时推送)。
+            if (!error)
+                owner.playbackFinished()
         }
     }
 
@@ -109,6 +112,8 @@ Window {
 
     // 窗口关闭完成(Main 据此从播放窗口列表移除)。
     signal windowClosed()
+    // 正常播完(错误退出不发):主窗口据此重拉当前页已看/进度。
+    signal playbackFinished()
 
     // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)并停止播放:
     // Window.close() 只隐藏窗口,对象与 mpv 继续存活、音频照播。
