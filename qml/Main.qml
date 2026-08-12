@@ -26,6 +26,8 @@ ApplicationWindow {
     // 剧集详情跳转防抖(同集 500ms 内只 push 一次)。
     property string lastEpisodePush: ""
     property int lastEpisodePushTime: 0
+    // 媒体库页离开时的状态(viewId/排序/滚动位置),再次进入时恢复。
+    property var libraryState: null
 
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
@@ -114,7 +116,7 @@ ApplicationWindow {
 
             Button {
                 text: "媒体库"
-                onClicked: stackView.push(libraryPage)
+                onClicked: stackView.push(libraryPage, { restore: root.libraryState || null })
             }
             Button {
                 text: "设置"
@@ -135,7 +137,7 @@ ApplicationWindow {
                 })
             }
             onOpenLibrary: function (viewId) {
-                stackView.push(libraryPage, { initialViewId: viewId || "" })
+                stackView.push(libraryPage, { initialViewId: viewId || "", restore: root.libraryState || null })
             }
             onOpenServerManager: stackView.push(serverManagerPage)
         }
@@ -146,6 +148,10 @@ ApplicationWindow {
         Library {
             onPlayRequested: function (url, headers, meta) {
                 root.openPlayerWindow(url, headers, meta)
+            }
+            // 离开媒体库页(返回首页等)时保存浏览状态供下次恢复。
+            onLibraryStateSaved: function (state) {
+                root.libraryState = state
             }
             onShowDetail: function (itemId, posterId, title) {
                 // 双击卡片会连发两次 showDetail,已打开详情页时忽略,避免叠出双实例。

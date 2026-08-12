@@ -155,3 +155,23 @@ void MediaItemModel::setFavoriteAt(int row, bool fav)
     m_items[row].favorite = fav;
     emit dataChanged(index(row), index(row), { FavoriteRole });
 }
+
+void MediaItemModel::setPlayedById(const QString &itemId, bool played)
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items.at(i).id == itemId) {
+            setPlayedAt(i, played);
+            return;
+        }
+    }
+}
+
+void MediaItemModel::setFavoriteById(const QString &itemId, bool fav)
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items.at(i).id == itemId) {
+            setFavoriteAt(i, fav);
+            return;
+        }
+    }
+}

@@ -71,6 +71,9 @@ public:
     Q_INVOKABLE void setPlayedAt(int row, bool played);
     // 就地翻转收藏状态。
     Q_INVOKABLE void setFavoriteAt(int row, bool fav);
+    // 按条目 id 就地翻转已看/收藏(通用卡片组件用,不依赖行号)。
+    Q_INVOKABLE void setPlayedById(const QString &itemId, bool played);
+    Q_INVOKABLE void setFavoriteById(const QString &itemId, bool fav);
 
 signals:
     void countChanged();

@@ -12,9 +12,15 @@ Item {
     signal playRequested(string url, var headers, var meta)
     // 点击条目进入详情页。
     signal showDetail(string itemId, string posterId, string title)
+    // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
+    signal libraryStateSaved(var state)
 
     // 进入页面时选中的媒体库 id(首页点某库海报时传入;空则默认第一个)。
     property string initialViewId: ""
+    // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
+    property var restore: null
+    // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
+    property real pendingRestoreY: 0
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
     // 当前服务端排序(DateLastMediaAdded 在 4.9.5 条目级查询报错,不在档位内)。
@@ -69,9 +75,23 @@ Item {
     // 进入页面:会话已在(自动登录/切换账号)则载入目标库;未登录则用当前
     // 账号信息预填连接表单(密码仅已保存时填入),便于重登。
     Component.onCompleted: {
-        if (EmbyClient.connected)
-            root.applyView(root.initialViewId)
-        else if (AccountManager.activeAccountId !== "") {
+        if (EmbyClient.connected) {
+            if (root.restore && root.restore.viewId !== "") {
+                // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
+                root.currentSortBy = root.restore.sortBy
+                root.currentSortOrder = root.restore.sortOrder
+                for (let i = 0; i < root.sortOptions.length; ++i) {
+                    if (root.sortOptions[i].key === root.restore.sortBy) {
+                        sortSelector.currentIndex = i
+                        break
+                    }
+                }
+                root.pendingRestoreY = root.restore.contentY || 0
+                root.applyView(root.restore.viewId)
+            } else {
+                root.applyView(root.initialViewId)
+            }
+        } else if (AccountManager.activeAccountId !== "") {
             serverField.text = EmbyClient.serverUrl
             const acc = AccountManager.accounts
             for (const a of acc) {
@@ -82,6 +102,17 @@ Item {
                 }
             }
         }
+    }
+
+    // 离开页面(pop 销毁)前保存浏览状态:视图/排序/滚动位置。
+    Component.onDestruction: {
+        if (root.currentViewId !== "")
+            root.libraryStateSaved({
+                viewId: root.currentViewId,
+                sortBy: root.currentSortBy,
+                sortOrder: root.currentSortOrder,
+                contentY: grid.contentY
+            })
     }
 
     // 头部:标题 + 连接表单(未连接)/ 媒体库选择(已连接)。
@@ -227,172 +258,28 @@ Item {
             anchors.centerIn: parent
             running: root.busy && grid.visible
         }
-        delegate: Item {
+        delegate: PosterCard {
             width: 168
             height: 252
-            Rectangle {
-                anchors.fill: parent
-                color: Theme.surface
-                radius: 8
-                clip: true
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    source: model.posterId ? "image://emby/" + model.posterId : ""
-                    fillMode: Image.PreserveAspectCrop
-                    cache: true
-                    asynchronous: true
-                }
-                // 底部渐变遮罩,提升标题可读性。
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 46
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.72) }
-                    }
-                }
-                // 标题 + 年份(第二行小字,避免长标题截断年份)。
-                Column {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottomMargin: 6
-                    anchors.leftMargin: 8
-                    anchors.rightMargin: 8
-                    spacing: 1
-                    Text {
-                        width: parent.width
-                        text: model.name
-                        color: Theme.textPrimary
-                        font.pixelSize: 13
-                        elide: Text.ElideRight
-                    }
-                    Text {
-                        visible: model.year > 0
-                        width: parent.width
-                        text: model.year
-                        color: Theme.textMuted
-                        font.pixelSize: 11
-                    }
-                }
-                // 观看进度条(位置/时长随列表 UserData 返回,零额外请求)。
-                Rectangle {
-                    visible: model.positionTicks > 0 && model.runtimeTicks > 0
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: 3
-                    color: Qt.rgba(1, 1, 1, 0.25)
-                    Rectangle {
-                        anchors.left: parent.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        width: parent.width * Math.min(1, model.positionTicks / model.runtimeTicks)
-                        color: Theme.accent
-                    }
-                }
-                // 左上:评分角标(Emby 评分 0-10)。
-                Rectangle {
-                    visible: model.rating >= 0.5
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    anchors.margins: 8
-                    height: 22
-                    width: ratingRow.implicitWidth + 12
-                    radius: 4
-                    color: Qt.rgba(0, 0, 0, 0.6)
-                    Row {
-                        id: ratingRow
-                        anchors.centerIn: parent
-                        spacing: 3
-                        Text {
-                            text: "★"
-                            color: "#ffd33d"
-                            font.pixelSize: 12
-                        }
-                        Text {
-                            text: model.rating.toFixed(1)
-                            color: Theme.textPrimary
-                            font.pixelSize: 12
-                        }
-                    }
-                }
-                // 右上:已看绿勾 / 剧集未看集数蓝标。
-                Rectangle {
-                    visible: model.played || (model.type === "Series" && model.unplayedCount > 0)
-                    anchors.right: parent.right
-                    anchors.top: parent.top
-                    anchors.margins: 8
-                    height: 22
-                    width: stateRow.implicitWidth + 12
-                    radius: 4
-                    color: model.played ? "#2ea043" : "#1f6feb"
-                    Row {
-                        id: stateRow
-                        anchors.centerIn: parent
-                        spacing: 3
-                        Text {
-                            text: model.played ? "✓ 已看"
-                                 : (model.unplayedCount >= 100 ? "99+ 未看"
-                                    : model.unplayedCount + " 未看")
-                            color: "#ffffff"
-                            font.pixelSize: 12
-                        }
-                    }
-                }
+            itemId: model.id
+            posterId: model.posterId
+            title: model.name
+            year: model.year
+            rating: model.rating
+            played: model.played
+            favorite: model.favorite
+            positionTicks: model.positionTicks
+            runtimeTicks: model.runtimeTicks
+            unplayedCount: model.unplayedCount
+            itemType: model.type
+            onClicked: root.showDetail(model.id, model.posterId, model.name)
+            onFavoriteRequested: function (id, fav) {
+                EmbyClient.setFavorite(id, fav)
+                EmbyClient.itemsModel.setFavoriteById(id, fav)
             }
-            HoverHandler {
-                id: cardHover
-            }
-            MouseArea {
-                anchors.fill: parent
-                onClicked: root.showDetail(model.id, model.posterId, model.name)
-            }
-            // 悬停操作按钮置于最上层(MouseArea 之后声明),可点击。
-            Row {
-                anchors.right: parent.right
-                anchors.top: parent.top
-                anchors.topMargin: 36
-                anchors.rightMargin: 8
-                visible: cardHover.hovered
-                spacing: 6
-                Button {
-                    width: 30
-                    height: 30
-                    padding: 0
-                    background: Rectangle { radius: 15; color: "#000000aa" }
-                    contentItem: Text {
-                        text: model.favorite ? "♥" : "♡"
-                        color: model.favorite ? "#f778ba" : "#ffffff"
-                        font.pixelSize: 16
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    onClicked: {
-                        EmbyClient.setFavorite(model.id, !model.favorite)
-                        EmbyClient.itemsModel.setFavoriteAt(index, !model.favorite)
-                    }
-                }
-                Button {
-                    width: 30
-                    height: 30
-                    padding: 0
-                    background: Rectangle { radius: 15; color: model.played ? "#2ea043" : "#000000aa" }
-                    contentItem: Text {
-                        text: "✓"
-                        color: "#ffffff"
-                        font.pixelSize: 15
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    onClicked: {
-                        EmbyClient.setWatched(model.id, !model.played)
-                        EmbyClient.itemsModel.setPlayedAt(index, !model.played)
-                    }
-                }
+            onWatchedRequested: function (id, played) {
+                EmbyClient.setWatched(id, played)
+                EmbyClient.itemsModel.setPlayedById(id, played)
             }
         }
     }
@@ -421,6 +308,14 @@ Item {
             statusText.text = "已加载 " + EmbyClient.itemsModel.count + " / "
                               + EmbyClient.itemsModel.totalCount + " 个条目"
             root.busy = false
+            // 恢复浏览位置:重拉完成后定位到上次离开处(clamp 到可滚范围),
+            // 后续触底自动补页。仅消费一次。
+            if (root.pendingRestoreY > 0) {
+                const y = Math.min(root.pendingRestoreY, grid.contentHeight - grid.height)
+                if (y > 0)
+                    grid.contentY = y
+                root.pendingRestoreY = 0
+            }
         }
         function onErrorOccurred(message) {
             root.busy = false

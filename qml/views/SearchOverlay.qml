@@ -82,49 +82,23 @@ Item {
                 cellWidth: 168
                 cellHeight: 252
                 model: EmbyClient.searchModel
-                delegate: Item {
+                // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
+                delegate: PosterCard {
                     width: 152
                     height: 236
-                    Rectangle {
-                        anchors.fill: parent
-                        color: Theme.surface
-                        radius: 8
-                        clip: true
-                        Image {
-                            anchors.fill: parent
-                            anchors.margins: 4
-                            source: model.posterId ? "image://emby/" + model.posterId : ""
-                            fillMode: Image.PreserveAspectCrop
-                            cache: true
-                            asynchronous: true
-                        }
-                        Rectangle {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            height: 40
-                            gradient: Gradient {
-                                GradientStop { position: 0.0; color: "transparent" }
-                                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.72) }
-                            }
-                        }
-                        Text {
-                            anchors.bottom: parent.bottom
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottomMargin: 6
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            text: model.year > 0 ? model.name + " (" + model.year + ")" : model.name
-                            color: Theme.textPrimary
-                            font.pixelSize: 12
-                            elide: Text.ElideRight
-                        }
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.showDetail(model.id, model.posterId, model.name)
-                    }
+                    showActions: false
+                    itemId: model.id
+                    posterId: model.posterId
+                    title: model.name
+                    year: model.year
+                    rating: model.rating
+                    played: model.played
+                    favorite: model.favorite
+                    positionTicks: model.positionTicks
+                    runtimeTicks: model.runtimeTicks
+                    unplayedCount: model.unplayedCount
+                    itemType: model.type
+                    onClicked: root.showDetail(model.id, model.posterId, model.name)
                 }
             }
         }
