@@ -65,9 +65,8 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
     qmlRegisterType<MpvItem>("MoePlayer.Playback", kQmlModuleMajor, kQmlModuleMinor, "MpvItem");
 
-    // 启动即展示聚合首页:所有已保存账号的媒体库并行拉取(无"激活账号",
-    // 浏览请求均按目标服务器携带凭据)。
-    accountManager.fetchHomeRows(MoePlayer::kHomePerLibraryLimit);
+    // 首页聚合与启动 token 校验均由 Home 页 onCompleted 触发(见 Home.qml),
+    // 此处不重复调用。
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/qml"));

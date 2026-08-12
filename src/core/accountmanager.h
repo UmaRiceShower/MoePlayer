@@ -47,6 +47,9 @@ public:
     // 首页聚合:遍历全部账号(顺序即账号列表顺序),每服拉公开信息/视图/最近条目,
     // 全部就绪后填充 homeRows 并发 homeRowsReady。perLibraryLimit 为每库条目上限。
     Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
+    // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
+    // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
+    Q_INVOKABLE void validateTokens();
     // 供海报提供方按服务器取 token(聚合行的跨服务器海报用)。
     QString tokenForServer(const QString &serverUrl) const;
     // 账号排序:在账号列表中上移/下移,顺序即首页聚合顺序与列表展示顺序。

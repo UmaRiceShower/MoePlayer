@@ -250,6 +250,15 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
         }, nullptr, QStringLiteral("获取服务器信息"));
 }
 
+void EmbyClient::validateToken(const QString &serverUrl, const QString &token,
+                               const QString &userId)
+{
+    // GET /System/Info(带 token),仅 401 视为
+    // token 失效(经 serverRequestFailed 通知);网络错误/超时静默不打扰。
+    get(serverUrl, token, userId, QStringLiteral("/System/Info"),
+        [](const QJsonDocument &) {}, nullptr, QStringLiteral("校验登录状态"));
+}
+
 // ---------- 浏览(按服务器路由) ----------
 
 void EmbyClient::fetchViews(const QString &serverUrl, const QString &token, const QString &userId)

@@ -34,6 +34,10 @@ public:
 
     // 服务器公开信息(/System/Info/Public,无需认证),取 ServerName。
     Q_INVOKABLE void fetchServerPublicInfo(const QString &serverUrl);
+    // 校验 token 有效性(/System/Info 轻量认证请求):401 经 serverRequestFailed
+    // 通知(AccountManager 标失效/重登),网络错误与超时不算失效(静默)。
+    Q_INVOKABLE void validateToken(const QString &serverUrl, const QString &token,
+                                   const QString &userId);
     // 用户名密码登录(/Users/AuthenticateByName):凭据经 loginSucceeded
     // (serverUrl, token, userId, userName) 返回,不设置会话状态;
     // 调用方(AccountManager 存账号 / 表单直连浏览)自行保管凭据。
