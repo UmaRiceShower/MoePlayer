@@ -60,7 +60,14 @@ public:
     Q_INVOKABLE void fetchViews();
     // 获取指定视图下的影片条目(/Users/{id}/Items,分页),填充 itemsModel。
     // startIndex=0 时替换模型,否则追加;TotalRecordCount 写入 itemsModel.totalCount。
-    Q_INVOKABLE void fetchItems(const QString &viewId, int startIndex, int limit);
+    // sortBy/sortOrder 传给服务端排序(SortName/DateCreated/DateModified/
+    // PremiereDate/ProductionYear/CommunityRating 等;DateLastMediaAdded
+    // 在 4.9.5 条目级查询会 SQLiteException,调用方勿用)。
+    Q_INVOKABLE void fetchItems(const QString &viewId, int startIndex, int limit,
+                                const QString &sortBy = QStringLiteral("DateModified"),
+                                const QString &sortOrder = QStringLiteral("Descending"));
+    // 收藏/取消收藏(/Users/{id}/FavoriteItems/{itemId} POST/DELETE)。
+    Q_INVOKABLE void setFavorite(const QString &itemId, bool fav);
     // 获取剧集的分季列表(/Shows/{id}/Seasons),填充 seasonsModel。
     Q_INVOKABLE void fetchSeasons(const QString &seriesId);
     // 获取指定季的分集列表(/Shows/{id}/Episodes?SeasonId=),填充 episodesModel。
@@ -164,6 +171,10 @@ private:
     void postJson(const QString &path, const QJsonObject &body, bool auth,
                   std::function<void(const QJsonDocument &)> onOk,
                   const QString &what);
+    // DELETE 请求(无请求体),成功回调解析后的 JSON,失败发 errorOccurred。
+    void del(const QString &path, bool auth,
+             std::function<void(const QJsonDocument &)> onOk,
+             const QString &what);
     // 发送播放状态回传(失败仅记日志,不阻断播放)。
     void postReport(const QString &endpoint, const QJsonObject &body);
     // 建立/重连 WebSocket(/embywebsocket,带 api_key 认证)。

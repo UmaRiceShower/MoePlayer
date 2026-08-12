@@ -234,6 +234,24 @@ void EmbyClient::postJson(const QString &path, const QJsonObject &body, bool aut
     });
 }
 
+void EmbyClient::del(const QString &path, bool auth,
+                     std::function<void(const QJsonDocument &)> onOk, const QString &what)
+{
+    QNetworkReply *reply = m_nam.deleteResource(makeRequest(path, auth));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, onOk, what]() {
+        reply->deleteLater();
+        if (reply->error() != QNetworkReply::NoError) {
+            const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 401)
+                emit authFailed();
+            emit errorOccurred(what + QStringLiteral(" 失败: ") + reply->errorString()
+                               + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')'));
+            return;
+        }
+        onOk(QJsonDocument::fromJson(reply->readAll()));
+    });
+}
+
 void EmbyClient::fetchPublicInfo()
 {
     get(QStringLiteral("/System/Info/Public"), false, [this](const QJsonDocument &doc) {
@@ -298,15 +316,18 @@ void EmbyClient::configureSession(const QString &serverUrl, const QString &token
     fetchViews();
 }
 
-void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
+void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit,
+                            const QString &sortBy, const QString &sortOrder)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     // 不限制类型、不递归:返回库的顶层条目(Movies→Movie,TV Shows→Series,
     // Home Videos/Music Videos→Movie),分页与 TotalRecordCount 仍适用。
-    // UserData 携带已看/进度/未看集数,评分/年份供卡片角标,零额外请求。
+    // UserData 携带已看/进度/未看集数/收藏,评分/年份供卡片角标,零额外请求。
     q.addQueryItem(QStringLiteral("Fields"),
                    QStringLiteral("PrimaryImageAspectRatio,ProductionYear,CommunityRating,RunTimeTicks,UserData"));
+    q.addQueryItem(QStringLiteral("SortBy"), sortBy);
+    q.addQueryItem(QStringLiteral("SortOrder"), sortOrder);
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
     const int seq = ++m_itemsSeq;
@@ -477,6 +498,17 @@ void EmbyClient::setWatched(const QString &itemId, bool played, double positionT
                 playedPercentage >= 0 ? playedPercentage : (played ? 100.0 : 0.0));
     postJson(QStringLiteral("/Users/%1/Items/%2/UserData").arg(m_userId, itemId), body, true,
              [](const QJsonDocument &) {}, QStringLiteral("标记已看"));
+}
+
+void EmbyClient::setFavorite(const QString &itemId, bool fav)
+{
+    const QString path = QStringLiteral("/Users/%1/FavoriteItems/%2").arg(m_userId, itemId);
+    // POST 加收藏 / DELETE 取消;服务器返回空体,成功与否只记错误日志。
+    if (fav)
+        postJson(path, QJsonObject(), true, [](const QJsonDocument &) {},
+                 QStringLiteral("加入收藏"));
+    else
+        del(path, true, [](const QJsonDocument &) {}, QStringLiteral("取消收藏"));
 }
 
 // ---------- 跨服务器只读拉取(首页聚合用,不改会话状态) ----------
