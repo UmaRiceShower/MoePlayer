@@ -378,6 +378,17 @@ Item {
         })
     }
 
+    // 鼠标按住拖动(跟手方向):上滑→媒体库行前进(内容上移,看到后面
+    // 的库),下滑→行后退;左滑→条目向右浏览,右滑→向左。调用方
+    // (卡片 MouseArea / 空白区 MouseArea)累计位移超阈值后调用,并
+    // 重置起点以便连续拖动。
+    function handleDrag(dx, dy) {
+        if (Math.abs(dy) > Math.abs(dx))
+            root.moveRow(dy < 0 ? 1 : -1)
+        else
+            root.moveCol(dx < 0 ? 1 : -1)
+    }
+
     // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
     // 行跨服时切换会话后详情/媒体库页按该服数据打开。
     function ensureAccount(accountId, action) {
@@ -508,6 +519,23 @@ Item {
             id: cardArea
             anchors.fill: parent
             hoverEnabled: true
+            // 按住拖动:累计位移超阈值触发行列滚动(拖动与点击共存——
+            // 移动后 release 不触发 clicked,Qt 自动处理)。
+            property real pressX: 0
+            property real pressY: 0
+            onPressed: function (mouse) {
+                pressX = mouse.x
+                pressY = mouse.y
+            }
+            onPositionChanged: function (mouse) {
+                const dx = mouse.x - pressX
+                const dy = mouse.y - pressY
+                if (Math.abs(dx) < 30 && Math.abs(dy) < 30)
+                    return
+                root.handleDrag(dx, dy)
+                pressX = mouse.x
+                pressY = mouse.y
+            }
         }
     }
 
@@ -525,6 +553,36 @@ Item {
     Keys.onEnterPressed: root.activateFocus()
     // 页面回到前台时恢复键盘焦点。
     onVisibleChanged: if (root.visible) root.forceActiveFocus()
+
+    // 鼠标按住拖动滚动(空白区域):与卡片内拖拽共用 handleDrag。
+    // 声明在 ListView 之前(z 在下层),卡片区域的事件先被卡片 MouseArea
+    // 接收,空白区(行间缝隙/顶部)穿透到这里。
+    MouseArea {
+        anchors.fill: parent
+        property real dragX: 0
+        property real dragY: 0
+        property bool dragPressed: false
+        onPressed: function (mouse) {
+            if (mouse.button === Qt.LeftButton) {
+                dragX = mouse.x
+                dragY = mouse.y
+                dragPressed = true
+            }
+        }
+        onPositionChanged: function (mouse) {
+            if (!dragPressed)
+                return
+            const dx = mouse.x - dragX
+            const dy = mouse.y - dragY
+            if (Math.abs(dx) < 40 && Math.abs(dy) < 40)
+                return
+            root.handleDrag(dx, dy)
+            dragX = mouse.x
+            dragY = mouse.y
+        }
+        onReleased: dragPressed = false
+    }
+
     // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
     ListView {
         id: list
