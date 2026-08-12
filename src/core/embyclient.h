@@ -9,6 +9,7 @@
 
 #include <functional>
 
+#include "core/constants.h"
 #include "models/mediaitemmodel.h"
 
 //! Emby REST 客户端(QML 单例 "MoePlayer.Core EmbyClient")。
@@ -32,8 +33,7 @@ public:
     explicit EmbyClient(QObject *parent = nullptr);
 
     // 服务器地址,持久化于 QSettings("network/serverUrl"),默认本地回环 8096 端口。
-    QString serverUrl() const { return m_settings.value("network/serverUrl", QStringLiteral("http://127.0.0.1:8096")).toString(); }
-    void setServerUrl(const QString &v);
+    QString serverUrl() const { return m_settings.value(MoePlayer::kSettingsServerUrlKey, MoePlayer::kDefaultServerUrl).toString(); }    void setServerUrl(const QString &v);
     QString serverName() const { return m_serverName; }
     QString serverVersion() const { return m_serverVersion; }
     QString userName() const { return m_userName; }
@@ -190,16 +190,15 @@ private:
     void handleWsMessage(const QJsonObject &msg);
     // 构造 WebSocket 地址:http(s)://host[:port] → ws(s)://host[:port]/embywebsocket。
     QString webSocketUrl() const;
-    // 构造 X-Emby-Authorization 头(官方 "Emby ..." 格式),带 Token 与否可选。
+    // 构造 X-Emby-Authorization 头(官方 "Emby ..." 格式,带 Token 与否可选)。
     QString authHeader(bool withToken) const;
     // 按显式凭据构造 X-Emby-Authorization 头(跨服务器请求用)。
     QString authHeaderFor(const QString &userId, const QString &token) const;
-
     QNetworkAccessManager m_nam;
     QSettings m_settings;
     QWebSocket m_ws; // /embywebsocket 长连接(登录后建立)
     QTimer m_wsReconnect; // 断线重连定时器(指数退避)
-    int m_wsReconnectDelay = 3000;
+    int m_wsReconnectDelay = MoePlayer::kWsReconnectStartMs;
     MediaItemModel m_viewsModel;
     MediaItemModel m_itemsModel;
     MediaItemModel m_seasonsModel;

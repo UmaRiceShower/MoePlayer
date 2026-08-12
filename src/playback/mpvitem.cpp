@@ -9,6 +9,8 @@
 
 #include <stdexcept>
 
+#include "core/constants.h"
+
 namespace {
 
 // mpv 事件回调:投递到 GUI 线程的 onMpvEvents() 排空事件队列。
@@ -98,9 +100,7 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_set_option_string(m_mpv, "hwdec", "no");
     // 统一 UA(软件名/版本号):mpv 取流(Emby DirectStream)用应用 UA,不用默认。
     mpv_set_option_string(m_mpv, "user-agent",
-                          (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion())
-                              .toUtf8()
-                              .constData());
+                          MoePlayer::userAgent().toUtf8().constData());
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     mpv_set_option_string(m_mpv, "idle", "yes");
     mpv_set_option_string(m_mpv, "volume", "100");

@@ -20,6 +20,7 @@
 #include <QUrlQuery>
 
 #include "core/accountmanager.h"
+#include "core/constants.h"
 #include "core/embyclient.h"
 
 PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts)
@@ -35,8 +36,10 @@ namespace {
 // - 回源闸:最多 6 张图同时回源。封面与 API 请求共用服务器连接,
 //   无闸时一屏几十张图同时拉取会挤占 JSON 请求带宽;缓存命中不占名额。
 QMutex g_memMutex;
-QCache<QString, QImage> g_memCache(64 * 1024 * 1024); // cost = 图片字节数
-QSemaphore g_fetchGate(6);
+constexpr int kCacheMaxBytes = 64 * 1024 * 1024; // 内存缓存上限(cost = 图片字节数)
+constexpr int kFetchConcurrency = 6;             // 同时回源上限
+QCache<QString, QImage> g_memCache(kCacheMaxBytes);
+QSemaphore g_fetchGate(kFetchConcurrency);
 constexpr qint64 kCacheTtlMs = 30LL * 24 * 3600 * 1000;
 
 QString cacheFilePath(const QString &key)
@@ -84,13 +87,12 @@ public:
         g_fetchGate.acquire();
         QNetworkAccessManager nam;
         nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理
-        nam.setTransferTimeout(10000);
+        nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
         QNetworkRequest req(m_url);
         // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
-        req.setRawHeader("User-Agent",
-                         (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
+        req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
         if (!m_token.isEmpty())
-            req.setRawHeader("X-Emby-Token", m_token.toUtf8());
+            req.setRawHeader(MoePlayer::kHeaderToken, m_token.toUtf8());
         QNetworkReply *reply = nam.get(req);
         QEventLoop loop;
         QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
@@ -164,7 +166,7 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。
     Q_UNUSED(requestedSize)
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("maxWidth"), QStringLiteral("320"));
+    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(MoePlayer::kPosterMaxWidth));
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
 

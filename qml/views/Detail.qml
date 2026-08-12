@@ -49,7 +49,7 @@ Item {
     // 已看标记文案:有进度且未看完 → 继续播放;否则从头播放。
     function playButtonText() {
         if (root.detail.positionTicks > 0 && !root.detail.played)
-            return "从 " + formatTime(root.detail.positionTicks / 1e7) + " 继续播放"
+            return "从 " + formatTime(root.detail.positionTicks / Constants.ticksPerSecond) + " 继续播放"
         return "播放"
     }
 
@@ -285,13 +285,13 @@ Item {
             GridView {
                 width: parent.width
                 height: parent.height - 60
-                cellWidth: 176
-                cellHeight: 260
+                cellWidth: Constants.cellW
+                cellHeight: Constants.cellH
                 clip: true
                 model: EmbyClient.episodesModel
                 delegate: Item {
-                    width: 168
-                    height: 252
+                    width: Constants.cardW
+                    height: Constants.cardH
                     Rectangle {
                         anchors.fill: parent
                         color: Theme.surface

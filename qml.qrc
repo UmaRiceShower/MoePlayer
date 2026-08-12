@@ -3,7 +3,7 @@
     <file>qml/Main.qml</file>
     <file>qml/theme/qmldir</file>
     <file>qml/theme/Theme.qml</file>
-    <file>qml/theme/Animations.qml</file>
+    <file>qml/theme/Constants.qml</file>
     <file>qml/player/PlayerWindow.qml</file>
     <file>qml/views/Library.qml</file>
     <file>qml/views/Detail.qml</file>

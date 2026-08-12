@@ -23,4 +23,9 @@ add_executable(MoePlayer
 )
 
 target_include_directories(MoePlayer PRIVATE src)
+# 应用名/版本单一来源:CMake project() → 编译期宏 → 运行时引用。
+# applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
+target_compile_definitions(MoePlayer PRIVATE
+    MOEPLAYER_VERSION="${PROJECT_VERSION}"
+    MOEPLAYER_NAME="${PROJECT_NAME}")
 target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets PkgConfig::MPV)

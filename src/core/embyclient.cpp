@@ -42,13 +42,13 @@ EmbyClient::EmbyClient(QObject *parent)
     // Emby 为局域网服务,不走系统代理(http_proxy);Qt 在 Linux 上不识别 no_proxy,
     // 且网络管理器会在构造时读取环境代理,故此处显式指定 NoProxy。
     m_nam.setProxy(QNetworkProxy::NoProxy);
-    m_nam.setTransferTimeout(10000);
+    m_nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
 
     // WebSocket 长连接:断线自动重连(3s 起指数退避至 30s)。
     // 保活由 QWebSocket 协议层处理(Emby 4.9 不发 Ping,收到时回 Pong 即可)。
     m_ws.setProxy(QNetworkProxy::NoProxy);
     connect(&m_ws, &QWebSocket::connected, this, [this] {
-        m_wsReconnectDelay = 3000;
+        m_wsReconnectDelay = MoePlayer::kWsReconnectStartMs;
         qInfo() << "Emby: websocket connected";
         emit wsConnectedChanged();
     });
@@ -63,7 +63,7 @@ EmbyClient::EmbyClient(QObject *parent)
     m_wsReconnect.setSingleShot(true);
     connect(&m_wsReconnect, &QTimer::timeout, this, [this] {
         connectWebSocket();
-        m_wsReconnectDelay = qMin(m_wsReconnectDelay * 2, 30000);
+        m_wsReconnectDelay = qMin(m_wsReconnectDelay * 2, MoePlayer::kWsReconnectMaxMs);
     });
 }
 
@@ -74,25 +74,22 @@ void EmbyClient::setServerUrl(const QString &v)
         clean.chop(1);
     if (clean == serverUrl())
         return;
-    m_settings.setValue(QStringLiteral("network/serverUrl"), clean);
+    m_settings.setValue(MoePlayer::kSettingsServerUrlKey, clean);
     emit serverUrlChanged();
 }
 
 QString EmbyClient::authHeader(bool withToken) const
 {
-    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"MoePlayer\", Device=\"Desktop\", "
-                               "DeviceId=\"%2\", Version=\"0.1.0\"")
-                    .arg(m_userId, deviceId());
-    if (withToken && !m_accessToken.isEmpty())
-        h += QStringLiteral(", Token=\"%1\"").arg(m_accessToken);
-    return h;
+    // 会话内请求:userId 用当前会话,Token 可选。
+    return authHeaderFor(m_userId, withToken ? m_accessToken : QString());
 }
 
 QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) const
 {
-    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"MoePlayer\", Device=\"Desktop\", "
-                               "DeviceId=\"%2\", Version=\"0.1.0\"")
-                    .arg(userId, deviceId());
+    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"%4\", Device=\"Desktop\", "
+                               "DeviceId=\"%2\", Version=\"%3\"")
+                    .arg(userId, deviceId(), QCoreApplication::applicationVersion(),
+                         MoePlayer::kAppName);
     if (!token.isEmpty())
         h += QStringLiteral(", Token=\"%1\"").arg(token);
     return h;
@@ -102,16 +99,15 @@ QNetworkRequest EmbyClient::makeRequest(const QString &path, bool auth, bool jso
 {
     QNetworkRequest req(QUrl(serverUrl() + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
-    req.setRawHeader("User-Agent",
-                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
-    req.setRawHeader("X-Emby-Authorization", authHeader(auth).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderAuth, authHeader(auth).toUtf8());
     // 官方文档(dev.emby.media User-Authentication)规定登录后的 AccessToken
     // 用 X-Emby-Token 头发送,同时保留 X-Emby-Authorization 以兼容按该头认证的服务器。
     if (auth && !m_accessToken.isEmpty())
-        req.setRawHeader("X-Emby-Token", m_accessToken.toUtf8());
+        req.setRawHeader(MoePlayer::kHeaderToken, m_accessToken.toUtf8());
     if (json)
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    req.setTransferTimeout(10000);
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
     return req;
 }
 
@@ -139,12 +135,11 @@ void EmbyClient::getFrom(const QString &serverUrl, const QString &token, const Q
 {
     QNetworkRequest req(QUrl(serverUrl + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
-    req.setRawHeader("User-Agent",
-                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
-    req.setRawHeader("X-Emby-Authorization", authHeaderFor(userId, token).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderAuth, authHeaderFor(userId, token).toUtf8());
     if (!token.isEmpty())
-        req.setRawHeader("X-Emby-Token", token.toUtf8());
-    req.setTransferTimeout(10000);
+        req.setRawHeader(MoePlayer::kHeaderToken, token.toUtf8());
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
@@ -168,13 +163,12 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
 {
     QNetworkRequest req(QUrl(serverUrl + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
-    req.setRawHeader("User-Agent",
-                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     // 认证头无 token 版本:Emby 4.9 的 AuthenticateByName 要求携带
     // X-Emby-Authorization(缺 appName 字段返回 400)。
-    req.setRawHeader("X-Emby-Authorization", authHeaderFor(QString(), QString()).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderAuth, authHeaderFor(QString(), QString()).toUtf8());
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    req.setTransferTimeout(10000);
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
     QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
@@ -325,11 +319,11 @@ void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit,
     // Home Videos/Music Videos→Movie),分页与 TotalRecordCount 仍适用。
     // UserData 携带已看/进度/未看集数/收藏,评分/年份供卡片角标,零额外请求。
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,CommunityRating,RunTimeTicks,UserData"));
+                   MoePlayer::kListFields);
     q.addQueryItem(QStringLiteral("SortBy"), sortBy);
     q.addQueryItem(QStringLiteral("SortOrder"), sortOrder);
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
-    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize))); // Emby 单页上限 200
     const int seq = ++m_itemsSeq;
     get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
         [this, startIndex, seq](const QJsonDocument &doc) {
@@ -408,9 +402,9 @@ void EmbyClient::fetchPlaybackInfo(const QString &itemId)
                      return serverUrl() + (p.startsWith(QLatin1Char('/')) ? p : QLatin1Char('/') + p);
                  };
                  const auto withApiKey = [this](QString u) -> QString {
-                     if (!m_accessToken.isEmpty() && !u.contains(QLatin1String("api_key=")))
+                     if (!m_accessToken.isEmpty() && !u.contains(MoePlayer::kApiKeyParam + QLatin1Char('=')))
                          u += (u.contains(QLatin1Char('?')) ? QLatin1Char('&') : QLatin1Char('?'))
-                              + QStringLiteral("api_key=") + m_accessToken;
+                              + MoePlayer::kApiKeyParam + QLatin1Char('=') + m_accessToken;
                      return u;
                  };
 
@@ -475,7 +469,7 @@ void EmbyClient::fetchItemDetail(const QString &itemId)
             m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
             m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
             m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
-            m.insert(QStringLiteral("runtimeSecs"), o.value(QLatin1String("RunTimeTicks")).toDouble(0) / 1e7);
+            m.insert(QStringLiteral("runtimeSecs"), o.value(QLatin1String("RunTimeTicks")).toDouble(0) / MoePlayer::kTicksPerSecond);
             m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
             // 继续观看:上次停止位置(100ns ticks),未看或已播完为 0。
             m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
@@ -525,8 +519,8 @@ void EmbyClient::search(const QString &term)
     q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
     q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Series,Episode"));
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,CommunityRating,RunTimeTicks,UserData"));
-    q.addQueryItem(QStringLiteral("Limit"), QStringLiteral("40"));
+                   MoePlayer::kListFields);
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kSearchLimit));
     q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
     const int seq = ++m_searchSeq;
     get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
@@ -587,7 +581,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
     q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateModified"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
-    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 20)));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     getFrom(serverUrl, token, userId,
             QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
             [this, serverUrl, viewId](const QJsonDocument &doc) {
@@ -643,7 +637,7 @@ QString EmbyClient::webSocketUrl() const
     u.setScheme(u.scheme() == QLatin1String("https") ? QStringLiteral("wss") : QStringLiteral("ws"));
     u.setPath(QStringLiteral("/embywebsocket"));
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("api_key"), m_accessToken);
+    q.addQueryItem(MoePlayer::kApiKeyParam, m_accessToken);
     u.setQuery(q);
     return u.toString();
 }
@@ -690,7 +684,7 @@ void EmbyClient::reportPlaybackStart(const QString &itemId, const QString &media
     b.insert(QStringLiteral("ItemId"), itemId);
     b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
     b.insert(QStringLiteral("PlaySessionId"), playSessionId);
-    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * MoePlayer::kTicksPerSecond));
     b.insert(QStringLiteral("PlayMethod"), playMethod);
     b.insert(QStringLiteral("CanSeek"), true);
     b.insert(QStringLiteral("IsPaused"), false);
@@ -706,7 +700,7 @@ void EmbyClient::reportPlaybackProgress(const QString &itemId, const QString &me
     b.insert(QStringLiteral("ItemId"), itemId);
     b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
     b.insert(QStringLiteral("PlaySessionId"), playSessionId);
-    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * MoePlayer::kTicksPerSecond));
     b.insert(QStringLiteral("PlayMethod"), playMethod);
     b.insert(QStringLiteral("CanSeek"), true);
     b.insert(QStringLiteral("IsPaused"), paused);
@@ -722,7 +716,7 @@ void EmbyClient::reportPlaybackStopped(const QString &itemId, const QString &med
     b.insert(QStringLiteral("ItemId"), itemId);
     b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
     b.insert(QStringLiteral("PlaySessionId"), playSessionId);
-    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * 1e7));
+    b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * MoePlayer::kTicksPerSecond));
     postReport(QStringLiteral("/Sessions/Playing/Stopped"), b);
 }
 
@@ -736,13 +730,12 @@ void EmbyClient::reportPlaybackPing(const QString &playSessionId)
 void EmbyClient::probeRange(const QString &url, std::function<void(bool ok)> onDone)
 {
     QNetworkRequest req(url);
-    req.setRawHeader("User-Agent",
-                     (QStringLiteral("MoePlayer/") + QCoreApplication::applicationVersion()).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     req.setRawHeader("Range", "bytes=0-0"); // 只取一个字节,探测代价可忽略
-    req.setRawHeader("X-Emby-Authorization", authHeader(true).toUtf8());
+    req.setRawHeader(MoePlayer::kHeaderAuth, authHeader(true).toUtf8());
     if (!m_accessToken.isEmpty())
-        req.setRawHeader("X-Emby-Token", m_accessToken.toUtf8());
-    req.setTransferTimeout(5000);
+        req.setRawHeader(MoePlayer::kHeaderToken, m_accessToken.toUtf8());
+    req.setTransferTimeout(MoePlayer::kProbeTimeoutMs);
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this, [reply, onDone]() {
         const bool ok = reply->error() == QNetworkReply::NoError
