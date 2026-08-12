@@ -528,6 +528,10 @@ Item {
                 pressY = mouse.y
             }
             onPositionChanged: function (mouse) {
+                // 仅按住左键时算拖动:hoverEnabled 使悬停移动也触发
+                // onPositionChanged,不检查按下会"没按住也滚动"。
+                if (!(mouse.buttons & Qt.LeftButton))
+                    return
                 const dx = mouse.x - pressX
                 const dy = mouse.y - pressY
                 if (Math.abs(dx) < 30 && Math.abs(dy) < 30)
@@ -561,16 +565,15 @@ Item {
         anchors.fill: parent
         property real dragX: 0
         property real dragY: 0
-        property bool dragPressed: false
         onPressed: function (mouse) {
             if (mouse.button === Qt.LeftButton) {
                 dragX = mouse.x
                 dragY = mouse.y
-                dragPressed = true
             }
         }
         onPositionChanged: function (mouse) {
-            if (!dragPressed)
+            // 仅按住左键时算拖动;按钮状态检查兜底 release 丢失。
+            if (!(mouse.buttons & Qt.LeftButton))
                 return
             const dx = mouse.x - dragX
             const dy = mouse.y - dragY
@@ -580,7 +583,6 @@ Item {
             dragX = mouse.x
             dragY = mouse.y
         }
-        onReleased: dragPressed = false
     }
 
     // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
