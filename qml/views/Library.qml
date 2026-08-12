@@ -176,6 +176,21 @@ Item {
             color: Theme.textMuted
             font.pixelSize: 16
         }
+        // 加载骨架:首屏数据未到前铺占位卡,避免转圈引起布局跳动。
+        Flow {
+            visible: root.busy && EmbyClient.itemsModel.count === 0
+            anchors.fill: parent
+            spacing: 16
+            Repeater {
+                model: 24
+                Rectangle {
+                    width: 168
+                    height: 252
+                    radius: 8
+                    color: Theme.surface
+                }
+            }
+        }
         BusyIndicator {
             anchors.centerIn: parent
             running: root.busy && grid.visible
@@ -187,21 +202,114 @@ Item {
                 anchors.fill: parent
                 color: Theme.surface
                 radius: 8
+                clip: true
                 Image {
                     anchors.fill: parent
                     anchors.margins: 4
                     source: model.posterId ? "image://emby/" + model.posterId : ""
                     fillMode: Image.PreserveAspectCrop
                     cache: true
+                    asynchronous: true
                 }
-                Text {
+                // 底部渐变遮罩,提升标题可读性。
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 46
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.72) }
+                    }
+                }
+                // 标题 + 年份(第二行小字,避免长标题截断年份)。
+                Column {
                     anchors.bottom: parent.bottom
                     anchors.left: parent.left
                     anchors.right: parent.right
+                    anchors.bottomMargin: 6
+                    anchors.leftMargin: 8
+                    anchors.rightMargin: 8
+                    spacing: 1
+                    Text {
+                        width: parent.width
+                        text: model.name
+                        color: Theme.textPrimary
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        visible: model.year > 0
+                        width: parent.width
+                        text: model.year
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                    }
+                }
+                // 观看进度条(位置/时长随列表 UserData 返回,零额外请求)。
+                Rectangle {
+                    visible: model.positionTicks > 0 && model.runtimeTicks > 0
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: 3
+                    color: Qt.rgba(1, 1, 1, 0.25)
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: parent.width * Math.min(1, model.positionTicks / model.runtimeTicks)
+                        color: Theme.accent
+                    }
+                }
+                // 左上:评分角标(Emby 评分 0-10)。
+                Rectangle {
+                    visible: model.rating >= 0.5
+                    anchors.left: parent.left
+                    anchors.top: parent.top
                     anchors.margins: 8
-                    text: model.name
-                    color: Theme.textPrimary
-                    elide: Text.ElideRight
+                    height: 22
+                    width: ratingRow.implicitWidth + 12
+                    radius: 4
+                    color: Qt.rgba(0, 0, 0, 0.6)
+                    Row {
+                        id: ratingRow
+                        anchors.centerIn: parent
+                        spacing: 3
+                        Text {
+                            text: "★"
+                            color: "#ffd33d"
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: model.rating.toFixed(1)
+                            color: Theme.textPrimary
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+                // 右上:已看绿勾 / 剧集未看集数蓝标。
+                Rectangle {
+                    visible: model.played || (model.type === "Series" && model.unplayedCount > 0)
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: 8
+                    height: 22
+                    width: stateRow.implicitWidth + 12
+                    radius: 4
+                    color: model.played ? "#2ea043" : "#1f6feb"
+                    Row {
+                        id: stateRow
+                        anchors.centerIn: parent
+                        spacing: 3
+                        Text {
+                            text: model.played ? "✓ 已看"
+                                 : (model.unplayedCount >= 100 ? "99+ 未看"
+                                    : model.unplayedCount + " 未看")
+                            color: "#ffffff"
+                            font.pixelSize: 12
+                        }
+                    }
                 }
             }
             MouseArea {
