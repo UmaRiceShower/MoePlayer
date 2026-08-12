@@ -11,5 +11,6 @@
     <file>qml/views/ServerManager.qml</file>
     <file>qml/views/Settings.qml</file>
     <file>qml/views/SearchOverlay.qml</file>
+    <file>qml/views/PosterCard.qml</file>
   </qresource>
 </RCC>
