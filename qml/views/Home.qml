@@ -156,6 +156,14 @@ Item {
                 root)
             root.scrollAnim.from = list.contentY
             root.scrollAnim.to = target
+            // 大幅滚动(单次≥2行)结尾超调目标再回弹:OutBack 是 boomerang
+            // 曲线,末段越过终点再返回,overshoot 控制超调幅度(约 17%)。
+            // 小幅滚动保持 OutCubic 平滑收尾,回弹会显得拖沓;快速连滚
+            // 每步 1 行不弹,不打断节奏。超调期间仍在中间副本内不露边界。
+            if (dist >= root.rowStep * 2) {
+                root.scrollAnim.easing.type = Easing.OutBack
+                root.scrollAnim.easing.overshoot = 2.0
+            }
             // 动态时长:距离/滚轮速度(px/s)。慢速滚动长动画平滑,
             // 快速滚动动画更快,内容移动速度与滚轮一致,不丢动画。
             root.scrollAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
