@@ -53,13 +53,13 @@ Item {
         }
         viewSelector.currentIndex = idx
         root.currentViewId = vm.idAt(idx)
-        EmbyClient.fetchItems(root.currentViewId, 0, 200, root.currentSortBy, root.currentSortOrder)
+        EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
     }
 
     // 切换排序:服务端重查第一页。
     function changeSort(sortBy) {
         root.currentSortBy = sortBy
-        EmbyClient.fetchItems(root.currentViewId, 0, 200, root.currentSortBy, root.currentSortOrder)
+        EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
     }
 
     function connectServer() {
@@ -177,7 +177,7 @@ Item {
                 textRole: "name"
                 onActivated: function (index) {
                     root.currentViewId = EmbyClient.viewsModel.idAt(index)
-                    EmbyClient.fetchItems(root.currentViewId, 0, 200,
+                    EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize,
                                           root.currentSortBy, root.currentSortOrder)
                 }
             }
@@ -201,7 +201,7 @@ Item {
         Text {
             id: statusText
             text: ""
-            color: statusText.text.indexOf("失败") >= 0 ? "#e5534b" : Theme.textMuted
+            color: statusText.text.indexOf("失败") >= 0 ? Theme.danger : Theme.textMuted
         }
     }
 
@@ -216,8 +216,8 @@ Item {
         anchors.leftMargin: 24
         anchors.rightMargin: 24
         anchors.bottomMargin: 24
-        cellWidth: 176
-        cellHeight: 260
+        cellWidth: Constants.cellW
+        cellHeight: Constants.cellH
         clip: true
         model: EmbyClient.itemsModel
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
@@ -227,7 +227,7 @@ Item {
             const m = EmbyClient.itemsModel
             if (root.currentViewId !== "" && m.count < m.totalCount && !root.busy) {
                 root.busy = true
-                EmbyClient.fetchItems(root.currentViewId, m.count, 200,
+                EmbyClient.fetchItems(root.currentViewId, m.count, Constants.pageSize,
                                       root.currentSortBy, root.currentSortOrder)
             }
         }
@@ -247,8 +247,8 @@ Item {
             Repeater {
                 model: 24
                 Rectangle {
-                    width: 168
-                    height: 252
+                    width: Constants.cardW
+                    height: Constants.cardH
                     radius: 8
                     color: Theme.surface
                 }
@@ -259,8 +259,8 @@ Item {
             running: root.busy && grid.visible
         }
         delegate: PosterCard {
-            width: 168
-            height: 252
+            width: Constants.cardW
+            height: Constants.cardH
             itemId: model.id
             posterId: model.posterId
             title: model.name

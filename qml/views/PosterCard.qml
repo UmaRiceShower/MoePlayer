@@ -134,14 +134,14 @@ Item {
             height: 22
             width: ratingRow.implicitWidth + 12
             radius: 4
-            color: Qt.rgba(0, 0, 0, 0.6)
+            color: Theme.badgeBg
             Row {
                 id: ratingRow
                 anchors.centerIn: parent
                 spacing: 3
                 Text {
                     text: "★"
-                    color: "#ffd33d"
+                    color: Theme.rating
                     font.pixelSize: 12
                 }
                 Text {
@@ -161,7 +161,7 @@ Item {
             height: 22
             width: stateRow.implicitWidth + 12
             radius: 4
-            color: root.played ? "#2ea043" : "#1f6feb"
+            color: root.played ? Theme.success : Theme.info
             Row {
                 id: stateRow
                 anchors.centerIn: parent
@@ -198,10 +198,10 @@ Item {
             width: 30
             height: 30
             padding: 0
-            background: Rectangle { radius: 15; color: "#000000aa" }
+            background: Rectangle { radius: 15; color: Theme.overlayBg }
             contentItem: Text {
                 text: root.favorite ? "♥" : "♡"
-                color: root.favorite ? "#f778ba" : "#ffffff"
+                color: root.favorite ? Theme.favorite : "#ffffff"
                 font.pixelSize: 16
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
@@ -212,7 +212,7 @@ Item {
             width: 30
             height: 30
             padding: 0
-            background: Rectangle { radius: 15; color: root.played ? "#2ea043" : "#000000aa" }
+            background: Rectangle { radius: 15; color: root.played ? Theme.success : Theme.overlayBg }
             contentItem: Text {
                 text: "✓"
                 color: "#ffffff"

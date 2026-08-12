@@ -34,7 +34,7 @@ Item {
         }
 
         Text {
-            text: "MoePlayer " + Qt.application.version
+            text: Qt.application.name + " " + Qt.application.version
             color: Theme.textMuted
             font.pixelSize: 12
         }

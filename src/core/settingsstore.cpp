@@ -1,9 +1,6 @@
 #include "settingsstore.h"
 
-namespace {
-// 默认 Emby 服务器地址(本地回环),用户可在设置页覆盖。
-const QString kDefaultServerUrl = QStringLiteral("http://127.0.0.1:8096");
-} // namespace
+#include "core/constants.h"
 
 SettingsStore::SettingsStore(QObject *parent)
     : QObject(parent)
@@ -12,13 +9,13 @@ SettingsStore::SettingsStore(QObject *parent)
 
 QString SettingsStore::serverUrl() const
 {
-    return m_settings.value(QStringLiteral("network/serverUrl"), kDefaultServerUrl).toString();
+    return m_settings.value(MoePlayer::kSettingsServerUrlKey, MoePlayer::kDefaultServerUrl).toString();
 }
 
 void SettingsStore::setServerUrl(const QString &v)
 {
     if (v == serverUrl())
         return;
-    m_settings.setValue(QStringLiteral("network/serverUrl"), v);
+    m_settings.setValue(MoePlayer::kSettingsServerUrlKey, v);
     emit serverUrlChanged();
 }

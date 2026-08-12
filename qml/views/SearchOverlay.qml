@@ -79,8 +79,8 @@ Item {
                 width: parent.width
                 height: parent.height - 52
                 clip: true
-                cellWidth: 168
-                cellHeight: 252
+                cellWidth: Constants.cellW
+                cellHeight: Constants.cellH
                 model: EmbyClient.searchModel
                 // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
                 delegate: PosterCard {
@@ -107,7 +107,7 @@ Item {
     // 输入防抖定时器。
     Timer {
         id: searchDebounce
-        interval: 300
+        interval: Constants.searchDebounceMs
         onTriggered: EmbyClient.search(searchField.text)
     }
 

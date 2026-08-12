@@ -10,7 +10,7 @@ ApplicationWindow {
     width: 1280
     height: 720
     visible: true
-    title: "MoePlayer"
+    title: Qt.application.name
 
     background: Rectangle {
         color: Theme.bg
@@ -172,7 +172,7 @@ ApplicationWindow {
             // (StackView 切换动画窗口期内双击会命中旧页面两次)。
             onShowEpisodeDetail: function (itemId, posterId, title) {
                 const now = Date.now()
-                if (itemId === root.lastEpisodePush && now - root.lastEpisodePushTime < 500)
+                if (itemId === root.lastEpisodePush && now - root.lastEpisodePushTime < Constants.episodePushDebounceMs)
                     return
                 root.lastEpisodePush = itemId
                 root.lastEpisodePushTime = now

@@ -5,6 +5,8 @@
 #include <QSet>
 #include <QVariantList>
 
+#include "core/constants.h"
+
 class EmbyClient;
 
 //! 多账号与会话持久化管理(QML 单例 "MoePlayer.Core AccountManager")。
@@ -128,7 +130,7 @@ private:
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
     QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
-    int m_homeLimit = 20;
+    int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
     QHash<int, int> m_homeReqGen; // 账号索引 -> 发起聚合的代次

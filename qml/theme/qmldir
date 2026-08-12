@@ -1,2 +1,2 @@
 singleton Theme 1.0 Theme.qml
-singleton Animations 1.0 Animations.qml
+singleton Constants 1.0 Constants.qml

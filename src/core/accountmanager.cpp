@@ -12,14 +12,18 @@
 
 #include <algorithm>
 
-#include "embyclient.h"
+#include "core/constants.h"
+#include "core/embyclient.h"
 
 namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kActiveKey = QStringLiteral("accounts/active");
+const QString kServerNamesKey = kServerNamesKey;
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
+// 首页聚合缓存文件名(CacheLocation 下)。
+const QString kHomeCacheFileName = QStringLiteral("/home-rows.json");
 } // namespace
 
 AccountManager::AccountManager(EmbyClient *client, QObject *parent)
@@ -277,7 +281,7 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     m_homeViews.clear();
     m_homeRowByKey.clear();
     m_homeAccountOrder.clear();
-    m_homeLimit = qBound(1, perLibraryLimit, 20);
+    m_homeLimit = qBound(1, perLibraryLimit, MoePlayer::kHomePerLibraryLimit);
     m_homePending = 0;
     // 先展示缓存(上次成功数据),网络刷新完成后再覆盖;无缓存则清空等待。
     m_homeRows.clear();
@@ -402,7 +406,7 @@ const AccountManager::AccountInfo *AccountManager::accountById(const QString &id
 void AccountManager::loadHomeCache()
 {
     const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                         + QStringLiteral("/home-rows.json");
+                         + kHomeCacheFileName;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
         return;
@@ -414,7 +418,7 @@ void AccountManager::saveHomeCache()
     if (m_homeRows.isEmpty())
         return;
     const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                         + QStringLiteral("/home-rows.json");
+                         + kHomeCacheFileName;
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile f(path);
     if (!f.open(QIODevice::WriteOnly))
@@ -448,7 +452,7 @@ QString AccountManager::decodeServerKey(const QString &key)
 void AccountManager::loadServerNames()
 {
     const QJsonObject o = QJsonDocument::fromJson(
-        m_settings.value(QStringLiteral("accounts/serverNames")).toString().toUtf8()).object();
+        m_settings.value(kServerNamesKey).toString().toUtf8()).object();
     for (auto it = o.begin(); it != o.end(); ++it)
         m_serverNames.insert(it.key(), it.value().toString());
 }
@@ -458,7 +462,7 @@ void AccountManager::persistServerNames()
     QJsonObject o;
     for (auto it = m_serverNames.constBegin(); it != m_serverNames.constEnd(); ++it)
         o.insert(it.key(), it.value());
-    m_settings.setValue(QStringLiteral("accounts/serverNames"),
+    m_settings.setValue(kServerNamesKey,
                         QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
     m_settings.sync();
 }

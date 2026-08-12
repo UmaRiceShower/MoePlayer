@@ -89,10 +89,10 @@ Item {
                         radius: 6
                         // 失效账号(重登失败)标红底;选中用强调色。
                         color: ListView.isCurrentItem ? Theme.accent
-                               : (modelData.tokenValid === false ? "#4a2226" : "transparent")
+                               : (modelData.tokenValid === false ? Theme.invalidBg : "transparent")
                         border.width: ListView.isCurrentItem ? 0
                                    : (modelData.tokenValid === false ? 2 : 1)
-                        border.color: modelData.tokenValid === false ? "#e5534b" : Theme.bg
+                        border.color: modelData.tokenValid === false ? Theme.danger : Theme.bg
 
                         Column {
                             anchors.verticalCenter: parent.verticalCenter
@@ -110,7 +110,7 @@ Item {
                             }
                             Text {
                                 text: modelData.userName + " · " + modelData.serverUrl
-                                color: ListView.isCurrentItem ? "#dddddd" : Theme.textMuted
+                                color: ListView.isCurrentItem ? Theme.textSelected : Theme.textMuted
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
                                 width: 330
@@ -237,7 +237,7 @@ Item {
                 Text {
                     text: root.statusText
                     color: root.statusText.indexOf("失败") >= 0 || root.statusText.indexOf("密码") >= 0
-                          ? "#e5534b" : Theme.textMuted
+                          ? Theme.danger : Theme.textMuted
                 }
             }
         }

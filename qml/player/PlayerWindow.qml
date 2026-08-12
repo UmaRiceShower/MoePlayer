@@ -13,7 +13,7 @@ Window {
     width: 960
     height: 540
     visible: true
-    title: source.length ? "MoePlayer · " + source.split("/").pop() : "MoePlayer"
+    title: source.length ? Qt.application.name + " · " + source.split("/").pop() : Qt.application.name
     color: "black"
 
     property string source: ""
@@ -52,7 +52,7 @@ Window {
                 EmbyClient.reportPlaybackStart(owner.meta.itemId, owner.meta.mediaSourceId,
                                                owner.meta.playSessionId, owner.meta.playMethod, 0)
             if (owner.resumeTicks > 0)
-                mpv.seek(owner.resumeTicks / 10000000)
+                mpv.seek(owner.resumeTicks / Constants.ticksPerSecond)
         }
         // 播放中每 10 秒上报一次进度。
         function onPositionChanged() {
@@ -60,7 +60,7 @@ Window {
             if (!owner.reporting || mpv.state !== "playing")
                 return
             const now = Date.now()
-            if (now - owner.lastProgressReport >= 10000) {
+            if (now - owner.lastProgressReport >= Constants.progressReportMs) {
                 owner.lastProgressReport = now
                 EmbyClient.reportPlaybackProgress(owner.meta.itemId, owner.meta.mediaSourceId,
                                                   owner.meta.playSessionId, owner.meta.playMethod,
@@ -89,7 +89,7 @@ Window {
 
     // 播放中每 10 分钟 Ping 一次,维持服务器会话。
     Timer {
-        interval: 600000
+        interval: Constants.pingIntervalMs
         running: root.reporting && mpv.state !== "idle"
         repeat: true
         onTriggered: EmbyClient.reportPlaybackPing(root.meta.playSessionId)

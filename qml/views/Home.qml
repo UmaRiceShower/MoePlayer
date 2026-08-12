@@ -33,14 +33,14 @@ Item {
     property real rowStep: 0
     // 滚轮速度(px/s):最近 350ms 窗口内滚轮步长换算,驱动滚动动画
     // 时长(距离/速度)——滚得越快动画越快,内容跟得上节奏不丢动画。
-    property real scrollVelocity: 800
+    property real scrollVelocity: Constants.scrollVelocityInitial
     property var wheelLog: []
 
     // 记录滚轮事件步长并换算滚动速度(行/秒 → px/s,夹到合理范围)。
     function noteWheel(step) {
         const now = Date.now()
         root.wheelLog.push([now, step])
-        while (root.wheelLog.length > 0 && now - root.wheelLog[0][0] > 350)
+        while (root.wheelLog.length > 0 && now - root.wheelLog[0][0] > Constants.wheelLogWindowMs)
             root.wheelLog.shift()
         let total = 0
         for (let i = 0; i < root.wheelLog.length; i++)
@@ -49,7 +49,7 @@ Item {
         const last = root.wheelLog[root.wheelLog.length - 1]
         const span = last[0] - first[0]
         const rowsPerSec = span > 0 ? total * 1000 / span : 0
-        root.scrollVelocity = Math.max(300, Math.min(3200, rowsPerSec * root.rowStep))
+        root.scrollVelocity = Math.max(Constants.scrollVelocityMin, Math.min(Constants.scrollVelocityMax, rowsPerSec * root.rowStep))
     }
 
     // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
@@ -108,9 +108,9 @@ Item {
         root.hAnim.to = to
         if (withBounce) {
             root.hAnim.easing.type = Easing.OutBack
-            root.hAnim.easing.overshoot = 1.6
+            root.hAnim.easing.overshoot = Constants.bounceOvershoot
         }
-        root.hAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
+        root.hAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
         root.hAnim.start()
     }
 
@@ -122,7 +122,7 @@ Item {
             return
         const v = row.rowItemsView
         // 每次滚一格(卡片宽+间距)。
-        const cell = 112 + 12
+        const cell = Constants.rowCellStep
         const from = v.contentX
         const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
         if (Math.abs(target - from) < 0.5)
@@ -145,7 +145,7 @@ Item {
         if (!row || !row.rowItemsView)
             return
         const v = row.rowItemsView
-        const cell = 112 + 12
+        const cell = Constants.rowCellStep
         const maxCol = v.count - 1
         if (root.focusCol === -1) {
             if (delta > 0) {
@@ -194,7 +194,7 @@ Item {
             return
         const v = row.rowItemsView
         const maxX = Math.max(0, v.contentWidth - v.width)
-        const over = 24
+        const over = Constants.pullOverrun
         pullSeq.stop()
         pullOut.target = v
         pullOut.from = v.contentX
@@ -211,15 +211,15 @@ Item {
         NumberAnimation {
             id: pullOut
             property: "contentX"
-            duration: 110
+            duration: Constants.pullOutMs
             easing.type: Easing.OutQuad
         }
         NumberAnimation {
             id: pullBack
             property: "contentX"
-            duration: 240
+            duration: Constants.pullBackMs
             easing.type: Easing.OutBack
-            easing.overshoot: 1.4
+            easing.overshoot: Constants.pullOvershoot
         }
     }
 
@@ -271,7 +271,7 @@ Item {
             }
         }
         // 兜底:行高(标题约 24 + 卡片 172)减重叠 44。
-        root.rowStep = 152
+        root.rowStep = Constants.rowStepFallback
     }
 
     // 循环滚动:绝对行索引推进,目标 contentY 经 NumberAnimation 动画
@@ -341,11 +341,11 @@ Item {
             // 每步 1 行不弹,不打断节奏。超调期间仍在中间副本内不露边界。
             if (dist >= root.rowStep * 2) {
                 root.scrollAnim.easing.type = Easing.OutBack
-                root.scrollAnim.easing.overshoot = 2.0
+                root.scrollAnim.easing.overshoot = Constants.bigBounceOvershoot
             }
             // 动态时长:距离/滚轮速度(px/s)。慢速滚动长动画平滑,
             // 快速滚动动画更快,内容移动速度与滚轮一致,不丢动画。
-            root.scrollAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
+            root.scrollAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
             root.scrollAnim.start()
         } else {
             if (root.scrollAnim) {
@@ -404,7 +404,7 @@ Item {
     // 账号增删/排序变化(accountsChanged)时按新顺序重拉。
     Component.onCompleted: {
         if (AccountManager.hasAccounts)
-            AccountManager.fetchHomeRows(20)
+            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
         root.forceActiveFocus()
     }
 
@@ -445,7 +445,7 @@ Item {
         }
         function onAccountsChanged() {
             if (AccountManager.hasAccounts)
-                AccountManager.fetchHomeRows(20)
+                AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
         }
         function onAccountLoginFinished(ok) {
             if (ok && root.pendingNav) {
@@ -466,8 +466,8 @@ Item {
         property string cardText: ""
         property bool isLibrary: false
         property bool selected: false
-        property int cardW: 112
-        property int cardH: 168
+        property int cardW: Constants.rowCardW
+        property int cardH: Constants.rowCardH
         property alias cardArea: cardArea
         width: cardW
         height: cardH
@@ -534,7 +534,7 @@ Item {
                     return
                 const dx = mouse.x - pressX
                 const dy = mouse.y - pressY
-                if (Math.abs(dx) < 30 && Math.abs(dy) < 30)
+                if (Math.abs(dx) < Constants.dragThresholdCard && Math.abs(dy) < Constants.dragThresholdCard)
                     return
                 root.handleDrag(dx, dy)
                 pressX = mouse.x
@@ -577,7 +577,7 @@ Item {
                 return
             const dx = mouse.x - dragX
             const dy = mouse.y - dragY
-            if (Math.abs(dx) < 40 && Math.abs(dy) < 40)
+            if (Math.abs(dx) < Constants.dragThresholdBlank && Math.abs(dy) < Constants.dragThresholdBlank)
                 return
             root.handleDrag(dx, dy)
             dragX = mouse.x
@@ -591,7 +591,7 @@ Item {
         anchors.fill: parent
         clip: true
         model: root.loopRows
-        spacing: -44
+        spacing: -Constants.rowOverlap
         onContentYChanged: root.focusRowIdx = root.findCenterRowIndex()
         // 缓冲只保留约 1.5 行:堆叠行内容较重(每行多张海报),
         // 过大的默认缓冲会让大量行同时实例化拖慢滚动。
@@ -654,12 +654,12 @@ Item {
             // 可见卡片,避免每行 1 张海报全部加载拖慢滚动。
             Item {
                 width: list.width
-                height: 172
+                height: Constants.rowHeight
                 clip: true
                 Row {
                     anchors.left: parent.left
-                    anchors.leftMargin: 24
-                    spacing: 12
+                    anchors.leftMargin: Constants.rowLeftMargin
+                    spacing: Constants.rowSpacing
                     // 库海报(行首):焦点在库海报且本行为居中行时高亮。
                     // z 置顶:左拉动画(contentX 负)时条目卡可能短暂越出
                     // ListView 边界,保证库海报始终在条目海报上层。
@@ -668,8 +668,8 @@ Item {
                         cardImage: modelData.posterId || ""
                         cardText: modelData.viewName
                         isLibrary: true
-                        cardW: 124
-                        cardH: 172
+                        cardW: Constants.rowLibraryW
+                        cardH: Constants.rowHeight
                         selected: rowDelegate.rowIndex === root.focusRowIdx && root.focusCol === -1
                         cardArea.onClicked: root.ensureAccount(modelData.accountId,
                             function () { root.openLibrary(modelData.viewId) })
@@ -677,10 +677,10 @@ Item {
                     // 该库最近条目:横向滚动列表,虚拟化渲染。
                     ListView {
                         id: rowItems
-                        width: list.width - 24 - 124 - 12
-                        height: 172
+                        width: list.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
+                        height: Constants.rowHeight
                         orientation: ListView.Horizontal
-                        spacing: 12
+                        spacing: Constants.rowSpacing
                         // 裁剪到自身边界:拉动画/回滚时 contentX 会短暂越界,
                         // 不裁剪则条目卡会覆盖到左侧库海报上。
                         clip: true
@@ -690,8 +690,8 @@ Item {
                         delegate: RowCard {
                             cardImage: modelData.posterId || ""
                             cardText: modelData.name
-                            cardW: 112
-                            cardH: 172
+                            cardW: Constants.rowCardW
+                            cardH: Constants.rowHeight
                             // 内层 modelData 是条目,行级 accountId 从 rowData 取。
                             // 选中块高亮:本行为居中行且列索引匹配。
                             selected: rowDelegate.rowIndex === root.focusRowIdx && index === root.focusCol
