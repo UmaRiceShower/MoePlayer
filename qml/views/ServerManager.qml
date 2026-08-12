@@ -103,8 +103,6 @@ Item {
                                 // 未填名称时显示用户名(首页聚合前缀此时用 ServerName)。
                                 text: (modelData.name !== "" ? modelData.name : modelData.userName)
                                       + (modelData.tokenValid === false ? "  [凭据失效]" : "")
-                                      + (modelData.id === AccountManager.activeAccountId
-                                         ? "  [当前]" : "")
                                 color: ListView.isCurrentItem ? "white" : Theme.textPrimary
                                 font.bold: true
                             }

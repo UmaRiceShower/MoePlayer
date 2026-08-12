@@ -9,9 +9,10 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    signal showDetail(string itemId, string posterId, string title)
-    // viewId 为被点击的媒体库 id,媒体库页打开时直接选中该库。
-    signal openLibrary(string viewId)
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    // viewId 为被点击的媒体库 id,serverUrl 为其所在服务器:媒体库页直接
+    // 按该服务器凭据浏览(无状态,无需切换会话)。
+    signal openLibrary(string viewId, string serverUrl)
     // 打开服务器管理页(未登录提示条入口)。
     signal openServerManager()
 
@@ -20,8 +21,6 @@ Item {
     // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
     // 实现无限循环(网上通用做法:首尾复制模型作缓冲)。
     property var loopRows: []
-    // 跨服导航:等待账号切换成功后再执行的跳转(见 ensureAccount)。
-    property var pendingNav: null
     // 当前逻辑行(0..rows-1)与实测行距(负间距布局下相邻行 y 之差)。
     // 滚动直接按逻辑行换算 contentY(夹取在副本范围内),不依赖
     // indexAt/positionViewAtIndex 的估计定位——堆叠负间距下它们会错位,
@@ -358,24 +357,20 @@ Item {
     }
 
     // Enter/回车进入当前选中的块:库海报打开媒体库页,条目进详情。
-    // 与卡片点击走同一路径(跨账号先切换会话)。
+    // 与卡片点击走同一路径(行数据带目标服务器,浏览无状态化后无需切会话)。
     function activateFocus() {
         const row = root.focusRow()
         if (!row || !row.rowData)
             return
         if (root.focusCol === -1) {
-            root.ensureAccount(row.rowData.accountId, function () {
-                root.openLibrary(row.rowData.viewId)
-            })
+            root.openLibrary(row.rowData.viewId, row.rowData.serverUrl)
             return
         }
         const items = row.rowData.items
         if (root.focusCol >= items.length)
             return
         const item = items[root.focusCol]
-        root.ensureAccount(row.rowData.accountId, function () {
-            root.showDetail(item.id, item.posterId || "", item.name)
-        })
+        root.showDetail(item.id, item.posterId || "", item.name, row.rowData.serverUrl)
     }
 
     // 鼠标按住拖动(跟手方向):上滑→媒体库行前进(内容上移,看到后面
@@ -387,17 +382,6 @@ Item {
             root.moveRow(dy < 0 ? 1 : -1)
         else
             root.moveCol(dx < 0 ? 1 : -1)
-    }
-
-    // 行点击目标账号与当前会话一致则立即执行,否则先切换账号再执行。
-    // 行跨服时切换会话后详情/媒体库页按该服数据打开。
-    function ensureAccount(accountId, action) {
-        if (accountId === "" || accountId === AccountManager.activeAccountId) {
-            action()
-            return
-        }
-        root.pendingNav = action
-        AccountManager.switchAccount(accountId)
     }
 
     // 聚合拉取不依赖当前会话(每服用各自缓存的 token),有账号即拉;
@@ -446,15 +430,6 @@ Item {
         function onAccountsChanged() {
             if (AccountManager.hasAccounts)
                 AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
-        }
-        function onAccountLoginFinished(ok) {
-            if (ok && root.pendingNav) {
-                const nav = root.pendingNav
-                root.pendingNav = null
-                nav()
-            } else if (!ok) {
-                root.pendingNav = null
-            }
         }
     }
     onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
@@ -671,8 +646,7 @@ Item {
                         cardW: Constants.rowLibraryW
                         cardH: Constants.rowHeight
                         selected: rowDelegate.rowIndex === root.focusRowIdx && root.focusCol === -1
-                        cardArea.onClicked: root.ensureAccount(modelData.accountId,
-                            function () { root.openLibrary(modelData.viewId) })
+                        cardArea.onClicked: root.openLibrary(modelData.viewId, modelData.serverUrl)
                     }
                     // 该库最近条目:横向滚动列表,虚拟化渲染。
                     ListView {
@@ -699,11 +673,8 @@ Item {
                                 // 点击即选中该卡,并保持行焦点同步。
                                 root.focusRowIdx = rowDelegate.rowIndex
                                 root.focusCol = index
-                                root.ensureAccount(rowDelegate.rowData.accountId,
-                                    function () {
-                                        root.showDetail(modelData.id, modelData.posterId || "",
-                                                        modelData.name)
-                                    })
+                                root.showDetail(modelData.id, modelData.posterId || "",
+                                                modelData.name, rowDelegate.rowData.serverUrl)
                             }
                         }
                     }

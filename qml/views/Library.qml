@@ -3,20 +3,24 @@ import QtQuick.Controls
 import MoePlayer.Core
 import "qrc:/qml/theme"
 
-//! 媒体库主界面:专注展示当前选中的媒体库条目(分页网格)。
-//! 顶部一行选择媒体库(下拉),主体为条目网格;未连接时显示连接表单兜底登录。
-//! 播放/详情请求经信号交给主窗口处理。
+//! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
+//! 浏览无状态化:serverUrl 为目标服务器,所有请求经
+//! AccountManager.credsForServer 取凭据按服务器路由,不依赖任何会话;
+//! 无账号/凭据失效时显示连接表单(直连登录 = 添加账号)。
+//! 顶部一行选择媒体库(下拉),主体为条目网格;播放/详情经信号交给主窗口。
 Item {
     id: root
 
     signal playRequested(string url, var headers, var meta)
-    // 点击条目进入详情页。
-    signal showDetail(string itemId, string posterId, string title)
+    // 点击条目进入详情页(携带所在服务器)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
     // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
     signal libraryStateSaved(var state)
 
     // 进入页面时选中的媒体库 id(首页点某库海报时传入;空则默认第一个)。
     property string initialViewId: ""
+    // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
+    property string serverUrl: ""
     // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
     property var restore: null
     // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
@@ -27,6 +31,25 @@ Item {
     property string currentSortBy: "DateModified"
     property string currentSortOrder: "Descending"
     property bool busy: false
+    // 该服务器的视图/条目模型(浏览绑定,页面生命周期内一次性取引用)。
+    property var vm: null
+    property var im: null
+
+    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
+    // 可浏览 = 有服务器且凭据有效。
+    readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
+    readonly property bool showForm: !root.browseReady
+    // 服务器显示名:账号名/用户名,未匹配回退地址。
+    function serverLabel() {
+        const accs = AccountManager.accounts
+        for (const a of accs)
+            if (a.serverUrl === root.serverUrl)
+                return a.name !== "" ? a.name : a.userName
+        return root.serverUrl
+    }
 
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
     property var sortOptions: [
@@ -41,41 +64,56 @@ Item {
     // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
     // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
     function applyView(preferredId) {
-        const vm = EmbyClient.viewsModel
-        if (vm.count === 0)
+        if (!root.vm || root.vm.count === 0)
             return
         let idx = 0
-        for (let i = 0; i < vm.count; ++i) {
-            if (vm.idAt(i) === preferredId) {
+        for (let i = 0; i < root.vm.count; ++i) {
+            if (root.vm.idAt(i) === preferredId) {
                 idx = i
                 break
             }
         }
         viewSelector.currentIndex = idx
-        root.currentViewId = vm.idAt(idx)
-        EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+        root.currentViewId = root.vm.idAt(idx)
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
     }
 
     // 切换排序:服务端重查第一页。
     function changeSort(sortBy) {
         root.currentSortBy = sortBy
-        EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
     }
 
+    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
     function connectServer() {
-        EmbyClient.serverUrl = serverField.text
-        root.busy = true
-        statusText.text = "正在连接…"
-        if (userField.text.length > 0 || passField.text.length > 0)
-            EmbyClient.login(userField.text, passField.text)
-        else
-            EmbyClient.fetchPublicInfo()
+        const started = AccountManager.addAccount("", serverField.text, userField.text,
+                                                  passField.text, true)
+        root.busy = started
+        if (started)
+            statusText.text = "正在登录…"
     }
 
-    // 进入页面:会话已在(自动登录/切换账号)则载入目标库;未登录则用当前
-    // 账号信息预填连接表单(密码仅已保存时填入),便于重登。
+    // 进入页面:有服务器则拉取;未指定时默认第一个有效账号;无账号则表单。
     Component.onCompleted: {
-        if (EmbyClient.connected) {
+        if (root.serverUrl === "") {
+            const accs = AccountManager.accounts
+            for (const a of accs) {
+                if (AccountManager.credsForServer(a.serverUrl).token !== "") {
+                    root.serverUrl = a.serverUrl
+                    break
+                }
+            }
+        }
+        if (root.browseReady) {
+            root.vm = EmbyClient.viewsModelFor(root.serverUrl)
+            root.im = EmbyClient.itemsModelFor(root.serverUrl)
+            // 无状态化后视图不会预载,主动拉取(onViewsReceived 后应用目标库)。
+            const c = root.creds()
+            EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
             if (root.restore && root.restore.viewId !== "") {
                 // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
                 root.currentSortBy = root.restore.sortBy
@@ -91,16 +129,9 @@ Item {
             } else {
                 root.applyView(root.initialViewId)
             }
-        } else if (AccountManager.activeAccountId !== "") {
-            serverField.text = EmbyClient.serverUrl
-            const acc = AccountManager.accounts
-            for (const a of acc) {
-                if (a.id === AccountManager.activeAccountId) {
-                    userField.text = a.userName
-                    passField.text = AccountManager.passwordFor(a.id)
-                    break
-                }
-            }
+        } else {
+            // 无账号/凭据失效:预填默认服务器地址,等待表单直连。
+            serverField.text = SettingsStore.serverUrl
         }
     }
 
@@ -131,16 +162,15 @@ Item {
             font.bold: true
         }
 
-        // --- 连接表单(未连接时) ---
+        // --- 连接表单(无有效凭据时) ---
         Row {
-            visible: !EmbyClient.connected
+            visible: root.showForm
             spacing: 10
             TextField {
                 id: serverField
                 width: 340
                 placeholderText: "服务器地址 (http://host:8096)"
-                text: EmbyClient.serverUrl
-                onEditingFinished: EmbyClient.serverUrl = text
+                text: SettingsStore.serverUrl
             }
             TextField {
                 id: userField
@@ -162,22 +192,24 @@ Item {
 
         // --- 媒体库选择(已连接时) ---
         Row {
-            visible: EmbyClient.connected
+            visible: root.browseReady
             spacing: 12
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: EmbyClient.serverName + " · " + EmbyClient.userName
+                text: root.serverLabel()
                 color: Theme.textMuted
                 font.pixelSize: 13
             }
             ComboBox {
                 id: viewSelector
                 width: 320
-                model: EmbyClient.viewsModel
+                model: root.vm
                 textRole: "name"
                 onActivated: function (index) {
-                    root.currentViewId = EmbyClient.viewsModel.idAt(index)
-                    EmbyClient.fetchItems(root.currentViewId, 0, Constants.pageSize,
+                    root.currentViewId = root.vm.idAt(index)
+                    const c = root.creds()
+                    EmbyClient.fetchItems(root.serverUrl, c.token, c.userId,
+                                          root.currentViewId, 0, Constants.pageSize,
                                           root.currentSortBy, root.currentSortOrder)
                 }
             }
@@ -192,10 +224,6 @@ Item {
                     root.changeSort(root.sortOptions[index].key)
                 }
             }
-            Button {
-                text: "断开"
-                onClicked: EmbyClient.disconnectServer()
-            }
         }
 
         Text {
@@ -208,7 +236,7 @@ Item {
     // 主体:选中媒体库的条目网格(填充头部以下空间)。
     GridView {
         id: grid
-        visible: EmbyClient.connected
+        visible: root.browseReady
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: headerCol.bottom
@@ -219,21 +247,22 @@ Item {
         cellWidth: Constants.cellW
         cellHeight: Constants.cellH
         clip: true
-        model: EmbyClient.itemsModel
+        model: root.im
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
         onAtYEndChanged: {
             if (!atYEnd)
                 return
-            const m = EmbyClient.itemsModel
-            if (root.currentViewId !== "" && m.count < m.totalCount && !root.busy) {
+            if (root.currentViewId !== "" && root.im.count < root.im.totalCount && !root.busy) {
                 root.busy = true
-                EmbyClient.fetchItems(root.currentViewId, m.count, Constants.pageSize,
+                const c = root.creds()
+                EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                                      root.im.count, Constants.pageSize,
                                       root.currentSortBy, root.currentSortOrder)
             }
         }
         // 空库提示。
         Text {
-            visible: EmbyClient.itemsModel.count === 0 && !root.busy
+            visible: root.im && root.im.count === 0 && !root.busy
             anchors.centerIn: parent
             text: "该媒体库暂无条目"
             color: Theme.textMuted
@@ -241,7 +270,7 @@ Item {
         }
         // 加载骨架:首屏数据未到前铺占位卡,避免转圈引起布局跳动。
         Flow {
-            visible: root.busy && EmbyClient.itemsModel.count === 0
+            visible: root.busy && root.im && root.im.count === 0
             anchors.fill: parent
             spacing: 16
             Repeater {
@@ -272,41 +301,35 @@ Item {
             runtimeTicks: model.runtimeTicks
             unplayedCount: model.unplayedCount
             itemType: model.type
-            onClicked: root.showDetail(model.id, model.posterId, model.name)
+            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
             onFavoriteRequested: function (id, fav) {
-                EmbyClient.setFavorite(id, fav)
-                EmbyClient.itemsModel.setFavoriteById(id, fav)
+                const c = root.creds()
+                EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)
+                root.im.setFavoriteById(id, fav)
             }
             onWatchedRequested: function (id, played) {
-                EmbyClient.setWatched(id, played)
-                EmbyClient.itemsModel.setPlayedById(id, played)
+                const c = root.creds()
+                EmbyClient.setWatched(root.serverUrl, c.token, c.userId, id, played)
+                root.im.setPlayedById(id, played)
             }
         }
     }
 
-    // EmbyClient 异步结果:按信号推进连接状态并更新界面。
+    // 异步结果:按服务器路由(仅处理本页服务器的响应)。
     Connections {
         target: EmbyClient
-        function onPublicInfoReceived() {
-            if (!EmbyClient.connected)
-                statusText.text = "服务器：" + EmbyClient.serverName + " v" + EmbyClient.serverVersion
-                                  + "（未登录，仅显示公开信息）"
-            root.busy = false
-        }
-        function onLoginSucceeded() {
-            statusText.text = "已连接：" + EmbyClient.serverName + " v" + EmbyClient.serverVersion
-                              + " · " + EmbyClient.userName
-            EmbyClient.fetchViews()
-        }
-        // 视图就绪(登录/切换账号后异步到达):应用目标库,未指定则第一个。
-        function onViewsReceived() {
-            if (EmbyClient.viewsModel.count > 0)
+        function onViewsReceived(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            if (root.vm && root.vm.count > 0)
                 root.applyView(root.initialViewId)
             root.busy = false
         }
-        function onItemsReceived() {
-            statusText.text = "已加载 " + EmbyClient.itemsModel.count + " / "
-                              + EmbyClient.itemsModel.totalCount + " 个条目"
+        function onItemsReceived(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            statusText.text = "已加载 " + root.im.count + " / "
+                              + root.im.totalCount + " 个条目"
             root.busy = false
             // 恢复浏览位置:重拉完成后定位到上次离开处(clamp 到可滚范围),
             // 后续触底自动补页。仅消费一次。
@@ -317,14 +340,32 @@ Item {
                 root.pendingRestoreY = 0
             }
         }
-        function onErrorOccurred(message) {
+        function onErrorOccurred(serverUrl, message) {
+            if (serverUrl !== root.serverUrl)
+                return
             root.busy = false
             statusText.text = "失败：" + message
         }
-        // 实时通道状态(连接成功后建立)。
-        function onWsConnectedChanged() {
-            if (EmbyClient.wsConnected)
-                statusText.text = "实时通道已连接"
+    }
+
+    // 表单直连(添加账号)结果:成功即切换到该服务器浏览。
+    Connections {
+        target: AccountManager
+        function onAccountLoginFinished(ok, message) {
+            if (ok) {
+                if (root.serverUrl !== serverField.text.trimmed())
+                    root.serverUrl = serverField.text.trimmed()
+                if (root.browseReady && root.vm === null) {
+                    root.vm = EmbyClient.viewsModelFor(root.serverUrl)
+                    root.im = EmbyClient.itemsModelFor(root.serverUrl)
+                    const c = root.creds()
+                    EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
+                }
+                root.busy = false
+            } else {
+                root.busy = false
+                statusText.text = "登录失败：" + message
+            }
         }
     }
 }

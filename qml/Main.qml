@@ -26,6 +26,8 @@ ApplicationWindow {
     property int lastEpisodePushTime: 0
     // 媒体库页离开时的状态(viewId/排序/滚动位置),再次进入时恢复。
     property var libraryState: null
+    // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
+    property string currentServerUrl: ""
 
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
@@ -65,34 +67,43 @@ ApplicationWindow {
         onTriggered: root.close()
     }
 
-    // 启动自动登录失败(token 失效):清掉无效会话(connected 变 false),
-    // 首页显示未登录提示条,引导回服务器管理重登。
-    Connections {
-        target: AccountManager
-        function onAutoLoginFinished(ok) {
-            if (!ok)
-                EmbyClient.disconnectServer()
-        }
-    }
-
     StackView {
         id: stackView
         anchors.fill: parent
         initialItem: homePage
     }
 
-    // 全局搜索浮层(Ctrl+K):覆盖所有页面,结果点击进详情。
+    // 打开详情页:记录浏览服务器(全局搜索路由),防抖在调用方。
+    function pushDetail(itemId, posterId, title, serverUrl) {
+        if (serverUrl)
+            root.currentServerUrl = serverUrl
+        stackView.push(detailPage, {
+            itemId: itemId,
+            posterId: posterId,
+            title: title,
+            serverUrl: serverUrl || root.currentServerUrl
+        })
+    }
+    // 打开媒体库页:记录浏览服务器。
+    function pushLibrary(viewId, serverUrl) {
+        if (serverUrl)
+            root.currentServerUrl = serverUrl
+        stackView.push(libraryPage, {
+            initialViewId: viewId || "",
+            serverUrl: serverUrl || root.currentServerUrl,
+            restore: root.libraryState || null
+        })
+    }
+
+    // 全局搜索浮层(Ctrl+K):按最近浏览的服务器搜索,结果点击进详情。
     SearchOverlay {
         id: searchOverlay
         anchors.fill: parent
         visible: false
-        onShowDetail: function (itemId, posterId, title) {
+        serverUrl: root.currentServerUrl
+        onShowDetail: function (itemId, posterId, title, serverUrl) {
             searchOverlay.close()
-            stackView.push(detailPage, {
-                itemId: itemId,
-                posterId: posterId,
-                title: title
-            })
+            root.pushDetail(itemId, posterId, title, serverUrl)
         }
     }
 
@@ -109,7 +120,7 @@ ApplicationWindow {
 
             Button {
                 text: "媒体库"
-                onClicked: stackView.push(libraryPage, { restore: root.libraryState || null })
+                onClicked: root.pushLibrary("", root.currentServerUrl)
             }
             Button {
                 text: "设置"
@@ -122,15 +133,11 @@ ApplicationWindow {
     Component {
         id: homePage
         Home {
-            onShowDetail: function (itemId, posterId, title) {
-                stackView.push(detailPage, {
-                    itemId: itemId,
-                    posterId: posterId,
-                    title: title
-                })
+            onShowDetail: function (itemId, posterId, title, serverUrl) {
+                root.pushDetail(itemId, posterId, title, serverUrl)
             }
-            onOpenLibrary: function (viewId) {
-                stackView.push(libraryPage, { initialViewId: viewId || "", restore: root.libraryState || null })
+            onOpenLibrary: function (viewId, serverUrl) {
+                root.pushLibrary(viewId, serverUrl)
             }
             onOpenServerManager: stackView.push(serverManagerPage)
         }
@@ -146,15 +153,11 @@ ApplicationWindow {
             onLibraryStateSaved: function (state) {
                 root.libraryState = state
             }
-            onShowDetail: function (itemId, posterId, title) {
+            onShowDetail: function (itemId, posterId, title, serverUrl) {
                 // 双击卡片会连发两次 showDetail,已打开详情页时忽略,避免叠出双实例。
                 if (stackView.currentItem && stackView.currentItem.isDetailPage)
                     return
-                stackView.push(detailPage, {
-                    itemId: itemId,
-                    posterId: posterId,
-                    title: title
-                })
+                root.pushDetail(itemId, posterId, title, serverUrl)
             }
         }
     }
@@ -170,17 +173,13 @@ ApplicationWindow {
             // 注意不能用"当前页是详情页"判断防重复:点击某集时当前页本就是
             // 详情页(季浏览模式),会拦截全部点击;改用同集短时间防抖
             // (StackView 切换动画窗口期内双击会命中旧页面两次)。
-            onShowEpisodeDetail: function (itemId, posterId, title) {
+            onShowEpisodeDetail: function (itemId, posterId, title, serverUrl) {
                 const now = Date.now()
                 if (itemId === root.lastEpisodePush && now - root.lastEpisodePushTime < Constants.episodePushDebounceMs)
                     return
                 root.lastEpisodePush = itemId
                 root.lastEpisodePushTime = now
-                stackView.push(detailPage, {
-                    itemId: itemId,
-                    posterId: posterId,
-                    title: title
-                })
+                root.pushDetail(itemId, posterId, title, serverUrl)
             }
         }
     }

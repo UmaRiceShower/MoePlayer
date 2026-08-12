@@ -50,8 +50,9 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
     };
 }
 
-// 解析一条 Emby Items JSON 为模型条目;withPosters 为真时解析 ImageTags.Primary。
-static MediaItem parseItem(const QJsonValue &v, bool withPosters)
+// 解析一条 Emby Items JSON 为模型条目;withPosters 为真时解析 ImageTags.Primary,
+// 海报 id 加服务器前缀(prefix~itemId~tag,无状态浏览按服务器路由取图)。
+static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString &prefix)
 {
     const QJsonObject o = v.toObject();
     MediaItem it;
@@ -72,7 +73,7 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters)
                                 .toObject().value(QLatin1String("Primary")).toString();
         // 分隔符用 ~ 而非 |:后者在 image:// URL 中会被转义,见 PosterProvider。
         if (!tag.isEmpty())
-            it.posterId = it.id + QLatin1Char('~') + tag;
+            it.posterId = prefix + it.id + QLatin1Char('~') + tag;
     }
     return it;
 }
@@ -83,7 +84,7 @@ void MediaItemModel::setItems(const QJsonArray &items, bool withPosters)
     m_items.clear();
     m_items.reserve(items.size());
     for (const auto &v : items) {
-        const MediaItem it = parseItem(v, withPosters);
+        const MediaItem it = parseItem(v, withPosters, m_serverPrefix);
         if (!it.id.isEmpty())
             m_items.append(it);
     }
@@ -97,7 +98,7 @@ void MediaItemModel::appendItems(const QJsonArray &items, bool withPosters)
     QList<MediaItem> page;
     page.reserve(items.size());
     for (const auto &v : items) {
-        const MediaItem it = parseItem(v, withPosters);
+        const MediaItem it = parseItem(v, withPosters, m_serverPrefix);
         if (!it.id.isEmpty())
             page.append(it);
     }
