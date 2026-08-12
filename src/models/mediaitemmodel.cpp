@@ -18,10 +18,16 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
         return {};
     const MediaItem &it = m_items.at(index.row());
     switch (role) {
-    case NameRole:     return it.name;
-    case IdRole:       return it.id;
-    case PosterIdRole: return it.posterId;
-    case TypeRole:     return it.type;
+    case NameRole:           return it.name;
+    case IdRole:             return it.id;
+    case PosterIdRole:       return it.posterId;
+    case TypeRole:           return it.type;
+    case YearRole:           return it.year;
+    case RatingRole:         return it.rating;
+    case PlayedRole:         return it.played;
+    case PositionTicksRole:  return it.positionTicks;
+    case RuntimeTicksRole:   return it.runtimeTicks;
+    case UnplayedCountRole:  return it.unplayedCount;
     }
     return {};
 }
@@ -33,6 +39,12 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
         { IdRole, "id" },
         { PosterIdRole, "posterId" },
         { TypeRole, "type" },
+        { YearRole, "year" },
+        { RatingRole, "rating" },
+        { PlayedRole, "played" },
+        { PositionTicksRole, "positionTicks" },
+        { RuntimeTicksRole, "runtimeTicks" },
+        { UnplayedCountRole, "unplayedCount" },
     };
 }
 
@@ -44,6 +56,14 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters)
     it.name = o.value(QLatin1String("Name")).toString();
     it.id = o.value(QLatin1String("Id")).toString();
     it.type = o.value(QLatin1String("Type")).toString();
+    it.year = o.value(QLatin1String("ProductionYear")).toInt(0);
+    it.rating = o.value(QLatin1String("CommunityRating")).toDouble(0);
+    it.runtimeTicks = o.value(QLatin1String("RunTimeTicks")).toDouble(0);
+    // UserData 随 /Items 列表返回:已看状态、观看进度、未看集数零额外请求。
+    const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+    it.played = ud.value(QLatin1String("Played")).toBool(false);
+    it.positionTicks = ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0);
+    it.unplayedCount = ud.value(QLatin1String("UnplayedItemCount")).toInt(0);
     if (withPosters) {
         const QString tag = o.value(QLatin1String("ImageTags"))
                                 .toObject().value(QLatin1String("Primary")).toString();

@@ -9,11 +9,18 @@ struct MediaItem {
     QString id;
     QString posterId;
     QString type;
+    int year = 0;              // ProductionYear,无则为 0。
+    double rating = 0;         // CommunityRating,无则为 0。
+    bool played = false;       // UserData.Played 已看完。
+    double positionTicks = 0;  // UserData.PlaybackPositionTicks 观看进度。
+    double runtimeTicks = 0;   // RunTimeTicks 总时长。
+    int unplayedCount = 0;     // UserData.UnplayedItemCount 未看集数(剧集)。
 };
 
 //! Emby 视图/媒体库条目列表模型,由 EmbyClient 填充。
 //! 角色:name(名称)、id(条目 id)、posterId("<itemId>~<tag>",无主图则为空)、
-//! type(条目类型,如 "Movie")。
+//! type(条目类型,如 "Movie")、year(年份)、rating(评分)、played(已看完)、
+//! positionTicks/runtimeTicks(观看进度/总时长)、unplayedCount(未看集数)。
 class MediaItemModel : public QAbstractListModel
 {
     Q_OBJECT
@@ -26,6 +33,12 @@ public:
         IdRole,
         PosterIdRole,
         TypeRole,
+        YearRole,
+        RatingRole,
+        PlayedRole,
+        PositionTicksRole,
+        RuntimeTicksRole,
+        UnplayedCountRole,
     };
 
     explicit MediaItemModel(QObject *parent = nullptr);

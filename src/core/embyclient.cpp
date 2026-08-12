@@ -304,7 +304,9 @@ void EmbyClient::fetchItems(const QString &viewId, int startIndex, int limit)
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     // 不限制类型、不递归:返回库的顶层条目(Movies→Movie,TV Shows→Series,
     // Home Videos/Music Videos→Movie),分页与 TotalRecordCount 仍适用。
-    q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
+    // UserData 携带已看/进度/未看集数,评分/年份供卡片角标,零额外请求。
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,CommunityRating,RunTimeTicks,UserData"));
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 200))); // Emby 单页上限 200
     const int seq = ++m_itemsSeq;
