@@ -25,6 +25,7 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
     case YearRole:           return it.year;
     case RatingRole:         return it.rating;
     case PlayedRole:         return it.played;
+    case FavoriteRole:       return it.favorite;
     case PositionTicksRole:  return it.positionTicks;
     case RuntimeTicksRole:   return it.runtimeTicks;
     case UnplayedCountRole:  return it.unplayedCount;
@@ -42,6 +43,7 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
         { YearRole, "year" },
         { RatingRole, "rating" },
         { PlayedRole, "played" },
+        { FavoriteRole, "favorite" },
         { PositionTicksRole, "positionTicks" },
         { RuntimeTicksRole, "runtimeTicks" },
         { UnplayedCountRole, "unplayedCount" },
@@ -62,6 +64,7 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters)
     // UserData 随 /Items 列表返回:已看状态、观看进度、未看集数零额外请求。
     const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
     it.played = ud.value(QLatin1String("Played")).toBool(false);
+    it.favorite = ud.value(QLatin1String("IsFavorite")).toBool(false);
     it.positionTicks = ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0);
     it.unplayedCount = ud.value(QLatin1String("UnplayedItemCount")).toInt(0);
     if (withPosters) {
@@ -135,4 +138,20 @@ QString MediaItemModel::nameAt(int row) const
 QString MediaItemModel::posterIdAt(int row) const
 {
     return (row >= 0 && row < m_items.size()) ? m_items.at(row).posterId : QString();
+}
+
+void MediaItemModel::setPlayedAt(int row, bool played)
+{
+    if (row < 0 || row >= m_items.size() || m_items.at(row).played == played)
+        return;
+    m_items[row].played = played;
+    emit dataChanged(index(row), index(row), { PlayedRole });
+}
+
+void MediaItemModel::setFavoriteAt(int row, bool fav)
+{
+    if (row < 0 || row >= m_items.size() || m_items.at(row).favorite == fav)
+        return;
+    m_items[row].favorite = fav;
+    emit dataChanged(index(row), index(row), { FavoriteRole });
 }

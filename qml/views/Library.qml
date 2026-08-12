@@ -17,7 +17,20 @@ Item {
     property string initialViewId: ""
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
+    // 当前服务端排序(DateLastMediaAdded 在 4.9.5 条目级查询报错,不在档位内)。
+    property string currentSortBy: "DateModified"
+    property string currentSortOrder: "Descending"
     property bool busy: false
+
+    // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
+    property var sortOptions: [
+        { label: "加入时间", key: "DateCreated" },
+        { label: "修改时间", key: "DateModified" },
+        { label: "上映日期", key: "PremiereDate" },
+        { label: "年份", key: "ProductionYear" },
+        { label: "评分", key: "CommunityRating" },
+        { label: "名称", key: "SortName" }
+    ]
 
     // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
     // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
@@ -34,7 +47,13 @@ Item {
         }
         viewSelector.currentIndex = idx
         root.currentViewId = vm.idAt(idx)
-        EmbyClient.fetchItems(root.currentViewId, 0, 200)
+        EmbyClient.fetchItems(root.currentViewId, 0, 200, root.currentSortBy, root.currentSortOrder)
+    }
+
+    // 切换排序:服务端重查第一页。
+    function changeSort(sortBy) {
+        root.currentSortBy = sortBy
+        EmbyClient.fetchItems(root.currentViewId, 0, 200, root.currentSortBy, root.currentSortOrder)
     }
 
     function connectServer() {
@@ -127,7 +146,19 @@ Item {
                 textRole: "name"
                 onActivated: function (index) {
                     root.currentViewId = EmbyClient.viewsModel.idAt(index)
-                    EmbyClient.fetchItems(root.currentViewId, 0, 200)
+                    EmbyClient.fetchItems(root.currentViewId, 0, 200,
+                                          root.currentSortBy, root.currentSortOrder)
+                }
+            }
+            ComboBox {
+                id: sortSelector
+                width: 130
+                model: root.sortOptions
+                textRole: "label"
+                // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
+                currentIndex: 1
+                onActivated: function (index) {
+                    root.changeSort(root.sortOptions[index].key)
                 }
             }
             Button {
@@ -165,7 +196,8 @@ Item {
             const m = EmbyClient.itemsModel
             if (root.currentViewId !== "" && m.count < m.totalCount && !root.busy) {
                 root.busy = true
-                EmbyClient.fetchItems(root.currentViewId, m.count, 200)
+                EmbyClient.fetchItems(root.currentViewId, m.count, 200,
+                                      root.currentSortBy, root.currentSortOrder)
             }
         }
         // 空库提示。
@@ -312,9 +344,55 @@ Item {
                     }
                 }
             }
+            HoverHandler {
+                id: cardHover
+            }
             MouseArea {
                 anchors.fill: parent
                 onClicked: root.showDetail(model.id, model.posterId, model.name)
+            }
+            // 悬停操作按钮置于最上层(MouseArea 之后声明),可点击。
+            Row {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: 36
+                anchors.rightMargin: 8
+                visible: cardHover.hovered
+                spacing: 6
+                Button {
+                    width: 30
+                    height: 30
+                    padding: 0
+                    background: Rectangle { radius: 15; color: "#000000aa" }
+                    contentItem: Text {
+                        text: model.favorite ? "♥" : "♡"
+                        color: model.favorite ? "#f778ba" : "#ffffff"
+                        font.pixelSize: 16
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    onClicked: {
+                        EmbyClient.setFavorite(model.id, !model.favorite)
+                        EmbyClient.itemsModel.setFavoriteAt(index, !model.favorite)
+                    }
+                }
+                Button {
+                    width: 30
+                    height: 30
+                    padding: 0
+                    background: Rectangle { radius: 15; color: model.played ? "#2ea043" : "#000000aa" }
+                    contentItem: Text {
+                        text: "✓"
+                        color: "#ffffff"
+                        font.pixelSize: 15
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    onClicked: {
+                        EmbyClient.setWatched(model.id, !model.played)
+                        EmbyClient.itemsModel.setPlayedAt(index, !model.played)
+                    }
+                }
             }
         }
     }
