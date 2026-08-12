@@ -63,7 +63,21 @@ Item {
     // 固定不动,只移动剧集/电影的海报图(rowItems 是独立横向 ListView)。
     // 动画对象每次新建并先 stop 再 destroy(与垂直滚动同模式)。
     function scrollRow(step) {
-        const row = list.itemAtIndex(root.absRow)
+        // 取视口中心行:负间距堆叠下 contentY=absRow×rowStep 使 absRow 行
+        // 贴视口顶部,视觉居中的无缩放行要按几何中心距实测(遍历可见行)。
+        let row = null
+        let bestDist = Infinity
+        for (let i = 0; i < list.count; ++i) {
+            const d = list.itemAtIndex(i)
+            if (!d)
+                continue
+            const cy = d.y + d.height / 2 - list.contentY
+            const dist = Math.abs(cy - list.height / 2)
+            if (dist < bestDist) {
+                bestDist = dist
+                row = d
+            }
+        }
         if (!row || !row.rowItemsView)
             return
         const v = row.rowItemsView
