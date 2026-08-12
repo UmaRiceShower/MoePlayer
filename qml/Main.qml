@@ -86,6 +86,21 @@ ApplicationWindow {
         initialItem: homePage
     }
 
+    // 全局搜索浮层(Ctrl+K):覆盖所有页面,结果点击进详情。
+    SearchOverlay {
+        id: searchOverlay
+        anchors.fill: parent
+        visible: false
+        onShowDetail: function (itemId, posterId, title) {
+            searchOverlay.close()
+            stackView.push(detailPage, {
+                itemId: itemId,
+                posterId: posterId,
+                title: title
+            })
+        }
+    }
+
     // 功能入口集中右下角(布局待按首页效果重新设计)。
     footer: Rectangle {
         height: 44
@@ -184,7 +199,7 @@ ApplicationWindow {
         }
     }
 
-    // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S。
+    // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S,搜索 Ctrl+K。
     Shortcut {
         sequence: "Ctrl+F"
         // pop 到根即返回首页(initialItem);已在首页时无操作。
@@ -197,6 +212,10 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+S"
         onActivated: stackView.push(settingsPage)
+    }
+    Shortcut {
+        sequence: "Ctrl+K"
+        onActivated: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
     }
 
     Component {
