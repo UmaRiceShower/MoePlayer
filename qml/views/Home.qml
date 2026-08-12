@@ -56,8 +56,46 @@ Item {
     // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
     // 时长按滚轮速度动态换算,快速滚动时动画更快,内容跟得上节奏。
     property var scrollAnim: null
+    // 横向条目滚动动画对象(普通滚轮驱动),模式同 scrollAnim。
+    property var hAnim: null
+
+    // 横向滚动当前居中行的条目:每次一格(卡片宽+间距),行首库海报
+    // 固定不动,只移动剧集/电影的海报图(rowItems 是独立横向 ListView)。
+    // 动画对象每次新建并先 stop 再 destroy(与垂直滚动同模式)。
+    function scrollRow(step) {
+        const row = list.itemAtIndex(root.absRow)
+        if (!row || !row.rowItemsView)
+            return
+        const v = row.rowItemsView
+        const cell = 112 + 12
+        const from = v.contentX
+        const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
+        const dist = Math.abs(target - from)
+        if (dist < 0.5)
+            return
+        root.noteWheel(step)
+        if (root.hAnim) {
+            root.hAnim.stop()
+            root.hAnim.destroy()
+            root.hAnim = null
+        }
+        root.hAnim = Qt.createQmlObject(
+            'import QtQuick; NumberAnimation { property: "contentX"; easing.type: Easing.OutCubic }',
+            root)
+        root.hAnim.target = v
+        root.hAnim.from = from
+        root.hAnim.to = target
+        root.hAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
+        root.hAnim.start()
+    }
 
     function rebuildLoop() {
+        // 模型重建旧行销毁,横向动画若还在跑会写到已销毁的视图上,先停。
+        if (root.hAnim) {
+            root.hAnim.stop()
+            root.hAnim.destroy()
+            root.hAnim = null
+        }
         const prevAbs = root.absRow
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
         // 模型重建后旧 contentY 可能越界(视口外全黑),延迟到布局更新后
@@ -334,6 +372,8 @@ Item {
             // 行数据快照:modelData 是委托上下文变量,不能作为对象属性
             // (rowDelegate.modelData)访问;存入显式属性供嵌套卡片取行级信息。
             property var rowData: modelData
+            // 供 scrollRow 访问横向条目视图(只移动条目海报)。
+            property alias rowItemsView: rowItems
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
             function centerDist() {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
@@ -424,11 +464,17 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
-            // angleDelta.y 向上为正:向上滚(正)则逻辑行减,向下滚(负)则加。
-            // 速度记账在 scrollBy 内统一做(noteWheel),这里不重复。
+            // angleDelta.y 向上为正:向上滚(正)则向前(左),向下滚(负)则向后。
+            // 速度记账统一在 scrollBy/scrollRow 内做(noteWheel),这里不重复。
             const delta = Math.round(wheel.angleDelta.y / 120)
-            if (delta !== 0)
+            if (delta === 0)
+                return
+            // Ctrl+滚轮:切换媒体库行(原垂直滚动逻辑);普通滚轮:当前
+            // 居中库的条目横向滚动(行首库海报固定,只移动条目海报)。
+            if (wheel.modifiers & Qt.ControlModifier)
                 root.scrollBy(-delta)
+            else
+                root.scrollRow(-delta)
             wheel.accepted = true
         }
     }
