@@ -59,13 +59,16 @@ Item {
     // 横向条目滚动动画对象(普通滚轮驱动),模式同 scrollAnim。
     property var hAnim: null
 
-    // 横向滚动当前居中行的条目:每次一格(卡片宽+间距),行首库海报
-    // 固定不动,只移动剧集/电影的海报图(rowItems 是独立横向 ListView)。
-    // 动画对象每次新建并先 stop 再 destroy(与垂直滚动同模式)。
-    function scrollRow(step) {
-        // 取视口中心行:负间距堆叠下 contentY=absRow×rowStep 使 absRow 行
-        // 贴视口顶部,视觉居中的无缩放行要按几何中心距实测(遍历可见行)。
-        let row = null
+    // 选中块:焦点行(loopRows 索引,几何居中行)与列(-1=库海报,≥0=条目)。
+    // 上下滚动后选中新居中行的库海报;左右键在可视区内移动列,
+    // 到边缘滚动展示内容,内容到头做拉动画。
+    property int focusRowIdx: 0
+    property int focusCol: -1
+
+    // 几何居中行(loopRows 索引):负间距堆叠下视口中心的行——absRow
+    // 行贴视口顶部,视觉居中的无缩放行必须按中心距实测(遍历可见行)。
+    function findCenterRowIndex() {
+        let best = -1
         let bestDist = Infinity
         for (let i = 0; i < list.count; ++i) {
             const d = list.itemAtIndex(i)
@@ -75,21 +78,23 @@ Item {
             const dist = Math.abs(cy - list.height / 2)
             if (dist < bestDist) {
                 bestDist = dist
-                row = d
+                best = i
             }
         }
-        if (!row || !row.rowItemsView)
-            return
-        const v = row.rowItemsView
-        // 每次滚轮移动两张卡(美观:一格一张太碎,两张是流畅浏览的
-        // 常用节奏);OutBack 末段轻微回弹,与垂直大幅滚动一致。
-        const cell = 2 * (112 + 12)
+        return best
+    }
+
+    // 焦点行 delegate(可能未实例化返回 null)。
+    function focusRow() {
+        return list.itemAtIndex(root.focusRowIdx)
+    }
+
+    // 焦点行横向条目视图的 contentX 动画(新建对象,先 stop 再 destroy)。
+    function animateContentX(v, to, withBounce) {
         const from = v.contentX
-        const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
-        const dist = Math.abs(target - from)
+        const dist = Math.abs(to - from)
         if (dist < 0.5)
             return
-        root.noteWheel(step)
         if (root.hAnim) {
             root.hAnim.stop()
             root.hAnim.destroy()
@@ -100,12 +105,122 @@ Item {
             root)
         root.hAnim.target = v
         root.hAnim.from = from
-        root.hAnim.to = target
-        // 末段回弹:boomerang 曲线越过目标约 10% 再回落。
-        root.hAnim.easing.type = Easing.OutBack
-        root.hAnim.easing.overshoot = 1.6
+        root.hAnim.to = to
+        if (withBounce) {
+            root.hAnim.easing.type = Easing.OutBack
+            root.hAnim.easing.overshoot = 1.6
+        }
         root.hAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
         root.hAnim.start()
+    }
+
+    // 横向滚动展示当前焦点行(居中行)的条目:每次滚两卡,行首库海报
+    // 固定不动,只移动剧集/电影的海报图。
+    function scrollRow(step) {
+        const row = root.focusRow()
+        if (!row || !row.rowItemsView)
+            return
+        const v = row.rowItemsView
+        // 每次滚两卡(美观:一格一张太碎,两张是流畅浏览的常用节奏)。
+        const cell = 2 * (112 + 12)
+        const from = v.contentX
+        const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
+        if (Math.abs(target - from) < 0.5)
+            return
+        root.noteWheel(step)
+        root.animateContentX(v, target, true)
+    }
+
+    // 上下滚动切换媒体库行(上下键 / Ctrl+滚轮):滚动后选中新居中行的
+    // 媒体库海报(focusRowIdx 由 contentY 变化实时更新)。
+    function moveRow(step) {
+        root.focusCol = -1
+        root.scrollBy(step)
+    }
+
+    // 左右移动选中块(左右键 / 普通滚轮):可视区内逐列移动;焦点到
+    // 可视区边缘时滚动展示内容;内容到头时做拉动画。delta +1 向右。
+    function moveCol(delta) {
+        const row = root.focusRow()
+        if (!row || !row.rowItemsView)
+            return
+        const v = row.rowItemsView
+        const cell = 112 + 12
+        const maxCol = v.count - 1
+        if (root.focusCol === -1) {
+            if (delta > 0) {
+                // 库海报 → 第一个条目;内容已滚动则先滚回开头。
+                root.focusCol = 0
+                if (v.contentX > 0.5)
+                    root.animateContentX(v, 0, false)
+                return
+            }
+            root.pullAnim(-1) // 库海报已是左端,左拉表示到头
+            return
+        }
+        const newCol = root.focusCol + delta
+        if (newCol < 0) {
+            // 回到库海报,内容滚回开头。
+            root.focusCol = -1
+            if (v.contentX > 0.5)
+                root.animateContentX(v, 0, false)
+            return
+        }
+        if (newCol > maxCol) {
+            // 内容末尾:还能滚动则滚动展示,否则到头拉动画。
+            if (v.contentX + v.width < v.contentWidth - 1)
+                root.scrollRow(1)
+            else
+                root.pullAnim(1)
+            return
+        }
+        root.focusCol = newCol
+        // 焦点出可视区则滚动跟随(右缘向前滚,左缘向后滚)。
+        const colStart = Math.floor(v.contentX / cell)
+        const colEnd = colStart + Math.floor(v.width / cell) - 1
+        if (root.focusCol > colEnd)
+            root.scrollRow(1)
+        else if (root.focusCol < colStart)
+            root.scrollRow(-1)
+    }
+
+    // 到头拉动画:内容向滚动意图方向超冲一点再弹回(橡皮筋,表示已到
+    // 尽头)。direction +1 = 向右滚的意图, -1 = 向左。
+    // 两段顺序动画用声明式 SequentialAnimation(动态设 target/from/to),
+    // 避免 JS 闭包持有动态对象不可靠的问题。
+    function pullAnim(direction) {
+        const row = root.focusRow()
+        if (!row || !row.rowItemsView)
+            return
+        const v = row.rowItemsView
+        const maxX = Math.max(0, v.contentWidth - v.width)
+        const over = 24
+        pullSeq.stop()
+        pullOut.target = v
+        pullOut.from = v.contentX
+        pullOut.to = direction > 0 ? maxX + over : -over
+        pullBack.target = v
+        pullBack.from = pullOut.to
+        pullBack.to = direction > 0 ? maxX : 0
+        pullSeq.start()
+    }
+
+    // 拉动画两段:先冲出边界(约 24px),再弹回边界。
+    SequentialAnimation {
+        id: pullSeq
+        NumberAnimation {
+            id: pullOut
+            property: "contentX"
+            duration: 110
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            id: pullBack
+            property: "contentX"
+            duration: 240
+            easing.type: Easing.OutBack
+            easing.overshoot: 1.4
+        }
     }
 
     function rebuildLoop() {
@@ -115,6 +230,7 @@ Item {
             root.hAnim.destroy()
             root.hAnim = null
         }
+        pullSeq.stop()
         const prevAbs = root.absRow
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
         // 模型重建后旧 contentY 可能越界(视口外全黑),延迟到布局更新后
@@ -131,6 +247,12 @@ Item {
             Qt.callLater(function () {
                 root.ensureRowStep()
                 list.contentY = root.absRow * root.rowStep
+                // 初始 contentY 可能恰为 0(0→0 不触发 onContentYChanged),
+                // 显式初始化焦点行为几何居中行;行位置下一帧才稳定,再查一次。
+                root.focusRowIdx = root.findCenterRowIndex()
+                Qt.callLater(function () {
+                    root.focusRowIdx = root.findCenterRowIndex()
+                })
             })
         }
     }
@@ -251,6 +373,7 @@ Item {
     Component.onCompleted: {
         if (AccountManager.hasAccounts)
             AccountManager.fetchHomeRows(20)
+        root.forceActiveFocus()
     }
 
     // 未登录提示条:没有任何已保存账号时覆盖在首页上方,提供服务器管理入口。
@@ -310,6 +433,7 @@ Item {
         property string cardImage: ""
         property string cardText: ""
         property bool isLibrary: false
+        property bool selected: false
         property int cardW: 112
         property int cardH: 168
         property alias cardArea: cardArea
@@ -317,7 +441,8 @@ Item {
         height: cardH
         color: Theme.surface
         radius: 10
-        border.width: cardArea.hovered ? 2 : 0
+        // 选中块高亮(accent 边框);悬停次之。
+        border.width: selected ? 3 : (cardArea.hovered ? 2 : 0)
         border.color: Theme.accent
         Image {
             anchors.fill: parent
@@ -368,12 +493,22 @@ Item {
     // 堆叠式竖向轮盘:行与行部分重叠(负间距),中间行最前最亮,
     // 上下行被相邻行覆盖一部分并逐级缩小变暗(类似应用库的堆叠效果,
     // 但间距更大,适合媒体库浏览)。
+    // 键盘四向控制:上下切换媒体库行,左右移动选中块;与滚轮共用逻辑。
+    focus: true
+    Keys.onUpPressed: root.moveRow(-1)
+    Keys.onDownPressed: root.moveRow(1)
+    Keys.onLeftPressed: root.moveCol(-1)
+    Keys.onRightPressed: root.moveCol(1)
+    // 页面回到前台时恢复键盘焦点。
+    onVisibleChanged: if (root.visible) root.forceActiveFocus()
+    // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
     ListView {
         id: list
         anchors.fill: parent
         clip: true
         model: root.loopRows
         spacing: -44
+        onContentYChanged: root.focusRowIdx = root.findCenterRowIndex()
         // 缓冲只保留约 1.5 行:堆叠行内容较重(每行多张海报),
         // 过大的默认缓冲会让大量行同时实例化拖慢滚动。
         cacheBuffer: 300
@@ -393,6 +528,8 @@ Item {
             property var rowData: modelData
             // 供 scrollRow 访问横向条目视图(只移动条目海报)。
             property alias rowItemsView: rowItems
+            // 本行在 loopRows 中的索引,供选中块高亮判定。
+            property int rowIndex: index
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
             function centerDist() {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
@@ -439,13 +576,14 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 24
                     spacing: 12
-                    // 库海报(行首)
+                    // 库海报(行首):焦点在库海报且本行为居中行时高亮。
                     RowCard {
                         cardImage: modelData.posterId || ""
                         cardText: modelData.viewName
                         isLibrary: true
                         cardW: 124
                         cardH: 172
+                        selected: rowDelegate.rowIndex === root.focusRowIdx && root.focusCol === -1
                         cardArea.onClicked: root.ensureAccount(modelData.accountId,
                             function () { root.openLibrary(modelData.viewId) })
                     }
@@ -465,11 +603,18 @@ Item {
                             cardW: 112
                             cardH: 172
                             // 内层 modelData 是条目,行级 accountId 从 rowData 取。
-                            cardArea.onClicked: root.ensureAccount(rowDelegate.rowData.accountId,
-                                function () {
-                                    root.showDetail(modelData.id, modelData.posterId || "",
-                                                    modelData.name)
-                                })
+                            // 选中块高亮:本行为居中行且列索引匹配。
+                            selected: rowDelegate.rowIndex === root.focusRowIdx && index === root.focusCol
+                            cardArea.onClicked: function () {
+                                // 点击即选中该卡,并保持行焦点同步。
+                                root.focusRowIdx = rowDelegate.rowIndex
+                                root.focusCol = index
+                                root.ensureAccount(rowDelegate.rowData.accountId,
+                                    function () {
+                                        root.showDetail(modelData.id, modelData.posterId || "",
+                                                        modelData.name)
+                                    })
+                            }
                         }
                     }
                 }
@@ -483,17 +628,16 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
-            // angleDelta.y 向上为正:向上滚(正)则向前(左),向下滚(负)则向后。
-            // 速度记账统一在 scrollBy/scrollRow 内做(noteWheel),这里不重复。
+            // 与键盘共用逻辑:普通滚轮=左右键(选中块移动/滚动/拉动画),
+            // Ctrl+滚轮=上下键(切换媒体库行)。速度记账在 scrollBy/
+            // scrollRow 内做,这里不重复。
             const delta = Math.round(wheel.angleDelta.y / 120)
             if (delta === 0)
                 return
-            // Ctrl+滚轮:切换媒体库行(原垂直滚动逻辑);普通滚轮:当前
-            // 居中库的条目横向滚动(行首库海报固定,只移动条目海报)。
             if (wheel.modifiers & Qt.ControlModifier)
-                root.scrollBy(-delta)
+                root.moveRow(-delta)
             else
-                root.scrollRow(-delta)
+                root.moveCol(-delta)
             wheel.accepted = true
         }
     }
