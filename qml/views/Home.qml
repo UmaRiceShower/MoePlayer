@@ -81,7 +81,9 @@ Item {
         if (!row || !row.rowItemsView)
             return
         const v = row.rowItemsView
-        const cell = 112 + 12
+        // 每次滚轮移动两张卡(美观:一格一张太碎,两张是流畅浏览的
+        // 常用节奏);OutBack 末段轻微回弹,与垂直大幅滚动一致。
+        const cell = 2 * (112 + 12)
         const from = v.contentX
         const target = Math.max(0, Math.min(v.contentWidth - v.width, from + step * cell))
         const dist = Math.abs(target - from)
@@ -99,6 +101,9 @@ Item {
         root.hAnim.target = v
         root.hAnim.from = from
         root.hAnim.to = target
+        // 末段回弹:boomerang 曲线越过目标约 10% 再回落。
+        root.hAnim.easing.type = Easing.OutBack
+        root.hAnim.easing.overshoot = 1.6
         root.hAnim.duration = Math.max(30, Math.min(250, dist / root.scrollVelocity * 1000))
         root.hAnim.start()
     }
