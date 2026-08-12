@@ -96,7 +96,9 @@ public:
         QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
         loop.exec(); // 本线程等待(后台线程,不阻塞 GUI)
         const bool ok = reply->error() == QNetworkReply::NoError;
-        const QByteArray data = reply->readAll();
+        // 失败/超时(abort)时 reply 的 QIODevice 已关闭,此时 readAll 会报
+        // "device not open";仅成功时读取,失败只取错误描述。
+        const QByteArray data = ok ? reply->readAll() : QByteArray();
         const QString err = reply->errorString();
         reply->deleteLater();
         g_fetchGate.release();
