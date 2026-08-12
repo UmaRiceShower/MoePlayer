@@ -27,6 +27,7 @@ class EmbyClient : public QObject
     Q_PROPERTY(MediaItemModel *itemsModel READ itemsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *seasonsModel READ seasonsModel CONSTANT)
     Q_PROPERTY(MediaItemModel *episodesModel READ episodesModel CONSTANT)
+    Q_PROPERTY(MediaItemModel *searchModel READ searchModel CONSTANT)
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
@@ -46,6 +47,7 @@ public:
     MediaItemModel *itemsModel() { return &m_itemsModel; }
     MediaItemModel *seasonsModel() { return &m_seasonsModel; }
     MediaItemModel *episodesModel() { return &m_episodesModel; }
+    MediaItemModel *searchModel() { return &m_searchModel; }
 
     // 获取服务器公开信息(/System/Info/Public,无需认证)。
     Q_INVOKABLE void fetchPublicInfo();
@@ -68,6 +70,9 @@ public:
                                 const QString &sortOrder = QStringLiteral("Descending"));
     // 收藏/取消收藏(/Users/{id}/FavoriteItems/{itemId} POST/DELETE)。
     Q_INVOKABLE void setFavorite(const QString &itemId, bool fav);
+    // 服务端搜索(/Users/{id}/Items?SearchTerm=,跨库递归),填充 searchModel。
+    // 空串清空结果;防抖在调用方(QML)做,响应按请求序号丢弃过期结果。
+    Q_INVOKABLE void search(const QString &term);
     // 获取剧集的分季列表(/Shows/{id}/Seasons),填充 seasonsModel。
     Q_INVOKABLE void fetchSeasons(const QString &seriesId);
     // 获取指定季的分集列表(/Shows/{id}/Episodes?SeasonId=),填充 episodesModel。
@@ -125,6 +130,8 @@ signals:
     void authFailed();
     void viewsReceived();
     void itemsReceived();
+    // 搜索完成:searchModel 已更新(含空串请求的清空)。
+    void searchResultsReady();
     void seasonsReceived();
     void episodesReceived();
     // 跨服务器拉取结果(见 fetchServer*):serverUrl 标识来源服务器。
@@ -197,8 +204,10 @@ private:
     MediaItemModel m_itemsModel;
     MediaItemModel m_seasonsModel;
     MediaItemModel m_episodesModel;
+    MediaItemModel m_searchModel;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"（Range 前缀探测缓存）
     int m_itemsSeq = 0; // 条目请求序号,丢弃过期响应(视图快速切换时)
+    int m_searchSeq = 0; // 搜索请求序号,丢弃过期响应(输入防抖窗口内旧请求)
     QString m_serverName;
     QString m_serverVersion;
     QString m_userId;

@@ -511,6 +511,35 @@ void EmbyClient::setFavorite(const QString &itemId, bool fav)
         del(path, true, [](const QJsonDocument &) {}, QStringLiteral("取消收藏"));
 }
 
+void EmbyClient::search(const QString &term)
+{
+    if (term.trimmed().isEmpty()) {
+        ++m_searchSeq; // 使在途响应过期
+        m_searchModel.clear();
+        emit searchResultsReady();
+        return;
+    }
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("SearchTerm"), term);
+    // 跨库递归搜索影片/剧集/单集;UserData 携带已看/进度/收藏,结果卡片零额外请求。
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Series,Episode"));
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,CommunityRating,RunTimeTicks,UserData"));
+    q.addQueryItem(QStringLiteral("Limit"), QStringLiteral("40"));
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
+    const int seq = ++m_searchSeq;
+    get(QStringLiteral("/Users/%1/Items?%2").arg(m_userId, q.toString()), true,
+        [this, seq](const QJsonDocument &doc) {
+            // 输入防抖窗口内的旧请求结果直接丢弃。
+            if (seq != m_searchSeq)
+                return;
+            const QJsonObject o = doc.object();
+            m_searchModel.setItems(o.value(QLatin1String("Items")).toArray(), true);
+            emit searchResultsReady();
+        }, QStringLiteral("搜索"));
+}
+
 // ---------- 跨服务器只读拉取(首页聚合用,不改会话状态) ----------
 
 void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
@@ -772,6 +801,7 @@ void EmbyClient::disconnectServer()
     m_userName.clear();
     m_itemsModel.clear();
     m_viewsModel.clear();
+    m_searchModel.clear();
     m_ws.close();
     m_wsReconnect.stop();
     emit loginChanged();
