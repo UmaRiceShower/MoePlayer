@@ -36,12 +36,39 @@ Item {
         clip: true
 
         Image {
+            id: posterImg
             anchors.fill: parent
             anchors.margins: 4
             source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
+            // 仅 Ready 可见:加载中露卡片底色,失败隐藏(配合 fallback 图标)。
+            visible: status === Image.Ready
+            opacity: 0
+            // 成功淡入;失败走 fallback。
+            onStatusChanged: {
+                if (status === Image.Ready)
+                    fadeIn.restart()
+            }
+        }
+        // 加载成功淡入,避免图片突然出现。
+        NumberAnimation {
+            id: fadeIn
+            target: posterImg
+            property: "opacity"
+            to: 1
+            duration: 200
+        }
+
+        // 无主图或加载失败:类型占位图标,不显示空卡(对照上游 404 契约)。
+        Text {
+            visible: root.posterId === "" || posterImg.status === Image.Error
+            anchors.centerIn: parent
+            text: root.itemType === "Series" ? "▦" : "▶"
+            color: Theme.textMuted
+            font.pixelSize: 40
+            opacity: 0.5
         }
 
         // 底部渐变遮罩,提升标题可读性。
