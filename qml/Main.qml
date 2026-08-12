@@ -12,8 +12,6 @@ ApplicationWindow {
     visible: true
     title: "MoePlayer"
 
-    // startupUrl 由 main.cpp 注入(--url 参数,空串表示不自动播放);
-    // 此处不可声明同名属性,否则会遮蔽注入值。
     background: Rectangle {
         color: Theme.bg
     }
@@ -65,11 +63,6 @@ ApplicationWindow {
         interval: 400
         running: false
         onTriggered: root.close()
-    }
-
-    Component.onCompleted: {
-        if (startupUrl !== "")
-            openPlayerWindow(startupUrl, [], {})
     }
 
     // 启动自动登录失败(token 失效):清掉无效会话(connected 变 false),

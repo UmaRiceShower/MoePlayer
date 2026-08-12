@@ -17,20 +17,6 @@
 
 int main(int argc, char *argv[])
 {
-    // 解析命令行:--url <地址> 指定启动即播放的媒体,可省略。
-    QString initialUrl;
-    for (int i = 1; i < argc; ++i) {
-        const QString a = QString::fromLocal8Bit(argv[i]);
-        if (a == QLatin1String("--url") && i + 1 < argc)
-            initialUrl = QString::fromLocal8Bit(argv[++i]);
-        else if (a.startsWith(QLatin1String("--url=")))
-            initialUrl = a.mid(6);
-        else if (a == QLatin1String("--help")) {
-            qInfo("Usage: MoePlayer [--url <url-or-local-file>]");
-            return 0;
-        }
-    }
-
     // 固定 OpenGL 场景图后端,须在 QGuiApplication 构造前设置。
     qputenv("QSG_RHI_BACKEND", "opengl");
     // Qt 6 GUI 应用默认抑制控制台日志,强制输出便于终端调试。
@@ -77,7 +63,6 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/qml"));
     engine.addImageProvider(QStringLiteral("emby"), new PosterProvider(&embyClient, &accountManager));
-    engine.rootContext()->setContextProperty(QStringLiteral("startupUrl"), initialUrl);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
