@@ -123,6 +123,7 @@ ApplicationWindow {
     // 搜索 Ctrl+K(见下方快捷键),右下角临时入口已随首页布局完善移除。
 
     // 首页:每行一库聚合(库海报进媒体库,条目进详情)。
+
     Component {
         id: homePage
         Home {
