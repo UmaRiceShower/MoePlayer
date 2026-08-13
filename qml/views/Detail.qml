@@ -100,6 +100,9 @@ Item {
         root.itemId = newItemId
         root.posterId = newPosterId
         root.title = newTitle
+        // 切集:重置季与收藏(新集 detail 到达前不显示旧集状态)。
+        root.currentSeasonId = ""
+        root.isFavorite = false
     }
     // 返回键:集详情先原地回父剧详情,否则 pop。
     function back() {
@@ -109,11 +112,9 @@ Item {
         }
         root.backRequested()
     }
-    // 统一重拉:重置状态 + 拉详情(首次进入与原地替换共用)。
+    // 统一重拉:保留旧 detail(切集/刷新时避免闪空),新 detail 经
+    // onItemDetailReady 替换;首次进入 detail 为空则显示空骨架。
     function reload() {
-        root.detail = {}
-        root.isFavorite = false
-        root.currentSeasonId = ""
         root.playbackPending = false
         const c = root.creds()
         if (root.itemId !== "")
@@ -276,7 +277,8 @@ Item {
                             anchors.fill: parent
                             source: root.backdropSource()
                             fillMode: Image.PreserveAspectCrop
-                            visible: source != ""
+                            opacity: source !== "" ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 220 } }
                             cache: true
                         }
                         // 底部渐变遮罩:保证标题/按钮文字可读。
@@ -343,7 +345,8 @@ Item {
                                     text: root.metaLine()
                                     color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                     font.pixelSize: 14
-                                    visible: text !== ""
+                                    opacity: text !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 200 } }
                                 }
                                 Text {
                                     text: root.detail.overview || ""
@@ -353,7 +356,8 @@ Item {
                                     elide: Text.ElideRight
                                     maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
                                     width: parent.width
-                                    visible: text !== ""
+                                    opacity: text !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 200 } }
                                 }
                                 Row {
                                     spacing: 10
@@ -404,6 +408,8 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.people && root.detail.people.length > 0
+                        opacity: visible ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         Text {
                             text: "演职人员"
@@ -477,6 +483,8 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
+                        opacity: visible ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         Text {
                             text: "媒体信息"
@@ -514,6 +522,8 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: EmbyClient.similarModelFor(root.serverUrl).count > 0
+                        opacity: visible ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         Text {
                             text: "相似推荐"
@@ -573,6 +583,8 @@ Item {
                 width: Constants.detailSidebarW
                 height: parent.height
                 visible: root.detail.type === "Series" || root.detail.type === "Episode"
+                opacity: visible ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 220 } }
 
                 // 季标签(季数>1 时显示;基础样式横向排列)
                 Row {
