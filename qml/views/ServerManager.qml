@@ -21,6 +21,84 @@ Item {
     readonly property int cardW: 280
     readonly property int cardH: 150
     readonly property int iconSize: 52
+    // 网格间距与 hover 放大参数。
+    readonly property int gridSpacing: 16
+    // 放大倍数:等比例 scale(宽高同倍),不单独加宽。
+    readonly property real hoverScale: 1.12
+    // 放大后每侧视觉溢出 = 卡宽 × (scale-1)/2;左右邻居各让出该距离(一致)。
+    readonly property real expandHalf: root.cardW * (root.hoverScale - 1) / 2
+
+    // 手动布局:占位卡第 0 格,账号卡其后。hover 卡等比例放大(scale),
+    // 其左侧全部卡片左移 expandHalf、右侧全部卡片右移 expandHalf(对称
+    // 一致挤压);y 不变(行距 16 > 上下视觉溢出 9,不重叠)。
+    // animate=true 时位置变化用弹簧动画(手感慢而弹),false 用于初始/resize 直接定位。
+    function layoutCards(animate) {
+        const n = cardRepeater.count
+        const stepW = root.cardW + root.gridSpacing
+        const stepH = root.cardH + root.gridSpacing
+        const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
+        let hover = -1
+        for (let i = 0; i < n; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c && c.expanded) {
+                hover = i
+                break
+            }
+        }
+        // hover 卡所在行:挤压只作用于同行左右,其他行不受影响。
+        let hcell = -1
+        let hrow = -1
+        if (hover >= 0) {
+            hcell = hover + 1
+            hrow = Math.floor(hcell / cols)
+        }
+        // 无放大卡 = 复原:全部卡片用短时复位动画(时长 < hover 触发阈值,
+        // 复原期间移回不与放大动画冲突)。
+        const restore = hover < 0
+        // 占位卡(格 0):行 0 且有同行放大卡时一并左移让位。
+        root.placeCard(plusCard, hrow === 0 ? -root.expandHalf : 0, 0, animate, restore)
+        for (let i = 0; i < n; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (!c || c.Drag.active)
+                continue
+            const cell = i + 1 // 占位卡占第 0 格
+            const col = cell % cols
+            const row = Math.floor(cell / cols)
+            let x = col * stepW
+            if (hover >= 0 && row === hrow) {
+                if (cell < hcell)
+                    x -= root.expandHalf
+                else if (cell > hcell)
+                    x += root.expandHalf
+            }
+            root.placeCard(c, x, row * stepH, animate, restore)
+        }
+    }
+
+    // 放置卡片:位置变化时 animate=true 走卡片内部 animateTo(restore=true
+    // 用短时复位动画),否则直接赋值。卡片内动画以 id 引用(delegate 内部
+    // 合法),外部经函数访问(QML id 不是对象属性,itemAt(i).animX 无法直达)。
+    function placeCard(c, x, y, animate, restore) {
+        if (animate)
+            c.animateTo(x, y, restore)
+        else {
+            c.x = x
+            c.y = y
+        }
+    }
+
+    // hover 状态/账号列表变化后延迟一帧重排(等 delegate 稳定)。
+    function scheduleLayout() {
+        layoutTimer.restart()
+    }
+
+    // 账号增删/排序后 Repeater 重建 delegate,重排到位。
+    Connections {
+        target: AccountManager
+        function onAccountsChanged() {
+            root.scheduleLayout()
+        }
+    }
 
     // 把落点坐标(相对 root,即 DropArea 原点)换算为账号索引。
     // 加号占位卡占内容区第一格,账号卡从第二格起;坐标 clamp 到有效范围,
@@ -29,14 +107,14 @@ Item {
         const n = AccountManager.accounts.length
         if (n <= 0)
             return 0
-        const stepW = root.cardW + flow.spacing
-        const stepH = root.cardH + flow.spacing
-        // 内容区坐标系 = Flow 自身坐标系(drop 坐标减去 Flow 偏移)。
-        const lx = dx - flow.x
-        const ly = dy - flow.y
-        const cols = Math.max(1, Math.floor((flow.width + flow.spacing) / stepW))
-        const col = Math.max(0, Math.min(cols - 1, Math.floor((lx + flow.spacing / 2) / stepW)))
-        const row = Math.max(0, Math.floor((ly + flow.spacing / 2) / stepH))
+        const stepW = root.cardW + root.gridSpacing
+        const stepH = root.cardH + root.gridSpacing
+        // 内容区坐标系 = grid 自身坐标系(drop 坐标减去 grid 偏移)。
+        const lx = dx - grid.x
+        const ly = dy - grid.y
+        const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
+        const col = Math.max(0, Math.min(cols - 1, Math.floor((lx + root.gridSpacing / 2) / stepW)))
+        const row = Math.max(0, Math.floor((ly + root.gridSpacing / 2) / stepH))
         const cell = row * cols + col
         return Math.max(0, Math.min(cell - 1, n - 1))
     }
@@ -103,9 +181,8 @@ Item {
                 // 真实交换:模型变化触发 Flow 重排,卡片随布局归位。
                 AccountManager.moveAccount(AccountManager.accounts[fromIdx].id, toIdx)
             } else {
-                // 拖回原位:模型不变,卡片仍有效,手动归位到布局位置。
-                drop.source.x = drop.source.dragStartX
-                drop.source.y = drop.source.dragStartY
+                // 拖回原位:模型不变,卡片仍有效,短时复位动画归位。
+                drop.source.animateTo(drop.source.dragStartX, drop.source.dragStartY, true)
             }
         }
     }
@@ -137,9 +214,11 @@ Item {
         }
     }
 
-    // 卡片网格:第一张为加号占位卡,其后每账号一张。
-    Flow {
-        id: flow
+    // 卡片网格(手动布局,见 layoutCards):第一张为加号占位卡,其后每账号一张。
+    // hover 放大/左右对称挤压/动画均由 layoutCards 驱动,不用 Flow(Flow
+    // 无法表达"左侧也被挤压"且加宽是横向的,做不到等比例)。
+    Item {
+        id: grid
         anchors.top: header.bottom
         anchors.topMargin: 20
         anchors.left: parent.left
@@ -148,13 +227,77 @@ Item {
         anchors.leftMargin: 24
         anchors.rightMargin: 24
         anchors.bottomMargin: 24
-        spacing: 16
+
+        // 延迟重排(hover 状态/账号变化后执行);首次与 resize 直接定位无动画。
+        Timer {
+            id: layoutTimer
+            interval: 1
+            repeat: false
+            onTriggered: root.layoutCards(true)
+        }
+        Component.onCompleted: root.layoutCards(false)
+        onWidthChanged: root.layoutCards(false)
+        onHeightChanged: root.layoutCards(false)
 
         // 添加服务器占位卡(具体添加 UI 后续设计,先占位)。
         Rectangle {
+            id: plusCard
             width: root.cardW
             height: root.cardH
             radius: 12
+            // 被同行放大卡挤压时同样让位/复位(经 animateTo 驱动)。
+            function animateTo(tx, ty, restore) {
+                if (Math.abs(plusCard.x - tx) > 0.5) {
+                    if (restore) {
+                        plusAnimXBack.from = plusCard.x
+                        plusAnimXBack.to = tx
+                        plusAnimXBack.start()
+                    } else {
+                        plusAnimX.from = plusCard.x
+                        plusAnimX.to = tx
+                        plusAnimX.start()
+                    }
+                }
+                if (Math.abs(plusCard.y - ty) > 0.5) {
+                    if (restore) {
+                        plusAnimYBack.from = plusCard.y
+                        plusAnimYBack.to = ty
+                        plusAnimYBack.start()
+                    } else {
+                        plusAnimY.from = plusCard.y
+                        plusAnimY.to = ty
+                        plusAnimY.start()
+                    }
+                }
+            }
+            NumberAnimation {
+                id: plusAnimX
+                target: plusCard
+                property: "x"
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                id: plusAnimY
+                target: plusCard
+                property: "y"
+                duration: 220
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                id: plusAnimXBack
+                target: plusCard
+                property: "x"
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
+            NumberAnimation {
+                id: plusAnimYBack
+                target: plusCard
+                property: "y"
+                duration: 120
+                easing.type: Easing.OutCubic
+            }
             color: "transparent"
             border.width: 2
             border.color: plusHover.containsMouse
@@ -209,14 +352,75 @@ Item {
 
             Rectangle {
                 id: card
+                // hover 放大:等比例 scale(宽高同倍),150ms 触发阈值(快速
+                // 划过不触发),拖动中收起。位置由 root.layoutCards 管理:
+                // 放大卡左右邻居对称让位(expandHalf),动画走 animX/animY 弹簧。
                 width: root.cardW
                 height: root.cardH
                 radius: 12
                 color: card.hovered ? Qt.rgba(Theme.surface.r, Theme.surface.g,
                                               Theme.surface.b, 1) : Theme.surface
-                // 拖动中半透明并置顶,松手恢复。
+                // 拖动中半透明并置顶,松手恢复;放大卡同样置顶避免压边。
                 opacity: Drag.active ? 0.6 : 1.0
-                z: Drag.active ? 10 : 0
+                z: Drag.active ? 10 : (card.expanded ? 9 : 0)
+                scale: card.expanded ? root.hoverScale : 1.0
+                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                // 位移动画:线性插值 + easeOutCubic(挤压与复位一致,无回弹);
+                // 复位 120ms < hover 触发 200ms,复原期间移回不会与放大
+                // 动画冲突。手动 from/to 驱动(不设 Behavior,否则初始
+                // 布局也会动画)。
+                function animateTo(tx, ty, restore) {
+                    if (Math.abs(card.x - tx) > 0.5) {
+                        if (restore) {
+                            animXBack.from = card.x
+                            animXBack.to = tx
+                            animXBack.start()
+                        } else {
+                            animX.from = card.x
+                            animX.to = tx
+                            animX.start()
+                        }
+                    }
+                    if (Math.abs(card.y - ty) > 0.5) {
+                        if (restore) {
+                            animYBack.from = card.y
+                            animYBack.to = ty
+                            animYBack.start()
+                        } else {
+                            animY.from = card.y
+                            animY.to = ty
+                            animY.start()
+                        }
+                    }
+                }
+                NumberAnimation {
+                    id: animX
+                    target: card
+                    property: "x"
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: animY
+                    target: card
+                    property: "y"
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: animXBack
+                    target: card
+                    property: "x"
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: animYBack
+                    target: card
+                    property: "y"
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
                 // 官方拖放模式:MouseArea.drag 移动卡片自身并驱动 Drag.active。
                 // Drag.source 是 QObject(卡片自身),drop 侧经 accountId 识别。
                 Drag.active: dragArea.drag.active
@@ -233,8 +437,21 @@ Item {
                                               : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1)))
                 property bool hovered: false
                 property bool dropTarget: false
+                property bool expanded: false
                 property real dragStartX: 0
                 property real dragStartY: 0
+
+                // 放大状态变化 → 重排(左右邻居让位/复位)。
+                onExpandedChanged: root.scheduleLayout()
+
+                // hover 触发阈值:进入后 200ms 才放大,快速划过不触发;
+                // 大于复原动画时长(120ms),复原期间移回不会与放大冲突。
+                Timer {
+                    id: hoverTimer
+                    interval: 200
+                    repeat: false
+                    onTriggered: card.expanded = true
+                }
 
                 // 图标区:自定义图标 → 服务器默认 Emby 图标(web PWA 图标/
                 // favicon)→ 名称首字,加载失败自动降档(见 ServerIcon)。
@@ -304,9 +521,19 @@ Item {
                         target: card
                         threshold: 8
                     }
-                    onEntered: card.hovered = true
-                    onExited: card.hovered = false
+                    onEntered: {
+                        card.hovered = true
+                        hoverTimer.start()
+                    }
+                    onExited: {
+                        card.hovered = false
+                        hoverTimer.stop()
+                        card.expanded = false
+                    }
                     onPressed: (mouse) => {
+                        // 按住立即收起放大(hover 让位于拖动),并记录布局位置。
+                        hoverTimer.stop()
+                        card.expanded = false
                         card.dragStartX = card.x
                         card.dragStartY = card.y
                     }
@@ -334,8 +561,8 @@ Item {
                         const sy = c.dragStartY
                         const act = c.Drag.drop()
                         if (act === Qt.IgnoreAction) {
-                            c.x = sx
-                            c.y = sy
+                            // 未投递(拖出窗口):短时复位动画归位。
+                            c.animateTo(sx, sy, true)
                         }
                     }
                 }
