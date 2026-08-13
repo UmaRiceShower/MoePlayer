@@ -55,6 +55,8 @@ public:
     // 账号排序:在账号列表中上移/下移,顺序即首页聚合顺序与列表展示顺序。
     Q_INVOKABLE void moveAccountUp(const QString &id);
     Q_INVOKABLE void moveAccountDown(const QString &id);
+    // 账号拖动排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
+    Q_INVOKABLE void moveAccount(const QString &id, int toIndex);
 
     // 供 UI 读取某账号的明文密码(仅当 rememberPassword;混淆解码)。
     Q_INVOKABLE QString passwordFor(const QString &id) const;
