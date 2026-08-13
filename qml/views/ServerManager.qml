@@ -59,7 +59,7 @@ Item {
                 text: "← 返回"
                 onClicked: root.backRequested()
             }
-            Text {
+            AppText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "服务器管理（Ctrl+O）"
                 color: Theme.textPrimary
@@ -99,14 +99,14 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: 10
                             spacing: 2
-                            Text {
+                            AppText {
                                 // 未填名称时显示用户名(首页聚合前缀此时用 ServerName)。
                                 text: (modelData.name !== "" ? modelData.name : modelData.userName)
                                       + (modelData.tokenValid === false ? "  [凭据失效]" : "")
                                 color: ListView.isCurrentItem ? "white" : Theme.textPrimary
                                 font.bold: true
                             }
-                            Text {
+                            AppText {
                                 text: modelData.userName + " · " + modelData.serverUrl
                                 color: ListView.isCurrentItem ? Theme.textSelected : Theme.textMuted
                                 font.pixelSize: 12
@@ -171,14 +171,14 @@ Item {
                 width: 380
                 spacing: 10
 
-                Text {
+                AppText {
                     text: root.editingId === "" ? "添加服务器" : "修改服务器"
                     color: Theme.textPrimary
                     font.pixelSize: 16
                     font.bold: true
                 }
 
-                Text { text: "名称"; color: Theme.textMuted; font.pixelSize: 13 }
+                AppText { text: "名称"; color: Theme.textMuted; font.pixelSize: 13 }
                 TextField {
                     width: 380
                     placeholderText: "如: 家庭服务器"
@@ -186,7 +186,7 @@ Item {
                     onEditingFinished: root.fName = text
                 }
 
-                Text { text: "服务器地址"; color: Theme.textMuted; font.pixelSize: 13 }
+                AppText { text: "服务器地址"; color: Theme.textMuted; font.pixelSize: 13 }
                 TextField {
                     width: 380
                     placeholderText: "http://host:8096"
@@ -194,14 +194,14 @@ Item {
                     onEditingFinished: root.fServer = text
                 }
 
-                Text { text: "用户名"; color: Theme.textMuted; font.pixelSize: 13 }
+                AppText { text: "用户名"; color: Theme.textMuted; font.pixelSize: 13 }
                 TextField {
                     width: 380
                     text: root.fUser
                     onEditingFinished: root.fUser = text
                 }
 
-                Text {
+                AppText {
                     text: root.editingId === "" ? "密码（仅新增时登录校验用）"
                                                 : "密码（换密码请删除后重新添加）"
                     color: Theme.textMuted
@@ -232,7 +232,7 @@ Item {
                     }
                 }
 
-                Text {
+                AppText {
                     text: root.statusText
                     color: root.statusText.indexOf("失败") >= 0 || root.statusText.indexOf("密码") >= 0
                           ? Theme.danger : Theme.textMuted

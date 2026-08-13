@@ -166,7 +166,7 @@ Item {
         spacing: 12
         padding: 24
 
-        Text {
+        AppText {
             text: "媒体库"
             color: Theme.textPrimary
             font.pixelSize: 28
@@ -205,7 +205,7 @@ Item {
         Row {
             visible: root.browseReady
             spacing: 12
-            Text {
+            AppText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: root.serverLabel()
                 color: Theme.textMuted
@@ -237,7 +237,7 @@ Item {
             }
         }
 
-        Text {
+        AppText {
             id: statusText
             text: ""
             color: statusText.text.indexOf("失败") >= 0 ? Theme.danger : Theme.textMuted
@@ -272,7 +272,7 @@ Item {
             }
         }
         // 空库提示。
-        Text {
+        AppText {
             visible: root.im && root.im.count === 0 && !root.busy
             anchors.centerIn: parent
             text: "该媒体库暂无条目"

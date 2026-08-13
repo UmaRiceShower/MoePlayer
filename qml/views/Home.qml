@@ -412,7 +412,7 @@ Item {
         Row {
             anchors.centerIn: parent
             spacing: 12
-            Text {
+            AppText {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "未添加服务器，添加后即可浏览媒体库"
                 color: Theme.textPrimary
@@ -467,7 +467,7 @@ Item {
             // 异步解码:大量海报同时加载时避免阻塞 UI 线程导致滚动卡顿。
             asynchronous: true
         }
-        Text {
+        AppText {
             visible: cardImage === ""
             anchors.centerIn: parent
             text: cardText
@@ -479,7 +479,7 @@ Item {
             width: parent.width - 8
             wrapMode: Text.Wrap
         }
-        Text {
+        AppText {
             visible: cardImage !== ""
             anchors.left: parent.left
             anchors.right: parent.right
@@ -619,7 +619,7 @@ Item {
             opacity: rowDelegate.stackOpacity()
 
             // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
-            Text {
+            AppText {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: modelData.serverName !== ""
                         ? modelData.serverName + " - " + modelData.viewName

@@ -77,7 +77,7 @@ Item {
             }
 
             // 未输入提示。
-            Text {
+            AppText {
                 visible: root.canSearch && searchField.text.length === 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: 32
@@ -86,7 +86,7 @@ Item {
                 font.pixelSize: 14
             }
             // 已搜索无结果。
-            Text {
+            AppText {
                 visible: root.canSearch && searchField.text.length > 0 && root.sm && root.sm.count === 0
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.topMargin: 32

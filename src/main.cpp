@@ -13,6 +13,7 @@
 #include "core/constants.h"
 #include "core/embyclient.h"
 #include "core/settingsstore.h"
+#include "models/colorprovider.h"
 #include "models/posterprovider.h"
 #include "playback/mpvitem.h"
 
@@ -63,6 +64,11 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "SettingsStore", &settingsStore);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
+    // 海报取色:复用 PosterProvider 加载(实例须在 addImageProvider 前创建,
+    // 且与 PosterProvider 同生命周期,ColorProvider 后台任务经 QPointer 自管)。
+    PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager);
+    ColorProvider colorProvider(posterProvider);
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
     qmlRegisterType<MpvItem>("MoePlayer.Playback", kQmlModuleMajor, kQmlModuleMinor, "MpvItem");
 
     // 首页聚合与启动 token 校验均由 Home 页 onCompleted 触发(见 Home.qml),
@@ -70,7 +76,7 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/qml"));
-    engine.addImageProvider(QStringLiteral("emby"), new PosterProvider(&embyClient, &accountManager));
+    engine.addImageProvider(QStringLiteral("emby"), posterProvider);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);

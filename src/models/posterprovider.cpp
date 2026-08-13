@@ -64,72 +64,12 @@ public:
 
     void run() override
     {
-        const QString key = m_url.toString();
-        // 1) 磁盘层命中(TTL 内):读文件解码,回填内存层。
-        const QString path = cacheFilePath(key);
-        if (QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs) {
-            QFile f(path);
-            if (f.open(QIODevice::ReadOnly)) {
-                QImage img;
-                if (img.loadFromData(f.readAll())) {
-                    {
-                        QMutexLocker locker(&g_memMutex);
-                        g_memCache.insert(key, new QImage(img), img.sizeInBytes());
-                    }
-                    if (m_self)
-                        QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
-                                                  Q_ARG(QImage, img), Q_ARG(QString, QString()));
-                    return;
-                }
-            }
-        }
-        // 2) 回源:占闸(后台阻塞无碍);QNAM 在本线程创建使用(线程亲和)。
-        g_fetchGate.acquire();
-        QNetworkAccessManager nam;
-        nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理
-        nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-        QNetworkRequest req(m_url);
-        // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
-        req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
-        if (!m_token.isEmpty())
-            req.setRawHeader(MoePlayer::kHeaderToken, m_token.toUtf8());
-        QNetworkReply *reply = nam.get(req);
-        QEventLoop loop;
-        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-        loop.exec(); // 本线程等待(后台线程,不阻塞 GUI)
-        const bool ok = reply->error() == QNetworkReply::NoError;
-        // 失败/超时(abort)时 reply 的 QIODevice 已关闭,此时 readAll 会报
-        // "device not open";仅成功时读取,失败只取错误描述。
-        const QByteArray data = ok ? reply->readAll() : QByteArray();
-        const QString err = reply->errorString();
-        reply->deleteLater();
-        g_fetchGate.release();
-        if (!ok) {
-            if (m_self)
-                QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
-                                          Q_ARG(QImage, QImage()), Q_ARG(QString, err));
-            return;
-        }
-        QImage img;
-        if (!img.loadFromData(data)) {
-            if (m_self)
-                QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
-                                          Q_ARG(QImage, QImage()),
-                                          Q_ARG(QString, QStringLiteral("图片解码失败")));
-            return;
-        }
-        // 回填磁盘与内存(写失败不算错:缓存只是优化)。
-        QDir().mkpath(QFileInfo(path).absolutePath());
-        QFile f(path);
-        if (f.open(QIODevice::WriteOnly))
-            f.write(data);
-        {
-            QMutexLocker locker(&g_memMutex);
-            g_memCache.insert(key, new QImage(img), img.sizeInBytes());
-        }
+        // 加载(磁盘缓存/回源)抽至 PosterProvider::loadImageSync,取色等复用。
+        QString err;
+        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err);
         if (m_self)
             QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
-                                      Q_ARG(QImage, img), Q_ARG(QString, QString()));
+                                      Q_ARG(QImage, img), Q_ARG(QString, err));
     }
 
 private:
@@ -142,50 +82,11 @@ private:
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
-    // 无状态浏览下图片 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>~<kind>
-    // (模型/详情填充时统一加前缀),PosterProvider 按前缀路由到对应服务器凭据;
-    // kind 为图片类型(Primary/Backdrop/Thumb),缺省 Primary 向后兼容旧三段 id。
-    // 缺前缀/凭据的 id 直接返回空图(不发起请求)。
-    // 分隔符用 ~ 而非 |(| 在 image:// URL 中会被转义为 %7C)。
-    QString serverUrl;
-    QString token;
-    QString itemId;
-    QString tag;
-    QString kind = QStringLiteral("Primary");
-    if (id.count(QLatin1Char('~')) >= 2) {
-        const int s1 = id.indexOf(QLatin1Char('~'));
-        const int s2 = id.indexOf(QLatin1Char('~'), s1 + 1);
-        serverUrl = AccountManager::decodeServerKey(id.left(s1));
-        token = m_accounts->tokenForServer(serverUrl);
-        itemId = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
-        // 末段 "<tag>" 或 "<tag>~<kind>";kind 白名单外一律回退 Primary。
-        const QString rest = id.mid(s2 + 1);
-        const int k = rest.indexOf(QLatin1Char('~'));
-        if (k >= 0) {
-            tag = rest.left(k);
-            kind = rest.mid(k + 1);
-            if (kind != QLatin1String("Primary") && kind != QLatin1String("Backdrop")
-                && kind != QLatin1String("Thumb"))
-                kind = QStringLiteral("Primary");
-        } else {
-            tag = rest;
-        }
-    }
-    if (serverUrl.isEmpty() || itemId.isEmpty() || token.isEmpty())
-        return new PosterResponse(QUrl(), QImage()); // 空图直接完成
-
-    // 固定尺寸(卡片显示宽度足够)且 URL 不含 api_key:缓存键稳定,
-    // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。
     Q_UNUSED(requestedSize)
-    QUrlQuery q;
-    const int maxW = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
-                                                       : MoePlayer::kPosterMaxWidth;
-    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxW));
-    if (!tag.isEmpty())
-        q.addQueryItem(QStringLiteral("tag"), tag);
-
-    const QUrl url(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")
-                                       .arg(itemId, kind, q.toString()));
+    QString serverUrl, token, itemId, tag, kind;
+    if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind))
+        return new PosterResponse(QUrl(), QImage()); // 空图直接完成
+    const QUrl url = imageUrl(serverUrl, itemId, tag, kind);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
         QMutexLocker locker(&g_memMutex);
@@ -193,6 +94,137 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
             return new PosterResponse(url, *g_memCache.object(url.toString()));
     }
     return new PosterResponse(url, token);
+}
+
+bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token,
+                                    QString *itemId, QString *tag, QString *kind) const
+{
+    if (serverUrl)
+        serverUrl->clear();
+    if (token)
+        token->clear();
+    if (itemId)
+        itemId->clear();
+    if (tag)
+        tag->clear();
+    if (kind)
+        kind->clear();
+    // 无状态浏览下图片 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>~<kind>
+    // (模型/详情填充时统一加前缀),按前缀路由到对应服务器凭据;
+    // kind 为图片类型(Primary/Backdrop/Thumb),缺省 Primary 向后兼容旧三段 id。
+    // 缺前缀/凭据的 id 直接失败(不发起请求)。
+    // 分隔符用 ~ 而非 |(| 在 image:// URL 中会被转义为 %7C)。
+    if (id.count(QLatin1Char('~')) < 2)
+        return false;
+    const int s1 = id.indexOf(QLatin1Char('~'));
+    const int s2 = id.indexOf(QLatin1Char('~'), s1 + 1);
+    const QString url = AccountManager::decodeServerKey(id.left(s1));
+    const QString tok = m_accounts->tokenForServer(url);
+    const QString iid = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
+    // 末段 "<tag>" 或 "<tag>~<kind>";kind 白名单外一律回退 Primary。
+    QString tg;
+    QString kd = QStringLiteral("Primary");
+    const QString rest = id.mid(s2 + 1);
+    const int k = rest.indexOf(QLatin1Char('~'));
+    if (k >= 0) {
+        tg = rest.left(k);
+        kd = rest.mid(k + 1);
+        if (kd != QLatin1String("Primary") && kd != QLatin1String("Backdrop")
+            && kd != QLatin1String("Thumb"))
+            kd = QStringLiteral("Primary");
+    } else {
+        tg = rest;
+    }
+    if (url.isEmpty() || iid.isEmpty() || tok.isEmpty())
+        return false;
+    if (serverUrl)
+        *serverUrl = url;
+    if (token)
+        *token = tok;
+    if (itemId)
+        *itemId = iid;
+    if (tag)
+        *tag = tg;
+    if (kind)
+        *kind = kd;
+    return true;
+}
+
+QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
+                              const QString &tag, const QString &kind)
+{
+    // 固定尺寸(卡片显示宽度足够)且 URL 不含 api_key:缓存键稳定,
+    // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。
+    QUrlQuery q;
+    const int maxW = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
+                                                       : MoePlayer::kPosterMaxWidth;
+    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxW));
+    if (!tag.isEmpty())
+        q.addQueryItem(QStringLiteral("tag"), tag);
+    return QUrl(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")
+                                   .arg(itemId, kind, q.toString()));
+}
+
+QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error)
+{
+    const QString key = url.toString();
+    if (error)
+        error->clear();
+    // 1) 磁盘层命中(TTL 内):读文件解码,回填内存层。
+    const QString path = cacheFilePath(key);
+    if (QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            QImage img;
+            if (img.loadFromData(f.readAll())) {
+                {
+                    QMutexLocker locker(&g_memMutex);
+                    g_memCache.insert(key, new QImage(img), img.sizeInBytes());
+                }
+                return img;
+            }
+        }
+    }
+    // 2) 回源:占闸(后台阻塞无碍);QNAM 在本线程创建使用(线程亲和)。
+    g_fetchGate.acquire();
+    QNetworkAccessManager nam;
+    nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理
+    nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    QNetworkRequest req(url);
+    // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    if (!token.isEmpty())
+        req.setRawHeader(MoePlayer::kHeaderToken, token.toUtf8());
+    QNetworkReply *reply = nam.get(req);
+    QEventLoop loop;
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec(); // 本线程等待(后台线程,不阻塞 GUI)
+    const bool ok = reply->error() == QNetworkReply::NoError;
+    // 失败/超时(abort)时 reply 的 QIODevice 已关闭,此时 readAll 会报
+    // "device not open";仅成功时读取,失败只取错误描述。
+    const QByteArray data = ok ? reply->readAll() : QByteArray();
+    if (error)
+        *error = reply->errorString();
+    reply->deleteLater();
+    g_fetchGate.release();
+    if (!ok)
+        return QImage();
+    QImage img;
+    if (!img.loadFromData(data)) {
+        if (error)
+            *error = QStringLiteral("图片解码失败");
+        return QImage();
+    }
+    // 回填磁盘与内存(写失败不算错:缓存只是优化)。
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly))
+        f.write(data);
+    {
+        QMutexLocker locker(&g_memMutex);
+        g_memCache.insert(key, new QImage(img), img.sizeInBytes());
+    }
+    return img;
 }
 
 PosterResponse::PosterResponse(const QUrl &url, const QString &token)
