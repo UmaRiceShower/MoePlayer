@@ -181,7 +181,9 @@ QVariantMap ColorProvider::extractRoles(const QImage &image)
     const QColor bgTint = QColor::fromHslF(hh, 0.10, 0.055);
     const QColor surfaceTint = QColor::fromHslF(hh, 0.10, 0.10);
     const QColor complement = QColor::fromHslF(chh, 0.30, 0.50);
-    const QColor complementDark = QColor::fromHslF(chh, 0.10, 0.04);
+    // 暗部藏色:明度/饱和较初版(0.10/0.04)提高,暗部可见一丝补色,
+    // 但仍显著暗于正文,不破坏明暗关系。
+    const QColor complementDark = QColor::fromHslF(chh, 0.40, 0.13);
     roles.insert(QStringLiteral("heroFrom"), heroFrom.name());
     roles.insert(QStringLiteral("accent"), accent.name());
     roles.insert(QStringLiteral("bgTint"), bgTint.name());
