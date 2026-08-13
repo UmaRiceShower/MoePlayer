@@ -212,8 +212,10 @@ Item {
                 property real dragStartX: 0
                 property real dragStartY: 0
 
-                // 图标区:Emby 风格方块,显示名称首字。
+                // 图标区:有自定义图标(图片 URL)时显示图片,加载失败或
+                // 未设置时回退名称首字(Emby 风格方块)。
                 Rectangle {
+                    id: iconRect
                     width: root.iconSize
                     height: root.iconSize
                     radius: 10
@@ -222,12 +224,45 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
                     color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    clip: true
+                    Image {
+                        id: cardIconImg
+                        anchors.fill: parent
+                        source: modelData.icon
+                        fillMode: Image.PreserveAspectCrop
+                        visible: modelData.icon !== "" && status !== Image.Error
+                    }
                     AppText {
                         anchors.centerIn: parent
+                        visible: modelData.icon === "" || cardIconImg.status === Image.Error
                         text: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
                         color: Theme.accent
                         font.pixelSize: 26
                         font.bold: true
+                    }
+                    // 图标设置入口:悬浮卡片时显示,hover 外隐藏。
+                    MouseArea {
+                        id: iconBtn
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        width: 22
+                        height: 22
+                        visible: card.hovered
+                        hoverEnabled: true
+                        z: 20 // 高于拖动 MouseArea,点击不被拖动吞掉
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 11
+                            color: iconBtn.containsMouse ? Theme.accent
+                                                         : Qt.rgba(0, 0, 0, 0.55)
+                            AppText {
+                                anchors.centerIn: parent
+                                text: "✎"
+                                color: Theme.textPrimary
+                                font.pixelSize: 12
+                            }
+                        }
+                        onClicked: root.openIconDialog(modelData.id, modelData.icon)
                     }
                 }
 
@@ -331,6 +366,29 @@ Item {
         passField.text = "" // 不留密码于控件,避免二次读取
     }
 
+    // ---- 图标设置浮窗 ----
+    property bool iconOpen: false
+    property string iconAccountId: ""
+
+    function openIconDialog(id, current) {
+        root.iconAccountId = id
+        iconUrlField.text = current || ""
+        root.iconOpen = true
+        iconUrlField.forceActiveFocus()
+    }
+    function closeIconDialog() {
+        root.iconOpen = false
+    }
+    // 保存即持久化(AccountManager.setAccountIcon 立即落盘)。
+    function saveIcon() {
+        AccountManager.setAccountIcon(root.iconAccountId, iconUrlField.text.trim())
+        root.closeIconDialog()
+    }
+    function clearIcon() {
+        AccountManager.setAccountIcon(root.iconAccountId, "")
+        root.closeIconDialog()
+    }
+
     function submitAdd() {
         if (root.adding)
             return
@@ -382,6 +440,12 @@ Item {
             color: Theme.surface
             border.width: 1
             border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+
+            // 吞掉点击:卡片空白处(标题/标签/间隙)不穿透到遮罩误关。
+            // 须在 Column 之前声明(下层),TextField/Button 在其上正常交互。
+            MouseArea {
+                anchors.fill: parent
+            }
 
             Column {
                 id: addCol
@@ -488,6 +552,122 @@ Item {
                         color: Theme.textMuted
                         font.pixelSize: 12
                         wrapMode: Text.Wrap
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 图标设置浮窗 ----
+    // 半透明遮罩 + 居中卡片:输入图片 URL(图床/服务器资源),实时预览,
+    // 保存即持久化(conf 落盘,卡片与设置入口自动刷新);"清除"恢复名称首字。
+    // 点击遮罩取消。
+    Rectangle {
+        id: iconOverlay
+        visible: root.iconOpen
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.55)
+        z: 100
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeIconDialog()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            height: iconCol.implicitHeight + 48
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+
+            // 同添加浮窗:吞掉空白处点击,防穿透误关。
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            Column {
+                id: iconCol
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 48
+                spacing: 14
+
+                AppText {
+                    text: "服务器图标"
+                    color: Theme.textPrimary
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+
+                // 预览:URL 有效即显示图片,空/加载失败显示账号首字。
+                Row {
+                    spacing: 14
+                    Rectangle {
+                        width: 52
+                        height: 52
+                        radius: 10
+                        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                        clip: true
+                        Image {
+                            id: iconPrevImg
+                            anchors.fill: parent
+                            source: iconUrlField.text.trim()
+                            fillMode: Image.PreserveAspectCrop
+                            visible: iconUrlField.text.trim() !== "" && status !== Image.Error
+                        }
+                        AppText {
+                            anchors.centerIn: parent
+                            visible: iconUrlField.text.trim() === "" || iconPrevImg.status === Image.Error
+                            text: "图"
+                            color: Theme.accent
+                            font.pixelSize: 24
+                            font.bold: true
+                        }
+                    }
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+                        AppText {
+                            text: "输入图片 URL 作为服务器图标"
+                            color: Theme.textMuted
+                            font.pixelSize: 13
+                        }
+                        AppText {
+                            text: "支持 http(s) 图片;清除后恢复名称首字"
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                        }
+                    }
+                }
+
+                TextField {
+                    id: iconUrlField
+                    width: parent.width
+                    placeholderText: "https://example.com/logo.png"
+                    onAccepted: root.saveIcon()
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
+                    Button {
+                        width: 110
+                        text: "保存"
+                        onClicked: root.saveIcon()
+                    }
+                    Button {
+                        width: 110
+                        text: "清除"
+                        enabled: iconUrlField.text.trim() !== ""
+                        onClicked: root.clearIcon()
+                    }
+                    Button {
+                        width: 110
+                        text: "取消"
+                        onClicked: root.closeIconDialog()
                     }
                 }
             }

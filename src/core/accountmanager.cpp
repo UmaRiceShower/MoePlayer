@@ -213,6 +213,7 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("serverUrl"), a.serverUrl);
         m.insert(QStringLiteral("userName"), a.userName);
         m.insert(QStringLiteral("rememberPassword"), a.rememberPassword);
+        m.insert(QStringLiteral("icon"), a.icon);
         m.insert(QStringLiteral("lastUsed"), a.lastUsed);
         // 确认 token 失效且重登失败的服务器为 false(UI 标红);未知/正常为 true。
         m.insert(QStringLiteral("tokenValid"), !m_invalidServers.contains(a.serverUrl));
@@ -405,6 +406,21 @@ void AccountManager::moveAccount(const QString &id, int toIndex)
     }
 }
 
+// 设置图标即持久化(conf 落盘 + UI 通知),用户无需额外保存。
+void AccountManager::setAccountIcon(const QString &id, const QString &icon)
+{
+    for (auto &a : m_accounts) {
+        if (a.id != id)
+            continue;
+        if (a.icon == icon)
+            return;
+        a.icon = icon.trimmed();
+        save();
+        emit accountsChanged();
+        return;
+    }
+}
+
 int AccountManager::accountIndexByServer(const QString &serverUrl) const
 {
     for (int i = 0; i < m_accounts.size(); ++i)
@@ -537,6 +553,7 @@ void AccountManager::load()
         a.token = o.value(QLatin1String("token")).toString();
         a.rememberPassword = o.value(QLatin1String("rememberPassword")).toBool();
         a.password = o.value(QLatin1String("password")).toString();
+        a.icon = o.value(QLatin1String("icon")).toString();
         a.lastUsed = o.value(QLatin1String("lastUsed")).toVariant().toLongLong();
         if (!a.id.isEmpty())
             m_accounts.append(a);
@@ -556,6 +573,7 @@ void AccountManager::save()
         o.insert(QLatin1String("token"), a.token);
         o.insert(QLatin1String("rememberPassword"), a.rememberPassword);
         o.insert(QLatin1String("password"), a.password);
+        o.insert(QLatin1String("icon"), a.icon);
         o.insert(QLatin1String("lastUsed"), a.lastUsed);
         arr.append(o);
     }

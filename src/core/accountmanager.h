@@ -58,6 +58,10 @@ public:
     // 账号拖动排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
     Q_INVOKABLE void moveAccount(const QString &id, int toIndex);
 
+    // 设置账号自定义图标(图片 URL;空串 = 恢复名称首字)。
+    // 立即持久化并通知 UI,无需额外保存操作。
+    Q_INVOKABLE void setAccountIcon(const QString &id, const QString &icon);
+
     // 供 UI 读取某账号的明文密码(仅当 rememberPassword;混淆解码)。
     Q_INVOKABLE QString passwordFor(const QString &id) const;
 
@@ -86,6 +90,7 @@ private:
         QString token;
         bool rememberPassword = false;
         QString password; // 混淆存储
+        QString icon; // 自定义图标(图片 URL;空 = 名称首字)
         qint64 lastUsed = 0;
     };
 
