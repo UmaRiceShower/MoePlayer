@@ -666,23 +666,41 @@ Item {
                         }
                         Row {
                             anchors.fill: parent
-                            anchors.margins: 10
-                            spacing: 8
-                            Text {
-                                width: 26
+                            anchors.margins: 6
+                            spacing: 10
+                            // 左:海报缩略图(16:9 剧照)
+                            Rectangle {
+                                width: 88
+                                height: 50
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: model.episodeNo > 0 ? String(model.episodeNo) : "—"
-                                color: model.id === root.itemId ? "white" : Theme.textMuted
-                                font.pixelSize: 14
-                                font.bold: true
+                                color: Theme.bg
+                                radius: 4
+                                Image {
+                                    id: thumb
+                                    anchors.fill: parent
+                                    source: model.posterId ? "image://emby/" + model.posterId : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                    cache: true
+                                }
+                                // 无海报/加载失败回退:播放图标
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "▶"
+                                    color: model.id === root.itemId ? "white" : Theme.textMuted
+                                    font.pixelSize: 16
+                                    visible: !model.posterId || thumb.status === Image.Error
+                                }
                             }
+                            // 右:集名 + 进度/已看
                             Column {
-                                width: parent.width - 34
+                                width: parent.width - 88 - 10
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: 3
                                 Text {
                                     width: parent.width
-                                    text: model.name
+                                    text: model.episodeNo > 0 ? "E" + model.episodeNo + " · " + model.name : model.name
                                     color: model.id === root.itemId ? "white" : Theme.textPrimary
                                     font.pixelSize: 14
                                     elide: Text.ElideRight
