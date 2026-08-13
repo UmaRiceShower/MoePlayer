@@ -179,7 +179,7 @@ ApplicationWindow {
         Settings {}
     }
 
-    // 服务器管理页(Ctrl+O):添加/删除/修改要连接的 Emby 服务器。
+    // 服务器管理页(Ctrl+O):展示已保存的 Emby 服务器,排序/删除。
     Component {
         id: serverManagerPage
         ServerManager {
