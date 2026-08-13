@@ -4,8 +4,8 @@ import MoePlayer.Core
 import "qrc:/qml/theme"
 
 //! 服务器管理页:枚举已保存的 Emby 服务器(账号)。
-//! 卡片网格展示:名称/用户名/地址/凭据状态;排序按钮决定首页聚合顺序;
-//! 删除按钮移除账号。第一张为"添加服务器"占位卡(添加 UI 后续设计)。
+//! 卡片网格展示:名称/用户名/地址/凭据状态。第一张为"添加服务器"
+//! 占位卡(添加/管理 UI 后续设计)。
 //! 打开方式 Ctrl+O(Main 注册快捷键)。
 Item {
     id: root
@@ -184,34 +184,7 @@ Item {
                     }
 
                     // 底部操作:上移/下移(决定首页聚合顺序)+ 删除。
-                    Row {
-                        anchors.bottom: parent.bottom
-                        anchors.bottomMargin: 10
-                        anchors.right: parent.right
-                        anchors.rightMargin: 10
-                        spacing: 6
-                        Button {
-                            width: 30
-                            height: 26
-                            text: "↑"
-                            padding: 0
-                            onClicked: AccountManager.moveAccountUp(modelData.id)
-                        }
-                        Button {
-                            width: 30
-                            height: 26
-                            text: "↓"
-                            padding: 0
-                            onClicked: AccountManager.moveAccountDown(modelData.id)
-                        }
-                        Button {
-                            width: 30
-                            height: 26
-                            text: "×"
-                            padding: 0
-                            onClicked: AccountManager.removeAccount(modelData.id)
-                        }
-                    }
+                    // 已按需求移除(后续管理操作另行设计)。
 
                     MouseArea {
                         id: cardHover
