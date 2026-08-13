@@ -522,18 +522,18 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             const QString primaryTag = o.value(QLatin1String("ImageTags"))
                                            .toObject().value(QLatin1String("Primary")).toString();
             if (!primaryTag.isEmpty())
-                m.insert(QStringLiteral("posterId"), prefix + id + QLatin1Char('~') + primaryTag + QStringLiteral("~Primary"));
+                m.insert(QStringLiteral("posterId"), prefix + QLatin1Char('~') + id + QLatin1Char('~') + primaryTag + QStringLiteral("~Primary"));
             const auto backdropTag = [&o](const char *field) {
                 const QJsonArray arr = o.value(QLatin1String(field)).toArray();
                 return arr.isEmpty() ? QString() : arr.first().toString();
             };
             const QString back = backdropTag("BackdropImageTags");
             if (!back.isEmpty())
-                m.insert(QStringLiteral("backdropId"), prefix + id + QLatin1Char('~') + back + QStringLiteral("~Backdrop"));
+                m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + id + QLatin1Char('~') + back + QStringLiteral("~Backdrop"));
             const QString parentBack = backdropTag("ParentBackdropImageTags");
             const QString seriesId = o.value(QLatin1String("SeriesId")).toString();
             if (!parentBack.isEmpty() && !seriesId.isEmpty())
-                m.insert(QStringLiteral("parentBackdropId"), prefix + seriesId + QLatin1Char('~') + parentBack + QStringLiteral("~Backdrop"));
+                m.insert(QStringLiteral("parentBackdropId"), prefix + QLatin1Char('~') + seriesId + QLatin1Char('~') + parentBack + QStringLiteral("~Backdrop"));
             // 演职人员:姓名/角色/类型,头像有 PrimaryImageTag 时带前缀。
             QVariantList people;
             for (const auto &p : o.value(QLatin1String("People")).toArray()) {
@@ -545,7 +545,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                 pm.insert(QStringLiteral("type"), po.value(QLatin1String("Type")).toString());
                 const QString ptag = po.value(QLatin1String("PrimaryImageTag")).toString();
                 if (!ptag.isEmpty())
-                    pm.insert(QStringLiteral("posterId"), prefix + po.value(QLatin1String("Id")).toString()
+                    pm.insert(QStringLiteral("posterId"), prefix + QLatin1Char('~') + po.value(QLatin1String("Id")).toString()
                                                           + QLatin1Char('~') + ptag + QStringLiteral("~Primary"));
                 people.append(pm);
             }
