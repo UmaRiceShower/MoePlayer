@@ -31,6 +31,12 @@ Item {
 
     property var detail: ({})
     property bool isFavorite: false
+    // 海报莫奈取色背景顶色(heroBackdrop 渐变起点);取色未完成/失败回退 surface。
+    property color heroFrom: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.heroFrom : Theme.surface
+    }
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
@@ -304,7 +310,7 @@ Item {
             visible: root.loaded
             z: 0
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Theme.surface }
+                GradientStop { position: 0.0; color: root.heroFrom }
                 GradientStop { position: 1.0; color: Theme.bg }
             }
             Image {
@@ -349,7 +355,7 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     running: true
                 }
-                Text {
+                AppText {
                     text: "加载中…"
                     color: Theme.textMuted
                     font.pixelSize: 14
@@ -426,7 +432,7 @@ Item {
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
                                 spacing: 8
 
-                                Text {
+                                AppText {
                                     text: root.heroTitle()
                                     color: Theme.textPrimary
                                     font.pixelSize: 30
@@ -434,14 +440,14 @@ Item {
                                     elide: Text.ElideRight
                                     width: parent.width
                                 }
-                                Text {
+                                AppText {
                                     text: root.metaLine()
                                     color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                     font.pixelSize: 14
                                     opacity: text !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 200 } }
                                 }
-                                Text {
+                                AppText {
                                     text: root.detail.overview || ""
                                     color: Theme.textMuted
                                     font.pixelSize: 13
@@ -464,7 +470,7 @@ Item {
                                             radius: 10
                                             color: Theme.accent
                                         }
-                                        contentItem: Text {
+                                        contentItem: AppText {
                                             text: parent.text
                                             color: "white"
                                             font.pixelSize: 16
@@ -504,7 +510,7 @@ Item {
                         opacity: visible ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                        Text {
+                        AppText {
                             text: "演职人员"
                             color: Theme.textPrimary
                             font.pixelSize: 18
@@ -540,7 +546,7 @@ Item {
                                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                                     cache: true
                                                 }
-                                                Text {
+                                                AppText {
                                                     anchors.centerIn: parent
                                                     text: modelData.name ? modelData.name.charAt(0) : ""
                                                     color: Theme.textMuted
@@ -548,7 +554,7 @@ Item {
                                                     visible: !(modelData.posterId)
                                                 }
                                             }
-                                            Text {
+                                            AppText {
                                                 text: modelData.name || ""
                                                 color: Theme.textPrimary
                                                 font.pixelSize: 12
@@ -556,7 +562,7 @@ Item {
                                                 width: 72
                                                 horizontalAlignment: Text.AlignHCenter
                                             }
-                                            Text {
+                                            AppText {
                                                 text: modelData.role || modelData.type || ""
                                                 color: Theme.textMuted
                                                 font.pixelSize: 11
@@ -580,7 +586,7 @@ Item {
                         opacity: visible ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                        Text {
+                        AppText {
                             text: "媒体信息"
                             color: Theme.textPrimary
                             font.pixelSize: 18
@@ -591,7 +597,7 @@ Item {
                             delegate: Column {
                                 width: parent.width
                                 spacing: 2
-                                Text {
+                                AppText {
                                     text: (modelData.name || "版本") + " · "
                                             + (modelData.container ? modelData.container.toUpperCase() + " · " : "")
                                             + formatSize(modelData.sizeBytes)
@@ -602,7 +608,7 @@ Item {
                                 }
                                 Repeater {
                                     model: modelData.streams
-                                    delegate: Text {
+                                    delegate: AppText {
                                         text: streamLabel(modelData)
                                         color: Theme.textMuted
                                         font.pixelSize: 13
@@ -621,7 +627,7 @@ Item {
                         opacity: visible ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                        Text {
+                        AppText {
                             text: "相似推荐"
                             color: Theme.textPrimary
                             font.pixelSize: 18
@@ -651,7 +657,7 @@ Item {
                                         Behavior on opacity { NumberAnimation { duration: 180 } }
                                         cache: true
                                     }
-                                    Text {
+                                    AppText {
                                         anchors.bottom: parent.bottom
                                         anchors.left: parent.left
                                         anchors.right: parent.right
@@ -719,7 +725,7 @@ Item {
                                         opacity: parent.checked ? 1 : 0.55
                                         Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
-                                    contentItem: Text {
+                                    contentItem: AppText {
                                         text: parent.text
                                         color: parent.checked ? "white" : Theme.textPrimary
                                         font.pixelSize: 13
@@ -747,7 +753,7 @@ Item {
                             border.color: Theme.textMuted
                             opacity: 0.55
                         }
-                        contentItem: Text {
+                        contentItem: AppText {
                             text: parent.text
                             color: Theme.textPrimary
                             font.pixelSize: 14
@@ -770,7 +776,7 @@ Item {
                             border.color: Theme.textMuted
                             opacity: 0.55
                         }
-                        contentItem: Text {
+                        contentItem: AppText {
                             text: parent.text
                             color: Theme.textPrimary
                             font.pixelSize: 14
@@ -825,7 +831,7 @@ Item {
                                     cache: true
                                 }
                                 // 无海报/加载失败回退:播放图标
-                                Text {
+                                AppText {
                                     anchors.centerIn: parent
                                     text: "▶"
                                     color: model.id === root.itemId ? "white" : Theme.textMuted
@@ -838,7 +844,7 @@ Item {
                                 width: parent.width - 88 - 10
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: 3
-                                Text {
+                                AppText {
                                     width: parent.width
                                     text: model.episodeNo > 0 ? "E" + model.episodeNo + " · " + model.name : model.name
                                     color: model.id === root.itemId ? "white" : Theme.textPrimary
@@ -860,7 +866,7 @@ Item {
                                         color: model.id === root.itemId ? "white" : Theme.accent
                                     }
                                 }
-                                Text {
+                                AppText {
                                     text: "已看"
                                     color: model.id === root.itemId ? "white" : Theme.success
                                     font.pixelSize: 11
@@ -890,6 +896,9 @@ Item {
                 return
             root.detail = d
             root.isFavorite = d.isFavorite
+            // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
+            // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
+            ColorProvider.requestColor(root.detail.posterId || root.posterId)
             const c = root.creds()
             // 选集条季列表:剧集自身 / 集详情的父剧。
             // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见

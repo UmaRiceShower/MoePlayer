@@ -11,7 +11,7 @@ Item {
         spacing: 28
         width: 480
 
-        Text {
+        AppText {
             text: "设置"
             color: Theme.textPrimary
             font.pixelSize: 28
@@ -21,7 +21,7 @@ Item {
         Column {
             spacing: 8
 
-            Text {
+            AppText {
                 text: "Emby 服务器（默认地址）"
                 color: Theme.textMuted
                 font.pixelSize: 13
@@ -33,7 +33,7 @@ Item {
             }
         }
 
-        Text {
+        AppText {
             text: Qt.application.name + " " + Qt.application.version
             color: Theme.textMuted
             font.pixelSize: 12

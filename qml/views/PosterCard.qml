@@ -62,7 +62,7 @@ Item {
         }
 
         // 无主图或加载失败:类型占位图标,不显示空卡(对照上游 404 契约)。
-        Text {
+        AppText {
             visible: root.posterId === "" || posterImg.status === Image.Error
             anchors.centerIn: parent
             text: root.itemType === "Series" ? "▦" : "▶"
@@ -92,14 +92,14 @@ Item {
             anchors.leftMargin: 8
             anchors.rightMargin: 8
             spacing: 1
-            Text {
+            AppText {
                 width: parent.width
                 text: root.title
                 color: Theme.textPrimary
                 font.pixelSize: 13
                 elide: Text.ElideRight
             }
-            Text {
+            AppText {
                 visible: root.year > 0
                 width: parent.width
                 text: root.year
@@ -139,12 +139,12 @@ Item {
                 id: ratingRow
                 anchors.centerIn: parent
                 spacing: 3
-                Text {
+                AppText {
                     text: "★"
                     color: Theme.rating
                     font.pixelSize: 12
                 }
-                Text {
+                AppText {
                     text: root.rating.toFixed(1)
                     color: Theme.textPrimary
                     font.pixelSize: 12
@@ -166,7 +166,7 @@ Item {
                 id: stateRow
                 anchors.centerIn: parent
                 spacing: 3
-                Text {
+                AppText {
                     text: root.played ? "✓ 已看"
                          : (root.unplayedCount >= 100 ? "99+ 未看"
                             : root.unplayedCount + " 未看")
@@ -199,7 +199,7 @@ Item {
             height: 30
             padding: 0
             background: Rectangle { radius: 15; color: Theme.overlayBg }
-            contentItem: Text {
+            contentItem: AppText {
                 text: root.favorite ? "♥" : "♡"
                 color: root.favorite ? Theme.favorite : "#ffffff"
                 font.pixelSize: 16
@@ -213,7 +213,7 @@ Item {
             height: 30
             padding: 0
             background: Rectangle { radius: 15; color: root.played ? Theme.success : Theme.overlayBg }
-            contentItem: Text {
+            contentItem: AppText {
                 text: "✓"
                 color: "#ffffff"
                 font.pixelSize: 15
