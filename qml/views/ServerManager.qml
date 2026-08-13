@@ -62,6 +62,19 @@ Item {
             c.dropTarget = true
     }
 
+    // 卡片右键菜单:设置图标(未来管理项可追加)。
+    Menu {
+        id: cardMenu
+        property string accountId: ""
+        property string currentIcon: ""
+        property string serverUrl: ""
+        MenuItem {
+            text: "设置图标…"
+            onTriggered: root.openIconDialog(cardMenu.accountId, cardMenu.currentIcon,
+                                             cardMenu.serverUrl)
+        }
+    }
+
     // 拖放目标:覆盖整页,任何位置松手都换算并重排(拖出网格也不会失序)。
     DropArea {
         id: gridDrop
@@ -212,8 +225,9 @@ Item {
                 property real dragStartX: 0
                 property real dragStartY: 0
 
-                // 图标区:有自定义图标(图片 URL)时显示图片,加载失败或
-                // 未设置时回退名称首字(Emby 风格方块)。
+                // 图标区:优先显示 Emby 服图标(服务器 web 资源,PWA 图标,
+                // 浏览器连接看到的即此图);用户自定义图标(图片 URL)覆盖;
+                // 加载失败(服务器离线/资源不存在)回退名称首字。
                 Rectangle {
                     id: iconRect
                     width: root.iconSize
@@ -228,41 +242,19 @@ Item {
                     Image {
                         id: cardIconImg
                         anchors.fill: parent
-                        source: modelData.icon
+                        source: modelData.icon !== ""
+                                ? modelData.icon
+                                : modelData.serverUrl + "/web/images/icon-192x192.png"
                         fillMode: Image.PreserveAspectCrop
-                        visible: modelData.icon !== "" && status !== Image.Error
+                        visible: status === Image.Ready
                     }
                     AppText {
                         anchors.centerIn: parent
-                        visible: modelData.icon === "" || cardIconImg.status === Image.Error
+                        visible: cardIconImg.status !== Image.Ready
                         text: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
                         color: Theme.accent
                         font.pixelSize: 26
                         font.bold: true
-                    }
-                    // 图标设置入口:悬浮卡片时显示,hover 外隐藏。
-                    MouseArea {
-                        id: iconBtn
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        width: 22
-                        height: 22
-                        visible: card.hovered
-                        hoverEnabled: true
-                        z: 20 // 高于拖动 MouseArea,点击不被拖动吞掉
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 11
-                            color: iconBtn.containsMouse ? Theme.accent
-                                                         : Qt.rgba(0, 0, 0, 0.55)
-                            AppText {
-                                anchors.centerIn: parent
-                                text: "✎"
-                                color: Theme.textPrimary
-                                font.pixelSize: 12
-                            }
-                        }
-                        onClicked: root.openIconDialog(modelData.id, modelData.icon)
                     }
                 }
 
@@ -310,6 +302,7 @@ Item {
                     id: dragArea
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
                     drag {
                         target: card
                         threshold: 8
@@ -319,6 +312,18 @@ Item {
                     onPressed: (mouse) => {
                         card.dragStartX = card.x
                         card.dragStartY = card.y
+                    }
+                    onClicked: (mouse) => {
+                        // 右键弹出卡片菜单(设置图标等);左键点击无操作。
+                        if (mouse.button === Qt.RightButton) {
+                            cardMenu.accountId = modelData.id
+                            cardMenu.currentIcon = modelData.icon
+                            cardMenu.serverUrl = modelData.serverUrl
+                            const g = card.mapToGlobal(mouse.x, mouse.y)
+                            cardMenu.x = g.x
+                            cardMenu.y = g.y
+                            cardMenu.open()
+                        }
                     }
                     onReleased: {
                         // drop() 可能同步触发模型重排销毁本 delegate,之后不得
@@ -369,9 +374,11 @@ Item {
     // ---- 图标设置浮窗 ----
     property bool iconOpen: false
     property string iconAccountId: ""
+    property string iconServerUrl: ""
 
-    function openIconDialog(id, current) {
+    function openIconDialog(id, current, serverUrl) {
         root.iconAccountId = id
+        root.iconServerUrl = serverUrl
         iconUrlField.text = current || ""
         root.iconOpen = true
         iconUrlField.forceActiveFocus()
@@ -384,6 +391,7 @@ Item {
         AccountManager.setAccountIcon(root.iconAccountId, iconUrlField.text.trim())
         root.closeIconDialog()
     }
+    // 清除自定义图标 → 恢复默认(服务器 Emby 图标)。
     function clearIcon() {
         AccountManager.setAccountIcon(root.iconAccountId, "")
         root.closeIconDialog()
@@ -602,7 +610,8 @@ Item {
                     font.bold: true
                 }
 
-                // 预览:URL 有效即显示图片,空/加载失败显示账号首字。
+                // 预览:自定义 URL 有效即显示,否则显示服务器默认 Emby 图标
+                // (即卡片默认图标);加载失败显示占位。
                 Row {
                     spacing: 14
                     Rectangle {
@@ -614,13 +623,15 @@ Item {
                         Image {
                             id: iconPrevImg
                             anchors.fill: parent
-                            source: iconUrlField.text.trim()
+                            source: iconUrlField.text.trim() !== ""
+                                    ? iconUrlField.text.trim()
+                                    : root.iconServerUrl + "/web/images/icon-192x192.png"
                             fillMode: Image.PreserveAspectCrop
-                            visible: iconUrlField.text.trim() !== "" && status !== Image.Error
+                            visible: status === Image.Ready
                         }
                         AppText {
                             anchors.centerIn: parent
-                            visible: iconUrlField.text.trim() === "" || iconPrevImg.status === Image.Error
+                            visible: iconPrevImg.status !== Image.Ready
                             text: "图"
                             color: Theme.accent
                             font.pixelSize: 24
@@ -631,12 +642,12 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 4
                         AppText {
-                            text: "输入图片 URL 作为服务器图标"
+                            text: "输入图片 URL 覆盖默认图标"
                             color: Theme.textMuted
                             font.pixelSize: 13
                         }
                         AppText {
-                            text: "支持 http(s) 图片;清除后恢复名称首字"
+                            text: "默认显示服务器 Emby 图标;清除恢复默认"
                             color: Theme.textMuted
                             font.pixelSize: 12
                         }
