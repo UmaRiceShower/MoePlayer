@@ -12,6 +12,7 @@
 #include <QUuid>
 #include <QDebug>
 #include <QCoreApplication>
+#include <QRegularExpression>
 
 namespace {
 
@@ -266,6 +267,74 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
             emit serverPublicInfoReceived(
                 serverUrl, doc.object().value(QLatin1String("ServerName")).toString());
         }, nullptr, QStringLiteral("获取服务器信息"));
+}
+
+// 浏览器式获取站点图标(HTML Living Standard):请求 web 首页,解析
+// <link rel="icon"> 标签,href 相对路径按 RFC 3986 相对文档 URL 解析;
+// HTML 拉取失败或无图标标签时回退根相对 /favicon.ico。
+void EmbyClient::fetchServerIcon(const QString &serverUrl)
+{
+    const QString htmlUrl = serverUrl.trimmed() + QStringLiteral("/web/index.html");
+    QNetworkRequest req{QUrl(htmlUrl)};
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    QNetworkReply *reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, serverUrl, htmlUrl]() {
+                reply->deleteLater();
+                QString iconUrl;
+                if (reply->error() == QNetworkReply::NoError)
+                    iconUrl = parseFaviconLink(QString::fromUtf8(reply->readAll()), htmlUrl);
+                if (iconUrl.isEmpty())
+                    iconUrl = serverUrl.trimmed() + QStringLiteral("/favicon.ico");
+                emit serverIconReceived(serverUrl, iconUrl);
+            });
+}
+
+// 解析 HTML 图标 link:apple-touch-icon 优先(选 192x192,Emby 的 PWA
+// 图标尺寸),其次常规 icon/shortcut icon;href 相对路径按文档 URL 解析。
+QString EmbyClient::parseFaviconLink(const QString &html, const QString &baseHtmlUrl)
+{
+    static const QRegularExpression tagRe(
+        QStringLiteral("<link\\s[^>]*>"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression relRe(
+        QStringLiteral("rel\\s*=\\s*[\"']([^\"']*)[\"']"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression hrefRe(
+        QStringLiteral("href\\s*=\\s*[\"']([^\"']+)[\"']"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression sizesRe(
+        QStringLiteral("sizes\\s*=\\s*[\"']([^\"']*)[\"']"),
+        QRegularExpression::CaseInsensitiveOption);
+
+    QString best;   // apple-touch-icon(192x192 优先)
+    QString favicon; // icon / shortcut icon
+    auto it = tagRe.globalMatch(html);
+    while (it.hasNext()) {
+        const QString tag = it.next().captured(0);
+        const QString rel = relRe.match(tag).captured(1).toLower();
+        if (!rel.contains(QLatin1String("icon")))
+            continue;
+        const QString href = hrefRe.match(tag).captured(1);
+        if (href.isEmpty())
+            continue;
+        if (rel.contains(QLatin1String("apple-touch-icon"))) {
+            const QString sizes = sizesRe.match(tag).captured(1);
+            if (sizes.startsWith(QLatin1String("192")) || best.isEmpty())
+                best = href;
+        } else if (favicon.isEmpty()) {
+            favicon = href;
+        }
+    }
+    const QString chosen = best.isEmpty() ? favicon : best;
+    if (chosen.isEmpty())
+        return QString();
+    // 相对路径按文档 URL 解析(RFC 3986);绝对 URL 原样返回。
+    const QUrl base(baseHtmlUrl);
+    const QUrl resolved = base.resolved(QUrl(chosen));
+    if (resolved.isValid() && !resolved.scheme().isEmpty())
+        return resolved.toString();
+    return chosen;
 }
 
 void EmbyClient::validateToken(const QString &serverUrl, const QString &token,

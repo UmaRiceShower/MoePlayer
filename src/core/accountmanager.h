@@ -47,6 +47,9 @@ public:
     // 首页聚合:遍历全部账号(顺序即账号列表顺序),每服拉公开信息/视图/最近条目,
     // 全部就绪后填充 homeRows 并发 homeRowsReady。perLibraryLimit 为每库条目上限。
     Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
+    // 浏览器式解析的服务器图标 URL(见 EmbyClient.fetchServerIcon),供
+    // 卡片默认图标显示;解析完成经 serverIconsChanged 通知,未解析到返回空。
+    Q_INVOKABLE QString serverIconFor(const QString &serverUrl) const;
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
@@ -79,6 +82,8 @@ signals:
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
     void homeRowsReady();
+    // 服务器图标解析结果更新(见 serverIconFor),UI 据此刷新默认图标。
+    void serverIconsChanged();
 
 private:
     struct AccountInfo {
@@ -104,6 +109,9 @@ private:
     // 服务器显示名(ServerName)持久化于 QSettings,启动时读入,拉取成功后刷新。
     void loadServerNames();
     void persistServerNames();
+    // 服务器图标 URL(浏览器式解析结果)持久化于 QSettings。
+    void loadServerIcons();
+    void persistServerIcons();
     // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
     int accountIndexByServer(const QString &serverUrl) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
@@ -119,6 +127,7 @@ private:
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
     QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
+    QHash<QString, QString> m_serverIcons; // serverUrl -> 浏览器式解析的图标 URL
     int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调

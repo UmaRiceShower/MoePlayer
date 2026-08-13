@@ -35,6 +35,12 @@ public:
 
     // 服务器公开信息(/System/Info/Public,无需认证),取 ServerName。
     Q_INVOKABLE void fetchServerPublicInfo(const QString &serverUrl);
+    // 浏览器式获取服务器图标:请求 web 首页 HTML,解析 <link rel="icon">
+    // 标签(apple-touch-icon 192 优先,其次 icon/shortcut icon),href 相对
+    // 路径按 RFC 3986 相对文档 URL 解析;HTML 拉取失败或无图标标签时回退
+    // 根相对 /favicon.ico。结果经 serverIconReceived 返回。Emby 官方 API
+    // 无图标端点,图标是 web 静态资源且路径随部署不同,故用 HTML 解析。
+    Q_INVOKABLE void fetchServerIcon(const QString &serverUrl);
     // 校验 token 有效性(/System/Info 轻量认证请求):401 经 serverRequestFailed
     // 通知(AccountManager 标失效/重登),网络错误与超时不算失效(静默)。
     Q_INVOKABLE void validateToken(const QString &serverUrl, const QString &token,
@@ -129,6 +135,8 @@ signals:
     // 请求失败时 views/items 仍发空结果(推进调用方计数),并另发
     // serverRequestFailed 携带失败原因。
     void serverPublicInfoReceived(const QString &serverUrl, const QString &serverName);
+    // 服务器图标解析结果(见 fetchServerIcon):iconUrl 为绝对 URL。
+    void serverIconReceived(const QString &serverUrl, const QString &iconUrl);
     void serverViewsReceived(const QString &serverUrl, const QVariantList &views);
     void serverItemsReceived(const QString &serverUrl, const QString &viewId,
                              const QVariantList &items);
@@ -178,6 +186,9 @@ private:
                     const QString &url, std::function<void(bool ok)> onDone);
     // 按显式凭据构造 X-Emby-Authorization 头(官方 "Emby ..." 格式)。
     QString authHeaderFor(const QString &userId, const QString &token) const;
+    // 解析 HTML 的图标 link 标签:apple-touch-icon 优先(192x192),其次
+    // rel 含 icon 的标签;href 相对路径按 baseHtmlUrl 解析,返回绝对 URL。
+    static QString parseFaviconLink(const QString &html, const QString &baseHtmlUrl);
 
     QNetworkAccessManager m_nam;
     QSettings m_settings;
