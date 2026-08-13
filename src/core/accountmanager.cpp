@@ -19,6 +19,7 @@ namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
+const QString kServerIconsKey = QStringLiteral("accounts/serverIcons");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 首页聚合缓存文件名(CacheLocation 下)。
@@ -31,6 +32,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
 {
     load();
     loadServerNames();
+    loadServerIcons();
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
@@ -79,6 +81,9 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 // ServerName 回填账号名(见 serverPublicInfoReceived)。
                 if (acc.name.isEmpty())
                     m_client->fetchServerPublicInfo(acc.serverUrl);
+                // 浏览器式解析服务器图标(新服务器;已有服务器解析过则忽略)。
+                if (!m_serverIcons.contains(acc.serverUrl))
+                    m_client->fetchServerIcon(acc.serverUrl);
             });
 
     // 登录失败(带 pending 的 addAccount):通知失败,清除待保存状态。
@@ -148,6 +153,18 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 // token 已换:重拉各库数据(先展示缓存),恢复该服首页行。
                 // 并行 fetchHomeRows 已因旧 token 401 把该服按空处理,必须刷新。
                 fetchHomeRows(m_homeLimit);
+            });
+
+    // 浏览器式图标解析结果:缓存并持久化,UI(卡片/预览默认图标)刷新。
+    connect(m_client, &EmbyClient::serverIconReceived, this,
+            [this](const QString &serverUrl, const QString &iconUrl) {
+                if (iconUrl.isEmpty())
+                    return;
+                if (m_serverIcons.value(serverUrl) == iconUrl)
+                    return;
+                m_serverIcons.insert(serverUrl, iconUrl);
+                persistServerIcons();
+                emit serverIconsChanged();
             });
 
     // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知;
@@ -241,14 +258,24 @@ QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
     return QVariantMap();
 }
 
+// 浏览器式解析的服务器图标(启动/添加账号时异步拉取,见 fetchServerIcon)。
+QString AccountManager::serverIconFor(const QString &serverUrl) const
+{
+    return m_serverIcons.value(serverUrl.trimmed());
+}
+
 // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
 // 401 经 serverRequestFailed 回到这里 → 记住密码的账号自动账密重登,
 // 无密码的标失效(UI 红);网络错误/超时不算失效(不打扰用户)。
 void AccountManager::validateTokens()
 {
-    for (const auto &a : m_accounts)
+    for (const auto &a : m_accounts) {
         if (!a.token.isEmpty())
             m_client->validateToken(a.serverUrl, a.token, a.userId);
+        // 浏览器式解析服务器图标:启动并行拉取,结果缓存并持久化;
+        // 已有解析结果的服务器也刷新(图标可能更新),UI 经 serverIconsChanged。
+        m_client->fetchServerIcon(a.serverUrl);
+    }
 }
 
 bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
@@ -498,6 +525,24 @@ void AccountManager::persistServerNames()
     for (auto it = m_serverNames.constBegin(); it != m_serverNames.constEnd(); ++it)
         o.insert(it.key(), it.value());
     m_settings.setValue(kServerNamesKey,
+                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
+    m_settings.sync();
+}
+
+void AccountManager::loadServerIcons()
+{
+    const QJsonObject o = QJsonDocument::fromJson(
+        m_settings.value(kServerIconsKey).toString().toUtf8()).object();
+    for (auto it = o.begin(); it != o.end(); ++it)
+        m_serverIcons.insert(it.key(), it.value().toString());
+}
+
+void AccountManager::persistServerIcons()
+{
+    QJsonObject o;
+    for (auto it = m_serverIcons.constBegin(); it != m_serverIcons.constEnd(); ++it)
+        o.insert(it.key(), it.value());
+    m_settings.setValue(kServerIconsKey,
                         QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
     m_settings.sync();
 }
