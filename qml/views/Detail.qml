@@ -214,18 +214,62 @@ Item {
         const mb = bytes / (1024 * 1024)
         return mb.toFixed(0) + " MB"
     }
+    function formatBitrate(bps) {
+        if (!bps || bps <= 0)
+            return ""
+        const mbps = bps / 1000000
+        if (mbps >= 1)
+            return mbps.toFixed(1) + " Mbps"
+        return (bps / 1000).toFixed(0) + " kbps"
+    }
     function streamLabel(s) {
-        if (s.type === "Video")
-            return "视频 · " + s.codec.toUpperCase()
-                    + (s.width > 0 && s.height > 0 ? " " + s.width + "×" + s.height : "")
-                    + (s.videoRange ? " " + s.videoRange : "")
-        if (s.type === "Audio")
-            return "音轨 · " + s.codec.toUpperCase()
-                    + (s.channels > 0 ? " " + s.channels + "声道" : "")
-                    + (s.language ? " " + s.language : "")
-        if (s.type === "Subtitle")
-            return "字幕 · " + s.codec.toUpperCase()
-                    + (s.language ? " " + s.language : "")
+        if (s.type === "Video") {
+            const parts = ["视频", s.codec ? s.codec.toUpperCase() : ""]
+            if (s.profile)
+                parts.push(s.profile)
+            if (s.width > 0 && s.height > 0)
+                parts.push(s.width + "×" + s.height)
+            if (s.bitDepth > 0)
+                parts.push(s.bitDepth + "bit")
+            if (s.frameRate > 0)
+                parts.push(s.frameRate.toFixed(2) + "fps")
+            if (s.level > 0)
+                parts.push("Lv" + s.level)
+            if (s.videoRange)
+                parts.push(s.videoRange)
+            if (s.pixelFormat)
+                parts.push(s.pixelFormat)
+            if (s.isInterlaced)
+                parts.push("隔行")
+            return parts.filter(function (x) { return x !== "" }).join(" · ")
+        }
+        if (s.type === "Audio") {
+            const parts = ["音轨", s.codec ? s.codec.toUpperCase() : ""]
+            if (s.channelLayout)
+                parts.push(s.channelLayout)
+            else if (s.channels > 0)
+                parts.push(s.channels + "声道")
+            if (s.sampleRate > 0)
+                parts.push((s.sampleRate / 1000).toFixed(s.sampleRate % 1000 === 0 ? 0 : 1) + "kHz")
+            if (s.bitDepth > 0)
+                parts.push(s.bitDepth + "bit")
+            if (s.language)
+                parts.push(s.language)
+            if (s.isDefault)
+                parts.push("默认")
+            return parts.filter(function (x) { return x !== "" }).join(" · ")
+        }
+        if (s.type === "Subtitle") {
+            const parts = ["字幕", s.codec ? s.codec.toUpperCase() : ""]
+            if (s.language)
+                parts.push(s.language)
+            if (s.isForced)
+                parts.push("强制")
+            parts.push(s.isExternal ? "外挂" : "内嵌")
+            if (s.isDefault)
+                parts.push("默认")
+            return parts.filter(function (x) { return x !== "" }).join(" · ")
+        }
         return s.type
     }
 
@@ -530,9 +574,11 @@ Item {
                                 width: parent.width
                                 spacing: 2
                                 Text {
-                                    text: (modelData.name || "") + " · "
+                                    text: (modelData.name || "版本") + " · "
                                             + (modelData.container ? modelData.container.toUpperCase() + " · " : "")
                                             + formatSize(modelData.sizeBytes)
+                                            + (modelData.bitrate > 0 ? " · " + formatBitrate(modelData.bitrate) : "")
+                                            + (modelData.runTimeTicks > 0 ? " · " + formatTime(modelData.runTimeTicks / Constants.ticksPerSecond) : "")
                                     color: Theme.textPrimary
                                     font.pixelSize: 14
                                 }

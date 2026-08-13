@@ -560,6 +560,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                 vm.insert(QStringLiteral("container"), so.value(QLatin1String("Container")).toString());
                 vm.insert(QStringLiteral("sizeBytes"), so.value(QLatin1String("Size")).toInteger());
                 vm.insert(QStringLiteral("bitrate"), so.value(QLatin1String("Bitrate")).toInteger());
+                vm.insert(QStringLiteral("runTimeTicks"), so.value(QLatin1String("RunTimeTicks")).toInteger());
                 QVariantList streams;
                 for (const auto &st : so.value(QLatin1String("MediaStreams")).toArray()) {
                     const QJsonObject sto = st.toObject();
@@ -569,13 +570,22 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                     sm.insert(QStringLiteral("displayTitle"), sto.value(QLatin1String("DisplayTitle")).toString());
                     sm.insert(QStringLiteral("bitrate"), sto.value(QLatin1String("BitRate")).toInteger());
                     sm.insert(QStringLiteral("channels"), sto.value(QLatin1String("Channels")).toInt(0));
+                    sm.insert(QStringLiteral("channelLayout"), sto.value(QLatin1String("ChannelLayout")).toString());
+                    sm.insert(QStringLiteral("sampleRate"), sto.value(QLatin1String("SampleRate")).toInt(0));
+                    sm.insert(QStringLiteral("bitDepth"), sto.value(QLatin1String("BitDepth")).toInt(0));
                     sm.insert(QStringLiteral("language"), sto.value(QLatin1String("Language")).toString());
                     sm.insert(QStringLiteral("width"), sto.value(QLatin1String("Width")).toInt(0));
                     sm.insert(QStringLiteral("height"), sto.value(QLatin1String("Height")).toInt(0));
                     sm.insert(QStringLiteral("profile"), sto.value(QLatin1String("Profile")).toString());
                     sm.insert(QStringLiteral("videoRange"), sto.value(QLatin1String("VideoRange")).toString());
                     sm.insert(QStringLiteral("frameRate"), sto.value(QLatin1String("RealFrameRate")).toDouble(0));
+                    sm.insert(QStringLiteral("level"), sto.value(QLatin1String("Level")).toDouble(0));
+                    sm.insert(QStringLiteral("aspectRatio"), sto.value(QLatin1String("AspectRatio")).toString());
+                    sm.insert(QStringLiteral("pixelFormat"), sto.value(QLatin1String("PixelFormat")).toString());
+                    sm.insert(QStringLiteral("isInterlaced"), sto.value(QLatin1String("IsInterlaced")).toBool(false));
                     sm.insert(QStringLiteral("isDefault"), sto.value(QLatin1String("IsDefault")).toBool(false));
+                    sm.insert(QStringLiteral("isForced"), sto.value(QLatin1String("IsForced")).toBool(false));
+                    sm.insert(QStringLiteral("isExternal"), sto.value(QLatin1String("IsExternal")).toBool(false));
                     streams.append(sm);
                 }
                 vm.insert(QStringLiteral("streams"), streams);
