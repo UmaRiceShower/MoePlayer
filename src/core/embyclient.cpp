@@ -207,6 +207,14 @@ MediaItemModel *EmbyClient::searchModelFor(const QString &serverUrl)
     return m_searchModels.value(key);
 }
 
+MediaItemModel *EmbyClient::similarModelFor(const QString &serverUrl)
+{
+    const QString key = serverUrl.trimmed();
+    if (!m_similarModels.contains(key))
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_similarModels.insert(key, m); }
+    return m_similarModels.value(key);
+}
+
 void EmbyClient::dropServerModels(const QString &serverUrl)
 {
     const QString key = serverUrl.trimmed();
@@ -215,6 +223,7 @@ void EmbyClient::dropServerModels(const QString &serverUrl)
     delete m_seasonsModels.take(key);
     delete m_episodesModels.take(key);
     delete m_searchModels.take(key);
+    delete m_similarModels.take(key);
     m_itemsSeq.remove(key);
     m_searchSeq.remove(key);
 }
@@ -368,7 +377,7 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &token, c
 {
     const QString key = serverUrl.trimmed();
     get(key, token, userId,
-        QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&Fields=PrimaryImageAspectRatio")
+        QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&Fields=UserData,PrimaryImageAspectRatio")
             .arg(seriesId, seasonId),
         [this, key](const QJsonDocument &doc) {
             episodesModelFor(key)->setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
@@ -472,15 +481,18 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
 {
     const QString key = serverUrl.trimmed();
     QUrlQuery q;
-    // UserData 携带已看状态与播放位置(继续观看数据源)。
+    // UserData 携带已看状态/播放位置/收藏;People 供演职人员;Series 相关字段
+    // 供剧集详情显示"剧名 + S/E"与选集条定位;Backdrop 标签供 Hero 背景。
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData"));
+                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId"));
     get(key, token, userId, QStringLiteral("/Users/%1/Items/%2?%3").arg(userId, itemId, q.toString()),
-        [this, key, itemId](const QJsonDocument &doc) {
+        [this, key](const QJsonDocument &doc) {
             const QJsonObject o = doc.object();
             const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+            const QString prefix = AccountManager::encodeServerKey(key);
+            const QString id = o.value(QLatin1String("Id")).toString();
             QVariantMap m;
-            m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+            m.insert(QStringLiteral("id"), id);
             m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
             m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
             m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
@@ -490,13 +502,96 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             // 继续观看:上次停止位置(100ns ticks),未看或已播完为 0。
             m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
             m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
-            QVariantList genres;
-            for (const auto &g : o.value(QLatin1String("Genres")).toArray())
-                genres.append(g.toString());
-            m.insert(QStringLiteral("genres"), genres);
+            m.insert(QStringLiteral("isFavorite"), ud.value(QLatin1String("IsFavorite")).toBool(false));
+            // 剧集归属:分集条目的季号/集号/剧名/父剧/所在季。
+            m.insert(QStringLiteral("seasonNo"), o.value(QLatin1String("ParentIndexNumber")).toInt(0));
+            m.insert(QStringLiteral("episodeNo"), o.value(QLatin1String("IndexNumber")).toInt(0));
+            m.insert(QStringLiteral("seriesName"), o.value(QLatin1String("SeriesName")).toString());
+            m.insert(QStringLiteral("seriesId"), o.value(QLatin1String("SeriesId")).toString());
+            m.insert(QStringLiteral("seasonId"), o.value(QLatin1String("SeasonId")).toString());
+            // 海报/背景 id 统一带服务器前缀与图片类型(kind),供 PosterProvider 路由。
+            const QString primaryTag = o.value(QLatin1String("ImageTags"))
+                                           .toObject().value(QLatin1String("Primary")).toString();
+            if (!primaryTag.isEmpty())
+                m.insert(QStringLiteral("posterId"), prefix + id + QLatin1Char('~') + primaryTag + QStringLiteral("~Primary"));
+            const auto backdropTag = [&o](const char *field) {
+                const QJsonArray arr = o.value(QLatin1String(field)).toArray();
+                return arr.isEmpty() ? QString() : arr.first().toString();
+            };
+            const QString back = backdropTag("BackdropImageTags");
+            if (!back.isEmpty())
+                m.insert(QStringLiteral("backdropId"), prefix + id + QLatin1Char('~') + back + QStringLiteral("~Backdrop"));
+            const QString parentBack = backdropTag("ParentBackdropImageTags");
+            const QString seriesId = o.value(QLatin1String("SeriesId")).toString();
+            if (!parentBack.isEmpty() && !seriesId.isEmpty())
+                m.insert(QStringLiteral("parentBackdropId"), prefix + seriesId + QLatin1Char('~') + parentBack + QStringLiteral("~Backdrop"));
+            // 演职人员:姓名/角色/类型,头像有 PrimaryImageTag 时带前缀。
+            QVariantList people;
+            for (const auto &p : o.value(QLatin1String("People")).toArray()) {
+                const QJsonObject po = p.toObject();
+                QVariantMap pm;
+                pm.insert(QStringLiteral("id"), po.value(QLatin1String("Id")).toString());
+                pm.insert(QStringLiteral("name"), po.value(QLatin1String("Name")).toString());
+                pm.insert(QStringLiteral("role"), po.value(QLatin1String("Role")).toString());
+                pm.insert(QStringLiteral("type"), po.value(QLatin1String("Type")).toString());
+                const QString ptag = po.value(QLatin1String("PrimaryImageTag")).toString();
+                if (!ptag.isEmpty())
+                    pm.insert(QStringLiteral("posterId"), prefix + po.value(QLatin1String("Id")).toString()
+                                                          + QLatin1Char('~') + ptag + QStringLiteral("~Primary"));
+                people.append(pm);
+            }
+            m.insert(QStringLiteral("people"), people);
+            // 媒体信息:版本 + 流(视频/音轨/字幕),只读展示用。
+            QVariantList versions;
+            for (const auto &s : o.value(QLatin1String("MediaSources")).toArray()) {
+                const QJsonObject so = s.toObject();
+                QVariantMap vm;
+                vm.insert(QStringLiteral("id"), so.value(QLatin1String("Id")).toString());
+                vm.insert(QStringLiteral("name"), so.value(QLatin1String("Name")).toString());
+                vm.insert(QStringLiteral("container"), so.value(QLatin1String("Container")).toString());
+                vm.insert(QStringLiteral("sizeBytes"), so.value(QLatin1String("Size")).toInteger());
+                vm.insert(QStringLiteral("bitrate"), so.value(QLatin1String("Bitrate")).toInteger());
+                QVariantList streams;
+                for (const auto &st : so.value(QLatin1String("MediaStreams")).toArray()) {
+                    const QJsonObject sto = st.toObject();
+                    QVariantMap sm;
+                    sm.insert(QStringLiteral("type"), sto.value(QLatin1String("Type")).toString());
+                    sm.insert(QStringLiteral("codec"), sto.value(QLatin1String("Codec")).toString());
+                    sm.insert(QStringLiteral("displayTitle"), sto.value(QLatin1String("DisplayTitle")).toString());
+                    sm.insert(QStringLiteral("bitrate"), sto.value(QLatin1String("BitRate")).toInteger());
+                    sm.insert(QStringLiteral("channels"), sto.value(QLatin1String("Channels")).toInt(0));
+                    sm.insert(QStringLiteral("language"), sto.value(QLatin1String("Language")).toString());
+                    sm.insert(QStringLiteral("width"), sto.value(QLatin1String("Width")).toInt(0));
+                    sm.insert(QStringLiteral("height"), sto.value(QLatin1String("Height")).toInt(0));
+                    sm.insert(QStringLiteral("profile"), sto.value(QLatin1String("Profile")).toString());
+                    sm.insert(QStringLiteral("videoRange"), sto.value(QLatin1String("VideoRange")).toString());
+                    sm.insert(QStringLiteral("frameRate"), sto.value(QLatin1String("RealFrameRate")).toDouble(0));
+                    sm.insert(QStringLiteral("isDefault"), sto.value(QLatin1String("IsDefault")).toBool(false));
+                    streams.append(sm);
+                }
+                vm.insert(QStringLiteral("streams"), streams);
+                versions.append(vm);
+            }
+            m.insert(QStringLiteral("mediaSources"), versions);
             emit itemDetailReady(key, m);
         }, nullptr, QStringLiteral("获取条目详情"));
 }
+
+void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &token,
+                              const QString &userId, const QString &itemId)
+{
+    const QString key = serverUrl.trimmed();
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kSearchLimit));
+    get(key, token, userId, QStringLiteral("/Items/%1/Similar?%2").arg(itemId, q.toString()),
+        [this, key](const QJsonDocument &doc) {
+            similarModelFor(key)->setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
+            qInfo() << "Emby: similar =" << similarModelFor(key)->count() << "on" << key;
+            emit similarReady(key);
+        }, nullptr, QStringLiteral("获取相似推荐"));
+}
+
 
 void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &token,
                                    const QString &userId, const QString &itemId)

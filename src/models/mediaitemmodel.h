@@ -16,6 +16,8 @@ struct MediaItem {
     double positionTicks = 0;  // UserData.PlaybackPositionTicks 观看进度。
     double runtimeTicks = 0;   // RunTimeTicks 总时长。
     int unplayedCount = 0;     // UserData.UnplayedItemCount 未看集数(剧集)。
+    int episodeNo = 0;         // IndexNumber 集号(分集条目)。
+    int seasonNo = 0;          // ParentIndexNumber 季号(分集条目)。
 };
 
 //! Emby 视图/媒体库条目列表模型,由 EmbyClient 填充。
@@ -42,6 +44,8 @@ public:
         PositionTicksRole,
         RuntimeTicksRole,
         UnplayedCountRole,
+        EpisodeNoRole,
+        SeasonNoRole,
     };
 
     explicit MediaItemModel(QObject *parent = nullptr);
@@ -72,6 +76,9 @@ public:
     Q_INVOKABLE QString nameAt(int row) const;
     // 取第 row 条的海报 id(<itemId>~<tag>),越界返回空串。
     Q_INVOKABLE QString posterIdAt(int row) const;
+    // 取第 row 条的完整条目(全部 role),越界返回空 map。
+    // 详情页选集条/剧集播放键需要按行读取进度/集号等字段。
+    Q_INVOKABLE QVariantMap itemAt(int row) const;
     // 就地翻转已看状态(卡片快捷操作后同步模型行,不重拉列表)。
     Q_INVOKABLE void setPlayedAt(int row, bool played);
     // 就地翻转收藏状态。

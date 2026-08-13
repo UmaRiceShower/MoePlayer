@@ -142,21 +142,34 @@ private:
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
-    // 无状态浏览下海报 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>
-    // (模型填充时统一加前缀),PosterProvider 按前缀路由到对应服务器凭据;
+    // 无状态浏览下图片 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>~<kind>
+    // (模型/详情填充时统一加前缀),PosterProvider 按前缀路由到对应服务器凭据;
+    // kind 为图片类型(Primary/Backdrop/Thumb),缺省 Primary 向后兼容旧三段 id。
     // 缺前缀/凭据的 id 直接返回空图(不发起请求)。
     // 分隔符用 ~ 而非 |(| 在 image:// URL 中会被转义为 %7C)。
     QString serverUrl;
     QString token;
     QString itemId;
     QString tag;
+    QString kind = QStringLiteral("Primary");
     if (id.count(QLatin1Char('~')) >= 2) {
         const int s1 = id.indexOf(QLatin1Char('~'));
         const int s2 = id.indexOf(QLatin1Char('~'), s1 + 1);
         serverUrl = AccountManager::decodeServerKey(id.left(s1));
         token = m_accounts->tokenForServer(serverUrl);
         itemId = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
-        tag = id.mid(s2 + 1);
+        // 末段 "<tag>" 或 "<tag>~<kind>";kind 白名单外一律回退 Primary。
+        const QString rest = id.mid(s2 + 1);
+        const int k = rest.indexOf(QLatin1Char('~'));
+        if (k >= 0) {
+            tag = rest.left(k);
+            kind = rest.mid(k + 1);
+            if (kind != QLatin1String("Primary") && kind != QLatin1String("Backdrop")
+                && kind != QLatin1String("Thumb"))
+                kind = QStringLiteral("Primary");
+        } else {
+            tag = rest;
+        }
     }
     if (serverUrl.isEmpty() || itemId.isEmpty() || token.isEmpty())
         return new PosterResponse(QUrl(), QImage()); // 空图直接完成
@@ -165,12 +178,14 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。
     Q_UNUSED(requestedSize)
     QUrlQuery q;
-    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(MoePlayer::kPosterMaxWidth));
+    const int maxW = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
+                                                       : MoePlayer::kPosterMaxWidth;
+    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxW));
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
 
-    const QUrl url(serverUrl + QStringLiteral("/Items/%1/Images/Primary?%2")
-                                       .arg(itemId, q.toString()));
+    const QUrl url(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")
+                                       .arg(itemId, kind, q.toString()));
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
         QMutexLocker locker(&g_memMutex);
