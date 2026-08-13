@@ -295,6 +295,48 @@ Item {
         anchors.fill: parent
         color: Theme.bg
 
+        // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
+        Rectangle {
+            id: heroBackdrop
+            y: 0
+            width: parent.width
+            height: Constants.detailHeroH
+            visible: root.loaded
+            z: 0
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Theme.surface }
+                GradientStop { position: 1.0; color: Theme.bg }
+            }
+            Image {
+                anchors.fill: parent
+                source: root.backdropSource()
+                fillMode: Image.PreserveAspectCrop
+                opacity: status === Image.Ready && source !== "" ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 220 } }
+                cache: true
+            }
+            // 底部渐变遮罩:保证标题/按钮文字可读,并让选集栏区域自然淡出。
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.55; color: "transparent" }
+                    GradientStop { position: 1.0; color: Theme.bg }
+                }
+            }
+        }
+        // 选集栏半透明 scrim:叠在全宽 Hero 之上,选集区透出背景氛围。
+        Rectangle {
+            id: sidebarScrim
+            width: Constants.detailSidebarW
+            x: parent.width - width
+            y: 0
+            height: parent.height
+            // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖深色带。
+            visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
+            z: 1
+            color: Qt.rgba(13, 17, 23, 0.55)
+        }
+
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
         // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
         Item {
@@ -319,6 +361,7 @@ Item {
         Row {
             anchors.fill: parent
             visible: root.loaded
+            z: 2
 
             // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
             Flickable {
@@ -337,31 +380,6 @@ Item {
                     Item {
                         width: parent.width
                         height: Constants.detailHeroH
-
-                        // 背景:无 backdrop 时纯色纵向渐变(表面色→底色)。
-                        Rectangle {
-                            anchors.fill: parent
-                            gradient: Gradient {
-                                GradientStop { position: 0.0; color: Theme.surface }
-                                GradientStop { position: 1.0; color: Theme.bg }
-                            }
-                        }
-                        Image {
-                            anchors.fill: parent
-                            source: root.backdropSource()
-                            fillMode: Image.PreserveAspectCrop
-                            opacity: status === Image.Ready && source !== "" ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: 220 } }
-                            cache: true
-                        }
-                        // 底部渐变遮罩:保证标题/按钮文字可读。
-                        Rectangle {
-                            anchors.fill: parent
-                            gradient: Gradient {
-                                GradientStop { position: 0.55; color: "transparent" }
-                                GradientStop { position: 1.0; color: Theme.bg }
-                            }
-                        }
 
                         Button {
                             anchors.left: parent.left
@@ -667,6 +685,7 @@ Item {
                 Behavior on opacity { NumberAnimation { duration: 220 } }
 
                 // 季标签(季数>1 时显示):超出宽度可左右滚动(拖拽 + 箭头)。
+                // 胶囊分段样式:选中填充强调色,未选中透明。
                 Item {
                     id: seasonBar
                     width: parent.width
@@ -686,16 +705,34 @@ Item {
                             Repeater {
                                 model: EmbyClient.seasonsModelFor(root.serverUrl)
                                 delegate: Button {
-                                    height: 32
+                                    height: 28
                                     text: model.name
                                     checkable: true
                                     checked: model.id === root.currentSeasonId
                                     onClicked: root.selectSeason(model.id)
+                                    // 胶囊分段:选中填强调色+白字,未选中透明+次要文字。
+                                    background: Rectangle {
+                                        radius: 14
+                                        color: parent.checked ? Theme.accent : "transparent"
+                                        border.width: parent.checked ? 0 : 1
+                                        border.color: Theme.textMuted
+                                        opacity: parent.checked ? 1 : 0.55
+                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: parent.checked ? "white" : Theme.textPrimary
+                                        font.pixelSize: 13
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
+                                    }
                                 }
                             }
                         }
                     }
 
+                    // 滚动箭头:与胶囊同高的半透明小圆钮。
                     Button {
                         anchors.left: parent.left
                         anchors.verticalCenter: parent.verticalCenter
@@ -703,6 +740,20 @@ Item {
                         width: 24
                         height: 28
                         onClicked: seasonFlick.contentX = Math.max(0, seasonFlick.contentX - 160)
+                        background: Rectangle {
+                            radius: 14
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.textMuted
+                            opacity: 0.55
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
                         anchors.right: parent.right
@@ -712,6 +763,20 @@ Item {
                         height: 28
                         onClicked: seasonFlick.contentX = Math.min(seasonFlick.contentWidth - seasonFlick.width,
                                                                   seasonFlick.contentX + 160)
+                        background: Rectangle {
+                            radius: 14
+                            color: "transparent"
+                            border.width: 1
+                            border.color: Theme.textMuted
+                            opacity: 0.55
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
 
