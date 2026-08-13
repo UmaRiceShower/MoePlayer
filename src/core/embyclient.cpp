@@ -260,6 +260,17 @@ void EmbyClient::login(const QString &serverUrl, const QString &username, const 
              nullptr, QStringLiteral("登录"));
 }
 
+// 通知服务器会话结束:结果完全忽略(部分服务器未实现该端点,登出失败
+// 不影响本地删除);独立实现避免经 postJson 触发账号状态信号。
+void EmbyClient::logout(const QString &serverUrl, const QString &token, const QString &userId)
+{
+    QNetworkRequest req = makeRequest(serverUrl, token, userId,
+                                      QStringLiteral("/Sessions/Logout"), true);
+    QNetworkReply *reply = m_nam.post(req, QByteArray());
+    connect(reply, &QNetworkReply::finished, this,
+            [reply]() { reply->deleteLater(); });
+}
+
 void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
 {
     get(serverUrl, QString(), QString(), QStringLiteral("/System/Info/Public"),

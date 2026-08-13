@@ -549,6 +549,15 @@ void AccountManager::persistServerIcons()
 
 void AccountManager::removeAccount(const QString &id)
 {
+    // 先向服务器发送登出信号(/Sessions/Logout,官方 API),结果忽略
+    // (部分 Emby 服务器未实现该端点);随后删除本地数据。登出请求
+    // 已携带 token 发出,删除不影响其完成。
+    for (const auto &a : m_accounts) {
+        if (a.id == id && !a.token.isEmpty()) {
+            m_client->logout(a.serverUrl, a.token, a.userId);
+            break;
+        }
+    }
     auto it = std::remove_if(m_accounts.begin(), m_accounts.end(),
                              [id](const AccountInfo &a) { return a.id == id; });
     if (it == m_accounts.end())
