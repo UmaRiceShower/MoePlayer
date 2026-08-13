@@ -506,7 +506,9 @@ Item {
                                         onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
                                         background: Rectangle {
                                             radius: 10
-                                            color: root.accentColor
+                                            // 强调色半透明(75%):透出莫奈背景,不显实色块。
+                                            color: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                          root.accentColor.b, 0.75)
                                             Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
                                         }
                                         contentItem: AppText {
@@ -775,10 +777,15 @@ Item {
                                     // 胶囊分段:选中填强调色+白字,未选中透明+次要文字。
                                     background: Rectangle {
                                         radius: 14
-                                        color: parent.checked ? root.accentColor : "transparent"
+                                        // 选中:强调色半透明;未选中:辅助色浅底 + 描边。
+                                        color: parent.checked
+                                               ? Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                         root.accentColor.b, 0.75)
+                                               : Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                         root.complementColor.b, 0.70)
                                         border.width: parent.checked ? 0 : 1
                                         border.color: root.complementColor
-                                        opacity: parent.checked ? 1 : 0.55
+                                        // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
                                         Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
                                     contentItem: AppText {
@@ -804,10 +811,12 @@ Item {
                         onClicked: seasonFlick.contentX = Math.max(0, seasonFlick.contentX - 160)
                         background: Rectangle {
                             radius: 14
-                            color: "transparent"
+                            // 辅助色浅底 + 描边(与未选中季胶囊同款)。
+                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                          root.complementColor.b, 0.70)
                             border.width: 1
                             border.color: root.complementColor
-                            opacity: 0.55
+                            // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
                         }
                         contentItem: AppText {
                             text: parent.text
@@ -827,10 +836,12 @@ Item {
                                                                   seasonFlick.contentX + 160)
                         background: Rectangle {
                             radius: 14
-                            color: "transparent"
+                            // 辅助色浅底 + 描边(与未选中季胶囊同款)。
+                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                          root.complementColor.b, 0.70)
                             border.width: 1
                             border.color: root.complementColor
-                            opacity: 0.55
+                            // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
                         }
                         contentItem: AppText {
                             text: parent.text
@@ -862,7 +873,9 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: model.id === root.itemId ? root.accentColor
+                            color: model.id === root.itemId
+                                   ? Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                             root.accentColor.b, 0.75)
                                    : (mouse.containsMouse || ListView.isCurrentItem) ? root.surfaceTint
                                    : "transparent"
                             Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
