@@ -3,251 +3,222 @@ import QtQuick.Controls
 import MoePlayer.Core
 import "qrc:/qml/theme"
 
-//! 服务器管理页:添加/删除/修改要连接的 Emby 服务器(账号)。
-//! 列表选中账号后表单预填可修改元数据;新增时需填密码完成登录校验;
-//! 换密码请删除后重新添加。打开方式 Ctrl+O(Main 注册快捷键)。
+//! 服务器管理页:枚举已保存的 Emby 服务器(账号)。
+//! 卡片网格展示:名称/用户名/地址/凭据状态;排序按钮决定首页聚合顺序;
+//! 删除按钮移除账号。第一张为"添加服务器"占位卡(添加 UI 后续设计)。
+//! 打开方式 Ctrl+O(Main 注册快捷键)。
 Item {
     id: root
 
     signal backRequested()
 
-    // 正在编辑的账号 id,空表示新增。
-    property string editingId: ""
-    // 表单字段。
-    property string fName: ""
-    property string fServer: ""
-    property string fUser: ""
-    property string fPassword: ""
-    property string statusText: ""
+    // 卡片尺寸(与 PosterCard 同风格:圆角 + surface 底)。
+    readonly property int cardW: 280
+    readonly property int cardH: 150
+    readonly property int iconSize: 52
 
-    function clearForm() {
-        root.editingId = ""
-        root.fName = ""
-        root.fServer = ""
-        root.fUser = ""
-        root.fPassword = ""
-    }
-
-    function saveForm() {
-        if (root.fServer.trim() === "" || root.fUser.trim() === "")
-            return
-        if (root.editingId !== "") {
-            AccountManager.updateAccount(root.editingId, root.fName, root.fServer, root.fUser)
-            root.statusText = "已保存"
-        } else {
-            if (root.fPassword === "") {
-                root.statusText = "新增需要填写密码"
-                return
-            }
-            const started = AccountManager.addAccount(root.fName, root.fServer,
-                                                      root.fUser, root.fPassword, true)
-            if (!started)
-                root.statusText = "参数不完整"
-            else
-                root.statusText = "正在登录…"
+    // 顶栏:返回 + 标题 + 计数。
+    Row {
+        id: header
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.margins: 24
+        spacing: 12
+        Button {
+            text: "← 返回"
+            onClicked: root.backRequested()
+        }
+        AppText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "服务器管理（Ctrl+O）"
+            color: Theme.textPrimary
+            font.pixelSize: 24
+            font.bold: true
+        }
+        AppText {
+            anchors.verticalCenter: parent.verticalCenter
+            text: "· " + AccountManager.accounts.length
+            color: Theme.textMuted
+            font.pixelSize: 16
         }
     }
 
-    Column {
-        anchors.fill: parent
+    // 卡片网格:第一张为加号占位卡,其后每账号一张。
+    Flow {
+        anchors.top: header.bottom
+        anchors.topMargin: 20
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
         spacing: 16
-        padding: 24
 
-        Row {
-            spacing: 12
-            Button {
-                text: "← 返回"
-                onClicked: root.backRequested()
-            }
-            AppText {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "服务器管理（Ctrl+O）"
-                color: Theme.textPrimary
-                font.pixelSize: 24
-                font.bold: true
-            }
-        }
-
-        Row {
-            spacing: 24
-
-            // 左:账号列表
+            // 添加服务器占位卡(具体添加 UI 后续设计,先占位)。
             Rectangle {
-                width: 420
-                height: 420
-                color: Theme.surface
-                radius: 8
+                width: root.cardW
+                height: root.cardH
+                radius: 12
+                color: "transparent"
+                border.width: 2
+                border.color: plusHover.containsMouse
+                              ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
+                              : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
-                ListView {
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 8
+                    Canvas {
+                        id: plusHover
+                        property bool containsMouse: false
+                        width: 44
+                        height: 44
+                        property color lineColor: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                        onLineColorChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = lineColor
+                            ctx.lineWidth = 3
+                            ctx.lineCap = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(8, height / 2)
+                            ctx.lineTo(width - 8, height / 2)
+                            ctx.stroke()
+                            ctx.beginPath()
+                            ctx.moveTo(width / 2, 8)
+                            ctx.lineTo(width / 2, height - 8)
+                            ctx.stroke()
+                        }
+                    }
+                    AppText {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "添加服务器"
+                        color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                        font.pixelSize: 14
+                    }
+                }
+
+                // 占位:添加 UI 后续设计,点击暂不响应。
+                MouseArea {
+                    id: plusHoverArea
                     anchors.fill: parent
-                    anchors.margins: 8
-                    clip: true
-                    model: AccountManager.accounts
-                    delegate: Rectangle {
-                        width: parent.width
-                        height: 64
-                        radius: 6
-                        // 失效账号(重登失败)标红底;选中用强调色。
-                        color: ListView.isCurrentItem ? Theme.accent
-                               : (modelData.tokenValid === false ? Theme.invalidBg : "transparent")
-                        border.width: ListView.isCurrentItem ? 0
-                                   : (modelData.tokenValid === false ? 2 : 1)
-                        border.color: modelData.tokenValid === false ? Theme.danger : Theme.bg
+                    hoverEnabled: true
+                    onEntered: plusHover.containsMouse = true
+                    onExited: plusHover.containsMouse = false
+                }
+            }
 
-                        Column {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 10
-                            spacing: 2
-                            AppText {
-                                // 未填名称时显示用户名(首页聚合前缀此时用 ServerName)。
-                                text: (modelData.name !== "" ? modelData.name : modelData.userName)
-                                      + (modelData.tokenValid === false ? "  [凭据失效]" : "")
-                                color: ListView.isCurrentItem ? "white" : Theme.textPrimary
-                                font.bold: true
-                            }
-                            AppText {
-                                text: modelData.userName + " · " + modelData.serverUrl
-                                color: ListView.isCurrentItem ? Theme.textSelected : Theme.textMuted
-                                font.pixelSize: 12
-                                elide: Text.ElideRight
-                                width: 330
-                            }
+            // 账号卡。
+            Repeater {
+                model: AccountManager.accounts
+
+                Rectangle {
+                    width: root.cardW
+                    height: root.cardH
+                    radius: 12
+                    color: cardHover.containsMouse ? Qt.rgba(Theme.surface.r, Theme.surface.g,
+                                                             Theme.surface.b, 1) : Theme.surface
+                    // 凭据失效(重登失败)标红边。
+                    border.width: modelData.tokenValid === false ? 2 : 1
+                    border.color: modelData.tokenValid === false ? Theme.danger
+                                  : (cardHover.containsMouse ? Qt.rgba(Theme.accent.r, Theme.accent.g,
+                                                                        Theme.accent.b, 0.5)
+                                                              : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1))
+
+                    // 图标区:Emby 风格方块,显示名称首字。
+                    Rectangle {
+                        width: root.iconSize
+                        height: root.iconSize
+                        radius: 10
+                        anchors.top: parent.top
+                        anchors.topMargin: 14
+                        anchors.left: parent.left
+                        anchors.leftMargin: 14
+                        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                        AppText {
+                            anchors.centerIn: parent
+                            text: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
+                            color: Theme.accent
+                            font.pixelSize: 26
+                            font.bold: true
                         }
-                        // 排序按钮:账号顺序即首页聚合顺序(Home 在 accountsChanged 时重拉)。
-                        // z 置顶:整行选中 MouseArea 声明在其后,默认覆盖并拦截按钮点击。
+                    }
+
+                    // 名称 + 用户名 · 地址。
+                    Column {
+                        anchors.top: parent.top
+                        anchors.topMargin: 18
+                        anchors.left: parent.left
+                        anchors.leftMargin: 14 + root.iconSize + 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 14
+                        spacing: 4
                         Row {
-                            z: 2
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.right: parent.right
-                            anchors.rightMargin: 8
-                            spacing: 4
-                            Button {
-                                width: 28
-                                height: 28
-                                text: "↑"
-                                padding: 0
-                                onClicked: AccountManager.moveAccountUp(modelData.id)
+                            width: parent.width
+                            spacing: 6
+                            AppText {
+                                text: modelData.name !== "" ? modelData.name : modelData.userName
+                                color: Theme.textPrimary
+                                font.pixelSize: 15
+                                font.bold: true
+                                elide: Text.ElideRight
+                                width: parent.width - (modelData.tokenValid === false ? 78 : 0)
                             }
-                            Button {
-                                width: 28
-                                height: 28
-                                text: "↓"
-                                padding: 0
-                                onClicked: AccountManager.moveAccountDown(modelData.id)
+                            AppText {
+                                visible: modelData.tokenValid === false
+                                text: "[凭据失效]"
+                                color: Theme.danger
+                                font.pixelSize: 12
                             }
                         }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                listView.currentIndex = index
-                                root.editingId = modelData.id
-                                root.fName = modelData.name
-                                root.fServer = modelData.serverUrl
-                                root.fUser = modelData.userName
-                                root.fPassword = ""
-                                root.statusText = ""
-                            }
+                        AppText {
+                            width: parent.width
+                            text: modelData.userName + " · " + modelData.serverUrl
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
                         }
                     }
-                    id: listView
-                }
 
-                Button {
-                    anchors.bottom: parent.bottom
-                    anchors.right: parent.right
-                    anchors.margins: 10
-                    text: "新建服务器"
-                    onClicked: {
-                        listView.currentIndex = -1
-                        root.clearForm()
-                        root.statusText = ""
+                    // 底部操作:上移/下移(决定首页聚合顺序)+ 删除。
+                    Row {
+                        anchors.bottom: parent.bottom
+                        anchors.bottomMargin: 10
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        spacing: 6
+                        Button {
+                            width: 30
+                            height: 26
+                            text: "↑"
+                            padding: 0
+                            onClicked: AccountManager.moveAccountUp(modelData.id)
+                        }
+                        Button {
+                            width: 30
+                            height: 26
+                            text: "↓"
+                            padding: 0
+                            onClicked: AccountManager.moveAccountDown(modelData.id)
+                        }
+                        Button {
+                            width: 30
+                            height: 26
+                            text: "×"
+                            padding: 0
+                            onClicked: AccountManager.removeAccount(modelData.id)
+                        }
+                    }
+
+                    MouseArea {
+                        id: cardHover
+                        anchors.fill: parent
+                        hoverEnabled: true
                     }
                 }
             }
-
-            // 右:编辑表单
-            Column {
-                width: 380
-                spacing: 10
-
-                AppText {
-                    text: root.editingId === "" ? "添加服务器" : "修改服务器"
-                    color: Theme.textPrimary
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-
-                AppText { text: "名称"; color: Theme.textMuted; font.pixelSize: 13 }
-                TextField {
-                    width: 380
-                    placeholderText: "如: 家庭服务器"
-                    text: root.fName
-                    onEditingFinished: root.fName = text
-                }
-
-                AppText { text: "服务器地址"; color: Theme.textMuted; font.pixelSize: 13 }
-                TextField {
-                    width: 380
-                    placeholderText: "http://host:8096"
-                    text: root.fServer
-                    onEditingFinished: root.fServer = text
-                }
-
-                AppText { text: "用户名"; color: Theme.textMuted; font.pixelSize: 13 }
-                TextField {
-                    width: 380
-                    text: root.fUser
-                    onEditingFinished: root.fUser = text
-                }
-
-                AppText {
-                    text: root.editingId === "" ? "密码（仅新增时登录校验用）"
-                                                : "密码（换密码请删除后重新添加）"
-                    color: Theme.textMuted
-                    font.pixelSize: 13
-                }
-                TextField {
-                    width: 380
-                    echoMode: TextInput.Password
-                    text: root.fPassword
-                    onEditingFinished: root.fPassword = text
-                }
-
-                Row {
-                    spacing: 10
-                    Button {
-                        text: root.editingId === "" ? "添加并登录" : "保存修改"
-                        enabled: root.fServer.trim() !== "" && root.fUser.trim() !== ""
-                        onClicked: root.saveForm()
-                    }
-                    Button {
-                        text: "删除"
-                        enabled: root.editingId !== ""
-                        onClicked: {
-                            AccountManager.removeAccount(root.editingId)
-                            root.clearForm()
-                            root.statusText = "已删除"
-                        }
-                    }
-                }
-
-                AppText {
-                    text: root.statusText
-                    color: root.statusText.indexOf("失败") >= 0 || root.statusText.indexOf("密码") >= 0
-                          ? Theme.danger : Theme.textMuted
-                }
-            }
-        }
-    }
-
-    Connections {
-        target: AccountManager
-        function onAccountLoginFinished(ok, message) {
-            root.statusText = ok ? "添加成功" : "添加失败：" + message
-        }
-        function onAccountsChanged() {
-            // 列表变化时若编辑项被删/改,重置表单状态(保留用户输入由新建按钮负责)。
-        }
     }
 }
