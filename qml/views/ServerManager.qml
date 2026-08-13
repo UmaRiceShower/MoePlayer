@@ -169,11 +169,12 @@ Item {
                 }
             }
 
-            // 占位:添加 UI 后续设计,点击暂不响应。
+            // 点击打开添加浮窗。
             MouseArea {
                 id: plusHover
                 anchors.fill: parent
                 hoverEnabled: true
+                onClicked: root.openAddDialog()
             }
         }
 
@@ -298,6 +299,195 @@ Item {
                             c.x = sx
                             c.y = sy
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 添加服务器浮窗 ----
+    // 半透明遮罩 + 居中卡片。字段:名称(可选,留空登录成功后自动获取
+    // 服务器端 ServerName)、地址(必填,无 scheme 自动补 http://)、
+    // 用户名(必填)、密码(可为空,填了默认记住供 token 失效自动重登)。
+    // 点"添加"经 AccountManager.addAccount 登录:成功关闭浮窗(账号卡
+    // 自动出现,首页经 accountsChanged 自动重拉聚合);失败在按钮下方
+    // 显示"失败"与详细原因。点击遮罩取消。
+    property bool addOpen: false
+    property bool adding: false
+    property string errorMsg: ""
+
+    function openAddDialog() {
+        root.addOpen = true
+        nameField.text = ""
+        urlField.text = ""
+        userField.text = ""
+        passField.text = ""
+        root.errorMsg = ""
+        urlField.forceActiveFocus()
+    }
+    function closeAddDialog() {
+        root.addOpen = false
+        root.adding = false
+        passField.text = "" // 不留密码于控件,避免二次读取
+    }
+
+    function submitAdd() {
+        if (root.adding)
+            return
+        const url = urlField.text.trim()
+        const user = userField.text.trim()
+        if (url === "") {
+            root.errorMsg = "请输入服务器地址"
+            return
+        }
+        if (user === "") {
+            root.errorMsg = "请输入用户名"
+            return
+        }
+        const full = url.indexOf("://") < 0 ? "http://" + url : url
+        root.errorMsg = ""
+        root.adding = true
+        AccountManager.addAccount(nameField.text, full, user, passField.text,
+                                  passField.text.length > 0)
+    }
+
+    Connections {
+        target: AccountManager
+        function onAccountLoginFinished(ok, message) {
+            root.adding = false
+            if (ok) {
+                root.closeAddDialog()
+            } else {
+                root.errorMsg = message
+            }
+        }
+    }
+
+    Rectangle {
+        visible: root.addOpen
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.55)
+        z: 100
+        // 点击遮罩取消;浮窗打开时遮罩拦截鼠标,卡片网格不可拖动。
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeAddDialog()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            height: addCol.implicitHeight + 48
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+
+            Column {
+                id: addCol
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 48
+                spacing: 14
+
+                AppText {
+                    text: "添加服务器"
+                    color: Theme.textPrimary
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+
+                // 名称(可选)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "服务器名称（可选，留空自动获取）"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: nameField
+                        width: parent.width
+                        placeholderText: "留空则使用服务器端名称"
+                        onAccepted: urlField.forceActiveFocus()
+                    }
+                }
+                // 地址(必填)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "服务器地址"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: urlField
+                        width: parent.width
+                        placeholderText: "http://192.168.1.100:8096"
+                        onAccepted: userField.forceActiveFocus()
+                    }
+                }
+                // 用户名(必填)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "用户名"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: userField
+                        width: parent.width
+                        onAccepted: passField.forceActiveFocus()
+                    }
+                }
+                // 密码(可为空,回车提交)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "密码（可为空）"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: passField
+                        width: parent.width
+                        echoMode: TextInput.Password
+                        onAccepted: root.submitAdd()
+                    }
+                }
+
+                Button {
+                    id: addBtn
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 160
+                    text: root.adding ? "登录中…" : "添加"
+                    enabled: !root.adding
+                    onClicked: root.submitAdd()
+                }
+
+                // 失败提示(按钮下方):红色"失败" + 详细错误(网络/HTTP 状态)。
+                Column {
+                    visible: root.errorMsg !== ""
+                    width: parent.width
+                    spacing: 4
+                    AppText {
+                        text: "失败"
+                        color: Theme.danger
+                        font.pixelSize: 15
+                        font.bold: true
+                    }
+                    AppText {
+                        width: parent.width
+                        text: root.errorMsg
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
                     }
                 }
             }

@@ -57,18 +57,28 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 m_pending.clear();
 
                 // 同服务器+用户已存在则更新,否则新增。
+                // 更新时名称留空视为"不改名":保留原账号名(新增时才用
+                // 服务器端 ServerName 回填,见 serverPublicInfoReceived)。
                 auto it = std::find_if(m_accounts.begin(), m_accounts.end(),
                                        [&acc](const AccountInfo &a) {
                                            return a.serverUrl == acc.serverUrl
                                                   && a.userName == acc.userName;
                                        });
-                if (it != m_accounts.end())
+                if (it != m_accounts.end()) {
+                    if (acc.name.isEmpty())
+                        acc.name = it->name;
+                    acc.id = it->id; // 账号 id 是稳定标识,更新不换
                     *it = acc;
-                else
+                } else {
                     m_accounts.append(acc);
+                }
                 save();
                 emit accountsChanged();
                 emit accountLoginFinished(true, QString());
+                // 名称留空:登录成功后再拉 /System/Info/Public,用服务器端
+                // ServerName 回填账号名(见 serverPublicInfoReceived)。
+                if (acc.name.isEmpty())
+                    m_client->fetchServerPublicInfo(acc.serverUrl);
             });
 
     // 登录失败(带 pending 的 addAccount):通知失败,清除待保存状态。
@@ -82,7 +92,12 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 if (pendingServer != serverUrl.trimmed())
                     return;
                 m_pending.clear();
-                emit accountLoginFinished(false, message);
+                // 401 = 凭据错误(Emby 返回 Unauthorized),给明确提示;
+                // 其余保留原始错误(Qt errorString + HTTP 状态码)。
+                const QString msg = message.contains(QLatin1String("401"))
+                                        ? QStringLiteral("用户名或密码错误(HTTP 401)")
+                                        : message;
+                emit accountLoginFinished(false, msg);
             });
 
     // 跨服务器请求失败:401 且账号记住密码 → 尝试账密重登(token 刷新);
@@ -135,13 +150,23 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 fetchHomeRows(m_homeLimit);
             });
 
-    // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知。
+    // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知;
+    // 同时服务"添加服务器未填名称"场景:登录成功回填 ServerName 到账号名。
     connect(m_client, &EmbyClient::serverPublicInfoReceived, this,
             [this](const QString &serverUrl, const QString &name) {
-                if (name.isEmpty() || m_serverNames.value(serverUrl) == name)
+                if (name.isEmpty())
                     return;
-                m_serverNames.insert(serverUrl, name);
-                persistServerNames();
+                if (m_serverNames.value(serverUrl) != name) {
+                    m_serverNames.insert(serverUrl, name);
+                    persistServerNames();
+                }
+                // 添加服务器时名称留空:用服务器端 ServerName 回填账号名。
+                const int idx = accountIndexByServer(serverUrl);
+                if (idx >= 0 && m_accounts[idx].name.isEmpty()) {
+                    m_accounts[idx].name = name;
+                    save();
+                    emit accountsChanged();
+                }
             });
     connect(m_client, &EmbyClient::serverViewsReceived, this,
             [this](const QString &serverUrl, const QVariantList &views) {
