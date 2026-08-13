@@ -29,6 +29,8 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
     case PositionTicksRole:  return it.positionTicks;
     case RuntimeTicksRole:   return it.runtimeTicks;
     case UnplayedCountRole:  return it.unplayedCount;
+    case EpisodeNoRole:      return it.episodeNo;
+    case SeasonNoRole:       return it.seasonNo;
     }
     return {};
 }
@@ -47,6 +49,8 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
         { PositionTicksRole, "positionTicks" },
         { RuntimeTicksRole, "runtimeTicks" },
         { UnplayedCountRole, "unplayedCount" },
+        { EpisodeNoRole, "episodeNo" },
+        { SeasonNoRole, "seasonNo" },
     };
 }
 
@@ -62,6 +66,8 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString 
     it.year = o.value(QLatin1String("ProductionYear")).toInt(0);
     it.rating = o.value(QLatin1String("CommunityRating")).toDouble(0);
     it.runtimeTicks = o.value(QLatin1String("RunTimeTicks")).toDouble(0);
+    it.episodeNo = o.value(QLatin1String("IndexNumber")).toInt(0);
+    it.seasonNo = o.value(QLatin1String("ParentIndexNumber")).toInt(0);
     // UserData 随 /Items 列表返回:已看状态、观看进度、未看集数零额外请求。
     const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
     it.played = ud.value(QLatin1String("Played")).toBool(false);
@@ -135,6 +141,29 @@ QString MediaItemModel::nameAt(int row) const
 {
     return (row >= 0 && row < m_items.size()) ? m_items.at(row).name : QString();
 }
+
+QVariantMap MediaItemModel::itemAt(int row) const
+{
+    QVariantMap m;
+    if (row < 0 || row >= m_items.size())
+        return m;
+    const MediaItem &it = m_items.at(row);
+    m.insert(QStringLiteral("name"), it.name);
+    m.insert(QStringLiteral("id"), it.id);
+    m.insert(QStringLiteral("posterId"), it.posterId);
+    m.insert(QStringLiteral("type"), it.type);
+    m.insert(QStringLiteral("year"), it.year);
+    m.insert(QStringLiteral("rating"), it.rating);
+    m.insert(QStringLiteral("played"), it.played);
+    m.insert(QStringLiteral("favorite"), it.favorite);
+    m.insert(QStringLiteral("positionTicks"), it.positionTicks);
+    m.insert(QStringLiteral("runtimeTicks"), it.runtimeTicks);
+    m.insert(QStringLiteral("unplayedCount"), it.unplayedCount);
+    m.insert(QStringLiteral("episodeNo"), it.episodeNo);
+    m.insert(QStringLiteral("seasonNo"), it.seasonNo);
+    return m;
+}
+
 
 QString MediaItemModel::posterIdAt(int row) const
 {

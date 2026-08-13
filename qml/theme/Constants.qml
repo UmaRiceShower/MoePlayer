@@ -11,6 +11,17 @@ QtObject {
     readonly property int cellW: 176
     readonly property int cellH: 260
 
+    // ---- 详情页(Hero + 右侧选集条) ----
+    readonly property int detailHeroH: 400        // Hero 高度(桌面端随窗口缩放)
+    readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
+    readonly property int detailPosterH: 300      // Hero 海报高
+    readonly property int detailSidebarW: 280     // 右侧选集条宽
+    readonly property int detailEpisodeRowH: 64   // 选集条行高
+    readonly property real detailEpisodeHoverScale: 1.06 // 选集条行 hover 放大
+    readonly property int detailBodyMaxW: 1000    // 正文区最大宽(窗口过宽时不拉成一条线)
+    readonly property int detailCardW: 112        // 相似推荐/演职人员头像卡宽
+    readonly property int detailCardH: 168        // 相似推荐海报卡高
+
     // ---- 首页行(堆叠轮盘) ----
     readonly property int rowCardW: 112
     readonly property int rowCardH: 168

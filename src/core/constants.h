@@ -24,8 +24,9 @@ inline constexpr int kMaxPageSize = 200;
 inline constexpr int kHomePerLibraryLimit = 20;
 // 搜索返回条数上限。
 inline constexpr int kSearchLimit = 40;
-// 海报请求固定取图宽度(缓存键稳定,换 token 不清缓存)。
 inline constexpr int kPosterMaxWidth = 320;
+// 背景图(Backdrop)取图宽度:Hero 全宽背景需要大图。
+inline constexpr int kBackdropMaxWidth = 1920;
 // Emby 时间单位:100ns ticks 换算秒。
 inline constexpr double kTicksPerSecond = 1e7;
 // 列表请求 Fields:已看/进度/收藏/未看集数/评分/年份随列表返回,零额外请求。
