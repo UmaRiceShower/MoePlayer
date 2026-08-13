@@ -27,11 +27,39 @@ Item {
     readonly property real hoverScale: 1.12
     // 放大后每侧视觉溢出 = 卡宽 × (scale-1)/2;左右邻居各让出该距离(一致)。
     readonly property real expandHalf: root.cardW * (root.hoverScale - 1) / 2
+    // 重排动画(水波):让位卡 320ms、被拖卡 1.5 倍时长追赶(480ms);跨行
+    // 换行/被拖卡淡入 0.5→1。均 OutCubic 无回弹。
+    readonly property int moveDuration: 320
+    readonly property int dragDuration: 480
+    readonly property int fadeDuration: 320
+
+    // 重排状态(FLIP First):模型变化前抓各卡位置快照(id → {x,y}),
+    // 新 delegate 按快照就位(消除瞬移 (0,0));dragAccountId 标记被拖卡
+    // (水波:更长动画);reordering 标志本次布局走重排动画而非 hover 挤压。
+    property var posSnapshot: ({})
+    property string dragAccountId: ""
+    property bool reordering: false
+    // 上次已知账号 id 集合:isNew 判定基线(新 id = 新卡,淡入出场;
+    // 旧 id 重登/添加引起的重建不误判为新卡,避免全网格集体淡入)。
+    property var prevAccountIds: []
+    // 拖动状态:按下时记录的卡 id 与布局位置。drop 处理不触碰 drop.source
+    // (拖动中重建后 source 可能是已销毁的旧卡,访问即 internal error),
+    // 统一走这里记录的值。
+    property string pressCardId: ""
+    property real pressStartX: 0
+    property real pressStartY: 0
+    // 拖动期间模型是否变化过(accountsChanged):拖放重排/重登/添加都会
+    // 触发 Repeater 重建,旧卡 delegate 的 context 被引擎失效但对象尚未
+    // 销毁(deleteLater),此时调用旧卡任何 QML 函数会触发引擎
+    // "QQmlVMEMetaObject: Internal error - invalid context"。onReleased
+    // 据此外出——模型未变(拖出窗口)时旧卡必然有效,归位兜底才安全。
+    property bool dragDirty: false
 
     // 手动布局:占位卡第 0 格,账号卡其后。hover 卡等比例放大(scale),
     // 其左侧全部卡片左移 expandHalf、右侧全部卡片右移 expandHalf(对称
     // 一致挤压);y 不变(行距 16 > 上下视觉溢出 9,不重叠)。
-    // animate=true 时位置变化用弹簧动画(手感慢而弹),false 用于初始/resize 直接定位。
+    // animate=true 时位置变化走卡片内动画(挤压 220ms/复位 120ms,OutCubic),
+    // false 用于初始/resize 直接定位。
     function layoutCards(animate) {
         const n = cardRepeater.count
         const stepW = root.cardW + root.gridSpacing
@@ -55,8 +83,12 @@ Item {
         // 无放大卡 = 复原:全部卡片用短时复位动画(时长 < hover 触发阈值,
         // 复原期间移回不与放大动画冲突)。
         const restore = hover < 0
+        // 重排(水波)模式:快照生效中且无 hover 挤压时,受影响卡从旧位置
+        // 动画到新位置(让位卡 220ms、被拖卡 330ms),跨行/被拖卡淡入;
+        // 新卡(无快照)直接定位 + 淡入,不参与位置动画。
+        const wave = root.reordering && hover < 0 && animate
         // 占位卡(格 0):行 0 且有同行放大卡时一并左移让位。
-        root.placeCard(plusCard, hrow === 0 ? -root.expandHalf : 0, 0, animate, restore)
+        root.placeCard(plusCard, hrow === 0 ? -root.expandHalf : 0, 0, animate, restore, false, 0)
         for (let i = 0; i < n; ++i) {
             const c = cardRepeater.itemAt(i)
             if (!c || c.Drag.active)
@@ -64,6 +96,7 @@ Item {
             const cell = i + 1 // 占位卡占第 0 格
             const col = cell % cols
             const row = Math.floor(cell / cols)
+            const y = row * stepH
             let x = col * stepW
             if (hover >= 0 && row === hrow) {
                 if (cell < hcell)
@@ -71,19 +104,80 @@ Item {
                 else if (cell > hcell)
                     x += root.expandHalf
             }
-            root.placeCard(c, x, row * stepH, animate, restore)
+            if (c.isNew) {
+                // 新账号卡:直接定位(位置无需动画)+ 淡入;初始/无动画场景
+                // 直接显示(避免启动时全卡透明)。
+                c.x = x
+                c.y = y
+                c.isNew = false
+                if (animate)
+                    c.fadeInFromZero()
+                else
+                    c.opacity = 1
+                continue
+            }
+            // 受影响 = 位置变化(以动画前位置为准:重建卡已被快照复位)。
+            // 跨行(旧 y ≠ 新 y)或为被拖卡 → 淡入;行内平移不淡。
+            const moved = Math.abs(c.x - x) > 0.5 || Math.abs(c.y - y) > 0.5
+            if (!wave) {
+                root.placeCard(c, x, y, animate, restore, false, 0)
+                continue
+            }
+            // 重建后无快照的非新卡(添加场景旧卡):位置不变,静默定位
+            // (1ms 内完成,不渲染 (0,0)),不走 (0,0) 飞行动画。
+            if (!root.posSnapshot[c.accountId]) {
+                c.x = x
+                c.y = y
+                continue
+            }
+            const isDrag = c.accountId === root.dragAccountId
+            // 重排走长动画(非短时复位),fade 由跨行/被拖卡判定决定。
+            root.placeCard(c, x, y, animate, false,
+                           moved && (Math.abs(c.y - y) > 0.5 || isDrag),
+                           isDrag ? root.dragDuration : root.moveDuration)
         }
     }
 
     // 放置卡片:位置变化时 animate=true 走卡片内部 animateTo(restore=true
     // 用短时复位动画),否则直接赋值。卡片内动画以 id 引用(delegate 内部
     // 合法),外部经函数访问(QML id 不是对象属性,itemAt(i).animX 无法直达)。
-    function placeCard(c, x, y, animate, restore) {
+    // fade/duration 仅重排(水波)时使用:跨行卡淡入、被拖卡 330ms 追赶。
+    function placeCard(c, x, y, animate, restore, fade, duration) {
         if (animate)
-            c.animateTo(x, y, restore)
+            c.animateTo(x, y, restore, fade, duration)
         else {
             c.x = x
             c.y = y
+        }
+    }
+
+    // 重排前抓位置快照(FLIP First):遍历当前卡片记录 id → {x,y}。新
+    // delegate 按快照复位(见 delegate Component.onCompleted),重排动画
+    // 从旧位置出发;dragId 为空表示删除场景(无被拖卡)。动画结束后由
+    // dragResetTimer 清状态,避免后续 hover 挤压误判为重排。
+    function snapshotPositions(dragId) {
+        root.posSnapshot = {}
+        root.dragAccountId = dragId || ""
+        root.reordering = true
+        // 基线 = 变化前的账号集合(交换/删除不改变"哪些卡存在",仅顺序)。
+        root.prevAccountIds = AccountManager.accounts.map(a => a.id)
+        for (let i = 0; i < cardRepeater.count; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c)
+                root.posSnapshot[c.accountId] = { x: c.x, y: c.y }
+        }
+        dragResetTimer.restart()
+    }
+
+    // 重排动画(被拖卡 330ms)结束后清状态,防后续 hover 挤压误判。
+    Timer {
+        id: dragResetTimer
+        interval: root.dragDuration + 80
+        repeat: false
+        onTriggered: {
+            root.reordering = false
+            root.dragAccountId = ""
+            root.posSnapshot = {}
         }
     }
 
@@ -96,6 +190,15 @@ Item {
     Connections {
         target: AccountManager
         function onAccountsChanged() {
+            // 模型变化 → 旧卡 context 失效(见 dragDirty 说明),onReleased
+            // 不得再触碰卡函数。
+            root.dragDirty = true
+            // 重建完成后一拍布局:accountsChanged 处理后旧 delegate 已销毁、
+            // 新 delegate 已按快照复位,此时 layoutCards 只作用于新卡,不会
+            // 把拖动卡定位回原位。若孵化未完成(部分新卡未创建),onCompleted
+            // 的兜底 scheduleLayout 会补全——两者幂等合并。
+            // 注意:不在此同步 isNew 基线(会先于异步重建的 delegate 判定,
+            // 导致新增卡误判为旧卡)。
             root.scheduleLayout()
         }
     }
@@ -103,8 +206,7 @@ Item {
     // 把落点坐标(相对 root,即 DropArea 原点)换算为账号索引。
     // 加号占位卡占内容区第一格,账号卡从第二格起;坐标 clamp 到有效范围,
     // 保证松手必落入某账号位置(全页 DropArea,任何位置都归位)。
-    function dropIndex(dx, dy) {
-        const n = AccountManager.accounts.length
+    function dropIndex(dx, dy) {        const n = AccountManager.accounts.length
         if (n <= 0)
             return 0
         const stepW = root.cardW + root.gridSpacing
@@ -129,7 +231,10 @@ Item {
 
     function updateDropTarget(drop) {
         root.clearDropTarget()
-        const fromIdx = AccountManager.accounts.findIndex(a => a.id === drop.source.accountId)
+        // 用 onPressed 记录的 id,不触碰 drop.source:拖动中模型可能被重建
+        // (重登/添加触发 accountsChanged),旧卡已销毁,访问其属性会触发
+        // 引擎 internal error。
+        const fromIdx = AccountManager.accounts.findIndex(a => a.id === root.pressCardId)
         if (fromIdx < 0)
             return
         const idx = root.dropIndex(drop.x, drop.y)
@@ -161,7 +266,11 @@ Item {
                 color: Theme.danger
                 font.pixelSize: 14
             }
-            onTriggered: AccountManager.removeAccount(cardMenu.accountId)
+            onTriggered: {
+                // 删除前抓快照:补位卡逐格前移动画(跨行淡入),被删卡消失。
+                root.snapshotPositions("")
+                AccountManager.removeAccount(cardMenu.accountId)
+            }
         }
     }
 
@@ -173,16 +282,31 @@ Item {
         onExited: root.clearDropTarget()
         onDropped: (drop) => {
             root.clearDropTarget()
-            const fromIdx = AccountManager.accounts.findIndex(a => a.id === drop.source.accountId)
+            // 不触碰 drop.source(拖动中重建后可能已销毁,访问即 internal
+            // error),来源 id 与归位值统一用 onPressed 记录的 root 状态。
+            const fromId = root.pressCardId
+            const fromIdx = AccountManager.accounts.findIndex(a => a.id === fromId)
             if (fromIdx < 0)
                 return
             const toIdx = root.dropIndex(drop.x, drop.y)
             if (fromIdx !== toIdx) {
-                // 真实交换:模型变化触发 Flow 重排,卡片随布局归位。
-                AccountManager.moveAccount(AccountManager.accounts[fromIdx].id, toIdx)
+                // 真实交换:立即执行。快照在模型变化前抓(被拖卡此刻 x/y
+                // 已是拖动位置,FLIP First),重建后新 delegate 按快照复位,
+                // 直接从拖动位置动画到目标格位(无"先回原位"的中间态)。
+                // Home 侧的去重/行就绪门控已消除 drop() 调用栈内重建的
+                // 引擎错误,无需延迟。
+                root.snapshotPositions(fromId)
+                AccountManager.moveAccount(fromId, toIdx)
             } else {
-                // 拖回原位:模型不变,卡片仍有效,短时复位动画归位。
-                drop.source.animateTo(drop.source.dragStartX, drop.source.dragStartY, true)
+                // 拖回原位:模型不变。若拖动中被重建过,当前卡是新实例,
+                // 位置已在布局位;找到存活卡按按下时位置短时复位归位。
+                for (let i = 0; i < cardRepeater.count; ++i) {
+                    const c = cardRepeater.itemAt(i)
+                    if (c && c.accountId === fromId) {
+                        c.animateTo(root.pressStartX, root.pressStartY, true)
+                        break
+                    }
+                }
             }
         }
     }
@@ -235,7 +359,12 @@ Item {
             repeat: false
             onTriggered: root.layoutCards(true)
         }
-        Component.onCompleted: root.layoutCards(false)
+        Component.onCompleted: {
+            // isNew 判定基线:页面打开时的账号集合。此后添加账号 = 新 id
+            // 淡入;重登/重建 = 旧 id 不误判,不触发集体淡入。
+            root.prevAccountIds = AccountManager.accounts.map(a => a.id)
+            root.layoutCards(false)
+        }
         onWidthChanged: root.layoutCards(false)
         onHeightChanged: root.layoutCards(false)
 
@@ -352,9 +481,10 @@ Item {
 
             Rectangle {
                 id: card
-                // hover 放大:等比例 scale(宽高同倍),150ms 触发阈值(快速
+                // hover 放大:等比例 scale(宽高同倍),200ms 触发阈值(快速
                 // 划过不触发),拖动中收起。位置由 root.layoutCards 管理:
-                // 放大卡左右邻居对称让位(expandHalf),动画走 animX/animY 弹簧。
+                // 放大卡左右邻居对称让位(expandHalf),动画走 animX/animY
+                // (220ms)与 animXBack/animYBack(120ms),均 OutCubic 无回弹。
                 width: root.cardW
                 height: root.cardH
                 radius: 12
@@ -369,13 +499,14 @@ Item {
                 // 复位 120ms < hover 触发 200ms,复原期间移回不会与放大
                 // 动画冲突。手动 from/to 驱动(不设 Behavior,否则初始
                 // 布局也会动画)。
-                function animateTo(tx, ty, restore) {
+                function animateTo(tx, ty, restore, fade, duration) {
                     if (Math.abs(card.x - tx) > 0.5) {
                         if (restore) {
                             animXBack.from = card.x
                             animXBack.to = tx
                             animXBack.start()
                         } else {
+                            animX.duration = duration > 0 ? duration : root.moveDuration
                             animX.from = card.x
                             animX.to = tx
                             animX.start()
@@ -387,11 +518,52 @@ Item {
                             animYBack.to = ty
                             animYBack.start()
                         } else {
+                            animY.duration = duration > 0 ? duration : root.moveDuration
                             animY.from = card.y
                             animY.to = ty
                             animY.start()
                         }
                     }
+                    // 跨行换行/被拖卡淡入(0.5→1),行内平移不淡。
+                    if (fade && !restore) {
+                        opacityAnim.from = 0.5
+                        opacityAnim.to = 1
+                        opacityAnim.start()
+                    }
+                }
+                // 新账号卡:淡入(0→1)出场。
+                function fadeInFromZero() {
+                    opacityAnim.from = 0
+                    opacityAnim.to = 1
+                    opacityAnim.start()
+                }
+                // 重排后按快照复位到旧位置(FLIP Invert),消除瞬移 (0,0)。
+                // isNew 由账号 id 基线判定(非快照缺失):新 id 淡入出场;
+                // 旧 id 重建(添加/重登)不误判,无快照时由布局静默定位。
+                // 销毁前停掉所有动画:target 随 delegate 销毁,主动 stop
+                // 避免动画引擎在失效对象上求值(QQmlVMEMetaObject internal
+                // error——重登等触发的重建可能发生在动画进行中)。
+                Component.onDestruction: {
+                    animX.stop()
+                    animY.stop()
+                    animXBack.stop()
+                    animYBack.stop()
+                    opacityAnim.stop()
+                }
+                Component.onCompleted: {
+                    const p = root.posSnapshot[modelData.id]
+                    card.isNew = !root.prevAccountIds.includes(modelData.id)
+                    if (p) {
+                        card.x = p.x
+                        card.y = p.y
+                    } else if (card.isNew) {
+                        card.opacity = 0
+                    }
+                    // Repeater 重建为异步(incubation):accountsChanged 触发的
+                    // 1ms 布局可能跑在重建完成前。本 delegate 完成后主动触发
+                    // 一次布局,同批次全部 onCompleted 会合并到同一 Timer 周期,
+                    // 最终布局在全部 delegate 就绪后执行(幂等,仅动位置变化的卡)。
+                    root.scheduleLayout()
                 }
                 NumberAnimation {
                     id: animX
@@ -421,6 +593,14 @@ Item {
                     duration: 120
                     easing.type: Easing.OutCubic
                 }
+                // 重排淡入:跨行换行/被拖卡 0.5→1、新卡 0→1。
+                NumberAnimation {
+                    id: opacityAnim
+                    target: card
+                    property: "opacity"
+                    duration: root.fadeDuration
+                    easing.type: Easing.OutCubic
+                }
                 // 官方拖放模式:MouseArea.drag 移动卡片自身并驱动 Drag.active。
                 // Drag.source 是 QObject(卡片自身),drop 侧经 accountId 识别。
                 Drag.active: dragArea.drag.active
@@ -438,6 +618,8 @@ Item {
                 property bool hovered: false
                 property bool dropTarget: false
                 property bool expanded: false
+                // 新账号卡(无位置快照):直接定位 + 淡入,不参与重排位移动画。
+                property bool isNew: false
                 property real dragStartX: 0
                 property real dragStartY: 0
 
@@ -531,11 +713,17 @@ Item {
                         card.expanded = false
                     }
                     onPressed: (mouse) => {
-                        // 按住立即收起放大(hover 让位于拖动),并记录布局位置。
+                        // 按住立即收起放大(hover 让位于拖动),并记录布局位置
+                        // 与卡 id(root 级,drop 处理经此访问,不触碰可能已
+                        // 随重建销毁的 drop.source)。
                         hoverTimer.stop()
                         card.expanded = false
                         card.dragStartX = card.x
                         card.dragStartY = card.y
+                        root.pressCardId = card.accountId
+                        root.pressStartX = card.x
+                        root.pressStartY = card.y
+                        root.dragDirty = false // 新一轮拖动,清模型变化标记
                     }
                     onClicked: (mouse) => {
                         // 右键弹出卡片菜单(设置图标等);左键点击无操作。
@@ -551,19 +739,26 @@ Item {
                         }
                     }
                     onReleased: {
-                        // drop() 可能同步触发模型重排销毁本 delegate,之后不得
-                        // 访问任何 QML 上下文——提前捕获局部引用与归位值。
-                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)时模型未变、
-                        // 卡片仍有效,此时手动归位;投递成功时归位由 onDropped
-                        // (from==to)或 Flow 重排(from!=to)完成。
-                        const c = card
-                        const sx = c.dragStartX
-                        const sy = c.dragStartY
-                        const act = c.Drag.drop()
-                        if (act === Qt.IgnoreAction) {
-                            // 未投递(拖出窗口):短时复位动画归位。
-                            c.animateTo(sx, sy, true)
-                        }
+                        // 事件顺序:released 先于 drop 投递。Drag.drop() 在
+                        // 本 handler 内投递 drop → onDropped → moveAccount →
+                        // Repeater 重建会使本卡 delegate 的 context 失效
+                        // (clearContext,对象未销毁)。此后本 handler 内任何
+                        // id 解析(root/card)都会 ReferenceError,任何本卡
+                        // QML 函数调用都会 "QQmlVMEMetaObject: Internal
+                        // error - invalid context"(gdb 实证)。因此全部取值
+                        // 在 drop 前完成:捕获根对象引用 r(JS 引用,属性读取
+                        // 不走 context,drop 后仍可安全读 r.dragDirty)与
+                        // 归位目标;drop 后不再做任何 id 查找。
+                        const r = root
+                        const sx = card.dragStartX
+                        const sy = card.dragStartY
+                        const act = card.Drag.drop()
+                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)且模型未变
+                        // (dragDirty 仍 false,本卡有效)时手动归位;投递成功
+                        // 时归位由 onDropped(from==to)或重排布局完成,本卡
+                        // 已失效,不再触碰。
+                        if (act === Qt.IgnoreAction && !r.dragDirty && card.animateTo)
+                            card.animateTo(sx, sy, true)
                     }
                 }
             }
