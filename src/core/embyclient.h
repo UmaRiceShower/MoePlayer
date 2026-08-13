@@ -50,6 +50,11 @@ public:
     // 调用方(AccountManager 存账号 / 表单直连浏览)自行保管凭据。
     Q_INVOKABLE void login(const QString &serverUrl, const QString &username,
                            const QString &password);
+    // 通知服务器会话结束(/Sessions/Logout,官方 Requires authentication
+    // as user)。结果完全忽略:部分 Emby 服务器未实现该端点,登出失败
+    // 不影响本地删除;不触发任何账号状态信号。
+    Q_INVOKABLE void logout(const QString &serverUrl, const QString &token,
+                            const QString &userId);
     // 获取用户媒体库视图(/Users/{id}/Views),填充该服务器的 viewsModel。
     Q_INVOKABLE void fetchViews(const QString &serverUrl, const QString &token,
                                 const QString &userId);

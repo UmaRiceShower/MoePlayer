@@ -62,7 +62,7 @@ Item {
             c.dropTarget = true
     }
 
-    // 卡片右键菜单:设置图标(未来管理项可追加)。
+    // 卡片右键菜单:设置图标 / 删除(登出服务器 + 删除本地数据)。
     Menu {
         id: cardMenu
         property string accountId: ""
@@ -72,6 +72,17 @@ Item {
             text: "设置图标…"
             onTriggered: root.openIconDialog(cardMenu.accountId, cardMenu.currentIcon,
                                              cardMenu.serverUrl)
+        }
+        MenuSeparator {}
+        MenuItem {
+            // 删除:先向服务器发登出(结果忽略),再删本地数据(见
+            // AccountManager.removeAccount),账号卡自动补位。
+            contentItem: AppText {
+                text: "删除"
+                color: Theme.danger
+                font.pixelSize: 14
+            }
+            onTriggered: AccountManager.removeAccount(cardMenu.accountId)
         }
     }
 
