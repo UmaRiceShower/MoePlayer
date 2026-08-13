@@ -19,8 +19,6 @@ namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
-const QString kServerIconsKey = QStringLiteral("accounts/serverIcons");
-const QString kFailedIconsKey = QStringLiteral("accounts/failedIcons");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 首页聚合缓存文件名(CacheLocation 下)。
@@ -33,8 +31,6 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
 {
     load();
     loadServerNames();
-    loadServerIcons();
-    loadFailedIcons();
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
@@ -157,20 +153,22 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 fetchHomeRows(m_homeLimit);
             });
 
-    // 浏览器式图标解析结果:缓存并持久化,清除旧失败记忆,UI 刷新。
+    // 浏览器式图标解析结果(仅添加服务器时拉取):写入该服务器账号的
+    // serverIcon 字段(持久化)。解析失败(空)静默:不写、不记录、不重试,
+    // 卡片回退名称首字。
     connect(m_client, &EmbyClient::serverIconReceived, this,
             [this](const QString &serverUrl, const QString &iconUrl) {
                 if (iconUrl.isEmpty())
                     return;
-                if (m_serverIcons.value(serverUrl) == iconUrl
-                    && m_failedIcons.value(serverUrl) == iconUrl)
+                const int idx = accountIndexByServer(serverUrl);
+                if (idx < 0)
                     return;
-                m_serverIcons.insert(serverUrl, iconUrl);
-                // 新解析结果(重新添加服务器):清除该服失败记忆,重新尝试。
-                m_failedIcons.remove(serverUrl);
-                persistServerIcons();
-                persistFailedIcons();
-                emit serverIconsChanged();
+                AccountInfo &a = m_accounts[idx];
+                if (a.serverIcon == iconUrl)
+                    return;
+                a.serverIcon = iconUrl;
+                save();
+                emit accountsChanged();
             });
 
     // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知;
@@ -237,6 +235,7 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("userName"), a.userName);
         m.insert(QStringLiteral("rememberPassword"), a.rememberPassword);
         m.insert(QStringLiteral("icon"), a.icon);
+        m.insert(QStringLiteral("serverIcon"), a.serverIcon);
         m.insert(QStringLiteral("lastUsed"), a.lastUsed);
         // 确认 token 失效且重登失败的服务器为 false(UI 标红);未知/正常为 true。
         m.insert(QStringLiteral("tokenValid"), !m_invalidServers.contains(a.serverUrl));
@@ -262,34 +261,6 @@ QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
         }
     }
     return QVariantMap();
-}
-
-// 浏览器式解析的服务器图标(仅添加服务器时拉取,见 loginSucceeded);
-// 已知加载失败的 URL 返回空,不再重复请求(失败记忆持久化)。
-QString AccountManager::serverIconFor(const QString &serverUrl) const
-{
-    const QString url = m_serverIcons.value(serverUrl.trimmed());
-    if (url.isEmpty())
-        return QString();
-    if (m_failedIcons.value(serverUrl.trimmed()) == url)
-        return QString();
-    return url;
-}
-
-// 图标加载失败(404/网络错误):持久化失败记忆,UI 立即回退首字。
-// 仅记录服务器默认图标(解析结果);用户自定义图标失败不记录(用户
-// 可能更换地址,重新设置后即可重试)。
-void AccountManager::markServerIconFailed(const QString &serverUrl, const QString &iconUrl)
-{
-    const QString url = iconUrl.trimmed();
-    const QString srv = serverUrl.trimmed();
-    if (url.isEmpty() || m_serverIcons.value(srv) != url)
-        return;
-    if (m_failedIcons.value(srv) == url)
-        return;
-    m_failedIcons.insert(srv, url);
-    persistFailedIcons();
-    emit serverIconsChanged();
 }
 
 // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
@@ -555,42 +526,6 @@ void AccountManager::persistServerNames()
     m_settings.sync();
 }
 
-void AccountManager::loadServerIcons()
-{
-    const QJsonObject o = QJsonDocument::fromJson(
-        m_settings.value(kServerIconsKey).toString().toUtf8()).object();
-    for (auto it = o.begin(); it != o.end(); ++it)
-        m_serverIcons.insert(it.key(), it.value().toString());
-}
-
-void AccountManager::persistServerIcons()
-{
-    QJsonObject o;
-    for (auto it = m_serverIcons.constBegin(); it != m_serverIcons.constEnd(); ++it)
-        o.insert(it.key(), it.value());
-    m_settings.setValue(kServerIconsKey,
-                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
-}
-
-void AccountManager::loadFailedIcons()
-{
-    const QJsonObject o = QJsonDocument::fromJson(
-        m_settings.value(kFailedIconsKey).toString().toUtf8()).object();
-    for (auto it = o.begin(); it != o.end(); ++it)
-        m_failedIcons.insert(it.key(), it.value().toString());
-}
-
-void AccountManager::persistFailedIcons()
-{
-    QJsonObject o;
-    for (auto it = m_failedIcons.constBegin(); it != m_failedIcons.constEnd(); ++it)
-        o.insert(it.key(), it.value());
-    m_settings.setValue(kFailedIconsKey,
-                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
-}
-
 void AccountManager::removeAccount(const QString &id)
 {
     // 先向服务器发送登出信号(/Sessions/Logout,官方 API),结果忽略
@@ -652,6 +587,7 @@ void AccountManager::load()
         a.rememberPassword = o.value(QLatin1String("rememberPassword")).toBool();
         a.password = o.value(QLatin1String("password")).toString();
         a.icon = o.value(QLatin1String("icon")).toString();
+        a.serverIcon = o.value(QLatin1String("serverIcon")).toString();
         a.lastUsed = o.value(QLatin1String("lastUsed")).toVariant().toLongLong();
         if (!a.id.isEmpty())
             m_accounts.append(a);
@@ -672,6 +608,7 @@ void AccountManager::save()
         o.insert(QLatin1String("rememberPassword"), a.rememberPassword);
         o.insert(QLatin1String("password"), a.password);
         o.insert(QLatin1String("icon"), a.icon);
+        o.insert(QLatin1String("serverIcon"), a.serverIcon);
         o.insert(QLatin1String("lastUsed"), a.lastUsed);
         arr.append(o);
     }

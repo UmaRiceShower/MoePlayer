@@ -68,10 +68,11 @@ Item {
         property string accountId: ""
         property string currentIcon: ""
         property string serverUrl: ""
+        property string serverIcon: ""
         MenuItem {
             text: "设置图标…"
             onTriggered: root.openIconDialog(cardMenu.accountId, cardMenu.currentIcon,
-                                             cardMenu.serverUrl)
+                                             cardMenu.serverUrl, cardMenu.serverIcon)
         }
         MenuSeparator {}
         MenuItem {
@@ -248,8 +249,8 @@ Item {
                     color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                     ServerIcon {
                         anchors.fill: parent
-                        serverUrl: modelData.serverUrl
                         customIcon: modelData.icon
+                        defaultIcon: modelData.serverIcon
                         fallbackText: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
                     }
                 }
@@ -315,6 +316,7 @@ Item {
                             cardMenu.accountId = modelData.id
                             cardMenu.currentIcon = modelData.icon
                             cardMenu.serverUrl = modelData.serverUrl
+                            cardMenu.serverIcon = modelData.serverIcon
                             const g = card.mapToGlobal(mouse.x, mouse.y)
                             cardMenu.x = g.x
                             cardMenu.y = g.y
@@ -370,11 +372,11 @@ Item {
     // ---- 图标设置浮窗 ----
     property bool iconOpen: false
     property string iconAccountId: ""
-    property string iconServerUrl: ""
+    property string iconServerDefault: ""
 
-    function openIconDialog(id, current, serverUrl) {
+    function openIconDialog(id, current, serverUrl, serverDefault) {
         root.iconAccountId = id
-        root.iconServerUrl = serverUrl
+        root.iconServerDefault = serverDefault
         iconUrlField.text = current || ""
         root.iconOpen = true
         iconUrlField.forceActiveFocus()
@@ -617,8 +619,8 @@ Item {
                         color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                         ServerIcon {
                             anchors.fill: parent
-                            serverUrl: root.iconServerUrl
                             customIcon: iconUrlField.text.trim()
+                            defaultIcon: root.iconServerDefault
                             fallbackText: "图"
                         }
                     }
