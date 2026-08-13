@@ -74,12 +74,13 @@ Item {
             if (fromIdx < 0)
                 return
             const toIdx = root.dropIndex(drop.x, drop.y)
-            if (fromIdx === toIdx) {
-                // 拖回原位:模型不变,Flow 不会重排,强制重建网格让卡片归位。
-                cardRepeater.model = null
-                cardRepeater.model = AccountManager.accounts
-            } else {
+            if (fromIdx !== toIdx) {
+                // 真实交换:模型变化触发 Flow 重排,卡片随布局归位。
                 AccountManager.moveAccount(AccountManager.accounts[fromIdx].id, toIdx)
+            } else {
+                // 拖回原位:模型不变,卡片仍有效,手动归位到布局位置。
+                drop.source.x = drop.source.dragStartX
+                drop.source.y = drop.source.dragStartY
             }
         }
     }
@@ -207,6 +208,8 @@ Item {
                                               : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1)))
                 property bool hovered: false
                 property bool dropTarget: false
+                property real dragStartX: 0
+                property real dragStartY: 0
 
                 // 图标区:Emby 风格方块,显示名称首字。
                 Rectangle {
@@ -264,6 +267,9 @@ Item {
                 }
 
                 // 拖动:按住拖动卡片(跟手),松手按落点重排;hover 样式合并于此。
+                // 拖动前记录布局位置:未发生真实交换时(drop 未投递/拖回原位)
+                // 手动归位——不触碰 Repeater.model(赋值会破坏 accounts 绑定,
+                // 导致后续所有重排都不刷新)。
                 MouseArea {
                     id: dragArea
                     anchors.fill: parent
@@ -274,7 +280,25 @@ Item {
                     }
                     onEntered: card.hovered = true
                     onExited: card.hovered = false
-                    onReleased: card.Drag.drop()
+                    onPressed: (mouse) => {
+                        card.dragStartX = card.x
+                        card.dragStartY = card.y
+                    }
+                    onReleased: {
+                        // drop() 可能同步触发模型重排销毁本 delegate,之后不得
+                        // 访问任何 QML 上下文——提前捕获局部引用与归位值。
+                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)时模型未变、
+                        // 卡片仍有效,此时手动归位;投递成功时归位由 onDropped
+                        // (from==to)或 Flow 重排(from!=to)完成。
+                        const c = card
+                        const sx = c.dragStartX
+                        const sy = c.dragStartY
+                        const act = c.Drag.drop()
+                        if (act === Qt.IgnoreAction) {
+                            c.x = sx
+                            c.y = sy
+                        }
+                    }
                 }
             }
         }
