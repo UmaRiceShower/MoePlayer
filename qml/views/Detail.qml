@@ -306,6 +306,13 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Theme.bg
+        // 莫奈色纵向延伸:顶部取色氛围色保持到正文起始,中部渐入底色,
+        // 正文区不再纯色,与 Hero 渐变衔接成一条连续过渡。
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.heroFrom }
+            GradientStop { position: 0.5; color: root.heroFrom }
+            GradientStop { position: 1.0; color: Theme.bg }
+        }
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
         Rectangle {
@@ -327,27 +334,29 @@ Item {
                 Behavior on opacity { NumberAnimation { duration: 220 } }
                 cache: true
             }
-            // 底部渐变遮罩:保证标题/按钮文字可读,并让选集栏区域自然淡出。
+            // 底部渐变遮罩:保证标题/按钮文字可读,并让选集栏区域自然淡出;
+            // 尾色用莫奈色与正文区纵向渐变衔接。
             Rectangle {
                 anchors.fill: parent
                 gradient: Gradient {
                     GradientStop { position: 0.55; color: "transparent" }
-                    GradientStop { position: 1.0; color: Theme.bg }
+                    GradientStop { position: 1.0; color: root.heroFrom }
                 }
             }
         }
-        // 选集栏半透明 scrim:叠在全宽 Hero 之上,选集区透出背景氛围。
-        Rectangle {
-            id: sidebarScrim
-            width: Constants.detailSidebarW
-            x: parent.width - width
-            y: 0
-            height: parent.height
-            // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖深色带。
-            visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
-            z: 1
-            color: Qt.rgba(13, 17, 23, 0.55)
-        }
+            // 选集栏莫奈色半透明 scrim:叠在全宽 Hero 之上,选集区透出
+            // 海报色氛围;低透明度(0.35)更通透,不再是大块深灰。
+            Rectangle {
+                id: sidebarScrim
+                width: Constants.detailSidebarW
+                x: parent.width - width
+                y: 0
+                height: parent.height
+                // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖色带。
+                visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
+                z: 1
+                color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.35)
+            }
 
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
         // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
