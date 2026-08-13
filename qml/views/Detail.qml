@@ -825,15 +825,19 @@ Item {
                 return
             root.detail = d
             root.isFavorite = d.isFavorite
-            root.loaded = true
             const c = root.creds()
             // 选集条季列表:剧集自身 / 集详情的父剧。
+            // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见
+            // onEpisodesReceived),避免选集栏先渲染旧数据再跳新数据。
             if (d.type === "Series") {
                 EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
                 // 全部集(跨季),供"继续观看"按进度定位目标集。
                 EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
             } else if (d.type === "Episode" && d.seriesId) {
                 EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
+            } else {
+                // 电影等无选集:detail 到达即渲染完整结构。
+                root.loaded = true
             }
             // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
             EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, d.id)
@@ -858,6 +862,14 @@ Item {
                 seasonId = model.itemAt(0).id
             if (seasonId)
                 root.selectSeason(seasonId)
+            else
+                root.loaded = true // 无季/无分集:选集就绪,直接渲染结构
+        }
+        function onEpisodesReceived(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
+            root.loaded = true
         }
         function onPlaybackReady(serverUrl, url, headers, meta) {
             root.playbackPending = false
