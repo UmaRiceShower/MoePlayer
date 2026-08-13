@@ -78,8 +78,9 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString 
         const QString tag = o.value(QLatin1String("ImageTags"))
                                 .toObject().value(QLatin1String("Primary")).toString();
         // 分隔符用 ~ 而非 |:后者在 image:// URL 中会被转义,见 PosterProvider。
+        // 格式 <prefix>~<id>~<tag>(前缀与 id 之间必须有 ~,供提供器切分)。
         if (!tag.isEmpty())
-            it.posterId = prefix + it.id + QLatin1Char('~') + tag;
+            it.posterId = prefix + QLatin1Char('~') + it.id + QLatin1Char('~') + tag;
     }
     return it;
 }
