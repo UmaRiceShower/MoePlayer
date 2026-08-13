@@ -333,7 +333,7 @@ Item {
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.heroFrom }
             GradientStop { position: 0.5; color: root.heroFrom }
-            GradientStop { position: 0.9; color: root.bgTint }
+            GradientStop { position: 0.8; color: root.bgTint }
             GradientStop { position: 1.0; color: root.complementDark }
         }
 
