@@ -55,6 +55,15 @@ Item {
         source: root.currentSource
         fillMode: Image.PreserveAspectCrop
         visible: status === Image.Ready
+        onStatusChanged: {
+            // 服务器默认图标加载失败(404/网络错误):记入失败记忆,
+            // 之后 serverIconFor 返回空,本会话与后续启动都不再加载;
+            // 用户自定义图标失败不记录(重新设置即可重试)。
+            if (status === Image.Error
+                && root.currentSource !== ""
+                && root.currentSource === root.defaultIcon)
+                AccountManager.markServerIconFailed(root.serverUrl, root.defaultIcon)
+        }
     }
 
     // 首字回退:图片未就绪(加载中/失败)时显示,就绪后被图片覆盖。

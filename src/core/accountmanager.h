@@ -48,8 +48,12 @@ public:
     // 全部就绪后填充 homeRows 并发 homeRowsReady。perLibraryLimit 为每库条目上限。
     Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
     // 浏览器式解析的服务器图标 URL(见 EmbyClient.fetchServerIcon),供
-    // 卡片默认图标显示;解析完成经 serverIconsChanged 通知,未解析到返回空。
+    // 卡片默认图标显示;解析完成经 serverIconsChanged 通知,未解析到或
+    // 已知加载失败返回空(失败记忆,避免反复请求无效地址)。
     Q_INVOKABLE QString serverIconFor(const QString &serverUrl) const;
+    // 记录服务器默认图标加载失败(持久化):之后 serverIconFor 返回空,
+    // 不再加载无效地址;重新添加服务器解析出新图标时自动清除。
+    Q_INVOKABLE void markServerIconFailed(const QString &serverUrl, const QString &iconUrl);
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
@@ -112,6 +116,9 @@ private:
     // 服务器图标 URL(浏览器式解析结果)持久化于 QSettings。
     void loadServerIcons();
     void persistServerIcons();
+    // 服务器图标加载失败记录(serverUrl -> 失败 URL)持久化于 QSettings。
+    void loadFailedIcons();
+    void persistFailedIcons();
     // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
     int accountIndexByServer(const QString &serverUrl) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
@@ -128,6 +135,7 @@ private:
     QVariantList m_homeRows;
     QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
     QHash<QString, QString> m_serverIcons; // serverUrl -> 浏览器式解析的图标 URL
+    QHash<QString, QString> m_failedIcons; // serverUrl -> 已确认加载失败的图标 URL
     int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
