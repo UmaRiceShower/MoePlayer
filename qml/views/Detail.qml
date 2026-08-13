@@ -620,23 +620,52 @@ Item {
                 opacity: visible ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 220 } }
 
-                // 季标签(季数>1 时显示;基础样式横向排列)
-                Row {
+                // 季标签(季数>1 时显示):超出宽度可左右滚动(拖拽 + 箭头)。
+                Item {
                     id: seasonBar
                     width: parent.width
                     height: 44
-                    spacing: 4
-                    clip: true
                     visible: EmbyClient.seasonsModelFor(root.serverUrl).count > 1
-                    Repeater {
-                        model: EmbyClient.seasonsModelFor(root.serverUrl)
-                        delegate: Button {
-                            height: 32
-                            text: model.name
-                            checkable: true
-                            checked: model.id === root.currentSeasonId
-                            onClicked: root.selectSeason(model.id)
+
+                    Flickable {
+                        id: seasonFlick
+                        anchors.fill: parent
+                        anchors.leftMargin: 26
+                        anchors.rightMargin: 26
+                        contentWidth: seasonRow.implicitWidth
+                        clip: true
+                        Row {
+                            id: seasonRow
+                            spacing: 4
+                            Repeater {
+                                model: EmbyClient.seasonsModelFor(root.serverUrl)
+                                delegate: Button {
+                                    height: 32
+                                    text: model.name
+                                    checkable: true
+                                    checked: model.id === root.currentSeasonId
+                                    onClicked: root.selectSeason(model.id)
+                                }
+                            }
                         }
+                    }
+
+                    Button {
+                        anchors.left: parent.left
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "‹"
+                        width: 24
+                        height: 28
+                        onClicked: seasonFlick.contentX = Math.max(0, seasonFlick.contentX - 160)
+                    }
+                    Button {
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "›"
+                        width: 24
+                        height: 28
+                        onClicked: seasonFlick.contentX = Math.min(seasonFlick.contentWidth - seasonFlick.width,
+                                                                  seasonFlick.contentX + 160)
                     }
                 }
 
