@@ -30,7 +30,7 @@ public:
     Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *similarModelFor(const QString &serverUrl);
-    // 删除某服务器的全部模型(账号删除时调用,防无界增长)。
+    Q_INVOKABLE MediaItemModel *allEpisodesModelFor(const QString &serverUrl);
     Q_INVOKABLE void dropServerModels(const QString &serverUrl);
 
     // 服务器公开信息(/System/Info/Public,无需认证),取 ServerName。
@@ -87,6 +87,9 @@ public:
     // 相似推荐(/Items/{id}/Similar),填充该服务器的 similarModel,发 similarReady。
     Q_INVOKABLE void fetchSimilar(const QString &serverUrl, const QString &token,
                                   const QString &userId, const QString &itemId);
+    // 剧集全部集(/Shows/{id}/Episodes 不带 SeasonId),供跨季续播查找。
+    Q_INVOKABLE void fetchAllEpisodes(const QString &serverUrl, const QString &token,
+                                      const QString &userId, const QString &seriesId);
     // 写入已看/继续观看状态(/Users/{id}/Items/{itemId}/UserData)。
     // played=true 表示看完(位置清零);否则写入上次播放位置供继续观看。
     Q_INVOKABLE void setWatched(const QString &serverUrl, const QString &token,
@@ -116,6 +119,7 @@ signals:
     void seasonsReceived(const QString &serverUrl);
     void episodesReceived(const QString &serverUrl);
     void similarReady(const QString &serverUrl);
+    void allEpisodesReady(const QString &serverUrl);
     // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
     void itemDetailReady(const QString &serverUrl, const QVariantMap &detail);
     // 登录成功:携带目标服务器与凭据(AccountManager 存账号 / 页面直连浏览)。
@@ -184,6 +188,7 @@ private:
     QHash<QString, MediaItemModel *> m_episodesModels;
     QHash<QString, MediaItemModel *> m_searchModels;
     QHash<QString, MediaItemModel *> m_similarModels;
+    QHash<QString, MediaItemModel *> m_allEpisodesModels;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"(Range 前缀探测缓存)
     // 请求序号按服务器隔离,丢弃过期响应(视图快速切换/输入防抖窗口内旧请求)。
     QHash<QString, int> m_itemsSeq;

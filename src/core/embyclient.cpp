@@ -215,6 +215,14 @@ MediaItemModel *EmbyClient::similarModelFor(const QString &serverUrl)
     return m_similarModels.value(key);
 }
 
+MediaItemModel *EmbyClient::allEpisodesModelFor(const QString &serverUrl)
+{
+    const QString key = serverUrl.trimmed();
+    if (!m_allEpisodesModels.contains(key))
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_allEpisodesModels.insert(key, m); }
+    return m_allEpisodesModels.value(key);
+}
+
 void EmbyClient::dropServerModels(const QString &serverUrl)
 {
     const QString key = serverUrl.trimmed();
@@ -224,6 +232,7 @@ void EmbyClient::dropServerModels(const QString &serverUrl)
     delete m_episodesModels.take(key);
     delete m_searchModels.take(key);
     delete m_similarModels.take(key);
+    delete m_allEpisodesModels.take(key);
     m_itemsSeq.remove(key);
     m_searchSeq.remove(key);
 }
@@ -590,6 +599,20 @@ void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &token,
             qInfo() << "Emby: similar =" << similarModelFor(key)->count() << "on" << key;
             emit similarReady(key);
         }, nullptr, QStringLiteral("获取相似推荐"));
+}
+
+void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &token,
+                                  const QString &userId, const QString &seriesId)
+{
+    const QString key = serverUrl.trimmed();
+    // 不带 SeasonId:返回整剧全部分集(跨季),供"继续观看"按进度定位目标集。
+    get(key, token, userId,
+        QStringLiteral("/Shows/%1/Episodes?Fields=UserData,PrimaryImageAspectRatio").arg(seriesId),
+        [this, key](const QJsonDocument &doc) {
+            allEpisodesModelFor(key)->setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
+            qInfo() << "Emby: allEpisodes =" << allEpisodesModelFor(key)->count() << "on" << key;
+            emit allEpisodesReady(key);
+        }, nullptr, QStringLiteral("获取剧集全部分集"));
 }
 
 

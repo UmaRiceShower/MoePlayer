@@ -54,9 +54,9 @@ Item {
                 ? root.detail.positionTicks : 0
         root.playItem(root.itemId, t)
     }
-    // 剧集页播放:续播第一条有进度的分集,否则第一集。
+    // 剧集页播放:跨季续播(全部集里第一条有进度的),否则第一集。
     function playSeries() {
-        const model = EmbyClient.episodesModelFor(root.serverUrl)
+        const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
         let target = null
         for (let i = 0; i < model.count; i++) {
             const it = model.itemAt(i)
@@ -74,7 +74,7 @@ Item {
         return "播放"
     }
     function seriesPlayText() {
-        const model = EmbyClient.episodesModelFor(root.serverUrl)
+        const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
         for (let i = 0; i < model.count; i++) {
             const it = model.itemAt(i)
             if (it.positionTicks > 0 && !it.played)
@@ -132,6 +132,22 @@ Item {
         }
         episodeList.contentY = 0
     }
+
+    // pop 回来时共享模型(seasons/episodes/similar/allEpisodes 按 serverUrl
+    // 字典化)可能已被栈内其他详情页覆盖(同服务器单模型),重拉本页数据;
+    // episodes 经 onSeasonsReceived → selectSeason 链重拉,季保持 currentSeasonId。
+    function resyncModels() {
+        if (root.itemId === "")
+            return
+        const c = root.creds()
+        const seriesId = root.detail.type === "Series" ? root.detail.id : root.detail.seriesId
+        if (seriesId)
+            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, seriesId)
+        if (root.detail.type === "Series")
+            EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, root.detail.id)
+        EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
+    }
+
 
     // ---- 显示辅助 ----
     function heroTitle() {
@@ -215,6 +231,13 @@ Item {
         root._ready = true
         root.reload()
     }
+
+    onVisibleChanged: {
+        // StackView pop 回来(visible false→true)时重拉被覆盖的共享模型。
+        if (root.visible && root._ready)
+            root.resyncModels()
+    }
+
 
     Rectangle {
         anchors.fill: parent
@@ -581,7 +604,7 @@ Item {
                     model: EmbyClient.episodesModelFor(root.serverUrl)
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
-                        width: parent.width - 12
+                        width: episodeList.width - 12
                         height: Constants.detailEpisodeRowH
                         x: 6
                         // hover 放大(基础样式)
@@ -667,6 +690,8 @@ Item {
             // 选集条季列表:剧集自身 / 集详情的父剧。
             if (d.type === "Series") {
                 EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
+                // 全部集(跨季),供"继续观看"按进度定位目标集。
+                EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
             } else if (d.type === "Episode" && d.seriesId) {
                 EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
             }
@@ -678,7 +703,13 @@ Item {
                 return
             const model = EmbyClient.seasonsModelFor(root.serverUrl)
             let seasonId = ""
-            if (root.detail.type === "Episode" && root.detail.seasonId) {
+            // 优先保持当前季(重拉/pop 回来不丢失用户选择),其次集详情的季,再第一季。
+            if (root.currentSeasonId) {
+                for (let i = 0; i < model.count; i++) {
+                    if (model.itemAt(i).id === root.currentSeasonId) { seasonId = root.currentSeasonId; break }
+                }
+            }
+            if (!seasonId && root.detail.type === "Episode" && root.detail.seasonId) {
                 for (let i = 0; i < model.count; i++) {
                     if (model.itemAt(i).id === root.detail.seasonId) { seasonId = root.detail.seasonId; break }
                 }
