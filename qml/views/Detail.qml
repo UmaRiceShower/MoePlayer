@@ -43,6 +43,28 @@ Item {
         const c = ColorProvider.colors[pid]
         return c ? c.accent : Theme.accent
     }
+    // 分裂互补辅助色(次要按钮/描边/焦点,30% 层)与极暗藏色(渐变暗部埋补色)。
+    property color complementColor: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.complement : Theme.textMuted
+    }
+    property color complementDark: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.complementDark : Theme.bg
+    }
+    // 背景藏色倾向(带海报色相,取代中性灰);surfaceTint 用于卡片底色。
+    property color bgTint: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.bgTint : Theme.bg
+    }
+    property color surfaceTint: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.surfaceTint : Theme.surface
+    }
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
@@ -306,12 +328,13 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: Theme.bg
-        // 莫奈色纵向延伸:顶部取色氛围色保持到正文起始,中部渐入底色,
-        // 正文区不再纯色,与 Hero 渐变衔接成一条连续过渡。
+        // 莫奈色纵向延伸 + 藏色:顶部氛围色保持到正文起始,中部渐入
+        // 带海报色相的底色(bgTint),最底部埋极暗互补色(暗部藏色)。
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.heroFrom }
             GradientStop { position: 0.5; color: root.heroFrom }
-            GradientStop { position: 1.0; color: Theme.bg }
+            GradientStop { position: 0.9; color: root.bgTint }
+            GradientStop { position: 1.0; color: root.complementDark }
         }
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
@@ -324,7 +347,7 @@ Item {
             z: 0
             gradient: Gradient {
                 GradientStop { position: 0.0; color: root.heroFrom }
-                GradientStop { position: 1.0; color: Theme.bg }
+                GradientStop { position: 1.0; color: root.bgTint }
             }
             Image {
                 anchors.fill: parent
@@ -430,7 +453,7 @@ Item {
                             Rectangle {
                                 width: Constants.detailPosterW
                                 height: Constants.detailPosterH
-                                color: Theme.surface
+                                color: root.surfaceTint
                                 radius: 6
                                 Image {
                                     anchors.fill: parent
@@ -499,6 +522,20 @@ Item {
                                         visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
                                         height: 44
                                         onClicked: root.startPlayback(false)
+                                        // 辅助色(分裂互补)半透明底:30% 层,与强调按钮拉开层级。
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                          root.complementColor.b, 0.28)
+                                            border.width: 1
+                                            border.color: root.complementColor
+                                        }
+                                        contentItem: AppText {
+                                            text: parent.text
+                                            font.pixelSize: 14
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
                                     }
                                     Button {
                                         text: root.detail.played ? "标记未看" : "标记已看"
@@ -552,7 +589,7 @@ Item {
                                                 width: 60
                                                 height: 60
                                                 radius: 30
-                                                color: Theme.surface
+                                                color: root.surfaceTint
                                                 anchors.horizontalCenter: parent.horizontalCenter
                                                 Image {
                                                     anchors.fill: parent
@@ -662,7 +699,7 @@ Item {
                                 Rectangle {
                                     width: Constants.detailCardW
                                     height: Constants.detailCardH
-                                    color: Theme.surface
+                                    color: root.surfaceTint
                                     radius: 6
                                     Image {
                                         anchors.fill: parent
@@ -737,7 +774,7 @@ Item {
                                         radius: 14
                                         color: parent.checked ? root.accentColor : "transparent"
                                         border.width: parent.checked ? 0 : 1
-                                        border.color: Theme.textMuted
+                                        border.color: root.complementColor
                                         opacity: parent.checked ? 1 : 0.55
                                         Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
@@ -766,7 +803,7 @@ Item {
                             radius: 14
                             color: "transparent"
                             border.width: 1
-                            border.color: Theme.textMuted
+                            border.color: root.complementColor
                             opacity: 0.55
                         }
                         contentItem: AppText {
@@ -789,7 +826,7 @@ Item {
                             radius: 14
                             color: "transparent"
                             border.width: 1
-                            border.color: Theme.textMuted
+                            border.color: root.complementColor
                             opacity: 0.55
                         }
                         contentItem: AppText {
@@ -823,7 +860,7 @@ Item {
                             anchors.fill: parent
                             radius: 6
                             color: model.id === root.itemId ? root.accentColor
-                                   : (mouse.containsMouse || ListView.isCurrentItem) ? Theme.surface
+                                   : (mouse.containsMouse || ListView.isCurrentItem) ? root.surfaceTint
                                    : "transparent"
                             Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                         }
@@ -875,7 +912,7 @@ Item {
                                     visible: model.positionTicks > 0 && !model.played && model.runtimeTicks > 0
                                     Rectangle {
                                         anchors.fill: parent
-                                        color: model.id === root.itemId ? Qt.rgba(1,1,1,0.4) : Theme.surface
+                                        color: model.id === root.itemId ? Qt.rgba(1,1,1,0.4) : root.surfaceTint
                                     }
                                     Rectangle {
                                         width: parent.width * Math.min(1, model.positionTicks / model.runtimeTicks)

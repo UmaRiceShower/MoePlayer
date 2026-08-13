@@ -10,12 +10,12 @@ QtObject {
     readonly property color textPrimary: "#e6edf3"
     readonly property color textMuted: "#8b949e"
 
-    // 状态色
-    readonly property color danger: "#e5534b"     // 错误/失败文字与边框
-    readonly property color success: "#2ea043"    // 已看/成功
-    readonly property color info: "#1f6feb"       // 未看集数等信息提示
-    readonly property color rating: "#ffd33d"     // 评分星标
-    readonly property color favorite: "#f778ba"   // 收藏
+    // 状态色(语义固定,不随海报色;深色主题下调饱和 15% 融入整体)
+    readonly property color danger: "#d95d56"     // 错误/失败文字与边框
+    readonly property color success: "#369748"    // 已看/成功
+    readonly property color info: "#2e72db"       // 未看集数等信息提示
+    readonly property color rating: "#f0cb4b"     // 评分星标
+    readonly property color favorite: "#ed81b9"   // 收藏
     readonly property color invalidBg: "#4a2226"  // 失效账号红底
     readonly property color textSelected: "#dddddd" // 强调底上的次级文字
 
