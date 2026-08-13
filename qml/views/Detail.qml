@@ -37,6 +37,12 @@ Item {
         const c = ColorProvider.colors[pid]
         return c ? c.heroFrom : Theme.surface
     }
+    // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
+    property color accentColor: {
+        const pid = root.detail.posterId || root.posterId
+        const c = ColorProvider.colors[pid]
+        return c ? c.accent : Theme.accent
+    }
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
@@ -468,7 +474,8 @@ Item {
                                         onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
                                         background: Rectangle {
                                             radius: 10
-                                            color: Theme.accent
+                                            color: root.accentColor
+                                            Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
                                         }
                                         contentItem: AppText {
                                             text: parent.text
@@ -719,7 +726,7 @@ Item {
                                     // 胶囊分段:选中填强调色+白字,未选中透明+次要文字。
                                     background: Rectangle {
                                         radius: 14
-                                        color: parent.checked ? Theme.accent : "transparent"
+                                        color: parent.checked ? root.accentColor : "transparent"
                                         border.width: parent.checked ? 0 : 1
                                         border.color: Theme.textMuted
                                         opacity: parent.checked ? 1 : 0.55
@@ -806,9 +813,10 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: model.id === root.itemId ? Theme.accent
+                            color: model.id === root.itemId ? root.accentColor
                                    : (mouse.containsMouse || ListView.isCurrentItem) ? Theme.surface
                                    : "transparent"
+                            Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                         }
                         Row {
                             anchors.fill: parent
@@ -863,7 +871,8 @@ Item {
                                     Rectangle {
                                         width: parent.width * Math.min(1, model.positionTicks / model.runtimeTicks)
                                         height: parent.height
-                                        color: model.id === root.itemId ? "white" : Theme.accent
+                                        color: model.id === root.itemId ? "white" : root.accentColor
+                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
                                 }
                                 AppText {

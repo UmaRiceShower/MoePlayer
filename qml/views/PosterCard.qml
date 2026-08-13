@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import MoePlayer.Core
 import "qrc:/qml/theme"
 
 //! 通用海报卡片(媒体库网格/搜索浮层共用):海报 + 评分/已看/未看集数角标
@@ -22,6 +23,19 @@ Item {
     property string itemType: ""
     // 悬停快捷操作开关(搜索结果等轻量场景可关)。
     property bool showActions: true
+
+    // 海报莫奈取色:底部渐变氛围尾色与进度条强调色跟随海报。
+    // 取色未完成/失败回退 surface/accent。
+    property color heroFrom: {
+        const c = ColorProvider.colors[root.posterId]
+        return c ? c.heroFrom : Theme.surface
+    }
+    property color accentColor: {
+        const c = ColorProvider.colors[root.posterId]
+        return c ? c.accent : Theme.accent
+    }
+    onPosterIdChanged: ColorProvider.requestColor(root.posterId)
+    Component.onCompleted: ColorProvider.requestColor(root.posterId)
 
     // 点击卡片(进详情)。
     signal clicked()
@@ -71,7 +85,7 @@ Item {
             opacity: 0.5
         }
 
-        // 底部渐变遮罩,提升标题可读性。
+        // 底部渐变遮罩,提升标题可读性;尾色跟随海报莫奈色(氛围统一)。
         Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
@@ -79,7 +93,7 @@ Item {
             height: 46
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.72) }
+                GradientStop { position: 1.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.72) }
             }
         }
 
@@ -121,7 +135,8 @@ Item {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 width: parent.width * Math.min(1, root.positionTicks / root.runtimeTicks)
-                color: Theme.accent
+                color: root.accentColor
+                Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
             }
         }
 
