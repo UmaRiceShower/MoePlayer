@@ -761,6 +761,9 @@ Item {
                         Row {
                             id: seasonRow
                             spacing: 4
+                            // 垂直居中:Flickable anchors.fill 时 Row 默认贴顶,
+                            // 需与两侧 ‹› 箭头(verticalCenter)同一水平轴。
+                            anchors.verticalCenter: parent.verticalCenter
                             Repeater {
                                 model: EmbyClient.seasonsModelFor(root.serverUrl)
                                 delegate: Button {
