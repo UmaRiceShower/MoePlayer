@@ -46,8 +46,10 @@ class PosterResponse : public QQuickImageResponse
 public:
     // 常规:后台线程查缓存/回源,token 用于 X-Emby-Token 请求头。
     explicit PosterResponse(const QUrl &url, const QString &token);
-    // 内存命中:直接携带图片完成。
-    explicit PosterResponse(const QUrl &url, const QImage &img);
+    // 同步完成(内存命中/解析失败):携带图片或错误,异步投递 finished,
+    // 遵守 QQuickImageProvider 契约(finished 不得在 requestImageResponse 内发出)。
+    explicit PosterResponse(const QUrl &url, const QImage &img,
+                            const QString &error = QString());
     ~PosterResponse() override;
 
     QQuickTextureFactory *textureFactory() const override;

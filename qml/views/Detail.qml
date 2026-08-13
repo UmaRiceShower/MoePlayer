@@ -460,6 +460,7 @@ Item {
                                     anchors.margins: 3
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
                                     opacity: status === Image.Ready && source !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                     cache: true
@@ -597,6 +598,7 @@ Item {
                                                     anchors.fill: parent
                                                     source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
+                                                    asynchronous: true
                                                     opacity: status === Image.Ready && source !== "" ? 1 : 0
                                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                                     cache: true
@@ -708,6 +710,7 @@ Item {
                                         anchors.margins: 3
                                         source: model.posterId ? "image://emby/" + model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
+                                        asynchronous: true
                                         opacity: status === Image.Ready && source !== "" ? 1 : 0
                                         Behavior on opacity { NumberAnimation { duration: 180 } }
                                         cache: true

@@ -85,7 +85,7 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     Q_UNUSED(requestedSize)
     QString serverUrl, token, itemId, tag, kind;
     if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind))
-        return new PosterResponse(QUrl(), QImage()); // 空图直接完成
+        return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
     const QUrl url = imageUrl(serverUrl, itemId, tag, kind);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
@@ -202,8 +202,10 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     const bool ok = reply->error() == QNetworkReply::NoError;
     // 失败/超时(abort)时 reply 的 QIODevice 已关闭,此时 readAll 会报
     // "device not open";仅成功时读取,失败只取错误描述。
+    // 注意:某些远程响应的 error()==NoError 但 errorString() 非空(如
+    // "未知错误"),成功响应不得据此判失败——仅在 !ok 时填 error。
     const QByteArray data = ok ? reply->readAll() : QByteArray();
-    if (error)
+    if (!ok && error)
         *error = reply->errorString();
     reply->deleteLater();
     g_fetchGate.release();
@@ -233,11 +235,17 @@ PosterResponse::PosterResponse(const QUrl &url, const QString &token)
     QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token));
 }
 
-PosterResponse::PosterResponse(const QUrl &url, const QImage &img)
+PosterResponse::PosterResponse(const QUrl &url, const QImage &img, const QString &error)
 {
     Q_UNUSED(url)
     m_image = img;
-    emit finished();
+    m_error = error;
+    // QQuickImageProvider 契约:finished 不得在 requestImageResponse 调用栈内
+    // 同步发出(构造期间 emit 先于 QQuickPixmap 的 connect 丢失;空图时 Qt
+    // 判"已 Finished 无图片数据"报"未知错误")。QueuedConnection 异步投递,
+    // 引擎先注册连接再收到完成;对象提前销毁时投递被 Qt 丢弃,无悬垂。
+    QMetaObject::invokeMethod(this, "setResult", Qt::QueuedConnection,
+                              Q_ARG(QImage, m_image), Q_ARG(QString, m_error));
 }
 
 PosterResponse::~PosterResponse()
