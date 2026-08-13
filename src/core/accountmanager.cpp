@@ -20,6 +20,7 @@ namespace {
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 const QString kServerIconsKey = QStringLiteral("accounts/serverIcons");
+const QString kFailedIconsKey = QStringLiteral("accounts/failedIcons");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 首页聚合缓存文件名(CacheLocation 下)。
@@ -33,6 +34,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     load();
     loadServerNames();
     loadServerIcons();
+    loadFailedIcons();
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
@@ -81,9 +83,9 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 // ServerName 回填账号名(见 serverPublicInfoReceived)。
                 if (acc.name.isEmpty())
                     m_client->fetchServerPublicInfo(acc.serverUrl);
-                // 浏览器式解析服务器图标(新服务器;已有服务器解析过则忽略)。
-                if (!m_serverIcons.contains(acc.serverUrl))
-                    m_client->fetchServerIcon(acc.serverUrl);
+                // 浏览器式解析服务器图标:仅添加/重新添加时拉取(用户主动
+                // 操作,图标可能已更新),此后不再重复请求。
+                m_client->fetchServerIcon(acc.serverUrl);
             });
 
     // 登录失败(带 pending 的 addAccount):通知失败,清除待保存状态。
@@ -155,15 +157,19 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 fetchHomeRows(m_homeLimit);
             });
 
-    // 浏览器式图标解析结果:缓存并持久化,UI(卡片/预览默认图标)刷新。
+    // 浏览器式图标解析结果:缓存并持久化,清除旧失败记忆,UI 刷新。
     connect(m_client, &EmbyClient::serverIconReceived, this,
             [this](const QString &serverUrl, const QString &iconUrl) {
                 if (iconUrl.isEmpty())
                     return;
-                if (m_serverIcons.value(serverUrl) == iconUrl)
+                if (m_serverIcons.value(serverUrl) == iconUrl
+                    && m_failedIcons.value(serverUrl) == iconUrl)
                     return;
                 m_serverIcons.insert(serverUrl, iconUrl);
+                // 新解析结果(重新添加服务器):清除该服失败记忆,重新尝试。
+                m_failedIcons.remove(serverUrl);
                 persistServerIcons();
+                persistFailedIcons();
                 emit serverIconsChanged();
             });
 
@@ -258,10 +264,32 @@ QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
     return QVariantMap();
 }
 
-// 浏览器式解析的服务器图标(启动/添加账号时异步拉取,见 fetchServerIcon)。
+// 浏览器式解析的服务器图标(仅添加服务器时拉取,见 loginSucceeded);
+// 已知加载失败的 URL 返回空,不再重复请求(失败记忆持久化)。
 QString AccountManager::serverIconFor(const QString &serverUrl) const
 {
-    return m_serverIcons.value(serverUrl.trimmed());
+    const QString url = m_serverIcons.value(serverUrl.trimmed());
+    if (url.isEmpty())
+        return QString();
+    if (m_failedIcons.value(serverUrl.trimmed()) == url)
+        return QString();
+    return url;
+}
+
+// 图标加载失败(404/网络错误):持久化失败记忆,UI 立即回退首字。
+// 仅记录服务器默认图标(解析结果);用户自定义图标失败不记录(用户
+// 可能更换地址,重新设置后即可重试)。
+void AccountManager::markServerIconFailed(const QString &serverUrl, const QString &iconUrl)
+{
+    const QString url = iconUrl.trimmed();
+    const QString srv = serverUrl.trimmed();
+    if (url.isEmpty() || m_serverIcons.value(srv) != url)
+        return;
+    if (m_failedIcons.value(srv) == url)
+        return;
+    m_failedIcons.insert(srv, url);
+    persistFailedIcons();
+    emit serverIconsChanged();
 }
 
 // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
@@ -269,13 +297,11 @@ QString AccountManager::serverIconFor(const QString &serverUrl) const
 // 无密码的标失效(UI 红);网络错误/超时不算失效(不打扰用户)。
 void AccountManager::validateTokens()
 {
-    for (const auto &a : m_accounts) {
+    for (const auto &a : m_accounts)
         if (!a.token.isEmpty())
             m_client->validateToken(a.serverUrl, a.token, a.userId);
-        // 浏览器式解析服务器图标:启动并行拉取,结果缓存并持久化;
-        // 已有解析结果的服务器也刷新(图标可能更新),UI 经 serverIconsChanged。
-        m_client->fetchServerIcon(a.serverUrl);
-    }
+    // 不在此处拉取服务器图标:图标只在添加服务器时解析(见
+    // loginSucceeded 回调),后续用缓存/失败记忆,避免每次启动重复请求。
 }
 
 bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
@@ -543,6 +569,24 @@ void AccountManager::persistServerIcons()
     for (auto it = m_serverIcons.constBegin(); it != m_serverIcons.constEnd(); ++it)
         o.insert(it.key(), it.value());
     m_settings.setValue(kServerIconsKey,
+                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
+    m_settings.sync();
+}
+
+void AccountManager::loadFailedIcons()
+{
+    const QJsonObject o = QJsonDocument::fromJson(
+        m_settings.value(kFailedIconsKey).toString().toUtf8()).object();
+    for (auto it = o.begin(); it != o.end(); ++it)
+        m_failedIcons.insert(it.key(), it.value().toString());
+}
+
+void AccountManager::persistFailedIcons()
+{
+    QJsonObject o;
+    for (auto it = m_failedIcons.constBegin(); it != m_failedIcons.constEnd(); ++it)
+        o.insert(it.key(), it.value());
+    m_settings.setValue(kFailedIconsKey,
                         QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
     m_settings.sync();
 }
