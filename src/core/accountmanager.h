@@ -137,7 +137,13 @@ private:
     // 账号检测状态:确认 token 失效且重登失败的服务器(UI 标红)。
     QSet<QString> m_invalidServers;
     QSet<QString> m_loggingInServers; // 正在账密重登的服务器(失败回调忽略重复处理)
-    // 首页聚合缓存:上次成功数据,启动先展示再后台刷新。
-    void loadHomeCache();
+    // 首页聚合缓存:上次成功数据,启动先展示再后台刷新。返回缓存数据,
+    // 由调用方与当前展示比较后决定是否重建(相同则跳过,避免无意义重建)。
+    QVariantList loadHomeCache();
     void saveHomeCache();
+    // 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排聚合行,不重拉
+    // 网络(避免撞上重登中的 token 失效触发连锁重登与首页反复重建)。
+    void reorderHomeRows();
+    // 首页聚合行语义等价比较(忽略 posterId/serverName 等易变字段)。
+    bool sameHomeRows(const QVariantList &a, const QVariantList &b);
 };

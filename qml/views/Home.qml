@@ -17,10 +17,42 @@ Item {
     signal openServerManager()
 
     // 聚合行(所有账号的媒体库,顺序按服务器管理中的账号排序)。
-    property var rows: AccountManager.homeRows
+    // 节流:homeRowsReady 可能连续触发(缓存先行 → 网络刷新 → 重登重拉),
+    // 合并后一次替换 rows,避免模型在行 delegate 孵化期间被 reset 打断
+    // (Qt "Cannot create delegate" 警告 + VMEMetaObject internal error)。
+    property var rows: []
+    property var pendingRows: []
+    // 最近一次行 delegate 就绪时刻(rowReady):替换 rows 前须确认上一轮
+    // 行孵化已稳定(无新就绪超过 settleMs),否则 model 替换会打断孵化,
+    // Qt 引擎在失效 context 上求值,打印 "QQmlVMEMetaObject: Internal
+    // error"。行就绪信号驱动比固定时间窗可靠(孵化时长随行数变化)。
+    property double lastRowReady: 0
+    readonly property int rowsSettleMs: 400
+    Timer {
+        id: rowsTimer
+        interval: 40
+        repeat: false
+        onTriggered: {
+            // 无行(空数据)或最近无行就绪(孵化稳定)→ 可替换;否则等稳定。
+            if (list.count > 0
+                && Date.now() - root.lastRowReady < root.rowsSettleMs) {
+                root.pendingRows = AccountManager.homeRows // 取最新,继续等
+                rowsTimer.restart()
+                return
+            }
+            // 替换即孵化开始:立即刷新就绪时刻,孵化窗口内(新行尚未
+            // 就绪)的再次替换被门控拦截,避免打断孵化触发引擎错误。
+            root.lastRowReady = Date.now()
+            root.rows = root.pendingRows
+        }
+    }
     // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
     // 实现无限循环(网上通用做法:首尾复制模型作缓冲)。
     property var loopRows: []
+    // 行重建代次:rows 每次刷新 +1;延迟定位回调携带代次,过期即跳过
+    // (防回调操作已重建的行,见 locateTimer)。
+    property int loopGen: 0
+    property int locateGen: 0
     // 当前逻辑行(0..rows-1)与实测行距(负间距布局下相邻行 y 之差)。
     // 滚动直接按逻辑行换算 contentY(夹取在副本范围内),不依赖
     // indexAt/positionViewAtIndex 的估计定位——堆叠负间距下它们会错位,
@@ -64,23 +96,21 @@ Item {
     property int focusRowIdx: 0
     property int focusCol: -1
 
-    // 几何居中行(loopRows 索引):负间距堆叠下视口中心的行——absRow
-    // 行贴视口顶部,视觉居中的无缩放行必须按中心距实测(遍历可见行)。
+    // 几何居中行(loopRows 索引):负间距堆叠下视口中心的行。几何公式
+    // 计算,不遍历/访问行 delegate——rows 重建时行 delegate 在销毁/孵化
+    // 中,遍历访问其 y/height 会触发引擎 "invalid context" 错误。
+    // 布局规则:相邻行距恒为 rowStep(实测,行高-重叠),行 i 的
+    // y = i*rowStep(y0=0,y1=行高-重叠=rowStep);行高 = rowStep + overlap。
+    // rowStep 未实测(重建中)时保持旧焦点,等行就绪后由 locateTimer
+    // 重新实测并定位。
     function findCenterRowIndex() {
-        let best = -1
-        let bestDist = Infinity
-        for (let i = 0; i < list.count; ++i) {
-            const d = list.itemAtIndex(i)
-            if (!d)
-                continue
-            const cy = d.y + d.height / 2 - list.contentY
-            const dist = Math.abs(cy - list.height / 2)
-            if (dist < bestDist) {
-                bestDist = dist
-                best = i
-            }
-        }
-        return best
+        const n = list.count
+        if (n <= 0 || root.rowStep <= 0)
+            return root.focusRowIdx
+        const rowH = root.rowStep + Constants.rowOverlap
+        const cy = list.contentY + list.height / 2
+        // 行 i 中心 = i*rowStep + rowH/2 → 反解 i 取整。
+        return Math.max(0, Math.min(n - 1, Math.round((cy - rowH / 2) / root.rowStep)))
     }
 
     // 焦点行 delegate(可能未实例化返回 null)。
@@ -243,34 +273,62 @@ Item {
             }
             root.rowIndex = root.absRow % root.rows.length
             root.rowStep = 0
-            Qt.callLater(function () {
-                root.ensureRowStep()
-                list.contentY = root.absRow * root.rowStep
-                // 初始 contentY 可能恰为 0(0→0 不触发 onContentYChanged),
-                // 显式初始化焦点行为几何居中行;行位置下一帧才稳定,再查一次。
-                root.focusRowIdx = root.findCenterRowIndex()
-                Qt.callLater(function () {
-                    root.focusRowIdx = root.findCenterRowIndex()
-                })
-            })
+            // 行将重建:递增代次使 locateGen !== loopGen,重建期间的行遍历
+            // (findCenterRowIndex/ensureRowStep)被代次守卫跳过,避免访问
+            // 销毁/孵化中的 delegate 触发引擎 "invalid context" 错误。
+            // 定位由"行 delegate 就绪"驱动:行实例化完成(Component.
+            // onCompleted → rowReady)→ locateTimer → 实测行距并定位 →
+            // locateGen 更新为本代,后续遍历恢复。
+            ++root.loopGen
         }
     }
 
-    // 实测行距:从相邻可见行取 y 差(负间距下为 行高 + 负间距)。
-    // 内容起点行数(第一副本)可能未被实例化,故从可见区取样。
-    function ensureRowStep() {
-        if (root.rowStep > 0)
-            return
-        for (let i = 0; i < list.count - 1; i++) {
-            const a = list.itemAtIndex(i)
-            const b = list.itemAtIndex(i + 1)
-            if (a && b && b.y > a.y) {
-                root.rowStep = b.y - a.y
-                return
-            }
+    // 行 delegate 实例化完成(rebuildLoop 后重建的行就绪)→ 触发定位,
+    // 并记录就绪时刻供 rows 替换门控判定孵化稳定(见 rowsTimer)。
+    // 虚拟化下每批实例化都会调用,locateTimer 重启合并,最后一次生效。
+    function rowReady() {
+        root.lastRowReady = Date.now()
+        locateTimer.restart()
+    }
+
+    // 延迟定位(替代 Qt.callLater,见 rebuildLoop):事件循环级延迟,
+    // rows 连续刷新时按代次丢弃过期回调;组件销毁即随 Timer 取消。
+    Timer {
+        id: locateTimer
+        interval: 0
+        repeat: false
+        onTriggered: {
+            const gen = root.loopGen
+            if (root.locateGen === gen)
+                return // 本代已定位(多批行就绪的重复触发)
+            // 行就绪(行 delegate onCompleted 触发 rowReady)后实测行距
+            // 并定位:此时遍历访问行是安全的;公式定位不访问行。
+            root.ensureRowStep()
+            list.contentY = root.absRow * root.rowStep
+            // 初始 contentY 可能恰为 0(0→0 不触发 onContentYChanged),
+            // 显式初始化焦点行为几何居中行;行位置下一帧才稳定,再查一次。
+            root.focusRowIdx = root.findCenterRowIndex()
+            root.locateGen = gen // 标记本代定位完成,恢复行遍历访问
+            locateTimer2.restart()
         }
-        // 兜底:行高(标题约 24 + 卡片 172)减重叠 44。
-        root.rowStep = Constants.rowStepFallback
+    }
+    Timer {
+        id: locateTimer2
+        interval: 0
+        repeat: false
+        onTriggered: {
+            if (root.locateGen !== root.loopGen)
+                return // 定位未完成/已被新重建覆盖
+            root.focusRowIdx = root.findCenterRowIndex()
+        }
+    }
+
+    // 行距:行高(标题 24 + 卡片 172,行 delegate 显式约束)减重叠 44,
+    // 常量布局公式即精确。不遍历行 delegate——rows 重建时行在销毁/
+    // 孵化中,遍历访问会触发引擎 "invalid context" 错误。
+    function ensureRowStep() {
+        if (root.rowStep <= 0)
+            root.rowStep = Constants.rowStepFallback
     }
 
     // 循环滚动:绝对行索引推进,目标 contentY 经 NumberAnimation 动画
@@ -428,13 +486,12 @@ Item {
     Connections {
         target: AccountManager
         function onHomeRowsReady() {
-            root.rows = AccountManager.homeRows
-            root.rebuildLoop()
+            root.pendingRows = AccountManager.homeRows
+            rowsTimer.restart()
         }
-        function onAccountsChanged() {
-            if (AccountManager.hasAccounts)
-                AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
-        }
+        // 账号变化(拖拽排序/删除)不再触发网络重拉:数据拉取由 C++ 统一
+        // 决定(排序/删除本地重排,添加/重登成功才重拉)。UI 操作若触发
+        // fetchHomeRows,会撞上重登中的 token 失效 → 401 → 连锁重登。
     }
     onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
 
@@ -567,6 +624,8 @@ Item {
     // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
     ListView {
         id: list
+        // delegate 池化:模型替换时尽量复用实例,减少销毁/孵化打断面。
+        reuseItems: true
         anchors.fill: parent
         clip: true
         model: root.loopRows
@@ -585,7 +644,13 @@ Item {
         delegate: Column {
             id: rowDelegate
             width: list.width
+            // 显式行高(标题 24 + 卡片 172):行距 = 行高 - 重叠 = 常量,
+            // root 侧行几何可公式计算,无需遍历 delegate(重建中遍历会
+            // 触发引擎 "invalid context" 错误)。
+            height: Constants.rowTitleH + Constants.rowHeight
             transformOrigin: Item.Top
+            // 就绪通知:实例化完成(布局可用)后由 root 定位(见 rowReady)。
+            Component.onCompleted: root.rowReady()
             // 行数据快照:modelData 是委托上下文变量,不能作为对象属性
             // (rowDelegate.modelData)访问;存入显式属性供嵌套卡片取行级信息。
             property var rowData: modelData
@@ -620,7 +685,9 @@ Item {
 
             // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
             AppText {
+                height: Constants.rowTitleH
                 anchors.horizontalCenter: parent.horizontalCenter
+                verticalAlignment: Text.AlignVCenter
                 text: modelData.serverName !== ""
                         ? modelData.serverName + " - " + modelData.viewName
                         : modelData.viewName
@@ -655,6 +722,7 @@ Item {
                     // 该库最近条目:横向滚动列表,虚拟化渲染。
                     ListView {
                         id: rowItems
+                        reuseItems: true
                         width: list.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
                         height: Constants.rowHeight
                         orientation: ListView.Horizontal

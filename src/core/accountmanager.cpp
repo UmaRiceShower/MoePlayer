@@ -130,27 +130,30 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                    const QString &userId, const QString &userName) {
                 m_loggingInServers.remove(serverUrl);
                 const int idx = accountIndexByServer(serverUrl);
-                if (idx < 0)
-                    return;
-                AccountInfo &a = m_accounts[idx];
-                if (!ok) {
-                    m_invalidServers.insert(serverUrl);
-                    emit accountsChanged();
-                    return;
+                if (idx >= 0) {
+                    AccountInfo &a = m_accounts[idx];
+                    if (!ok) {
+                        m_invalidServers.insert(serverUrl);
+                        emit accountsChanged();
+                    } else {
+                        qInfo() << "Emby: relogin ok on" << serverUrl;
+                        a.token = token;
+                        if (!userId.isEmpty())
+                            a.userId = userId;
+                        if (!userName.isEmpty())
+                            a.userName = userName;
+                        a.lastUsed = QDateTime::currentMSecsSinceEpoch();
+                        m_invalidServers.remove(serverUrl);
+                        save();
+                        emit accountsChanged();
+                    }
                 }
-                qInfo() << "Emby: relogin ok on" << serverUrl;
-                a.token = token;
-                if (!userId.isEmpty())
-                    a.userId = userId;
-                if (!userName.isEmpty())
-                    a.userName = userName;
-                a.lastUsed = QDateTime::currentMSecsSinceEpoch();
-                m_invalidServers.remove(serverUrl);
-                save();
-                emit accountsChanged();
-                // token 已换:重拉各库数据(先展示缓存),恢复该服首页行。
-                // 并行 fetchHomeRows 已因旧 token 401 把该服按空处理,必须刷新。
-                fetchHomeRows(m_homeLimit);
+                // token 校验/重登风暴结束(无账号仍在重登)后一次性重拉首页
+                // 数据:避免每台重登完成就 fetch 一次——数据逐步恢复会让
+                // 首页反复整体重建,Qt 引擎在 delegate 销毁期求值,打印
+                // "QQmlVMEMetaObject: Internal error" 噪音。
+                if (m_loggingInServers.isEmpty())
+                    fetchHomeRows(m_homeLimit);
             });
 
     // 浏览器式图标解析结果(仅添加服务器时拉取):写入该服务器账号的
@@ -314,9 +317,14 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     m_homeAccountOrder.clear();
     m_homePending = 0;
     // 先展示缓存(上次成功数据),网络刷新完成后再覆盖;无缓存则清空等待。
-    m_homeRows.clear();
-    loadHomeCache();
-    emit homeRowsReady();
+    // 缓存与当前展示相同则不 emit(避免无意义重建:重登/重复拉取常返回
+    // 相同数据,Home 行整体重建会触发 Qt 引擎在 delegate 销毁期的内部
+    // 警告 "QQmlVMEMetaObject: Internal error ... invalid context")。
+    const QVariantList cached = loadHomeCache();
+    if (!sameHomeRows(m_homeRows, cached)) {
+        m_homeRows = cached;
+        emit homeRowsReady();
+    }
 
     for (int i = 0; i < m_accounts.size(); ++i) {
         const AccountInfo &a = m_accounts.at(i);
@@ -347,6 +355,55 @@ void AccountManager::finishHomeFetch()
     }
 }
 
+// 首页聚合行"语义等价"比较:忽略易变字段(posterId 的 tag/serverName
+// 补全时序等),只比账号归属、视图与条目身份/名称——重登/重复拉取返回
+// 的微差(如 serverName 拉取时序、items 字段细节)不应触发无意义重建。
+bool AccountManager::sameHomeRows(const QVariantList &a, const QVariantList &b)
+{
+    if (a.size() != b.size())
+        return false;
+    for (int i = 0; i < a.size(); ++i) {
+        const QVariantMap ma = a.at(i).toMap();
+        const QVariantMap mb = b.at(i).toMap();
+        if (ma.value(QStringLiteral("accountId")) != mb.value(QStringLiteral("accountId"))
+            || ma.value(QStringLiteral("viewId")) != mb.value(QStringLiteral("viewId"))
+            || ma.value(QStringLiteral("viewName")) != mb.value(QStringLiteral("viewName")))
+            return false;
+        // items 按 id 集合比较(忽略顺序与名称细节:Emby 返回顺序可能
+        // 波动,名称变化不属结构变化,不触发重建)。
+        const QVariantList ia = ma.value(QStringLiteral("items")).toList();
+        const QVariantList ib = mb.value(QStringLiteral("items")).toList();
+        if (ia.size() != ib.size())
+            return false;
+        QSet<QString> idsA, idsB;
+        for (const auto &it : ia)
+            idsA.insert(it.toMap().value(QStringLiteral("id")).toString());
+        for (const auto &it : ib)
+            idsB.insert(it.toMap().value(QStringLiteral("id")).toString());
+        if (idsA != idsB)
+            return false;
+    }
+    return true;
+}
+
+// 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排首页聚合行。
+// 数据未变,仅顺序变化——不重拉网络,否则会撞上重登中的 token 失效,
+// 401 触发连锁重登并导致首页反复重建(触发 Qt 引擎 delegate 销毁期噪音)。
+void AccountManager::reorderHomeRows()
+{
+    if (m_homeRows.isEmpty())
+        return;
+    QVariantList out;
+    for (const auto &acc : m_accounts) {
+        for (const auto &row : m_homeRows) {
+            if (row.toMap().value(QStringLiteral("accountId")).toString() == acc.id)
+                out.append(row);
+        }
+    }
+    // 顺序路径 out 含全部行(重排);删除路径 out 已剔除被删服的行。
+    m_homeRows = out;
+}
+
 void AccountManager::maybeAssembleHomeRows()
 {
     if (m_homePending > 0)
@@ -362,13 +419,34 @@ void AccountManager::maybeAssembleHomeRows()
         if (serverName.isEmpty())
             serverName = m_serverNames.value(serverUrl);
         const QVariantList views = m_homeViews.value(idx);
+        if (views.isEmpty()) {
+            // 该服本次无数据(401/token 失效/网络失败):沿用上次聚合该服的
+            // 行,避免重登期间数据抖动导致首页反复重建(Qt 引擎噪音)。
+            for (const auto &old : m_homeRows) {
+                if (old.toMap().value(QStringLiteral("serverUrl")).toString() == serverUrl)
+                    out.append(old);
+            }
+            continue;
+        }
         for (const auto &v : views) {
             const QVariantMap vm = v.toMap();
             const QString key = QString::number(idx) + QLatin1Char('|')
                                 + vm.value(QStringLiteral("id")).toString();
             QVariantMap row = m_homeRowByKey.value(key);
-            if (row.isEmpty())
-                continue;
+            if (row.isEmpty()) {
+                // 该库条目拉取失败(401):沿用上次该库的行(同服同库)。
+                for (const auto &old : m_homeRows) {
+                    const QVariantMap om = old.toMap();
+                    if (om.value(QStringLiteral("serverUrl")).toString() == serverUrl
+                        && om.value(QStringLiteral("viewId")).toString()
+                               == vm.value(QStringLiteral("id")).toString()) {
+                        row = om;
+                        break;
+                    }
+                }
+                if (row.isEmpty())
+                    continue;
+            }
             row.insert(QStringLiteral("viewName"), vm.value(QStringLiteral("name")));
             row.insert(QStringLiteral("accountId"), om.value(QStringLiteral("id")));
             row.insert(QStringLiteral("serverUrl"), serverUrl);
@@ -388,6 +466,13 @@ void AccountManager::maybeAssembleHomeRows()
             row.insert(QStringLiteral("items"), items);
             out.append(row);
         }
+    }
+    // 与当前展示语义相同则不重建(重登/重复拉取数据常不变;重建触发 Home
+    // 行 delegate 销毁/孵化,连续重建会让 Qt 引擎在失效 context 上求值,
+    // 打印 "QQmlVMEMetaObject: Internal error" 警告)。
+    if (sameHomeRows(m_homeRows, out)) {
+        finishHomeFetch();
+        return;
     }
     m_homeRows = out;
     saveHomeCache(); // 缓存本次成功数据,下次启动先展示
@@ -409,8 +494,10 @@ void AccountManager::moveAccountUp(const QString &id)
         if (m_accounts.at(i).id != id)
             continue;
         std::swap(m_accounts[i], m_accounts[i - 1]);
+        reorderHomeRows(); // 本地重排,不重拉网络(见 moveAccount)
         save();
         emit accountsChanged();
+        emit homeRowsReady();
         return;
     }
 }
@@ -421,8 +508,10 @@ void AccountManager::moveAccountDown(const QString &id)
         if (m_accounts.at(i).id != id)
             continue;
         std::swap(m_accounts[i], m_accounts[i + 1]);
+        reorderHomeRows(); // 本地重排,不重拉网络(见 moveAccount)
         save();
         emit accountsChanged();
+        emit homeRowsReady();
         return;
     }
 }
@@ -442,8 +531,13 @@ void AccountManager::moveAccount(const QString &id, int toIndex)
             return;
         const AccountInfo a = m_accounts.takeAt(i);
         m_accounts.insert(toIndex, a);
+        // 首页聚合行按新账号顺序本地重排:拖拽只改顺序,数据未变,不
+        // 重拉网络——否则会撞上启动重登中的 token 失效,401 触发连锁
+        // 重登,并导致首页反复重建。
+        reorderHomeRows();
         save();
         emit accountsChanged();
+        emit homeRowsReady();
         return;
     }
 }
@@ -480,14 +574,14 @@ const AccountManager::AccountInfo *AccountManager::accountById(const QString &id
 }
 
 // 首页聚合缓存:上次成功数据落盘(视图列表 + 每库最近条目),启动先展示。
-void AccountManager::loadHomeCache()
+QVariantList AccountManager::loadHomeCache()
 {
     const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
                          + kHomeCacheFileName;
     QFile f(path);
     if (!f.open(QIODevice::ReadOnly))
-        return;
-    m_homeRows = QJsonDocument::fromJson(f.readAll()).array().toVariantList();
+        return {};
+    return QJsonDocument::fromJson(f.readAll()).array().toVariantList();
 }
 
 void AccountManager::saveHomeCache()
@@ -562,8 +656,10 @@ void AccountManager::removeAccount(const QString &id)
     const QString serverUrl = it->serverUrl;
     m_accounts.erase(it, m_accounts.end());
     m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
+    reorderHomeRows(); // 被删服的行一并移除,本地重排不重拉网络(见 moveAccount)
     save();
     emit accountsChanged();
+    emit homeRowsReady();
 }
 
 void AccountManager::updateAccount(const QString &id, const QString &name,
