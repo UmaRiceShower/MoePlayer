@@ -34,6 +34,11 @@ Item {
         const c = ColorProvider.colors[root.posterId]
         return c ? c.accent : Theme.accent
     }
+    // 卡片底色藏色:带海报色相倾向,取代中性灰。
+    property color surfaceTint: {
+        const c = ColorProvider.colors[root.posterId]
+        return c ? c.surfaceTint : Theme.surface
+    }
     onPosterIdChanged: ColorProvider.requestColor(root.posterId)
     Component.onCompleted: ColorProvider.requestColor(root.posterId)
 
@@ -45,7 +50,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: Theme.surface
+        color: root.surfaceTint
         radius: 8
         clip: true
 

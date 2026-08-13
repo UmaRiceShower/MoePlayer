@@ -8,6 +8,7 @@
 #include <QUrl>
 
 #include <algorithm>
+#include <cmath>
 
 #include "posterprovider.h"
 
@@ -164,12 +165,28 @@ QVariantMap ColorProvider::extractRoles(const QImage &image)
     if (!source.isValid())
         return roles;
 
-    // 3) 角色色:背景调暗降饱和(深色氛围底),强调提饱和提亮(可读强调)。
-    const qreal hh = source.hslHueF();
+    // 3) 角色色(分裂互补 + 藏色,60-30-10 分配):
+    //    主色系:背景藏色倾向(bgTint/surfaceTint,取代中性灰)+ 背景氛围(heroFrom)
+    //          + 强调(accent,10%);
+    //    互补侧(色相 +150°,自动落反冷暖区:暖海报配冷补、冷海报配暖补):
+    //          辅助色(complement,30%)+ 极暗藏色(complementDark,画师式暗部埋补色)。
+    qreal hh = source.hslHueF();
+    if (hh < 0)
+        hh = 0;
     const qreal ss = source.hslSaturationF();
+    // 分裂互补:色相 +150°(fromHslF 的 h 为 0-1 归一化,150/360 弧度)。
+    const qreal chh = std::fmod(hh + 150.0 / 360.0, 1.0);
     const QColor heroFrom = QColor::fromHslF(hh, qMin<qreal>(1.0, ss * 0.45), 0.22);
     const QColor accent = QColor::fromHslF(hh, qMax<qreal>(0.55, ss), 0.58);
+    const QColor bgTint = QColor::fromHslF(hh, 0.10, 0.055);
+    const QColor surfaceTint = QColor::fromHslF(hh, 0.10, 0.10);
+    const QColor complement = QColor::fromHslF(chh, 0.30, 0.50);
+    const QColor complementDark = QColor::fromHslF(chh, 0.10, 0.04);
     roles.insert(QStringLiteral("heroFrom"), heroFrom.name());
     roles.insert(QStringLiteral("accent"), accent.name());
+    roles.insert(QStringLiteral("bgTint"), bgTint.name());
+    roles.insert(QStringLiteral("surfaceTint"), surfaceTint.name());
+    roles.insert(QStringLiteral("complement"), complement.name());
+    roles.insert(QStringLiteral("complementDark"), complementDark.name());
     return roles;
 }
