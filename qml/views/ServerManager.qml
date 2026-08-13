@@ -160,37 +160,36 @@ Item {
                           ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
                           : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
-            Column {
+            Canvas {
+                id: plusIcon
                 anchors.centerIn: parent
-                spacing: 8
-                Canvas {
-                    id: plusIcon
-                    width: 44
-                    height: 44
-                    property color lineColor: plusHover.containsMouse ? Theme.accent : Theme.textMuted
-                    onLineColorChanged: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        ctx.strokeStyle = lineColor
-                        ctx.lineWidth = 3
-                        ctx.lineCap = "round"
-                        ctx.beginPath()
-                        ctx.moveTo(8, height / 2)
-                        ctx.lineTo(width - 8, height / 2)
-                        ctx.stroke()
-                        ctx.beginPath()
-                        ctx.moveTo(width / 2, 8)
-                        ctx.lineTo(width / 2, height - 8)
-                        ctx.stroke()
-                    }
+                width: 44
+                height: 44
+                property color lineColor: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                onLineColorChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+                    ctx.strokeStyle = lineColor
+                    ctx.lineWidth = 3
+                    ctx.lineCap = "round"
+                    ctx.beginPath()
+                    ctx.moveTo(8, height / 2)
+                    ctx.lineTo(width - 8, height / 2)
+                    ctx.stroke()
+                    ctx.beginPath()
+                    ctx.moveTo(width / 2, 8)
+                    ctx.lineTo(width / 2, height - 8)
+                    ctx.stroke()
                 }
-                AppText {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    text: "添加服务器"
-                    color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
-                    font.pixelSize: 14
-                }
+            }
+            AppText {
+                anchors.top: plusIcon.bottom
+                anchors.topMargin: 8
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "添加服务器"
+                color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                font.pixelSize: 14
             }
 
             // 点击打开添加浮窗。
