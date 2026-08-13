@@ -281,8 +281,9 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
 }
 
 // 浏览器式获取站点图标(HTML Living Standard):请求 web 首页,解析
-// <link rel="icon"> 标签,href 相对路径按 RFC 3986 相对文档 URL 解析;
-// HTML 拉取失败或无图标标签时回退根相对 /favicon.ico。
+// <link rel="icon"> 标签,href 相对路径按 RFC 3986 相对文档 URL 解析。
+// HTML 拉取失败或无图标标签时静默失败(发空结果):不 fallback、不重试,
+// 调用方不存数据,卡片回退名称首字。仅添加服务器时调用。
 void EmbyClient::fetchServerIcon(const QString &serverUrl)
 {
     const QString htmlUrl = serverUrl.trimmed() + QStringLiteral("/web/index.html");
@@ -296,9 +297,7 @@ void EmbyClient::fetchServerIcon(const QString &serverUrl)
                 QString iconUrl;
                 if (reply->error() == QNetworkReply::NoError)
                     iconUrl = parseFaviconLink(QString::fromUtf8(reply->readAll()), htmlUrl);
-                if (iconUrl.isEmpty())
-                    iconUrl = serverUrl.trimmed() + QStringLiteral("/favicon.ico");
-                emit serverIconReceived(serverUrl, iconUrl);
+                emit serverIconReceived(serverUrl, iconUrl); // 失败即空,静默
             });
 }
 
