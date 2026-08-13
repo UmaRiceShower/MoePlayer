@@ -359,6 +359,27 @@ void AccountManager::moveAccountDown(const QString &id)
     }
 }
 
+// 拖动排序:从当前位置移除后插入到 toIndex(稳定移动,其余账号顺移)。
+// 与 moveAccountUp/Down 的相邻交换不同,拖动可跨任意距离。
+void AccountManager::moveAccount(const QString &id, int toIndex)
+{
+    const int n = m_accounts.size();
+    if (n < 2)
+        return;
+    toIndex = qBound(0, toIndex, n - 1);
+    for (int i = 0; i < n; ++i) {
+        if (m_accounts.at(i).id != id)
+            continue;
+        if (i == toIndex)
+            return;
+        const AccountInfo a = m_accounts.takeAt(i);
+        m_accounts.insert(toIndex, a);
+        save();
+        emit accountsChanged();
+        return;
+    }
+}
+
 int AccountManager::accountIndexByServer(const QString &serverUrl) const
 {
     for (int i = 0; i < m_accounts.size(); ++i)

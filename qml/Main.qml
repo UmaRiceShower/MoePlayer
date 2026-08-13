@@ -179,7 +179,7 @@ ApplicationWindow {
         Settings {}
     }
 
-    // 服务器管理页(Ctrl+O):展示已保存的 Emby 服务器,排序/删除。
+    // 服务器管理页(Ctrl+O):展示已保存的 Emby 服务器,拖动排序。
     Component {
         id: serverManagerPage
         ServerManager {
