@@ -31,6 +31,9 @@ Item {
 
     property var detail: ({})
     property bool isFavorite: false
+    // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
+    // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
+    property bool loaded: false
     // 选集条当前季(Season id);空=尚未选择。
     property string currentSeasonId: ""
 
@@ -112,16 +115,20 @@ Item {
         }
         root.backRequested()
     }
-    // 统一重拉:保留旧 detail(切集/刷新时避免闪空),新 detail 经
-    // onItemDetailReady 替换;首次进入 detail 为空则显示空骨架。
+    // 首次进入/切集共用:置 loaded=false 显示加载动画,detail 到达后
+    // 经 onItemDetailReady 置 loaded=true 并一次性渲染完整结构。
     function reload() {
+        root.loaded = false
         root.playbackPending = false
         const c = root.creds()
         if (root.itemId !== "")
             EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
     }
+    // 播放后刷新:保留当前结构与旧数据,静默重拉(不闪加载动画)。
     function refreshAfterPlayback() {
-        root.reload()
+        const c = root.creds()
+        if (root.itemId !== "")
+            EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
     }
     // 选集条选季:拉该季分集并回顶部。
     function selectSeason(seasonId) {
@@ -244,8 +251,30 @@ Item {
         anchors.fill: parent
         color: Theme.bg
 
+        // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
+        // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
+        Item {
+            anchors.fill: parent
+            visible: !root.loaded
+            Column {
+                anchors.centerIn: parent
+                spacing: 12
+                BusyIndicator {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    running: true
+                }
+                Text {
+                    text: "加载中…"
+                    color: Theme.textMuted
+                    font.pixelSize: 14
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+            }
+        }
+
         Row {
             anchors.fill: parent
+            visible: root.loaded
 
             // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
             Flickable {
@@ -277,7 +306,7 @@ Item {
                             anchors.fill: parent
                             source: root.backdropSource()
                             fillMode: Image.PreserveAspectCrop
-                            opacity: source !== "" ? 1 : 0
+                            opacity: status === Image.Ready && source !== "" ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 220 } }
                             cache: true
                         }
@@ -325,6 +354,8 @@ Item {
                                     anchors.margins: 3
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
+                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 180 } }
                                     cache: true
                                 }
                             }
@@ -443,8 +474,9 @@ Item {
                                                     anchors.fill: parent
                                                     source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
+                                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                                    Behavior on opacity { NumberAnimation { duration: 180 } }
                                                     cache: true
-                                                    visible: source !== ""
                                                 }
                                                 Text {
                                                     anchors.centerIn: parent
@@ -551,6 +583,8 @@ Item {
                                         anchors.margins: 3
                                         source: model.posterId ? "image://emby/" + model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
+                                        opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 180 } }
                                         cache: true
                                     }
                                     Text {
@@ -698,6 +732,7 @@ Item {
                 return
             root.detail = d
             root.isFavorite = d.isFavorite
+            root.loaded = true
             const c = root.creds()
             // 选集条季列表:剧集自身 / 集详情的父剧。
             if (d.type === "Series") {
