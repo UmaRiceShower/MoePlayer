@@ -91,12 +91,15 @@ private:
         bool rememberPassword = false;
         QString password; // 混淆存储
         QString icon; // 自定义图标(图片 URL;空 = 名称首字)
-        QString serverIcon; // 添加服务器时解析的服务器默认图标(空 = 未解析到)
+        QString serverIcon; // 服务器默认图标本地缓存 file:// URL(空 = 未解析到)
         qint64 lastUsed = 0;
     };
 
     void load();
     void save();
+    // 服务器图标图片落盘本地缓存(不存远程 URL),返回 file:// URL(失败空)。
+    static QString writeServerIconCache(const QString &serverUrl, const QString &iconUrl,
+                                        const QByteArray &imageData);
     // 简单混淆(XOR + base64):防随手翻看,不防专业取证。
     static QString obfuscate(const QString &plain);
     static QString deobfuscate(const QString &cipher);

@@ -8,6 +8,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
@@ -156,20 +157,29 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                     fetchHomeRows(m_homeLimit);
             });
 
-    // 浏览器式图标解析结果(仅添加服务器时拉取):写入该服务器账号的
-    // serverIcon 字段(持久化)。解析失败(空)静默:不写、不记录、不重试,
-    // 卡片回退名称首字。
+    // 浏览器式图标解析+下载结果(仅添加服务器时拉取 / 存量账号本地化
+    // 迁移):图片字节落盘本地缓存(CacheLocation,不存远程 URL),账号
+    // serverIcon 字段存本地文件路径。失败(字节空)静默置空:不写、不
+    // 记录、不重试,卡片回退名称首字。
     connect(m_client, &EmbyClient::serverIconReceived, this,
-            [this](const QString &serverUrl, const QString &iconUrl) {
-                if (iconUrl.isEmpty())
-                    return;
+            [this](const QString &serverUrl, const QString &iconUrl,
+                   const QByteArray &imageData) {
                 const int idx = accountIndexByServer(serverUrl);
                 if (idx < 0)
                     return;
                 AccountInfo &a = m_accounts[idx];
-                if (a.serverIcon == iconUrl)
+                if (imageData.isEmpty()) {
+                    if (a.serverIcon.isEmpty())
+                        return;
+                    a.serverIcon.clear();
+                    save();
+                    emit accountsChanged();
                     return;
-                a.serverIcon = iconUrl;
+                }
+                const QString localPath = writeServerIconCache(serverUrl, iconUrl, imageData);
+                if (localPath.isEmpty() || a.serverIcon == localPath)
+                    return;
+                a.serverIcon = localPath;
                 save();
                 emit accountsChanged();
             });
@@ -612,6 +622,47 @@ QString AccountManager::encodeServerKey(const QString &serverUrl)
     // Base64URL(无填充):输出仅含字母数字与 - _,可安全放进 image:// URL。
     return QString::fromLatin1(serverUrl.toUtf8().toBase64(
         QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
+}
+
+// 服务器图标图片落盘本地缓存(CacheLocation,不存远程 URL):文件名
+// server-icon-<encodeServerKey(serverUrl)><扩展名>,扩展名取图标 URL 后缀
+// (Qt Image 按内容解码,扩展名仅作标识)。返回本地绝对路径,写失败返回空。
+QString AccountManager::writeServerIconCache(const QString &serverUrl,
+                                             const QString &iconUrl,
+                                             const QByteArray &imageData)
+{
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (dir.isEmpty())
+        return QString();
+    QDir d;
+    if (!d.mkpath(dir))
+        return QString();
+    // 扩展名:仅接受 ≤5 位小写字母数字后缀(防 ".html" 等误用),否则 .png。
+    QString ext = QStringLiteral(".png");
+    const QString path = QUrl(iconUrl).path();
+    const int dot = path.lastIndexOf(QLatin1Char('.'));
+    if (dot >= 0) {
+        const QString e = path.mid(dot + 1).toLower();
+        bool ok = !e.isEmpty() && e.size() <= 5;
+        for (const QChar ch : e)
+            ok = ok && (ch.isLower() || ch.isDigit());
+        if (ok)
+            ext = QLatin1Char('.') + e;
+    }
+    const QString file = dir + QStringLiteral("/server-icon-")
+                         + encodeServerKey(serverUrl) + ext;
+    QFile f(file);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return QString();
+    if (f.write(imageData) != imageData.size()) {
+        f.close();
+        f.remove();
+        return QString();
+    }
+    f.close();
+    // file:// URL 形式:QML Image.source 的字符串按相对当前 URL(qrc)解析,
+    // 裸绝对路径会被当成 qrc:/... 资源路径加载失败,必须显式 file://。
+    return QUrl::fromLocalFile(file).toString();
 }
 
 QString AccountManager::decodeServerKey(const QString &key)

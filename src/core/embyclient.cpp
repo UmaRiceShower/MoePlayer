@@ -281,9 +281,10 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
 }
 
 // 浏览器式获取站点图标(HTML Living Standard):请求 web 首页,解析
-// <link rel="icon"> 标签,href 相对路径按 RFC 3986 相对文档 URL 解析。
-// HTML 拉取失败或无图标标签时静默失败(发空结果):不 fallback、不重试,
-// 调用方不存数据,卡片回退名称首字。仅添加服务器时调用。
+// <link rel="icon"> 标签,href 相对路径按 RFC 3986 相对文档 URL 解析,
+// 随后下载图标图片字节经 serverIconReceived 返回(空 = 失败)。HTML 拉取
+// 失败或无图标标签时静默失败:不 fallback、不重试,调用方不存数据,
+// 卡片回退名称首字。仅添加服务器时调用(图片由调用方落盘本地缓存)。
 void EmbyClient::fetchServerIcon(const QString &serverUrl)
 {
     const QString htmlUrl = serverUrl.trimmed() + QStringLiteral("/web/index.html");
@@ -294,10 +295,35 @@ void EmbyClient::fetchServerIcon(const QString &serverUrl)
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, serverUrl, htmlUrl]() {
                 reply->deleteLater();
-                QString iconUrl;
-                if (reply->error() == QNetworkReply::NoError)
-                    iconUrl = parseFaviconLink(QString::fromUtf8(reply->readAll()), htmlUrl);
-                emit serverIconReceived(serverUrl, iconUrl); // 失败即空,静默
+                if (reply->error() != QNetworkReply::NoError) {
+                    emit serverIconReceived(serverUrl, QString(), QByteArray());
+                    return;
+                }
+                const QString iconUrl =
+                    parseFaviconLink(QString::fromUtf8(reply->readAll()), htmlUrl);
+                if (iconUrl.isEmpty()) {
+                    emit serverIconReceived(serverUrl, QString(), QByteArray());
+                    return;
+                }
+                downloadServerIconImage(serverUrl, iconUrl);
+            });
+}
+
+// 下载已解析的图标 URL 图片字节(不含认证,Emby /web/ 静态资源):
+// 成功发字节、失败发空。fetchServerIcon 解析出图标 URL 后调用。
+void EmbyClient::downloadServerIconImage(const QString &serverUrl, const QString &iconUrl)
+{
+    QNetworkRequest req{QUrl(iconUrl)};
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    QNetworkReply *reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, serverUrl, iconUrl]() {
+                reply->deleteLater();
+                const QByteArray data = reply->error() == QNetworkReply::NoError
+                                            ? reply->readAll()
+                                            : QByteArray();
+                emit serverIconReceived(serverUrl, iconUrl, data);
             });
 }
 
