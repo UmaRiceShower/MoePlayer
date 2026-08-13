@@ -102,6 +102,8 @@ private:
     static QString deobfuscate(const QString &cipher);
     // 首页聚合:全部请求完成后按账号顺序组装 homeRows 并发 homeRowsReady。
     void maybeAssembleHomeRows();
+    // 首页聚合串行化:结束本轮,飞行中排队的触发重跑一次。
+    void finishHomeFetch();
     // 服务器显示名(ServerName)持久化于 QSettings,启动时读入,拉取成功后刷新。
     void loadServerNames();
     void persistServerNames();
@@ -120,6 +122,11 @@ private:
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
     QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
+    // 首页聚合串行化:飞行中收到新触发(启动拉取/重登/账号变化)时排队,
+    // 本轮完成后重跑一次。避免并发 fill 打断正在孵化的 ListView delegate
+    // (Qt 报 "Object or context destroyed during incubation")。
+    bool m_homeFetchActive = false;
+    bool m_homeFetchQueued = false;
     int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调

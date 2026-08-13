@@ -297,6 +297,14 @@ bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
 //TODO:逐媒体库拉取并刷新
 void AccountManager::fetchHomeRows(int perLibraryLimit)
 {
+    m_homeLimit = qBound(1, perLibraryLimit, MoePlayer::kHomePerLibraryLimit);
+    // 上一轮仍在途(启动拉取与重登/账号变化可能重叠):合并,当前轮
+    // 完成后再按最新状态重跑,避免并发 fill 打断孵化中的 delegate。
+    if (m_homeFetchActive) {
+        m_homeFetchQueued = true;
+        return;
+    }
+    m_homeFetchActive = true;
     // 重叠重拉(排序/增删快速操作)时旧代次的回调可能仍在途,其归位索引已
     // 失效,须按代次丢弃;否则会污染本次聚合的视图与计数。
     ++m_homeGen;
@@ -304,7 +312,6 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     m_homeViews.clear();
     m_homeRowByKey.clear();
     m_homeAccountOrder.clear();
-    m_homeLimit = qBound(1, perLibraryLimit, MoePlayer::kHomePerLibraryLimit);
     m_homePending = 0;
     // 先展示缓存(上次成功数据),网络刷新完成后再覆盖;无缓存则清空等待。
     m_homeRows.clear();
@@ -327,7 +334,17 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         m_client->fetchServerViews(a.serverUrl, a.token, a.userId);
     }
     if (m_homePending == 0)
-        emit homeRowsReady();
+        finishHomeFetch();
+}
+
+// 结束本轮聚合:释放串行标记;飞行中排队的触发(账号状态已变)重跑一次。
+void AccountManager::finishHomeFetch()
+{
+    m_homeFetchActive = false;
+    if (m_homeFetchQueued) {
+        m_homeFetchQueued = false;
+        fetchHomeRows(m_homeLimit);
+    }
 }
 
 void AccountManager::maybeAssembleHomeRows()
@@ -375,6 +392,7 @@ void AccountManager::maybeAssembleHomeRows()
     m_homeRows = out;
     saveHomeCache(); // 缓存本次成功数据,下次启动先展示
     emit homeRowsReady();
+    finishHomeFetch();
 }
 
 QString AccountManager::tokenForServer(const QString &serverUrl) const
