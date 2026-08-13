@@ -225,11 +225,9 @@ Item {
                 property real dragStartX: 0
                 property real dragStartY: 0
 
-                // 图标区:优先显示 Emby 服图标(服务器 web 资源,PWA 图标,
-                // 浏览器连接看到的即此图);用户自定义图标(图片 URL)覆盖;
-                // 加载失败(服务器离线/资源不存在)回退名称首字。
+                // 图标区:自定义图标 → 服务器默认 Emby 图标(web PWA 图标/
+                // favicon)→ 名称首字,加载失败自动降档(见 ServerIcon)。
                 Rectangle {
-                    id: iconRect
                     width: root.iconSize
                     height: root.iconSize
                     radius: 10
@@ -238,23 +236,11 @@ Item {
                     anchors.left: parent.left
                     anchors.leftMargin: 14
                     color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
-                    clip: true
-                    Image {
-                        id: cardIconImg
+                    ServerIcon {
                         anchors.fill: parent
-                        source: modelData.icon !== ""
-                                ? modelData.icon
-                                : modelData.serverUrl + "/web/images/icon-192x192.png"
-                        fillMode: Image.PreserveAspectCrop
-                        visible: status === Image.Ready
-                    }
-                    AppText {
-                        anchors.centerIn: parent
-                        visible: cardIconImg.status !== Image.Ready
-                        text: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
-                        color: Theme.accent
-                        font.pixelSize: 26
-                        font.bold: true
+                        serverUrl: modelData.serverUrl
+                        customIcon: modelData.icon
+                        fallbackText: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
                     }
                 }
 
@@ -610,8 +596,8 @@ Item {
                     font.bold: true
                 }
 
-                // 预览:自定义 URL 有效即显示,否则显示服务器默认 Emby 图标
-                // (即卡片默认图标);加载失败显示占位。
+                // 预览:自定义 URL 生效即显示,否则走服务器默认图标链
+                // (与卡片一致);输入实时反映。
                 Row {
                     spacing: 14
                     Rectangle {
@@ -619,23 +605,11 @@ Item {
                         height: 52
                         radius: 10
                         color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
-                        clip: true
-                        Image {
-                            id: iconPrevImg
+                        ServerIcon {
                             anchors.fill: parent
-                            source: iconUrlField.text.trim() !== ""
-                                    ? iconUrlField.text.trim()
-                                    : root.iconServerUrl + "/web/images/icon-192x192.png"
-                            fillMode: Image.PreserveAspectCrop
-                            visible: status === Image.Ready
-                        }
-                        AppText {
-                            anchors.centerIn: parent
-                            visible: iconPrevImg.status !== Image.Ready
-                            text: "图"
-                            color: Theme.accent
-                            font.pixelSize: 24
-                            font.bold: true
+                            serverUrl: root.iconServerUrl
+                            customIcon: iconUrlField.text.trim()
+                            fallbackText: "图"
                         }
                     }
                     Column {
