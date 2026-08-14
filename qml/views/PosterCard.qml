@@ -55,18 +55,21 @@ Item {
     Rectangle {
         anchors.fill: parent
         color: root.surfaceTint
-        radius: 8
+        radius: 14
         clip: true
 
-        Image {
+        // CrossfadeImage:圆角在绘制层裁切(Item::clip 只裁矩形;Rectangle
+        // radius 不影响子项)。静态场景 Canvas 仅绘制一次,无重绘开销。
+        CrossfadeImage {
             id: posterImg
             anchors.fill: parent
-            // 不内缩:图片充满卡片(圆角由卡片 clip 裁切)。内缩会露出深色
-            // 卡片底(surfaceTint),观感像一圈黑框。
+            cornerRadius: 14
             source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
+            // 网格滚动 delegate 复用:禁用替换动画(duration 0 = 瞬时切换)。
+            duration: 0
             // 仅 Ready 可见:加载中露卡片底色,失败隐藏(配合 fallback 图标)。
             visible: status === Image.Ready
             opacity: 0

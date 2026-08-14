@@ -12,7 +12,7 @@ set(CMAKE_AUTORCC ON)
 # qrc 资源路径。buildDir 由 qmlls 自动读取,无需手动配置扩展。
 set(QT_QML_GENERATE_QMLLS_INI ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
 # QTP0004 NEW:为模块内含 .qml 的子目录(views/theme/player)自动生成 qmldir。
 qt_policy(SET QTP0004 NEW)
 # 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
@@ -66,6 +66,17 @@ qt_add_qml_module(MoePlayer
         qml/views/SearchOverlay.qml
         qml/views/PosterCard.qml
         qml/views/ServerIcon.qml
+)
+
+# ShaderEffect 用 qsb 编译的 shader(官方路径):资源嵌入 qrc:
+# /qt/qml/MoePlayer/Core/shaders/*.frag.qsb,与 QML 模块同前缀。
+qt_add_shaders(MoePlayer moeplayer_shaders
+    PREFIX "/qt/qml/MoePlayer/Core"
+    # 仅 GLSL 目标:ShaderEffect 的属性按名绑定直接 uniform,Vulkan 要求
+    # uniform block,与 ShaderEffect 绑定模型不兼容(本应用 RHI 后端为
+    # OpenGL)。
+    GLSL "100es,120,150"
+    FILES shaders/crossfade.frag
 )
 
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件

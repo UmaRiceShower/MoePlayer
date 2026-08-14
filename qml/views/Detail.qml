@@ -666,11 +666,13 @@ Item {
                                 width: Constants.detailPosterW
                                 height: Constants.detailPosterH
                                 color: root.surfaceTint
-                                radius: 6
+                                radius: 18
+                                clip: true
                                 CrossfadeImage {
                                     id: posterFx
                                     anchors.fill: parent
-                                    // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
+                                    // 圆角在绘制层裁切(Item::clip 只裁矩形)。
+                                    cornerRadius: 18
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
@@ -936,6 +938,8 @@ Item {
                                                 anchors.horizontalCenter: parent.horizontalCenter
                                                 CrossfadeImage {
                                                     anchors.fill: parent
+                                                    // 60x60 卡:半径=短边一半,呈圆形。
+                                                    cornerRadius: 30
                                                     source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
                                                     asynchronous: true
@@ -1050,10 +1054,12 @@ Item {
                                     width: Constants.detailCardW
                                     height: Constants.detailCardH
                                     color: root.surfaceTint
-                                    radius: 6
+                                    radius: 14
+                                    clip: true
                                     CrossfadeImage {
                                         anchors.fill: parent
                                         // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
+                                        cornerRadius: 14
                                         source: similarCard.model.posterId ? "image://emby/" + similarCard.model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
@@ -1253,10 +1259,12 @@ Item {
                                 height: 50
                                 anchors.verticalCenter: parent.verticalCenter
                                 color: Theme.bg
-                                radius: 4
+                                radius: 12
+                                clip: true
                                 CrossfadeImage {
                                     id: thumb
                                     anchors.fill: parent
+                                    cornerRadius: 12
                                     source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId : ""
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
