@@ -25,6 +25,50 @@ Item {
     // 替换流程内部状态。
     property bool _pending: false
 
+    onSourceChanged: {
+        const s = root.source
+        if (s === "") {
+            // 无图:清空两层。
+            revealAnim.stop()
+            bottom.source = ""
+            root._pending = false
+            return
+        }
+        if (root._pending) {
+            // 扩散进行中又来新 source:换目标图,重放动画。
+            revealAnim.stop()
+            view.loadImage(s)
+            if (view.isImageLoaded(s))
+                root._beginReveal()
+        } else if (bottom.source !== "" && bottom.source !== s && bottom.status === Image.Ready) {
+            // 底层已有显示中的旧图:新图进画布,加载完成后圆形扩散。
+            root._pending = true
+            view.radius = 0
+            view.dissolve = 0
+            top.source = s
+            view.loadImage(s)
+            if (view.isImageLoaded(s))
+                root._beginReveal()
+        } else {
+            // 首次/无旧图:直接到底层显示。
+            bottom.source = s
+        }
+    }
+
+    function _beginReveal() {
+        const w = view.width, h = view.height
+        if (w === 0 || h === 0)
+            return
+        const cx = root.center.x * w, cy = root.center.y * h
+        const maxR = Math.sqrt(Math.max(cx, w - cx) * Math.max(cx, w - cx)
+                             + Math.max(cy, h - cy) * Math.max(cy, h - cy))
+        revealAnim.radiusTo = root.inward ? 0 : maxR
+        revealAnim.radiusFrom = root.inward ? maxR : 0
+        revealAnim.dissolveFrom = 0
+        revealAnim.dissolveTo = 1
+        revealAnim.start()
+    }
+
     // 底层:常显当前图(替换期间保留旧图)。
     Image {
         id: bottom
@@ -93,56 +137,20 @@ Item {
         }
     }
 
-    onSourceChanged: {
-        const s = root.source
-        if (s === "") {
-            // 无图:清空两层。
-            revealAnim.stop()
-            bottom.source = ""
-            root._pending = false
-            return
-        }
-        if (root._pending) {
-            // 扩散进行中又来新 source:换目标图,重放动画。
-            revealAnim.stop()
-            view.loadImage(s)
-            if (view.isImageLoaded(s))
-                root._beginReveal()
-        } else if (bottom.source !== "" && bottom.source !== s && bottom.status === Image.Ready) {
-            // 底层已有显示中的旧图:新图进画布,加载完成后圆形扩散。
-            root._pending = true
-            view.radius = 0
-            view.dissolve = 0
-            top.source = s
-            view.loadImage(s)
-            if (view.isImageLoaded(s))
-                root._beginReveal()
-        } else {
-            // 首次/无旧图:直接到底层显示。
-            bottom.source = s
-        }
-    }
-
-    function _beginReveal() {
-        const w = view.width, h = view.height
-        if (w === 0 || h === 0)
-            return
-        const cx = root.center.x * w, cy = root.center.y * h
-        const maxR = Math.sqrt(Math.max(cx, w - cx) * Math.max(cx, w - cx)
-                             + Math.max(cy, h - cy) * Math.max(cy, h - cy))
-        revealAnim.radiusTo = root.inward ? 0 : maxR
-        revealAnim.radiusFrom = root.inward ? maxR : 0
-        revealAnim.dissolveFrom = 0
-        revealAnim.dissolveTo = 1
-        revealAnim.start()
-    }
-
     ParallelAnimation {
         id: revealAnim
         property real radiusFrom: 0
         property real radiusTo: 0
         property real dissolveFrom: 0
         property real dissolveTo: 1
+        onFinished: {
+            // 画布已成新图:同步底层,复位画布,释放替换流程。
+            bottom.source = root.source
+            view.radius = 0
+            view.dissolve = 0
+            top.source = ""
+            root._pending = false
+        }
         NumberAnimation {
             target: view
             property: "radius"
@@ -158,14 +166,6 @@ Item {
             to: revealAnim.dissolveTo
             duration: root.duration
             easing.type: Easing.OutCubic
-        }
-        onFinished: {
-            // 画布已成新图:同步底层,复位画布,释放替换流程。
-            bottom.source = root.source
-            view.radius = 0
-            view.dissolve = 0
-            top.source = ""
-            root._pending = false
         }
     }
 }

@@ -39,14 +39,14 @@ Item {
         const c = ColorProvider.colors[root.posterId]
         return c ? c.surfaceTint : Theme.surface
     }
-    onPosterIdChanged: ColorProvider.requestColor(root.posterId)
-    Component.onCompleted: ColorProvider.requestColor(root.posterId)
 
     // 点击卡片(进详情)。
     signal clicked()
     // 悬停操作:收藏/已看切换请求(useById 翻转)。
     signal favoriteRequested(string itemId, bool fav)
     signal watchedRequested(string itemId, bool played)
+    onPosterIdChanged: ColorProvider.requestColor(root.posterId)
+    Component.onCompleted: ColorProvider.requestColor(root.posterId)
 
     Rectangle {
         anchors.fill: parent
@@ -218,6 +218,7 @@ Item {
             width: 30
             height: 30
             padding: 0
+            onClicked: root.favoriteRequested(root.itemId, !root.favorite)
             background: Rectangle { radius: 15; color: Theme.overlayBg }
             contentItem: AppText {
                 text: root.favorite ? "♥" : "♡"
@@ -226,12 +227,12 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
-            onClicked: root.favoriteRequested(root.itemId, !root.favorite)
         }
         Button {
             width: 30
             height: 30
             padding: 0
+            onClicked: root.watchedRequested(root.itemId, !root.played)
             background: Rectangle { radius: 15; color: root.played ? Theme.success : Theme.overlayBg }
             contentItem: AppText {
                 text: "✓"
@@ -240,7 +241,6 @@ Item {
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
             }
-            onClicked: root.watchedRequested(root.itemId, !root.played)
         }
     }
 }

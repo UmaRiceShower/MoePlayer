@@ -15,8 +15,6 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    signal backRequested()
-
     // 卡片尺寸(与 PosterCard 同风格:圆角 + surface 底)。
     readonly property int cardW: 280
     readonly property int cardH: 150
@@ -54,6 +52,24 @@ Item {
     // "QQmlVMEMetaObject: Internal error - invalid context"。onReleased
     // 据此外出——模型未变(拖出窗口)时旧卡必然有效,归位兜底才安全。
     property bool dragDirty: false
+
+    // ---- 添加服务器浮窗 ----
+    // 半透明遮罩 + 居中卡片。字段:名称(可选,留空登录成功后自动获取
+    // 服务器端 ServerName)、地址(必填,无 scheme 自动补 http://)、
+    // 用户名(必填)、密码(可为空,填了默认记住供 token 失效自动重登)。
+    // 点"添加"经 AccountManager.addAccount 登录:成功关闭浮窗(账号卡
+    // 自动出现,首页经 accountsChanged 自动重拉聚合);失败在按钮下方
+    // 显示"失败"与详细原因。点击遮罩取消。
+    property bool addOpen: false
+    property bool adding: false
+    property string errorMsg: ""
+
+    // ---- 图标设置浮窗 ----
+    property bool iconOpen: false
+    property string iconAccountId: ""
+    property string iconServerDefault: ""
+
+    signal backRequested()
 
     // 手动布局:占位卡第 0 格,账号卡其后。hover 卡等比例放大(scale),
     // 其左侧全部卡片左移 expandHalf、右侧全部卡片右移 expandHalf(对称
@@ -169,38 +185,9 @@ Item {
         dragResetTimer.restart()
     }
 
-    // 重排动画(被拖卡 330ms)结束后清状态,防后续 hover 挤压误判。
-    Timer {
-        id: dragResetTimer
-        interval: root.dragDuration + 80
-        repeat: false
-        onTriggered: {
-            root.reordering = false
-            root.dragAccountId = ""
-            root.posSnapshot = {}
-        }
-    }
-
     // hover 状态/账号列表变化后延迟一帧重排(等 delegate 稳定)。
     function scheduleLayout() {
         layoutTimer.restart()
-    }
-
-    // 账号增删/排序后 Repeater 重建 delegate,重排到位。
-    Connections {
-        target: AccountManager
-        function onAccountsChanged() {
-            // 模型变化 → 旧卡 context 失效(见 dragDirty 说明),onReleased
-            // 不得再触碰卡函数。
-            root.dragDirty = true
-            // 重建完成后一拍布局:accountsChanged 处理后旧 delegate 已销毁、
-            // 新 delegate 已按快照复位,此时 layoutCards 只作用于新卡,不会
-            // 把拖动卡定位回原位。若孵化未完成(部分新卡未创建),onCompleted
-            // 的兜底 scheduleLayout 会补全——两者幂等合并。
-            // 注意:不在此同步 isNew 基线(会先于异步重建的 delegate 判定,
-            // 导致新增卡误判为旧卡)。
-            root.scheduleLayout()
-        }
     }
 
     // 把落点坐标(相对 root,即 DropArea 原点)换算为账号索引。
@@ -245,6 +232,91 @@ Item {
             c.dropTarget = true
     }
 
+    function openAddDialog() {
+        root.addOpen = true
+        nameField.text = ""
+        urlField.text = ""
+        userField.text = ""
+        passField.text = ""
+        root.errorMsg = ""
+        urlField.forceActiveFocus()
+    }
+    function closeAddDialog() {
+        root.addOpen = false
+        root.adding = false
+        passField.text = "" // 不留密码于控件,避免二次读取
+    }
+
+    function openIconDialog(id, current, serverUrl, serverDefault) {
+        root.iconAccountId = id
+        root.iconServerDefault = serverDefault
+        iconUrlField.text = current || ""
+        root.iconOpen = true
+        iconUrlField.forceActiveFocus()
+    }
+    function closeIconDialog() {
+        root.iconOpen = false
+    }
+    // 保存即持久化(AccountManager.setAccountIcon 立即落盘)。
+    function saveIcon() {
+        AccountManager.setAccountIcon(root.iconAccountId, iconUrlField.text.trim())
+        root.closeIconDialog()
+    }
+    // 清除自定义图标 → 恢复默认(服务器 Emby 图标)。
+    function clearIcon() {
+        AccountManager.setAccountIcon(root.iconAccountId, "")
+        root.closeIconDialog()
+    }
+
+    function submitAdd() {
+        if (root.adding)
+            return
+        const url = urlField.text.trim()
+        const user = userField.text.trim()
+        if (url === "") {
+            root.errorMsg = "请输入服务器地址"
+            return
+        }
+        if (user === "") {
+            root.errorMsg = "请输入用户名"
+            return
+        }
+        const full = url.indexOf("://") < 0 ? "http://" + url : url
+        root.errorMsg = ""
+        root.adding = true
+        AccountManager.addAccount(nameField.text, full, user, passField.text,
+                                  passField.text.length > 0)
+    }
+
+    // 重排动画(被拖卡 330ms)结束后清状态,防后续 hover 挤压误判。
+    Timer {
+        id: dragResetTimer
+        interval: root.dragDuration + 80
+        repeat: false
+        onTriggered: {
+            root.reordering = false
+            root.dragAccountId = ""
+            root.posSnapshot = {}
+        }
+    }
+
+    // 账号增删/排序后 Repeater 重建 delegate,重排到位。
+    Connections {
+        target: AccountManager
+        function onAccountsChanged() {
+            // 模型变化 → 旧卡 context 失效(见 dragDirty 说明),onReleased
+            // 不得再触碰卡函数。
+            root.dragDirty = true
+            // 重建完成后一拍布局:accountsChanged 处理后旧 delegate 已销毁、
+            // 新 delegate 已按快照复位,此时 layoutCards 只作用于新卡,不会
+            // 把拖动卡定位回原位。若孵化未完成(部分新卡未创建),onCompleted
+            // 的兜底 scheduleLayout 会补全——两者幂等合并。
+            // 注意:不在此同步 isNew 基线(会先于异步重建的 delegate 判定,
+            // 导致新增卡误判为旧卡)。
+            root.scheduleLayout()
+        }
+    }
+
     // 卡片右键菜单:设置图标 / 删除(登出服务器 + 删除本地数据)。
     Menu {
         id: cardMenu
@@ -259,17 +331,17 @@ Item {
         }
         MenuSeparator {}
         MenuItem {
+            onTriggered: {
+                // 删除前抓快照:补位卡逐格前移动画(跨行淡入),被删卡消失。
+                root.snapshotPositions("")
+                AccountManager.removeAccount(cardMenu.accountId)
+            }
             // 删除:先向服务器发登出(结果忽略),再删本地数据(见
             // AccountManager.removeAccount),账号卡自动补位。
             contentItem: AppText {
                 text: "删除"
                 color: Theme.danger
                 font.pixelSize: 14
-            }
-            onTriggered: {
-                // 删除前抓快照:补位卡逐格前移动画(跨行淡入),被删卡消失。
-                root.snapshotPositions("")
-                AccountManager.removeAccount(cardMenu.accountId)
             }
         }
     }
@@ -351,14 +423,6 @@ Item {
         anchors.leftMargin: 24
         anchors.rightMargin: 24
         anchors.bottomMargin: 24
-
-        // 延迟重排(hover 状态/账号变化后执行);首次与 resize 直接定位无动画。
-        Timer {
-            id: layoutTimer
-            interval: 1
-            repeat: false
-            onTriggered: root.layoutCards(true)
-        }
         Component.onCompleted: {
             // isNew 判定基线:页面打开时的账号集合。此后添加账号 = 新 id
             // 淡入;重登/重建 = 旧 id 不误判,不触发集体淡入。
@@ -368,12 +432,25 @@ Item {
         onWidthChanged: root.layoutCards(false)
         onHeightChanged: root.layoutCards(false)
 
+        // 延迟重排(hover 状态/账号变化后执行);首次与 resize 直接定位无动画。
+        Timer {
+            id: layoutTimer
+            interval: 1
+            repeat: false
+            onTriggered: root.layoutCards(true)
+        }
+
         // 添加服务器占位卡(具体添加 UI 后续设计,先占位)。
         Rectangle {
             id: plusCard
             width: root.cardW
             height: root.cardH
             radius: 12
+            color: "transparent"
+            border.width: 2
+            border.color: plusHover.containsMouse
+                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
+                          : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
             // 被同行放大卡挤压时同样让位/复位(经 animateTo 驱动)。
             function animateTo(tx, ty, restore) {
                 if (Math.abs(plusCard.x - tx) > 0.5) {
@@ -427,11 +504,6 @@ Item {
                 duration: 120
                 easing.type: Easing.OutCubic
             }
-            color: "transparent"
-            border.width: 2
-            border.color: plusHover.containsMouse
-                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
-                          : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
             Canvas {
                 id: plusIcon
@@ -495,6 +567,58 @@ Item {
                 z: Drag.active ? 10 : (card.expanded ? 9 : 0)
                 scale: card.expanded ? root.hoverScale : 1.0
                 Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                // 官方拖放模式:MouseArea.drag 移动卡片自身并驱动 Drag.active。
+                // Drag.source 是 QObject(卡片自身),drop 侧经 accountId 识别。
+                Drag.active: dragArea.drag.active
+                Drag.source: card
+                Drag.hotSpot.x: width / 2
+                Drag.hotSpot.y: height / 2
+                property string accountId: modelData.id
+                // 凭据失效(重登失败)标红边;拖动落点高亮用强调色。
+                border.width: modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
+                border.color: modelData.tokenValid === false ? Theme.danger
+                              : (card.dropTarget ? Theme.accent
+                              : (card.hovered ? Qt.rgba(Theme.accent.r, Theme.accent.g,
+                                                        Theme.accent.b, 0.5)
+                                              : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1)))
+                property bool hovered: false
+                property bool dropTarget: false
+                property bool expanded: false
+                // 新账号卡(无位置快照):直接定位 + 淡入,不参与重排位移动画。
+                property bool isNew: false
+                property real dragStartX: 0
+                property real dragStartY: 0
+                // 重排后按快照复位到旧位置(FLIP Invert),消除瞬移 (0,0)。
+                // isNew 由账号 id 基线判定(非快照缺失):新 id 淡入出场;
+                // 旧 id 重建(添加/重登)不误判,无快照时由布局静默定位。
+                // 销毁前停掉所有动画:target 随 delegate 销毁,主动 stop
+                // 避免动画引擎在失效对象上求值(QQmlVMEMetaObject internal
+                // error——重登等触发的重建可能发生在动画进行中)。
+                Component.onDestruction: {
+                    animX.stop()
+                    animY.stop()
+                    animXBack.stop()
+                    animYBack.stop()
+                    opacityAnim.stop()
+                }
+                Component.onCompleted: {
+                    const p = root.posSnapshot[modelData.id]
+                    card.isNew = !root.prevAccountIds.includes(modelData.id)
+                    if (p) {
+                        card.x = p.x
+                        card.y = p.y
+                    } else if (card.isNew) {
+                        card.opacity = 0
+                    }
+                    // Repeater 重建为异步(incubation):accountsChanged 触发的
+                    // 1ms 布局可能跑在重建完成前。本 delegate 完成后主动触发
+                    // 一次布局,同批次全部 onCompleted 会合并到同一 Timer 周期,
+                    // 最终布局在全部 delegate 就绪后执行(幂等,仅动位置变化的卡)。
+                    root.scheduleLayout()
+                }
+
+                // 放大状态变化 → 重排(左右邻居让位/复位)。
+                onExpandedChanged: root.scheduleLayout()
                 // 位移动画:线性插值 + easeOutCubic(挤压与复位一致,无回弹);
                 // 复位 120ms < hover 触发 200ms,复原期间移回不会与放大
                 // 动画冲突。手动 from/to 驱动(不设 Behavior,否则初始
@@ -537,34 +661,6 @@ Item {
                     opacityAnim.to = 1
                     opacityAnim.start()
                 }
-                // 重排后按快照复位到旧位置(FLIP Invert),消除瞬移 (0,0)。
-                // isNew 由账号 id 基线判定(非快照缺失):新 id 淡入出场;
-                // 旧 id 重建(添加/重登)不误判,无快照时由布局静默定位。
-                // 销毁前停掉所有动画:target 随 delegate 销毁,主动 stop
-                // 避免动画引擎在失效对象上求值(QQmlVMEMetaObject internal
-                // error——重登等触发的重建可能发生在动画进行中)。
-                Component.onDestruction: {
-                    animX.stop()
-                    animY.stop()
-                    animXBack.stop()
-                    animYBack.stop()
-                    opacityAnim.stop()
-                }
-                Component.onCompleted: {
-                    const p = root.posSnapshot[modelData.id]
-                    card.isNew = !root.prevAccountIds.includes(modelData.id)
-                    if (p) {
-                        card.x = p.x
-                        card.y = p.y
-                    } else if (card.isNew) {
-                        card.opacity = 0
-                    }
-                    // Repeater 重建为异步(incubation):accountsChanged 触发的
-                    // 1ms 布局可能跑在重建完成前。本 delegate 完成后主动触发
-                    // 一次布局,同批次全部 onCompleted 会合并到同一 Timer 周期,
-                    // 最终布局在全部 delegate 就绪后执行(幂等,仅动位置变化的卡)。
-                    root.scheduleLayout()
-                }
                 NumberAnimation {
                     id: animX
                     target: card
@@ -601,30 +697,6 @@ Item {
                     duration: root.fadeDuration
                     easing.type: Easing.OutCubic
                 }
-                // 官方拖放模式:MouseArea.drag 移动卡片自身并驱动 Drag.active。
-                // Drag.source 是 QObject(卡片自身),drop 侧经 accountId 识别。
-                Drag.active: dragArea.drag.active
-                Drag.source: card
-                Drag.hotSpot.x: width / 2
-                Drag.hotSpot.y: height / 2
-                property string accountId: modelData.id
-                // 凭据失效(重登失败)标红边;拖动落点高亮用强调色。
-                border.width: modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
-                border.color: modelData.tokenValid === false ? Theme.danger
-                              : (card.dropTarget ? Theme.accent
-                              : (card.hovered ? Qt.rgba(Theme.accent.r, Theme.accent.g,
-                                                        Theme.accent.b, 0.5)
-                                              : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1)))
-                property bool hovered: false
-                property bool dropTarget: false
-                property bool expanded: false
-                // 新账号卡(无位置快照):直接定位 + 淡入,不参与重排位移动画。
-                property bool isNew: false
-                property real dragStartX: 0
-                property real dragStartY: 0
-
-                // 放大状态变化 → 重排(左右邻居让位/复位)。
-                onExpandedChanged: root.scheduleLayout()
 
                 // hover 触发阈值:进入后 200ms 才放大,快速划过不触发;
                 // 大于复原动画时长(120ms),复原期间移回不会与放大冲突。
@@ -763,78 +835,6 @@ Item {
                 }
             }
         }
-    }
-
-    // ---- 添加服务器浮窗 ----
-    // 半透明遮罩 + 居中卡片。字段:名称(可选,留空登录成功后自动获取
-    // 服务器端 ServerName)、地址(必填,无 scheme 自动补 http://)、
-    // 用户名(必填)、密码(可为空,填了默认记住供 token 失效自动重登)。
-    // 点"添加"经 AccountManager.addAccount 登录:成功关闭浮窗(账号卡
-    // 自动出现,首页经 accountsChanged 自动重拉聚合);失败在按钮下方
-    // 显示"失败"与详细原因。点击遮罩取消。
-    property bool addOpen: false
-    property bool adding: false
-    property string errorMsg: ""
-
-    function openAddDialog() {
-        root.addOpen = true
-        nameField.text = ""
-        urlField.text = ""
-        userField.text = ""
-        passField.text = ""
-        root.errorMsg = ""
-        urlField.forceActiveFocus()
-    }
-    function closeAddDialog() {
-        root.addOpen = false
-        root.adding = false
-        passField.text = "" // 不留密码于控件,避免二次读取
-    }
-
-    // ---- 图标设置浮窗 ----
-    property bool iconOpen: false
-    property string iconAccountId: ""
-    property string iconServerDefault: ""
-
-    function openIconDialog(id, current, serverUrl, serverDefault) {
-        root.iconAccountId = id
-        root.iconServerDefault = serverDefault
-        iconUrlField.text = current || ""
-        root.iconOpen = true
-        iconUrlField.forceActiveFocus()
-    }
-    function closeIconDialog() {
-        root.iconOpen = false
-    }
-    // 保存即持久化(AccountManager.setAccountIcon 立即落盘)。
-    function saveIcon() {
-        AccountManager.setAccountIcon(root.iconAccountId, iconUrlField.text.trim())
-        root.closeIconDialog()
-    }
-    // 清除自定义图标 → 恢复默认(服务器 Emby 图标)。
-    function clearIcon() {
-        AccountManager.setAccountIcon(root.iconAccountId, "")
-        root.closeIconDialog()
-    }
-
-    function submitAdd() {
-        if (root.adding)
-            return
-        const url = urlField.text.trim()
-        const user = userField.text.trim()
-        if (url === "") {
-            root.errorMsg = "请输入服务器地址"
-            return
-        }
-        if (user === "") {
-            root.errorMsg = "请输入用户名"
-            return
-        }
-        const full = url.indexOf("://") < 0 ? "http://" + url : url
-        root.errorMsg = ""
-        root.adding = true
-        AccountManager.addAccount(nameField.text, full, user, passField.text,
-                                  passField.text.length > 0)
     }
 
     Connections {

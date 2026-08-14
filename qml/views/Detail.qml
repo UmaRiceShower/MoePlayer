@@ -16,9 +16,6 @@ Item {
     // 条目所在服务器:所有请求按该服务器凭据路由(无状态)。
     property string serverUrl: ""
 
-    signal playRequested(string url, var headers, var meta)
-    signal backRequested()
-
     // 详情间导航历史(相似推荐原地替换):栈内保存被替换前的条目,
     // back 时逐级恢复,替代"压新页再 pop"的整页重建。
     property var detailHistory: []
@@ -34,11 +31,6 @@ Item {
     property var pendingDetail: null
     // 文字层透明度:详情切换时正文文字淡出→换字→淡入;图片不受此影响。
     property real textFade: 1
-
-    // 该服务器凭据(账号缺失返回空 map)。
-    function creds() {
-        return AccountManager.credsForServer(root.serverUrl)
-    }
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
@@ -97,6 +89,31 @@ Item {
     property string pendingPlayItemId: ""
     property double resumeTicks: 0
     property bool playbackPending: false
+
+    property bool _ready: false
+
+    signal playRequested(string url, var headers, var meta)
+    signal backRequested()
+    onItemIdChanged: {
+        // 首次进入由 onCompleted 处理;之后(itemId 原地替换)在此重拉。
+        if (root._ready)
+            root.reload()
+    }
+    Component.onCompleted: {
+        root._ready = true
+        root.reload()
+    }
+
+    onVisibleChanged: {
+        // StackView pop 回来(visible false→true)时重拉被覆盖的共享模型。
+        if (root.visible && root._ready)
+            root.resyncModels()
+    }
+
+    // 该服务器凭据(账号缺失返回空 map)。
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
 
     function playItem(itemId, resume) {
         if (root.playbackPending || !itemId)
@@ -233,50 +250,6 @@ Item {
             // 标题推入:上移 8px(淡入由 textFade 统一驱动,不再手动置 opacity)。
             heroTitleShift.y = 8
             titleReveal.start()
-        }
-    }
-
-    // 正文文字交叉淡化:淡出文字 → 落地新数据 → 淡入文字。
-    // 图片(backdrop/海报/演职/缩略图)不走此层,各自圆形扩散溶解。
-    SequentialAnimation {
-        id: fadeInOut
-        NumberAnimation {
-            target: root
-            property: "textFade"
-            to: 0
-            duration: 140
-            easing.type: Easing.InQuad
-        }
-        ScriptAction {
-            script: {
-                const d = root.pendingDetail
-                root.pendingDetail = null
-                root.applyDetail(d, true)
-            }
-        }
-        NumberAnimation {
-            target: root
-            property: "textFade"
-            to: 1
-            duration: 160
-            easing.type: Easing.OutCubic
-        }
-        onFinished: root.replacing = false
-        onStopped: {
-            root.replacing = false
-            root.textFade = 1
-        }
-    }
-    // 标题推入:替换落地时标题区上移 8px(淡入由 textFade 统一驱动)。
-    ParallelAnimation {
-        id: titleReveal
-        NumberAnimation {
-            target: heroTitleShift
-            property: "y"
-            from: 8
-            to: 0
-            duration: 200
-            easing.type: Easing.OutCubic
         }
     }
     // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
@@ -508,35 +481,54 @@ Item {
         return s.type
     }
 
-    property bool _ready: false
-    onItemIdChanged: {
-        // 首次进入由 onCompleted 处理;之后(itemId 原地替换)在此重拉。
-        if (root._ready)
-            root.reload()
+    // 正文文字交叉淡化:淡出文字 → 落地新数据 → 淡入文字。
+    // 图片(backdrop/海报/演职/缩略图)不走此层,各自圆形扩散溶解。
+    SequentialAnimation {
+        id: fadeInOut
+        NumberAnimation {
+            target: root
+            property: "textFade"
+            to: 0
+            duration: 140
+            easing.type: Easing.InQuad
+        }
+        ScriptAction {
+            script: {
+                const d = root.pendingDetail
+                root.pendingDetail = null
+                root.applyDetail(d, true)
+            }
+        }
+        NumberAnimation {
+            target: root
+            property: "textFade"
+            to: 1
+            duration: 160
+            easing.type: Easing.OutCubic
+        }
+        onFinished: root.replacing = false
+        onStopped: {
+            root.replacing = false
+            root.textFade = 1
+        }
     }
-    Component.onCompleted: {
-        root._ready = true
-        root.reload()
-    }
-
-    onVisibleChanged: {
-        // StackView pop 回来(visible false→true)时重拉被覆盖的共享模型。
-        if (root.visible && root._ready)
-            root.resyncModels()
+    // 标题推入:替换落地时标题区上移 8px(淡入由 textFade 统一驱动)。
+    ParallelAnimation {
+        id: titleReveal
+        NumberAnimation {
+            target: heroTitleShift
+            property: "y"
+            from: 8
+            to: 0
+            duration: 200
+            easing.type: Easing.OutCubic
+        }
     }
 
 
     Rectangle {
         anchors.fill: parent
         color: Theme.bg
-        // 莫奈色纵向延伸 + 藏色:顶部氛围色保持到正文起始,中部渐入
-        // 带海报色相的底色(bgTint),最底部埋极暗互补色(暗部藏色)。
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: root.heroFrom }
-            GradientStop { position: 0.5; color: root.heroFrom }
-            GradientStop { position: 0.8; color: root.bgTint }
-            GradientStop { position: 1.0; color: root.complementDark }
-        }
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
         Rectangle {
@@ -546,10 +538,6 @@ Item {
             height: Constants.detailHeroH
             visible: root.loaded
             z: 0
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: root.heroFrom }
-                GradientStop { position: 1.0; color: root.bgTint }
-            }
             // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
             // 与海报同速,切换时氛围同步换新)。
             CrossfadeImage {
@@ -568,6 +556,10 @@ Item {
                     GradientStop { position: 0.55; color: "transparent" }
                     GradientStop { position: 1.0; color: root.heroFrom }
                 }
+            }
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.heroFrom }
+                GradientStop { position: 1.0; color: root.bgTint }
             }
         }
             // 选集栏莫奈色半透明 scrim:叠在全宽 Hero 之上,选集区透出
@@ -1226,6 +1218,14 @@ Item {
                     }
                 }
             }
+        }
+        // 莫奈色纵向延伸 + 藏色:顶部氛围色保持到正文起始,中部渐入
+        // 带海报色相的底色(bgTint),最底部埋极暗互补色(暗部藏色)。
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.heroFrom }
+            GradientStop { position: 0.5; color: root.heroFrom }
+            GradientStop { position: 0.8; color: root.bgTint }
+            GradientStop { position: 1.0; color: root.complementDark }
         }
     }
 
