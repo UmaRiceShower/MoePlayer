@@ -1053,7 +1053,7 @@ Item {
                                     radius: 6
                                     CrossfadeImage {
                                         anchors.fill: parent
-                                        anchors.margins: 3
+                                        // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
                                         source: similarCard.model.posterId ? "image://emby/" + similarCard.model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
