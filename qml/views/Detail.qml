@@ -558,11 +558,13 @@ Item {
         color: Theme.bg
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
+        // 高度 = hero 内容区(400)+ 延伸 160,背景图"漏出"到正文起始区,
+        // 底部经渐变遮罩(透明→bgTint)融入正文底色,自然沉入页面而非硬切。
         Rectangle {
             id: heroBackdrop
             y: 0
             width: parent.width
-            height: Constants.detailHeroH
+            height: Constants.detailBackdropH
             visible: root.loaded
             z: 0
             // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
@@ -575,33 +577,29 @@ Item {
                 duration: 800
                 cache: true
             }
-            // 底部渐变遮罩:保证标题/按钮文字可读,并让选集栏区域自然淡出;
-            // 尾色用莫奈色与正文区纵向渐变衔接。
+            // 氛围色叠加层(Multiply 近似):顶部海报色相低透明染色,向下渐淡,
+            // 背景图主导视觉;不遮挡图片细节。
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.30) }
+                    GradientStop { position: 0.35; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.08) }
+                    GradientStop { position: 0.65; color: "transparent" }
+                }
+            }
+            // 底部渐隐遮罩(官方 Gradient 标准做法):透明→bgTint 盖色渐入,
+            // 背景图在延伸区被涂成接近正文底色,自然沉入页面;同时压暗
+            // hero 底部保证标题/按钮文字可读。不引入 shader 离屏采样。
             Rectangle {
                 anchors.fill: parent
                 gradient: Gradient {
                     GradientStop { position: 0.55; color: "transparent" }
-                    GradientStop { position: 1.0; color: root.heroFrom }
+                    GradientStop { position: 1.0; color: root.bgTint }
                 }
             }
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: root.heroFrom }
-                GradientStop { position: 1.0; color: root.bgTint }
-            }
         }
-        // 选集栏莫奈色半透明 scrim:叠在全宽 Hero 之上,选集区透出
-        // 海报色氛围;低透明度(0.35)更通透,不再是大块深灰。
-        Rectangle {
-            id: sidebarScrim
-            width: Constants.detailSidebarW
-            x: parent.width - width
-            y: 0
-            height: parent.height
-            // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖色带。
-            visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
-            z: 1
-            color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.35)
-        }
+        // 侧栏莫奈氛围由侧栏自身渐变承载(见侧栏容器),不再叠 scrim
+        // (叠加使颜色浑浊)。
 
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
         // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
@@ -1324,13 +1322,14 @@ Item {
                 }
             }
         }
-        // 莫奈色纵向延伸 + 藏色:顶部氛围色保持到正文起始,中部渐入
-        // 带海报色相的底色(bgTint),最底部埋极暗互补色(暗部藏色)。
+        // 莫奈色纵向延伸:顶部氛围色保持到 35%,中部平滑渐入带海报色相的
+        // 极暗底色(bgTint),底部与正文底色衔接;不引入互补藏色(异色相在
+        // 暗底上显脏)。
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.heroFrom }
-            GradientStop { position: 0.5; color: root.heroFrom }
-            GradientStop { position: 0.8; color: root.bgTint }
-            GradientStop { position: 1.0; color: root.complementDark }
+            GradientStop { position: 0.35; color: root.heroFrom }
+            GradientStop { position: 0.70; color: root.bgTint }
+            GradientStop { position: 1.0; color: root.bgTint }
         }
     }
 
