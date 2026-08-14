@@ -5,6 +5,7 @@
     <file>qml/theme/Theme.qml</file>
     <file>qml/theme/Constants.qml</file>
     <file>qml/theme/AppText.qml</file>
+    <file>qml/theme/CrossfadeImage.qml</file>
     <file>qml/player/PlayerWindow.qml</file>
     <file>qml/views/Library.qml</file>
     <file>qml/views/Detail.qml</file>
