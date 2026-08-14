@@ -70,6 +70,9 @@ Item {
     property bool loaded: false
     // 选集条当前季(Season id);空=尚未选择。
     property string currentSeasonId: ""
+    // 选季胶囊状态:候选季号(滚轮调整,按服务器实际季遍历)、实际季号列表。
+    property int seasonCandidate: 1
+    property var seasonNos: []
 
     // ---- 播放:Series/Episode/Movie 统一走 playItem,按目标条目 id 协商。 ----
     property string pendingPlayItemId: ""
@@ -173,6 +176,78 @@ Item {
             EmbyClient.fetchEpisodes(root.serverUrl, c.token, c.userId, seriesId, seasonId)
         }
         episodeList.contentY = 0
+    }
+
+    // ---- 选季胶囊 ----
+    // 两位数补零(季号显示两位)。
+    function pad2(n) {
+        return ("0" + n).slice(-2)
+    }
+    // 当前选中季的季号(seasons 模型中按 currentSeasonId 查;未选中返回 0)。
+    function currentSeasonNo() {
+        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        for (let i = 0; i < m.count; ++i) {
+            if (m.itemAt(i).id === root.currentSeasonId)
+                return m.itemAt(i).seasonNo
+        }
+        return 0
+    }
+    // 提取服务器实际返回的季号列表(升序;季号可能不连续,如 1-17、23)。
+    function refreshSeasonNos() {
+        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        const arr = []
+        for (let i = 0; i < m.count; ++i)
+            arr.push(m.itemAt(i).seasonNo)
+        arr.sort((a, b) => a - b)
+        root.seasonNos = arr
+    }
+    // 候选在当前实际季号列表中的索引;不在返回 -1。
+    function seasonIndex() {
+        for (let i = 0; i < root.seasonNos.length; ++i) {
+            if (root.seasonNos[i] === root.seasonCandidate)
+                return i
+        }
+        return -1
+    }
+    // 候选的上一季季号(列表内);无则 -1。
+    function seasonPrevNo() {
+        const i = root.seasonIndex()
+        return i > 0 ? root.seasonNos[i - 1] : -1
+    }
+    // 候选的下一季季号(列表内);无则 -1。
+    function seasonNextNo() {
+        const i = root.seasonIndex()
+        return i >= 0 && i < root.seasonNos.length - 1 ? root.seasonNos[i + 1] : -1
+    }
+    // 候选回到当前季(鼠标移开/点到别处,不跳转)。
+    function resetSeasonCandidate() {
+        root.seasonCandidate = root.currentSeasonNo()
+        if (root.seasonIndex() === -1 && root.seasonNos.length > 0)
+            root.seasonCandidate = root.seasonNos[0] // 当前季不在列表时取第一季
+    }
+    // 滚轮步进候选季(仅遍历服务器实际返回的季,跳过不存在的季号)。
+    function stepCandidate(delta) {
+        if (root.seasonNos.length === 0)
+            return
+        let i = root.seasonIndex()
+        if (i === -1)
+            i = delta > 0 ? -1 : root.seasonNos.length // 从端点进入
+        i = Math.max(0, Math.min(root.seasonNos.length - 1, i + delta))
+        root.seasonCandidate = root.seasonNos[i]
+    }
+    // 点击确认:候选即实际存在的季 → 直接按季号定位并跳转。
+    function confirmSeason() {
+        const target = root.seasonCandidate
+        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        let bestId = ""
+        for (let i = 0; i < m.count; ++i) {
+            if (m.itemAt(i).seasonNo === target) {
+                bestId = m.itemAt(i).id
+                break
+            }
+        }
+        if (bestId)
+            root.selectSeason(bestId)
     }
 
     // pop 回来时共享模型(seasons/episodes/similar/allEpisodes 按 serverUrl
@@ -471,13 +546,18 @@ Item {
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
                                 spacing: 8
 
-                                AppText {
-                                    text: root.heroTitle()
-                                    color: Theme.textPrimary
-                                    font.pixelSize: 30
-                                    font.bold: true
-                                    elide: Text.ElideRight
+                                Row {
                                     width: parent.width
+                                    spacing: 12
+
+                                    AppText {
+                                        text: root.heroTitle()
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 30
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                    }
                                 }
                                 AppText {
                                     text: root.metaLine()
@@ -744,122 +824,123 @@ Item {
                 id: sidebar
                 width: Constants.detailSidebarW
                 height: parent.height
+                spacing: 10
                 visible: root.detail.type === "Series" || root.detail.type === "Episode"
                 opacity: visible ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 220 } }
 
-                // 季标签(季数>1 时显示):超出宽度可左右滚动(拖拽 + 箭头)。
-                // 胶囊分段样式:选中填充强调色,未选中透明。
-                Item {
-                    id: seasonBar
+                // 选季条:显示当前季,悬停时仅数字区变化(候选数字原位放大 +
+                // 上下邻季淡入),条本身高度/背景/描边保持固定。
+                // 背景用莫奈取色的 surfaceTint 半透明,与选集栏 scrim 同源。
+                Rectangle {
+                    id: seasonStrip
+                    property bool stripHovered: seasonMa.containsMouse
                     width: parent.width
-                    height: 44
-                    visible: EmbyClient.seasonsModelFor(root.serverUrl).count > 1
+                    height: 66
+                    radius: 10
+                    color: Qt.rgba(root.surfaceTint.r, root.surfaceTint.g,
+                                  root.surfaceTint.b, 0.38)
+                    border.width: 1
+                    border.color: root.complementColor
+                    clip: true
 
-                    Flickable {
-                        id: seasonFlick
-                        anchors.fill: parent
-                        anchors.leftMargin: 26
-                        anchors.rightMargin: 26
-                        contentWidth: seasonRow.implicitWidth
-                        clip: true
-                        Row {
-                            id: seasonRow
-                            spacing: 4
-                            // 垂直居中:Flickable anchors.fill 时 Row 默认贴顶,
-                            // 需与两侧 ‹› 箭头(verticalCenter)同一水平轴。
-                            anchors.verticalCenter: parent.verticalCenter
-                            Repeater {
-                                model: EmbyClient.seasonsModelFor(root.serverUrl)
-                                delegate: Button {
-                                    height: 28
-                                    text: model.name
-                                    checkable: true
-                                    checked: model.id === root.currentSeasonId
-                                    onClicked: root.selectSeason(model.id)
-                                    // 胶囊分段:选中填强调色+白字,未选中透明+次要文字。
-                                    background: Rectangle {
-                                        radius: 14
-                                        // 选中:强调色半透明;未选中:辅助色浅底 + 描边。
-                                        color: parent.checked
-                                               ? Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                         root.accentColor.b, 0.75)
-                                               : Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                         root.complementColor.b, 0.70)
-                                        border.width: parent.checked ? 0 : 1
-                                        border.color: root.complementColor
-                                        // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
-                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
-                                    }
-                                    contentItem: AppText {
-                                        text: parent.text
-                                        color: parent.checked ? "white" : Theme.textPrimary
-                                        font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
-                                    }
-                                }
+                    // "第"/"季":锚定条顶固定位置(中心 y=33,与数字同线),
+                    // hover 不移动。
+                    AppText {
+                        text: "第"
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
+                        anchors.left: parent.left
+                        anchors.leftMargin: 18
+                        anchors.top: parent.top
+                        anchors.topMargin: 26
+                    }
+                    // 数字区:行高固定(上 20 + 候选 30 + 下 20),每行
+                    // verticalAlignment 居中 → 候选数字原位放大,不上下移动;
+                    // 上下邻季行始终占位,折叠时仅透明(淡入淡出)。
+                    Column {
+                        id: digitCol
+                        anchors.top: parent.top
+                        anchors.topMargin: -2
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: 44
+                        height: 70
+                        spacing: 0
+                        // 上一季(列表内实际存在的季;无则隐藏)。
+                        AppText {
+                            id: upText
+                            width: 44
+                            height: 20
+                            verticalAlignment: Text.AlignVCenter
+                            text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
+                                  ? root.pad2(root.seasonPrevNo()) : ""
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            opacity: seasonStrip.stripHovered
+                                     && root.seasonPrevNo() > 0 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
+                        }
+                        // 候选季号:仅数字,展开时原位放大(中心不动)。
+                        AppText {
+                            id: candText
+                            width: 44
+                            height: 30
+                            verticalAlignment: Text.AlignVCenter
+                            text: root.pad2(root.seasonCandidate)
+                            color: Theme.textPrimary
+                            font.pixelSize: seasonStrip.stripHovered ? 30 : 16
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            Behavior on font.pixelSize {
+                                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
                             }
                         }
-                    }
-
-                    // 滚动箭头:与胶囊同高的半透明小圆钮。
-                    Button {
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "‹"
-                        width: 24
-                        height: 28
-                        onClicked: seasonFlick.contentX = Math.max(0, seasonFlick.contentX - 160)
-                        background: Rectangle {
-                            radius: 14
-                            // 辅助色浅底 + 描边(与未选中季胶囊同款)。
-                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                          root.complementColor.b, 0.70)
-                            border.width: 1
-                            border.color: root.complementColor
-                            // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
-                        }
-                        contentItem: AppText {
-                            text: parent.text
-                            color: Theme.textPrimary
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
+                        // 下一季(列表内实际存在的季;无则隐藏)。
+                        AppText {
+                            id: downText
+                            width: 44
+                            height: 20
                             verticalAlignment: Text.AlignVCenter
+                            text: seasonStrip.stripHovered && root.seasonNextNo() > 0
+                                  ? root.pad2(root.seasonNextNo()) : ""
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            opacity: seasonStrip.stripHovered
+                                     && root.seasonNextNo() > 0 ? 1 : 0
+                            Behavior on opacity { NumberAnimation { duration: 160 } }
                         }
                     }
-                    Button {
+                    // "季" 同样固定。
+                    AppText {
+                        text: "季"
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
                         anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: "›"
-                        width: 24
-                        height: 28
-                        onClicked: seasonFlick.contentX = Math.min(seasonFlick.contentWidth - seasonFlick.width,
-                                                                  seasonFlick.contentX + 160)
-                        background: Rectangle {
-                            radius: 14
-                            // 辅助色浅底 + 描边(与未选中季胶囊同款)。
-                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                          root.complementColor.b, 0.70)
-                            border.width: 1
-                            border.color: root.complementColor
-                            // 透明度只由 color 的 alpha 控制,不再叠加整体淡化。
+                        anchors.rightMargin: 18
+                        anchors.top: parent.top
+                        anchors.topMargin: 26
+                    }
+                    MouseArea {
+                        id: seasonMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onEntered: {
+                            root.refreshSeasonNos()
+                            root.resetSeasonCandidate()
                         }
-                        contentItem: AppText {
-                            text: parent.text
-                            color: Theme.textPrimary
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
+                        onExited: root.resetSeasonCandidate()
+                        onWheel: root.stepCandidate(wheel.angleDelta.y > 0 ? -1 : 1)
+                        onClicked: root.confirmSeason()
                     }
                 }
 
                 ListView {
                     id: episodeList
                     width: parent.width
-                    height: parent.height - seasonBar.height
+                    height: parent.height - seasonStrip.height - sidebar.spacing
                     clip: true
                     focus: true
                     keyNavigationWraps: true
@@ -988,8 +1069,13 @@ Item {
                 root.loaded = true
             }
             // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
-            EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, d.id)
+            EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
         }
+    }
+
+
+    Connections {
+        target: EmbyClient
         function onSeasonsReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
@@ -1034,4 +1120,6 @@ Item {
             root.playbackPending = false
         }
     }
+
 }
+
