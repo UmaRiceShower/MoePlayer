@@ -836,7 +836,7 @@ Item {
                     id: seasonStrip
                     property bool stripHovered: seasonMa.containsMouse
                     width: parent.width
-                    height: 66
+                    height: 96
                     radius: 10
                     color: Qt.rgba(root.surfaceTint.r, root.surfaceTint.g,
                                   root.surfaceTint.b, 0.38)
@@ -844,7 +844,7 @@ Item {
                     border.color: root.complementColor
                     clip: true
 
-                    // "第"/"季":锚定条顶固定位置(中心 y=33,与数字同线),
+                    // "第"/"季":锚定条顶固定位置(中心 y=48,与数字同线),
                     // hover 不移动。
                     AppText {
                         text: "第"
@@ -853,24 +853,24 @@ Item {
                         anchors.left: parent.left
                         anchors.leftMargin: 18
                         anchors.top: parent.top
-                        anchors.topMargin: 26
+                        anchors.topMargin: 41
                     }
-                    // 数字区:行高固定(上 20 + 候选 30 + 下 20),每行
-                    // verticalAlignment 居中 → 候选数字原位放大,不上下移动;
-                    // 上下邻季行始终占位,折叠时仅透明(淡入淡出)。
+                    // 数字区:行高固定(上 18 + 候选牌 56 + 下 18),每行内容
+                    // 垂直居中 → 候选牌原位缩放,不上下移动;上下邻季行
+                    // 始终占位,折叠时仅透明(淡入淡出)。
                     Column {
                         id: digitCol
                         anchors.top: parent.top
-                        anchors.topMargin: -2
+                        anchors.topMargin: 2
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 44
-                        height: 70
+                        width: 62
+                        height: 92
                         spacing: 0
                         // 上一季(列表内实际存在的季;无则隐藏)。
                         AppText {
                             id: upText
-                            width: 44
-                            height: 20
+                            width: 62
+                            height: 18
                             verticalAlignment: Text.AlignVCenter
                             text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
                                   ? root.pad2(root.seasonPrevNo()) : ""
@@ -881,26 +881,35 @@ Item {
                                      && root.seasonPrevNo() > 0 ? 1 : 0
                             Behavior on opacity { NumberAnimation { duration: 160 } }
                         }
-                        // 候选季号:仅数字,展开时原位放大(中心不动)。
-                        AppText {
-                            id: candText
-                            width: 44
-                            height: 30
-                            verticalAlignment: Text.AlignVCenter
-                            text: root.pad2(root.seasonCandidate)
-                            color: Theme.textPrimary
-                            font.pixelSize: seasonStrip.stripHovered ? 30 : 16
-                            font.bold: true
-                            horizontalAlignment: Text.AlignHCenter
-                            Behavior on font.pixelSize {
-                                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                        // 候选季号:两位 Counter Girls 牌(十位/个位),牌原位
+                        // 放大(中心不动),牌上的数字随季号切换。
+                        Item {
+                            width: 62
+                            height: 56
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 2
+                                Repeater {
+                                    model: 2
+                                    AnimatedImage {
+                                        readonly property int digit: model.index === 0
+                                                                   ? Math.floor(root.seasonCandidate / 10) % 10
+                                                                   : root.seasonCandidate % 10
+                                        source: "qrc:/counter/" + digit + ".gif"
+                                        width: seasonStrip.stripHovered ? 26 : 18
+                                        height: seasonStrip.stripHovered ? 56 : 40
+                                        smooth: true
+                                        Behavior on width { NumberAnimation { duration: 160 } }
+                                        Behavior on height { NumberAnimation { duration: 160 } }
+                                    }
+                                }
                             }
                         }
                         // 下一季(列表内实际存在的季;无则隐藏)。
                         AppText {
                             id: downText
-                            width: 44
-                            height: 20
+                            width: 62
+                            height: 18
                             verticalAlignment: Text.AlignVCenter
                             text: seasonStrip.stripHovered && root.seasonNextNo() > 0
                                   ? root.pad2(root.seasonNextNo()) : ""
@@ -920,7 +929,7 @@ Item {
                         anchors.right: parent.right
                         anchors.rightMargin: 18
                         anchors.top: parent.top
-                        anchors.topMargin: 26
+                        anchors.topMargin: 41
                     }
                     MouseArea {
                         id: seasonMa

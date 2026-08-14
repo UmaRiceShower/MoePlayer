@@ -14,5 +14,15 @@
     <file>qml/views/SearchOverlay.qml</file>
     <file>qml/views/PosterCard.qml</file>
     <file>qml/views/ServerIcon.qml</file>
+    <file alias="counter/0.gif">qml/assets/counter/0.gif</file>
+    <file alias="counter/1.gif">qml/assets/counter/1.gif</file>
+    <file alias="counter/2.gif">qml/assets/counter/2.gif</file>
+    <file alias="counter/3.gif">qml/assets/counter/3.gif</file>
+    <file alias="counter/4.gif">qml/assets/counter/4.gif</file>
+    <file alias="counter/5.gif">qml/assets/counter/5.gif</file>
+    <file alias="counter/6.gif">qml/assets/counter/6.gif</file>
+    <file alias="counter/7.gif">qml/assets/counter/7.gif</file>
+    <file alias="counter/8.gif">qml/assets/counter/8.gif</file>
+    <file alias="counter/9.gif">qml/assets/counter/9.gif</file>
   </qresource>
 </RCC>
