@@ -1,8 +1,5 @@
 import QtQuick
-import QtQuick.Controls
 import MoePlayer.Core
-import MoePlayer.Playback
-import "qrc:/qml/theme"
 
 //! 播放窗口:MpvItem 播放视频,官方 OSC(进度条/按钮/时间)由 mpv 直接绘制。
 //! 无自绘控件,鼠标/键盘事件转发给 mpv 以驱动 OSC 交互。
@@ -72,6 +69,9 @@ Window {
     // Qt 6.11 中属性 change 信号的内联 handler 作用域异常,引用 root 会得到 null。
     Connections {
         target: mpv
+        // 与文件级 owner 同机制:处理器函数内 id 解析不可靠,经绑定期
+        // 捕获的实例引用访问 root;声明为本对象属性可让 qmllint 识别。
+        property var owner: root.owner
         // 开始解码(时长首次有效) → 上报播放开始;续播则跳到上次位置。
         function onPlaybackStarted() {
             owner.lastDuration = mpv.duration

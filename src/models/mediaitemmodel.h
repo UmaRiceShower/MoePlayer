@@ -3,6 +3,8 @@
 #include <QAbstractListModel>
 #include <QJsonArray>
 
+#include <QtQml/qqmlregistration.h>
+
 //! 单个媒体条目(Emby Items JSON 解析结果)。
 struct MediaItem {
     QString name;
@@ -28,6 +30,7 @@ struct MediaItem {
 class MediaItemModel : public QAbstractListModel
 {
     Q_OBJECT
+    QML_ELEMENT
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     //! 服务器端条目总数(Items 查询的 TotalRecordCount),用于分页判断。
     Q_PROPERTY(int totalCount READ totalCount NOTIFY totalCountChanged)

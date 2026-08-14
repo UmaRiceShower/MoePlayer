@@ -1,7 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
 //! 浏览无状态化:serverUrl 为目标服务器,所有请求经
@@ -364,8 +364,10 @@ Item {
         target: AccountManager
         function onAccountLoginFinished(ok, message) {
             if (ok) {
-                if (root.serverUrl !== serverField.text.trimmed())
-                    root.serverUrl = serverField.text.trimmed()
+                // QML 字符串是 JS String,无 trimmed()(运行时抛 TypeError),
+                // 等价方法为 trim()。qmllint 的 missing-property 暴露此问题。
+                if (root.serverUrl !== serverField.text.trim())
+                    root.serverUrl = serverField.text.trim()
                 if (root.browseReady && root.vm === null) {
                     root.vm = EmbyClient.viewsModelFor(root.serverUrl)
                     root.im = EmbyClient.itemsModelFor(root.serverUrl)

@@ -3,6 +3,8 @@
 #include <QQuickFramebufferObject>
 #include <QVariantList>
 
+#include <QtQml/qqmlregistration.h>
+
 #include <mpv/client.h>
 #include <mpv/render.h>
 #include <mpv/render_gl.h>
@@ -14,6 +16,7 @@ class MpvRenderer;
 class MpvItem : public QQuickFramebufferObject
 {
     Q_OBJECT
+    QML_NAMED_ELEMENT(MpvItem)
     Q_PROPERTY(double position READ position NOTIFY positionChanged)
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged) // "idle" | "paused" | "playing"

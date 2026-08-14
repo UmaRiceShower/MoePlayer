@@ -1,7 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 首页:每行一个媒体库,行首为库海报,后面是该库按加入时间倒序的最近条目。
 //! 中间一行最大,上下行尺寸与透明度逐级递减(透视感)。
@@ -514,6 +514,11 @@ Item {
     // 每行条目卡片(库海报或媒体条目)。尺寸由调用处指定(cardW/cardH),
     // 有图时底部显示标题,无图时居中显示占位文字。
     component RowCard: Rectangle {
+        id: rowCard
+        // delegate 用法下由 Repeater/ListView 注入;required 声明让 qmllint
+        // 静态识别(复杂文件内 delegate 作用域注入不可靠)。
+        required property var modelData
+        required property int index
         property string cardImage: ""
         property string cardText: ""
         property bool isLibrary: false
@@ -525,8 +530,9 @@ Item {
         height: cardH
         color: Theme.surface
         radius: 10
-        // 选中块高亮(accent 边框);悬停次之。
-        border.width: selected ? 3 : (cardArea.hovered ? 2 : 0)
+        // 选中块高亮(accent 边框);悬停次之。MouseArea 在 Qt 6.7+ 无
+        // hovered 属性(已移除),用 containsMouse(语义相同,需 hoverEnabled)。
+        border.width: selected ? 3 : (cardArea.containsMouse ? 2 : 0)
         border.color: Theme.accent
         Image {
             anchors.fill: parent
@@ -534,36 +540,36 @@ Item {
             anchors.rightMargin: 5
             anchors.topMargin: 5
             anchors.bottomMargin: 22
-            source: cardImage !== "" ? "image://emby/" + cardImage : ""
+            source: rowCard.cardImage !== "" ? "image://emby/" + rowCard.cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             // 异步解码:大量海报同时加载时避免阻塞 UI 线程导致滚动卡顿。
             asynchronous: true
         }
         AppText {
-            visible: cardImage === ""
+            visible: rowCard.cardImage === ""
             anchors.centerIn: parent
-            text: cardText
+            text: rowCard.cardText
             color: Theme.textPrimary
-            font.pixelSize: isLibrary ? 16 : 13
-            font.bold: isLibrary
+            font.pixelSize: rowCard.isLibrary ? 16 : 13
+            font.bold: rowCard.isLibrary
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             width: parent.width - 8
             wrapMode: Text.Wrap
         }
         AppText {
-            visible: cardImage !== ""
+            visible: rowCard.cardImage !== ""
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.leftMargin: 6
             anchors.rightMargin: 6
             anchors.bottomMargin: 3
-            text: cardText
+            text: rowCard.cardText
             color: Theme.textPrimary
-            font.pixelSize: isLibrary ? 13 : 12
-            font.bold: isLibrary
+            font.pixelSize: rowCard.isLibrary ? 13 : 12
+            font.bold: rowCard.isLibrary
             elide: Text.ElideRight
             horizontalAlignment: Text.AlignHCenter
         }
@@ -644,6 +650,9 @@ Item {
 
         delegate: Column {
             id: rowDelegate
+            // Repeater/ListView 注入;required 声明让 qmllint 静态识别。
+            required property var modelData
+            required property int index
             // 行数据快照:modelData 是委托上下文变量,不能作为对象属性
             // (rowDelegate.modelData)访问;存入显式属性供嵌套卡片取行级信息。
             property var rowData: modelData
@@ -689,9 +698,9 @@ Item {
                 height: Constants.rowTitleH
                 anchors.horizontalCenter: parent.horizontalCenter
                 verticalAlignment: Text.AlignVCenter
-                text: modelData.serverName !== ""
-                        ? modelData.serverName + " - " + modelData.viewName
-                        : modelData.viewName
+                text: rowDelegate.modelData.serverName !== ""
+                        ? rowDelegate.modelData.serverName + " - " + rowDelegate.modelData.viewName
+                        : rowDelegate.modelData.viewName
                 color: Theme.textPrimary
                 font.pixelSize: 17
                 font.bold: true
@@ -712,6 +721,9 @@ Item {
                     // ListView 边界,保证库海报始终在条目海报上层。
                     RowCard {
                         z: 1
+                        // 本行 delegate 的模型元素(required 属性须显式传入)。
+                        modelData: rowDelegate.modelData
+                        index: rowDelegate.index
                         cardImage: modelData.posterId || ""
                         cardText: modelData.viewName
                         isLibrary: true
@@ -733,7 +745,7 @@ Item {
                         clip: true
                         // 纯展示:滚轮由外层竖向处理,避免嵌套滚动冲突。
                         interactive: false
-                        model: modelData.items
+                        model: rowDelegate.modelData.items
                         delegate: RowCard {
                             cardImage: modelData.posterId || ""
                             cardText: modelData.name

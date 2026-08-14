@@ -1,9 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/player"
-import "qrc:/qml/views"
-import "qrc:/qml/theme"
 
 ApplicationWindow {
     id: root
@@ -60,11 +58,16 @@ ApplicationWindow {
         return w
     }
     // 通知当前页面重拉(Detail/Library 各自实现 refreshAfterPlayback)。
+    // qmllint disable missing-property
+    // stackView.currentItem 静态类型为 Item,压入页面的自定义成员
+    // (refreshAfterPlayback/isDetailPage)无法静态推导;typeof 守卫与
+    // 短路判空下运行时安全,屏蔽该误报。
     function refreshCurrentAfterPlayback() {
         const cur = stackView.currentItem
         if (cur && typeof cur.refreshAfterPlayback === "function")
             cur.refreshAfterPlayback()
     }
+    // qmllint enable missing-property
     // 打开详情页:记录浏览服务器(全局搜索路由),防抖在调用方。
     function pushDetail(itemId, posterId, title, serverUrl) {
         if (serverUrl)
@@ -146,8 +149,11 @@ ApplicationWindow {
             }
             onShowDetail: function (itemId, posterId, title, serverUrl) {
                 // 双击卡片会连发两次 showDetail,已打开详情页时忽略,避免叠出双实例。
+                // 同 refreshCurrentAfterPlayback:currentItem 动态类型,短路判空下安全。
+                // qmllint disable missing-property
                 if (stackView.currentItem && stackView.currentItem.isDetailPage)
                     return
+                // qmllint enable missing-property
                 root.pushDetail(itemId, posterId, title, serverUrl)
             }
         }

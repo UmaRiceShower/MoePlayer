@@ -24,6 +24,10 @@ constexpr int kQmlModuleMajor = 1;
 constexpr int kQmlModuleMinor = 0;
 } // namespace
 
+// qmltyperegistrar 生成的模块注册函数(moeplayer_qmltyperegistrations.cpp),
+// 注册 QML_ELEMENT/QML_SINGLETON/QML_NAMED_ELEMENT 标注的类型。
+extern void qml_register_types_MoePlayer_Core();
+
 int main(int argc, char *argv[])
 {
     // 固定 OpenGL 场景图后端,须在 QGuiApplication 构造前设置。
@@ -58,10 +62,21 @@ int main(int argc, char *argv[])
     }
 
     // 向 QML 暴露 C++ 类型与单例。
-    SettingsStore settingsStore;
+    // 无依赖/无共享实例需求的类型(SettingsStore/MediaItemModel/MpvItem)由
+    // qmltyperegistrar 经 QML_ELEMENT/QML_SINGLETON/QML_NAMED_ELEMENT 自动注册
+    // 到 MoePlayer.Core。生成的注册函数 qml_register_types_MoePlayer_Core() 由
+    // qmltyperegistrations.cpp 中的 QQmlModuleRegistration 静态注册,理论上引擎
+    // import 模块时自动触发;但实测(Qt 6.11,qrc qmldir 与静态注册并存)静态注册
+    // 未在组件类型解析前触发(PlayerWindow 解析 MpvItem 报 "is not a type"),
+    // 故在此显式调用该注册函数,保证类型在 loadFromModule 前就绪。宏与手动
+    // qmlRegister 不并存,无双注册。
+    qml_register_types_MoePlayer_Core();
+    // 以下单例因构造依赖或需与 C++ 侧共享同一实例(PosterProvider 复用
+    // EmbyClient/AccountManager;ColorProvider 复用 PosterProvider),按官方
+    // 推荐用 qmlRegisterSingletonInstance 注入现有实例,不声明 QML_SINGLETON,
+    // 避免与自动注册构成双注册。
     EmbyClient embyClient;
     AccountManager accountManager(&embyClient);
-    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "SettingsStore", &settingsStore);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
     // 海报取色:复用 PosterProvider 加载(实例须在 addImageProvider 前创建,
@@ -69,19 +84,21 @@ int main(int argc, char *argv[])
     PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager);
     ColorProvider colorProvider(posterProvider);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
-    qmlRegisterType<MpvItem>("MoePlayer.Playback", kQmlModuleMajor, kQmlModuleMinor, "MpvItem");
+
 
     // 首页聚合与启动 token 校验均由 Home 页 onCompleted 触发(见 Home.qml),
     // 此处不重复调用。
 
     QQmlApplicationEngine engine;
-    engine.addImportPath(QStringLiteral("qrc:/qml"));
+    // QML 文件随 qt_add_qml_module 部署在 qrc:/qt/qml/MoePlayer/Core/(默认
+    // 资源导入路径),loadFromModule 免硬编码资源路径。旧 addImportPath("qrc:/qml")
+    // 随 qml.qrc 布局删除。
     engine.addImageProvider(QStringLiteral("emby"), posterProvider);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
 
-    engine.load(QUrl(QStringLiteral("qrc:/qml/Main.qml")));
+    engine.loadFromModule(QStringLiteral("MoePlayer.Core"), QStringLiteral("Main"));
 
     return app.exec();
 }
