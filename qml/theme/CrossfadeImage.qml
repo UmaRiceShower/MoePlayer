@@ -14,6 +14,8 @@ Item {
     property alias fillMode: bottom.fillMode
     property alias asynchronous: bottom.asynchronous
     property alias cache: bottom.cache
+    // 底层图加载状态(调用方做加载失败回退判断)。
+    property alias status: bottom.status
     // 扩散时长。
     property int duration: 800
     // true=新图从四周向圆心收缩(Outer);false=从圆心一点扩散(Grow)。
