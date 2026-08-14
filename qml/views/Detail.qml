@@ -690,7 +690,10 @@ Item {
                             Item {
                                 id: heroTextArea
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
-                                height: heroOldCol.height
+                                // 高度取两树列高较大者:首次进入时旧树快照为空(列高 0),
+                                // 只绑 heroOldCol 会把整个文字区裁没(overview 首屏消失);
+                                // 切换时旧树填值,取 max 保证两列都完整显示。
+                                height: Math.max(heroOldCol.height, heroNewCol.height)
 
                                 Item {
                                     id: heroOldTree
@@ -747,6 +750,7 @@ Item {
                                     clip: true
                                     opacity: root.newTextOpacity
                                     Column {
+                                        id: heroNewCol
                                         width: heroTextArea.width
                                         spacing: 8
                                         Row {
