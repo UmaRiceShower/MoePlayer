@@ -1,9 +1,21 @@
-//! 双层图片圆形扩散溶解替换(awww 壁纸切换式,Qt 文档/社区标准做法):
-//! source 变化时,新图从圆心一点按圆形裁剪扩散;圆内新图 globalAlpha
-//! 0→1 渐进溶解(对齐 awww 圆内像素逐步混合的观感),圆外保持旧图。
-//! inward=true 反向(圆外新图,圆向圆心收缩)。动画用 Canvas 每帧两次
-//! drawImage + clip(无逐像素循环,避免 Canvas 文档警告的大图/频繁
-//! 更新开销)。完成后下层同步新图、画布复位,供下次替换复用。
+//! 双层图片圆形扩散溶解替换(awww 壁纸切换式):source 变化时,新图从圆心
+//! 一点按圆形裁剪扩散,圆内新图渐入、圆外保持旧图(inward=true 反向)。
+//!
+//! 实现:bottom/top Image 元素 visible:false + layer.enabled 离屏渲染
+//! (官方示例模式:不可见 + layer 化的 item 可被 ShaderEffectSource 采样,
+//! 且不遮挡场景),ShaderEffect 溶解层采样两离屏纹理,在 shader 内完成
+//! 圆形扩散 + 圆角裁切。
+//! - 圆角:corner SDF 在溶解 shader 内做(cornerRadius >= 短边一半即圆形,
+//!   如演职人员头像);圆角外 alpha=0 真透明,透出页面背景(离屏纹理源
+//!   visible:false,无直角内容可露)。
+//! - 纹理:ShaderEffectSource textureSize 按物理分辨率(x devicePixelRatio),
+//!   DPR>1 屏幕 1:1 采样锐利。
+//! - 全部走普通 ShaderEffect(非 layer.effect):QML 属性绑定 uniform 的
+//!   路径经溶解动画实测可靠(layer.effect 的纹理坐标/自定义 uniform 行为
+//!   不可靠,弃用)。
+//!
+//! 为什么不用 Canvas:Qt6 Canvas 的 backing store 固定为元素逻辑尺寸
+//! (devicePixelRatio 属性已在 Qt6 移除),DPR>1 屏幕上放大渲染必然模糊。
 import QtQuick
 
 Item {
@@ -22,6 +34,8 @@ Item {
     property bool inward: false
     // 扩散圆心(归一化 0-1,相对本组件)。
     property vector2d center: Qt.vector2d(0.5, 0.5)
+    // 圆角半径(0=直角);>= 短边一半时呈圆形。
+    property real cornerRadius: 0
     // 替换流程内部状态。
     property bool _pending: false
 
@@ -31,23 +45,25 @@ Item {
             // 无图:清空两层。
             revealAnim.stop()
             bottom.source = ""
+            top.source = ""
             root._pending = false
+            fx.u_reveal = 0
+            fx.u_dissolve = 0
             return
         }
         if (root._pending) {
             // 扩散进行中又来新 source:换目标图,重放动画。
             revealAnim.stop()
-            view.loadImage(s)
-            if (view.isImageLoaded(s))
+            top.source = s
+            if (top.status === Image.Ready)
                 root._beginReveal()
         } else if (bottom.source !== "" && bottom.source !== s && bottom.status === Image.Ready) {
-            // 底层已有显示中的旧图:新图进画布,加载完成后圆形扩散。
+            // 底层已有显示中的旧图:新图进顶层,加载完成后圆形扩散。
             root._pending = true
-            view.radius = 0
-            view.dissolve = 0
+            fx.u_reveal = 0
+            fx.u_dissolve = 0
             top.source = s
-            view.loadImage(s)
-            if (view.isImageLoaded(s))
+            if (top.status === Image.Ready)
                 root._beginReveal()
         } else {
             // 首次/无旧图:直接到底层显示。
@@ -56,7 +72,7 @@ Item {
     }
 
     function _beginReveal() {
-        const w = view.width, h = view.height
+        const w = root.width, h = root.height
         if (w === 0 || h === 0)
             return
         const cx = root.center.x * w, cy = root.center.y * h
@@ -64,106 +80,86 @@ Item {
                              + Math.max(cy, h - cy) * Math.max(cy, h - cy))
         revealAnim.radiusTo = root.inward ? 0 : maxR
         revealAnim.radiusFrom = root.inward ? maxR : 0
-        revealAnim.dissolveFrom = 0
-        revealAnim.dissolveTo = 1
+        fx.u_dissolve = 0
         revealAnim.start()
     }
 
-    // 底层:常显当前图(替换期间保留旧图)。
+    // 底层:当前图。离屏渲染(visible:false + layer),仅作采样纹理源;
+    // 不遮挡场景,圆角透明区下方无直角内容。
     Image {
         id: bottom
         anchors.fill: parent
+        visible: false
+        layer.enabled: true
         retainWhileLoading: true
     }
-    // 顶层:过渡中的新图(仅作 Canvas 绘制源;z 0 被画布盖住)。
+    // 顶层:过渡中的新图(同离屏处理)。
     Image {
         id: top
         anchors.fill: parent
+        visible: false
+        layer.enabled: true
         fillMode: bottom.fillMode
         asynchronous: bottom.asynchronous
         cache: bottom.cache
         retainWhileLoading: true
-    }
-    // 混合画布:旧图全屏 + 圆内新图渐入(clip + globalAlpha)。
-    Canvas {
-        id: view
-        anchors.fill: parent
-        z: 1
-        visible: root._pending
-        // 圆半径(像素)与圆内溶解度,动画驱动。
-        property real radius: 0
-        property real dissolve: 0
-        onRadiusChanged: requestPaint()
-        onDissolveChanged: requestPaint()
-        // 任一图片加载完成:新图就绪则启动扩散。
-        onImageLoaded: {
-            if (root._pending && view.isImageLoaded(root.source))
+        onStatusChanged: {
+            if (status === Image.Ready && root._pending)
                 root._beginReveal()
         }
-        onPaint: {
-            const ctx = getContext("2d")
-            ctx.reset()
-            const w = width, h = height
-            if (w === 0 || h === 0)
-                return
-            const cx = root.center.x * w, cy = root.center.y * h
-            const r = Math.max(0, view.radius)
-            // 底图:当前显示的旧图(Image 元素,已加载)。
-            ctx.drawImage(bottom, 0, 0, w, h)
-            // 新图:经 loadImage 预加载后按 URL 绘制。
-            if (!view.isImageLoaded(root.source))
-                return
-            if (root.inward) {
-                // Outer:新图全屏渐入,圆内以旧图盖住(圆从最大收缩到 0)。
-                ctx.globalAlpha = view.dissolve
-                ctx.drawImage(root.source, 0, 0, w, h)
-                ctx.globalAlpha = 1
-                ctx.save()
-                ctx.beginPath()
-                ctx.arc(cx, cy, r, 0, Math.PI * 2)
-                ctx.clip()
-                ctx.drawImage(bottom, 0, 0, w, h)
-                ctx.restore()
-            } else {
-                // Grow:圆内新图渐入、圆外旧图(圆从点扩散)。
-                ctx.save()
-                ctx.beginPath()
-                ctx.arc(cx, cy, r, 0, Math.PI * 2)
-                ctx.clip()
-                ctx.globalAlpha = view.dissolve
-                ctx.drawImage(root.source, 0, 0, w, h)
-                ctx.restore()
-            }
+    }
+    // 溶解层:圆形扩散 + 圆角(普通 ShaderEffect,属性绑定可靠)。
+    ShaderEffect {
+        id: fx
+        anchors.fill: parent
+        z: 2
+        property variant srcOld: ShaderEffectSource {
+            sourceItem: bottom
+            live: true
+            textureSize: Qt.size(Math.round(root.width * Screen.devicePixelRatio),
+                                 Math.round(root.height * Screen.devicePixelRatio))
         }
+        property variant srcNew: ShaderEffectSource {
+            sourceItem: top
+            live: true
+            textureSize: Qt.size(Math.round(root.width * Screen.devicePixelRatio),
+                                 Math.round(root.height * Screen.devicePixelRatio))
+        }
+        property real u_radius: root.cornerRadius
+        property vector2d u_size: Qt.vector2d(root.width, root.height)
+        property vector2d u_center: Qt.vector2d(root.width * root.center.x,
+                                                root.height * root.center.y)
+        property real u_reveal: 0
+        property real u_dissolve: 0
+        property real u_inward: root.inward ? 1.0 : 0.0
+        fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/crossfade.frag.qsb"
     }
 
     ParallelAnimation {
         id: revealAnim
         property real radiusFrom: 0
         property real radiusTo: 0
-        property real dissolveFrom: 0
-        property real dissolveTo: 1
         onFinished: {
-            // 画布已成新图:同步底层,复位画布,释放替换流程。
+            // 画布已成新图:同步底层,复位,释放替换流程。
             bottom.source = root.source
-            view.radius = 0
-            view.dissolve = 0
+            fx.u_reveal = 0
+            fx.u_dissolve = 0
             top.source = ""
             root._pending = false
         }
         NumberAnimation {
-            target: view
-            property: "radius"
+            target: fx
+            property: "u_reveal"
             from: revealAnim.radiusFrom
             to: revealAnim.radiusTo
             duration: root.duration
             easing.type: Easing.OutCubic
         }
         NumberAnimation {
-            target: view
-            property: "dissolve"
-            from: revealAnim.dissolveFrom
-            to: revealAnim.dissolveTo
+            target: fx
+            property: "u_dissolve"
+            from: 0
+            to: 1
             duration: root.duration
             easing.type: Easing.OutCubic
         }

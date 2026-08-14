@@ -529,17 +529,21 @@ Item {
         width: cardW
         height: cardH
         color: Theme.surface
-        radius: 10
+        radius: 14
         // 选中块高亮(accent 边框);悬停次之。MouseArea 在 Qt 6.7+ 无
         // hovered 属性(已移除),用 containsMouse(语义相同,需 hoverEnabled)。
         border.width: selected ? 3 : (cardArea.containsMouse ? 2 : 0)
         border.color: Theme.accent
-        Image {
+        // CrossfadeImage:圆角在绘制层裁切(Item::clip 只裁矩形)。
+        CrossfadeImage {
             anchors.fill: parent
             anchors.leftMargin: 5
             anchors.rightMargin: 5
             anchors.topMargin: 5
             anchors.bottomMargin: 22
+            cornerRadius: 14
+            // 行卡内容切换瞬时替换,不触发替换动画。
+            duration: 0
             source: rowCard.cardImage !== "" ? "image://emby/" + rowCard.cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
