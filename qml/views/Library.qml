@@ -11,12 +11,6 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    signal playRequested(string url, var headers, var meta)
-    // 点击条目进入详情页(携带所在服务器)。
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
-    // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
-    signal libraryStateSaved(var state)
-
     // 进入页面时选中的媒体库 id(首页点某库海报时传入;空则默认第一个)。
     property string initialViewId: ""
     // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
@@ -34,22 +28,9 @@ Item {
     // 该服务器的视图/条目模型(浏览绑定,页面生命周期内一次性取引用)。
     property var vm: null
     property var im: null
-
-    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
-    function creds() {
-        return AccountManager.credsForServer(root.serverUrl)
-    }
     // 可浏览 = 有服务器且凭据有效。
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
     readonly property bool showForm: !root.browseReady
-    // 服务器显示名:账号名/用户名,未匹配回退地址。
-    function serverLabel() {
-        const accs = AccountManager.accounts
-        for (const a of accs)
-            if (a.serverUrl === root.serverUrl)
-                return a.name !== "" ? a.name : a.userName
-        return root.serverUrl
-    }
 
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
     property var sortOptions: [
@@ -61,52 +42,11 @@ Item {
         { label: "名称", key: "SortName" }
     ]
 
-    // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
-    // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
-    function applyView(preferredId) {
-        if (!root.vm || root.vm.count === 0)
-            return
-        let idx = 0
-        for (let i = 0; i < root.vm.count; ++i) {
-            if (root.vm.idAt(i) === preferredId) {
-                idx = i
-                break
-            }
-        }
-        viewSelector.currentIndex = idx
-        root.currentViewId = root.vm.idAt(idx)
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 切换排序:服务端重查第一页。
-    function changeSort(sortBy) {
-        root.currentSortBy = sortBy
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 播放结束(主窗口通知)后重拉当前库第一页:刷新已看/进度角标,
-    // 恢复滚动位置(onItemsReceived 消费 pendingRestoreY)。
-    function refreshAfterPlayback() {
-        if (!root.browseReady || root.currentViewId === "")
-            return
-        root.pendingRestoreY = grid.contentY
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
-    function connectServer() {
-        const started = AccountManager.addAccount("", serverField.text, userField.text,
-                                                  passField.text, true)
-        root.busy = started
-        if (started)
-            statusText.text = "正在登录…"
-    }
+    signal playRequested(string url, var headers, var meta)
+    // 点击条目进入详情页(携带所在服务器)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
+    signal libraryStateSaved(var state)
 
     // 进入页面:有服务器则拉取;未指定时默认第一个有效账号;无账号则表单。
     Component.onCompleted: {
@@ -157,6 +97,66 @@ Item {
             })
     }
 
+    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
+    // 服务器显示名:账号名/用户名,未匹配回退地址。
+    function serverLabel() {
+        const accs = AccountManager.accounts
+        for (const a of accs)
+            if (a.serverUrl === root.serverUrl)
+                return a.name !== "" ? a.name : a.userName
+        return root.serverUrl
+    }
+
+    // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
+    // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
+    function applyView(preferredId) {
+        if (!root.vm || root.vm.count === 0)
+            return
+        let idx = 0
+        for (let i = 0; i < root.vm.count; ++i) {
+            if (root.vm.idAt(i) === preferredId) {
+                idx = i
+                break
+            }
+        }
+        viewSelector.currentIndex = idx
+        root.currentViewId = root.vm.idAt(idx)
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+    }
+
+    // 切换排序:服务端重查第一页。
+    function changeSort(sortBy) {
+        root.currentSortBy = sortBy
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+    }
+
+    // 播放结束(主窗口通知)后重拉当前库第一页:刷新已看/进度角标,
+    // 恢复滚动位置(onItemsReceived 消费 pendingRestoreY)。
+    function refreshAfterPlayback() {
+        if (!root.browseReady || root.currentViewId === "")
+            return
+        root.pendingRestoreY = grid.contentY
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
+                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
+    }
+
+    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
+    function connectServer() {
+        const started = AccountManager.addAccount("", serverField.text, userField.text,
+                                                  passField.text, true)
+        root.busy = started
+        if (started)
+            statusText.text = "正在登录…"
+    }
+
     // 头部:标题 + 连接表单(未连接)/ 媒体库选择(已连接)。
     Column {
         id: headerCol
@@ -195,9 +195,9 @@ Item {
                 echoMode: TextInput.Password
             }
             Button {
+                onClicked: root.connectServer()
                 text: "连接"
                 enabled: !root.busy
-                onClicked: root.connectServer()
             }
         }
 
@@ -213,9 +213,6 @@ Item {
             }
             ComboBox {
                 id: viewSelector
-                width: 320
-                model: root.vm
-                textRole: "name"
                 onActivated: function (index) {
                     root.currentViewId = root.vm.idAt(index)
                     const c = root.creds()
@@ -223,17 +220,20 @@ Item {
                                           root.currentViewId, 0, Constants.pageSize,
                                           root.currentSortBy, root.currentSortOrder)
                 }
+                width: 320
+                model: root.vm
+                textRole: "name"
             }
             ComboBox {
                 id: sortSelector
+                onActivated: function (index) {
+                    root.changeSort(root.sortOptions[index].key)
+                }
                 width: 130
                 model: root.sortOptions
                 textRole: "label"
                 // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
                 currentIndex: 1
-                onActivated: function (index) {
-                    root.changeSort(root.sortOptions[index].key)
-                }
             }
         }
 
@@ -247,18 +247,6 @@ Item {
     // 主体:选中媒体库的条目网格(填充头部以下空间)。
     GridView {
         id: grid
-        visible: root.browseReady
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: headerCol.bottom
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: 24
-        anchors.rightMargin: 24
-        anchors.bottomMargin: 24
-        cellWidth: Constants.cellW
-        cellHeight: Constants.cellH
-        clip: true
-        model: root.im
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
         onAtYEndChanged: {
             if (!atYEnd)
@@ -271,6 +259,18 @@ Item {
                                       root.currentSortBy, root.currentSortOrder)
             }
         }
+        visible: root.browseReady
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: headerCol.bottom
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        anchors.bottomMargin: 24
+        cellWidth: Constants.cellW
+        cellHeight: Constants.cellH
+        clip: true
+        model: root.im
         // 空库提示。
         AppText {
             visible: root.im && root.im.count === 0 && !root.busy
@@ -299,6 +299,17 @@ Item {
             running: root.busy && grid.visible
         }
         delegate: PosterCard {
+            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+            onFavoriteRequested: function (id, fav) {
+                const c = root.creds()
+                EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)
+                root.im.setFavoriteById(id, fav)
+            }
+            onWatchedRequested: function (id, played) {
+                const c = root.creds()
+                EmbyClient.setWatched(root.serverUrl, c.token, c.userId, id, played)
+                root.im.setPlayedById(id, played)
+            }
             width: Constants.cardW
             height: Constants.cardH
             itemId: model.id
@@ -312,17 +323,6 @@ Item {
             runtimeTicks: model.runtimeTicks
             unplayedCount: model.unplayedCount
             itemType: model.type
-            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
-            onFavoriteRequested: function (id, fav) {
-                const c = root.creds()
-                EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)
-                root.im.setFavoriteById(id, fav)
-            }
-            onWatchedRequested: function (id, played) {
-                const c = root.creds()
-                EmbyClient.setWatched(root.serverUrl, c.token, c.userId, id, played)
-                root.im.setPlayedById(id, played)
-            }
         }
     }
 

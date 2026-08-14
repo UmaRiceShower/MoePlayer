@@ -19,13 +19,13 @@ Item {
     property string fallbackText: ""
     // 当前加载源(命令式更新,不参与绑定依赖链)。
     property string currentSource: ""
+    onCustomIconChanged: root.updateSource()
+    onDefaultIconChanged: root.updateSource()
+    Component.onCompleted: root.updateSource()
 
     function updateSource() {
         root.currentSource = root.customIcon !== "" ? root.customIcon : root.defaultIcon
     }
-    onCustomIconChanged: root.updateSource()
-    onDefaultIconChanged: root.updateSource()
-    Component.onCompleted: root.updateSource()
 
     Image {
         id: iconImg

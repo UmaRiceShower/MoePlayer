@@ -35,6 +35,33 @@ Window {
     // 持有的是实例引用,不经过运行时 id 查找。
     readonly property var owner: root
 
+    // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
+    property bool stoppedReported: false
+
+    // 窗口关闭完成(Main 据此从播放窗口列表移除)。
+    signal windowClosed()
+    // 正常播完(错误退出不发):主窗口据此重拉当前页已看/进度。
+    signal playbackFinished()
+
+    // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)并停止播放:
+    // Window.close() 只隐藏窗口,对象与 mpv 继续存活、音频照播。
+    onClosing: {
+        if (root.reporting && !root.stoppedReported) {
+            root.stoppedReported = true
+            EmbyClient.reportPlaybackStopped(root.meta.serverUrl, root.meta.token,
+                                             root.meta.userId, root.meta.itemId,
+                                             root.meta.mediaSourceId, root.meta.playSessionId,
+                                             root.lastPosition)
+        }
+        mpv.command(["stop"])
+        root.windowClosed()
+        // 隐藏窗口的 MpvItem/mpv 残留,显式销毁释放。
+        root.destroy()
+    }
+
+    onActiveChanged: if (active) keyCatcher.forceActiveFocus()
+    Component.onCompleted: keyCatcher.forceActiveFocus()
+
     MpvItem {
         id: mpv
         anchors.fill: parent
@@ -107,30 +134,6 @@ Window {
                                                    root.meta.userId, root.meta.playSessionId)
     }
 
-    // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
-    property bool stoppedReported: false
-
-    // 窗口关闭完成(Main 据此从播放窗口列表移除)。
-    signal windowClosed()
-    // 正常播完(错误退出不发):主窗口据此重拉当前页已看/进度。
-    signal playbackFinished()
-
-    // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)并停止播放:
-    // Window.close() 只隐藏窗口,对象与 mpv 继续存活、音频照播。
-    onClosing: {
-        if (root.reporting && !root.stoppedReported) {
-            root.stoppedReported = true
-            EmbyClient.reportPlaybackStopped(root.meta.serverUrl, root.meta.token,
-                                             root.meta.userId, root.meta.itemId,
-                                             root.meta.mediaSourceId, root.meta.playSessionId,
-                                             root.lastPosition)
-        }
-        mpv.command(["stop"])
-        root.windowClosed()
-        // 隐藏窗口的 MpvItem/mpv 残留,显式销毁释放。
-        root.destroy()
-    }
-
     // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);
     // 坐标为整数(mpv 的 mouse 命令不接受浮点),滚轮经 keypress WHEEL_UP|WHEEL_DOWN 转发。
     MouseArea {
@@ -181,7 +184,4 @@ Window {
             }
         }
     }
-
-    Component.onCompleted: keyCatcher.forceActiveFocus()
-    onActiveChanged: if (active) keyCatcher.forceActiveFocus()
 }

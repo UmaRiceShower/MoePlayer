@@ -12,10 +12,6 @@ ApplicationWindow {
     visible: true
     title: Qt.application.name
 
-    background: Rectangle {
-        color: Theme.bg
-    }
-
     // 打开的播放窗口:主窗口关闭时一并关闭。
     // niri/常规窗口管理器下关闭快捷键作用于焦点窗口,焦点常在主窗口,
     // 若不处理则播放窗口会残留继续播放、应用也不退出。
@@ -25,6 +21,22 @@ ApplicationWindow {
     property var libraryState: null
     // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
     property string currentServerUrl: ""
+
+    // 主窗口关闭 → 关闭全部播放窗口,应用随之退出。
+    // 两阶段:第一次关闭播放窗口并暂缓退出(等播放窗口的 Stopped 异步回传
+    // 发出),随后真正关闭;立即退出会中断网络请求导致服务器收不到回传。
+    property bool pendingQuit: false
+    onClosing: function (close) {
+        if (!root.playerWindows.length || root.pendingQuit) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
+        root.pendingQuit = true
+        for (const w of root.playerWindows)
+            w.close()
+        quitTimer.start()
+    }
 
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
@@ -53,35 +65,6 @@ ApplicationWindow {
         if (cur && typeof cur.refreshAfterPlayback === "function")
             cur.refreshAfterPlayback()
     }
-
-    // 主窗口关闭 → 关闭全部播放窗口,应用随之退出。
-    // 两阶段:第一次关闭播放窗口并暂缓退出(等播放窗口的 Stopped 异步回传
-    // 发出),随后真正关闭;立即退出会中断网络请求导致服务器收不到回传。
-    property bool pendingQuit: false
-    onClosing: function (close) {
-        if (!root.playerWindows.length || root.pendingQuit) {
-            close.accepted = true
-            return
-        }
-        close.accepted = false
-        root.pendingQuit = true
-        for (const w of root.playerWindows)
-            w.close()
-        quitTimer.start()
-    }
-    Timer {
-        id: quitTimer
-        interval: 400
-        running: false
-        onTriggered: root.close()
-    }
-
-    StackView {
-        id: stackView
-        anchors.fill: parent
-        initialItem: homePage
-    }
-
     // 打开详情页:记录浏览服务器(全局搜索路由),防抖在调用方。
     function pushDetail(itemId, posterId, title, serverUrl) {
         if (serverUrl)
@@ -102,6 +85,23 @@ ApplicationWindow {
             serverUrl: serverUrl || root.currentServerUrl,
             restore: root.libraryState || null
         })
+    }
+
+    background: Rectangle {
+        color: Theme.bg
+    }
+
+    Timer {
+        id: quitTimer
+        interval: 400
+        running: false
+        onTriggered: root.close()
+    }
+
+    StackView {
+        id: stackView
+        anchors.fill: parent
+        initialItem: homePage
     }
 
     // 全局搜索浮层(Ctrl+K):按最近浏览的服务器搜索,结果点击进详情。
@@ -177,6 +177,11 @@ ApplicationWindow {
         }
     }
 
+    Component {
+        id: playerWindowComponent
+        PlayerWindow {}
+    }
+
     // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S,搜索 Ctrl+K。
     Shortcut {
         sequence: "Ctrl+F"
@@ -194,10 +199,5 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+K"
         onActivated: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
-    }
-
-    Component {
-        id: playerWindowComponent
-        PlayerWindow {}
     }
 }

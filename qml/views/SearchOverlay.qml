@@ -9,22 +9,22 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    // 点击结果进详情(携带所在服务器)。
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
-
     // 搜索目标服务器(主窗口按最近浏览的页面注入;空则不可搜索)。
     property string serverUrl: ""
     // 该服务器的搜索结果模型(serverUrl 就绪后一次性取引用)。
     property var sm: null
-
-    function creds() {
-        return AccountManager.credsForServer(root.serverUrl)
-    }
     readonly property bool canSearch: root.serverUrl !== "" && root.creds().token !== ""
+
+    // 点击结果进详情(携带所在服务器)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
 
     onServerUrlChanged: {
         if (root.serverUrl !== "")
             root.sm = EmbyClient.searchModelFor(root.serverUrl)
+    }
+
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
     }
 
     // 打开:清空旧结果并聚焦输入框。

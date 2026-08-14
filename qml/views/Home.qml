@@ -9,13 +9,6 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
-    // viewId 为被点击的媒体库 id,serverUrl 为其所在服务器:媒体库页直接
-    // 按该服务器凭据浏览(无状态,无需切换会话)。
-    signal openLibrary(string viewId, string serverUrl)
-    // 打开服务器管理页(未登录提示条入口)。
-    signal openServerManager()
-
     // 聚合行(所有账号的媒体库,顺序按服务器管理中的账号排序)。
     // 节流:homeRowsReady 可能连续触发(缓存先行 → 网络刷新 → 重登重拉),
     // 合并后一次替换 rows,避免模型在行 delegate 孵化期间被 reset 打断
@@ -28,24 +21,6 @@ Item {
     // error"。行就绪信号驱动比固定时间窗可靠(孵化时长随行数变化)。
     property double lastRowReady: 0
     readonly property int rowsSettleMs: 400
-    Timer {
-        id: rowsTimer
-        interval: 40
-        repeat: false
-        onTriggered: {
-            // 无行(空数据)或最近无行就绪(孵化稳定)→ 可替换;否则等稳定。
-            if (list.count > 0
-                && Date.now() - root.lastRowReady < root.rowsSettleMs) {
-                root.pendingRows = AccountManager.homeRows // 取最新,继续等
-                rowsTimer.restart()
-                return
-            }
-            // 替换即孵化开始:立即刷新就绪时刻,孵化窗口内(新行尚未
-            // 就绪)的再次替换被门控拦截,避免打断孵化触发引擎错误。
-            root.lastRowReady = Date.now()
-            root.rows = root.pendingRows
-        }
-    }
     // 循环模型:rows 复制 3 份,始终在中间副本内滚动,边界时跳回中间副本,
     // 实现无限循环(网上通用做法:首尾复制模型作缓冲)。
     property var loopRows: []
@@ -67,6 +42,48 @@ Item {
     property real scrollVelocity: Constants.scrollVelocityInitial
     property var wheelLog: []
 
+    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
+    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
+    // 时长按滚轮速度动态换算,快速滚动时动画更快,内容跟得上节奏。
+    property var scrollAnim: null
+    // 横向条目滚动动画对象(普通滚轮驱动),模式同 scrollAnim。
+    property var hAnim: null
+
+    // 选中块:焦点行(loopRows 索引,几何居中行)与列(-1=库海报,≥0=条目)。
+    // 上下滚动后选中新居中行的库海报;左右键在可视区内移动列,
+    // 到边缘滚动展示内容,内容到头做拉动画。
+    property int focusRowIdx: 0
+    property int focusCol: -1
+
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    // viewId 为被点击的媒体库 id,serverUrl 为其所在服务器:媒体库页直接
+    // 按该服务器凭据浏览(无状态,无需切换会话)。
+    signal openLibrary(string viewId, string serverUrl)
+    // 打开服务器管理页(未登录提示条入口)。
+    signal openServerManager()
+
+    // 聚合拉取不依赖当前会话(每服用各自缓存的 token),有账号即拉;
+    // 启动同时校验各服 token(/System/Info 轻量认证,401 即失效,见
+    // AccountManager.validateTokens);账号增删/排序变化(accountsChanged)
+    // 时按新顺序重拉。
+    Component.onCompleted: {
+        if (AccountManager.hasAccounts) {
+            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
+            AccountManager.validateTokens()
+        }
+        root.forceActiveFocus()
+    }
+    onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
+    Keys.onUpPressed: root.moveRow(-1)
+    Keys.onDownPressed: root.moveRow(1)
+    Keys.onLeftPressed: root.moveCol(-1)
+    Keys.onRightPressed: root.moveCol(1)
+    // Enter/回车:进入当前选中的块。
+    Keys.onReturnPressed: root.activateFocus()
+    Keys.onEnterPressed: root.activateFocus()
+    // 页面回到前台时恢复键盘焦点。
+    onVisibleChanged: if (root.visible) root.forceActiveFocus()
+
     // 记录滚轮事件步长并换算滚动速度(行/秒 → px/s,夹到合理范围)。
     function noteWheel(step) {
         const now = Date.now()
@@ -82,19 +99,6 @@ Item {
         const rowsPerSec = span > 0 ? total * 1000 / span : 0
         root.scrollVelocity = Math.max(Constants.scrollVelocityMin, Math.min(Constants.scrollVelocityMax, rowsPerSec * root.rowStep))
     }
-
-    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
-    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
-    // 时长按滚轮速度动态换算,快速滚动时动画更快,内容跟得上节奏。
-    property var scrollAnim: null
-    // 横向条目滚动动画对象(普通滚轮驱动),模式同 scrollAnim。
-    property var hAnim: null
-
-    // 选中块:焦点行(loopRows 索引,几何居中行)与列(-1=库海报,≥0=条目)。
-    // 上下滚动后选中新居中行的库海报;左右键在可视区内移动列,
-    // 到边缘滚动展示内容,内容到头做拉动画。
-    property int focusRowIdx: 0
-    property int focusCol: -1
 
     // 几何居中行(loopRows 索引):负间距堆叠下视口中心的行。几何公式
     // 计算,不遍历/访问行 delegate——rows 重建时行 delegate 在销毁/孵化
@@ -234,24 +238,6 @@ Item {
         pullSeq.start()
     }
 
-    // 拉动画两段:先冲出边界(约 24px),再弹回边界。
-    SequentialAnimation {
-        id: pullSeq
-        NumberAnimation {
-            id: pullOut
-            property: "contentX"
-            duration: Constants.pullOutMs
-            easing.type: Easing.OutQuad
-        }
-        NumberAnimation {
-            id: pullBack
-            property: "contentX"
-            duration: Constants.pullBackMs
-            easing.type: Easing.OutBack
-            easing.overshoot: Constants.pullOvershoot
-        }
-    }
-
     function rebuildLoop() {
         // 模型重建旧行销毁,横向动画若还在跑会写到已销毁的视图上,先停。
         if (root.hAnim) {
@@ -289,38 +275,6 @@ Item {
     function rowReady() {
         root.lastRowReady = Date.now()
         locateTimer.restart()
-    }
-
-    // 延迟定位(替代 Qt.callLater,见 rebuildLoop):事件循环级延迟,
-    // rows 连续刷新时按代次丢弃过期回调;组件销毁即随 Timer 取消。
-    Timer {
-        id: locateTimer
-        interval: 0
-        repeat: false
-        onTriggered: {
-            const gen = root.loopGen
-            if (root.locateGen === gen)
-                return // 本代已定位(多批行就绪的重复触发)
-            // 行就绪(行 delegate onCompleted 触发 rowReady)后实测行距
-            // 并定位:此时遍历访问行是安全的;公式定位不访问行。
-            root.ensureRowStep()
-            list.contentY = root.absRow * root.rowStep
-            // 初始 contentY 可能恰为 0(0→0 不触发 onContentYChanged),
-            // 显式初始化焦点行为几何居中行;行位置下一帧才稳定,再查一次。
-            root.focusRowIdx = root.findCenterRowIndex()
-            root.locateGen = gen // 标记本代定位完成,恢复行遍历访问
-            locateTimer2.restart()
-        }
-    }
-    Timer {
-        id: locateTimer2
-        interval: 0
-        repeat: false
-        onTriggered: {
-            if (root.locateGen !== root.loopGen)
-                return // 定位未完成/已被新重建覆盖
-            root.focusRowIdx = root.findCenterRowIndex()
-        }
     }
 
     // 行距:行高(标题 24 + 卡片 172,行 delegate 显式约束)减重叠 44,
@@ -442,16 +396,79 @@ Item {
             root.moveCol(dx < 0 ? 1 : -1)
     }
 
-    // 聚合拉取不依赖当前会话(每服用各自缓存的 token),有账号即拉;
-    // 启动同时校验各服 token(/System/Info 轻量认证,401 即失效,见
-    // AccountManager.validateTokens);账号增删/排序变化(accountsChanged)
-    // 时按新顺序重拉。
-    Component.onCompleted: {
-        if (AccountManager.hasAccounts) {
-            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
-            AccountManager.validateTokens()
+    // 堆叠式竖向轮盘:行与行部分重叠(负间距),中间行最前最亮,
+    // 上下行被相邻行覆盖一部分并逐级缩小变暗(类似应用库的堆叠效果,
+    // 但间距更大,适合媒体库浏览)。
+    // 键盘四向控制:上下切换媒体库行,左右移动选中块;与滚轮共用逻辑。
+    focus: true
+
+    Timer {
+        id: rowsTimer
+        onTriggered: {
+            // 无行(空数据)或最近无行就绪(孵化稳定)→ 可替换;否则等稳定。
+            if (list.count > 0
+                && Date.now() - root.lastRowReady < root.rowsSettleMs) {
+                root.pendingRows = AccountManager.homeRows // 取最新,继续等
+                rowsTimer.restart()
+                return
+            }
+            // 替换即孵化开始:立即刷新就绪时刻,孵化窗口内(新行尚未
+            // 就绪)的再次替换被门控拦截,避免打断孵化触发引擎错误。
+            root.lastRowReady = Date.now()
+            root.rows = root.pendingRows
         }
-        root.forceActiveFocus()
+        interval: 40
+        repeat: false
+    }
+
+    // 拉动画两段:先冲出边界(约 24px),再弹回边界。
+    SequentialAnimation {
+        id: pullSeq
+        NumberAnimation {
+            id: pullOut
+            property: "contentX"
+            duration: Constants.pullOutMs
+            easing.type: Easing.OutQuad
+        }
+        NumberAnimation {
+            id: pullBack
+            property: "contentX"
+            duration: Constants.pullBackMs
+            easing.type: Easing.OutBack
+            easing.overshoot: Constants.pullOvershoot
+        }
+    }
+
+    // 延迟定位(替代 Qt.callLater,见 rebuildLoop):事件循环级延迟,
+    // rows 连续刷新时按代次丢弃过期回调;组件销毁即随 Timer 取消。
+    Timer {
+        id: locateTimer
+        onTriggered: {
+            const gen = root.loopGen
+            if (root.locateGen === gen)
+                return // 本代已定位(多批行就绪的重复触发)
+            // 行就绪(行 delegate onCompleted 触发 rowReady)后实测行距
+            // 并定位:此时遍历访问行是安全的;公式定位不访问行。
+            root.ensureRowStep()
+            list.contentY = root.absRow * root.rowStep
+            // 初始 contentY 可能恰为 0(0→0 不触发 onContentYChanged),
+            // 显式初始化焦点行为几何居中行;行位置下一帧才稳定,再查一次。
+            root.focusRowIdx = root.findCenterRowIndex()
+            root.locateGen = gen // 标记本代定位完成,恢复行遍历访问
+            locateTimer2.restart()
+        }
+        interval: 0
+        repeat: false
+    }
+    Timer {
+        id: locateTimer2
+        onTriggered: {
+            if (root.locateGen !== root.loopGen)
+                return // 定位未完成/已被新重建覆盖
+            root.focusRowIdx = root.findCenterRowIndex()
+        }
+        interval: 0
+        repeat: false
     }
 
     // 未登录提示条:没有任何已保存账号时覆盖在首页上方,提供服务器管理入口。
@@ -477,8 +494,8 @@ Item {
                 font.pixelSize: 13
             }
             Button {
-                text: "服务器管理"
                 onClicked: root.openServerManager()
+                text: "服务器管理"
             }
         }
     }
@@ -493,7 +510,6 @@ Item {
         // 决定(排序/删除本地重排,添加/重登成功才重拉)。UI 操作若触发
         // fetchHomeRows,会撞上重登中的 token 失效 → 401 → 连锁重登。
     }
-    onRowsChanged: if (root.rows.length > 0) root.rebuildLoop()
 
     // 每行条目卡片(库海报或媒体条目)。尺寸由调用处指定(cardW/cardH),
     // 有图时底部显示标题,无图时居中显示占位文字。
@@ -553,8 +569,6 @@ Item {
         }
         MouseArea {
             id: cardArea
-            anchors.fill: parent
-            hoverEnabled: true
             // 按住拖动:累计位移超阈值触发行列滚动(拖动与点击共存——
             // 移动后 release 不触发 clicked,Qt 自动处理)。
             property real pressX: 0
@@ -576,29 +590,15 @@ Item {
                 pressX = mouse.x
                 pressY = mouse.y
             }
+            anchors.fill: parent
+            hoverEnabled: true
         }
     }
-
-    // 堆叠式竖向轮盘:行与行部分重叠(负间距),中间行最前最亮,
-    // 上下行被相邻行覆盖一部分并逐级缩小变暗(类似应用库的堆叠效果,
-    // 但间距更大,适合媒体库浏览)。
-    // 键盘四向控制:上下切换媒体库行,左右移动选中块;与滚轮共用逻辑。
-    focus: true
-    Keys.onUpPressed: root.moveRow(-1)
-    Keys.onDownPressed: root.moveRow(1)
-    Keys.onLeftPressed: root.moveCol(-1)
-    Keys.onRightPressed: root.moveCol(1)
-    // Enter/回车:进入当前选中的块。
-    Keys.onReturnPressed: root.activateFocus()
-    Keys.onEnterPressed: root.activateFocus()
-    // 页面回到前台时恢复键盘焦点。
-    onVisibleChanged: if (root.visible) root.forceActiveFocus()
 
     // 鼠标按住拖动滚动(空白区域):与卡片内拖拽共用 handleDrag。
     // 声明在 ListView 之前(z 在下层),卡片区域的事件先被卡片 MouseArea
     // 接收,空白区(行间缝隙/顶部)穿透到这里。
     MouseArea {
-        anchors.fill: parent
         property real dragX: 0
         property real dragY: 0
         onPressed: function (mouse) {
@@ -619,18 +619,19 @@ Item {
             dragX = mouse.x
             dragY = mouse.y
         }
+        anchors.fill: parent
     }
 
     // 滚动时实时更新焦点行(选中块跟随居中的无缩放行)。
     ListView {
         id: list
+        onContentYChanged: root.focusRowIdx = root.findCenterRowIndex()
         // delegate 池化:模型替换时尽量复用实例,减少销毁/孵化打断面。
         reuseItems: true
         anchors.fill: parent
         clip: true
         model: root.loopRows
         spacing: -Constants.rowOverlap
-        onContentYChanged: root.focusRowIdx = root.findCenterRowIndex()
         // 缓冲只保留约 1.5 行:堆叠行内容较重(每行多张海报),
         // 过大的默认缓冲会让大量行同时实例化拖慢滚动。
         cacheBuffer: 300
@@ -643,14 +644,6 @@ Item {
 
         delegate: Column {
             id: rowDelegate
-            width: list.width
-            // 显式行高(标题 24 + 卡片 172):行距 = 行高 - 重叠 = 常量,
-            // root 侧行几何可公式计算,无需遍历 delegate(重建中遍历会
-            // 触发引擎 "invalid context" 错误)。
-            height: Constants.rowTitleH + Constants.rowHeight
-            transformOrigin: Item.Top
-            // 就绪通知:实例化完成(布局可用)后由 root 定位(见 rowReady)。
-            Component.onCompleted: root.rowReady()
             // 行数据快照:modelData 是委托上下文变量,不能作为对象属性
             // (rowDelegate.modelData)访问;存入显式属性供嵌套卡片取行级信息。
             property var rowData: modelData
@@ -658,6 +651,8 @@ Item {
             property alias rowItemsView: rowItems
             // 本行在 loopRows 中的索引,供选中块高亮判定。
             property int rowIndex: index
+            // 就绪通知:实例化完成(布局可用)后由 root 定位(见 rowReady)。
+            Component.onCompleted: root.rowReady()
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
             function centerDist() {
                 const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
@@ -672,6 +667,12 @@ Item {
                 const maxDist = Math.max(1, list.height / 2 - 60)
                 return Math.max(0.3, 1 - 0.7 * rowDelegate.centerDist() / maxDist)
             }
+            width: list.width
+            // 显式行高(标题 24 + 卡片 172):行距 = 行高 - 重叠 = 常量,
+            // root 侧行几何可公式计算,无需遍历 delegate(重建中遍历会
+            // 触发引擎 "invalid context" 错误)。
+            height: Constants.rowTitleH + Constants.rowHeight
+            transformOrigin: Item.Top
             // 堆叠层级:距视口中心越近越靠前(离散三档,滚动动画中跨档
             // 才重排场景图,比逐帧浮点 z 便宜得多);中间行最前可点,
             // 上下行被相邻行覆盖。
@@ -758,8 +759,6 @@ Item {
     // 滚轮无缝循环:每格按一个"可见行"滚动,回绕跳回同逻辑行
     // (视觉内容不变)。向上滚上移,向下滚下移。
     MouseArea {
-        anchors.fill: parent
-        acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
         onWheel: function (wheel) {
             // 与键盘共用逻辑:普通滚轮=左右键(选中块移动/滚动/拉动画),
             // Ctrl+滚轮=上下键(切换媒体库行)。速度记账在 scrollBy/
@@ -773,5 +772,7 @@ Item {
                 root.moveCol(-delta)
             wheel.accepted = true
         }
+        anchors.fill: parent
+        acceptedButtons: Qt.NoButton // 不拦截点击,只接收滚轮
     }
 }
