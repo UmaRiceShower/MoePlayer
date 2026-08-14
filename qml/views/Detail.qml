@@ -27,6 +27,10 @@ Item {
     // 相似推荐双击防抖(沿用原 Main 侧逻辑)。
     property string lastItemPush: ""
     property int lastItemPushTime: 0
+    // 原地替换动画:数据落地前先淡出旧正文(replacing 期间 detail 暂存
+    // pendingDetail),动画中 applyDetail 落地并淡入,完成后复位。
+    property bool replacing: false
+    property var pendingDetail: null
 
     // 该服务器凭据(账号缺失返回空 map)。
     function creds() {
@@ -156,6 +160,7 @@ Item {
         root.seasonNos = []
         root.seasonCandidate = 1
         root.similarStale = true
+        root.replacing = true
         overview.contentY = 0
     }
     // 相似推荐点击:压历史(记录当前条目)后原地替换,不 push 新页。
@@ -187,6 +192,90 @@ Item {
             return
         }
         root.backRequested()
+    }
+    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步)。
+    // fromReplace 时正文已淡出,落地后触发标题推入(fadeInOut 后半段淡入)。
+    function applyDetail(d, fromReplace) {
+        root.detail = d
+        root.isFavorite = d.isFavorite
+        // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
+        // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
+        ColorProvider.requestColor(root.detail.posterId || root.posterId)
+        const c = root.creds()
+        // 选集条季列表:剧集自身 / 集详情的父剧。
+        // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见
+        // onEpisodesReceived),避免选集栏先渲染旧数据再跳新数据。
+        if (d.type === "Series") {
+            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
+            // 全部集(跨季),供"继续观看"按进度定位目标集。
+            EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
+        } else if (d.type === "Episode" && d.seriesId) {
+            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
+        } else {
+            // 电影等无选集:detail 到达即渲染完整结构。
+            root.loaded = true
+        }
+        // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
+        // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
+        root.similarStale = true
+        EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
+        if (fromReplace) {
+            // 标题推入:上移 8px + 淡入(与正文淡入同步进行)。
+            heroTextCol.opacity = 0
+            heroTitleShift.y = 8
+            titleReveal.start()
+        }
+    }
+
+    // 正文交叉淡化:淡出旧内容 → 落地新数据 → 淡入。
+    SequentialAnimation {
+        id: fadeInOut
+        NumberAnimation {
+            target: overview
+            property: "opacity"
+            to: 0
+            duration: 140
+            easing.type: Easing.InQuad
+        }
+        ScriptAction {
+            script: {
+                const d = root.pendingDetail
+                root.pendingDetail = null
+                root.applyDetail(d, true)
+            }
+        }
+        NumberAnimation {
+            target: overview
+            property: "opacity"
+            to: 1
+            duration: 160
+            easing.type: Easing.OutCubic
+        }
+        onFinished: root.replacing = false
+        onStopped: {
+            root.replacing = false
+            overview.opacity = 1
+        }
+    }
+    // 标题推入:替换落地时标题区上移 8px + 淡入,模拟"新页面进入"。
+    ParallelAnimation {
+        id: titleReveal
+        NumberAnimation {
+            target: heroTextCol
+            property: "opacity"
+            from: 0
+            to: 1
+            duration: 200
+            easing.type: Easing.OutCubic
+        }
+        NumberAnimation {
+            target: heroTitleShift
+            property: "y"
+            from: 8
+            to: 0
+            duration: 200
+            easing.type: Easing.OutCubic
+        }
     }
     // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
     // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
@@ -459,10 +548,12 @@ Item {
                 GradientStop { position: 0.0; color: root.heroFrom }
                 GradientStop { position: 1.0; color: root.bgTint }
             }
+            // 背景图:大图不做逐像素溶解(性能),retain + 淡入平滑换图。
             Image {
                 anchors.fill: parent
                 source: root.backdropSource()
                 fillMode: Image.PreserveAspectCrop
+                asynchronous: true
                 retainWhileLoading: true
                 opacity: source !== "" ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 220 } }
@@ -566,22 +657,26 @@ Item {
                                 height: Constants.detailPosterH
                                 color: root.surfaceTint
                                 radius: 6
-                                Image {
+                                CrossfadeImage {
+                                    id: posterFx
                                     anchors.fill: parent
                                     anchors.margins: 3
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
-                                    retainWhileLoading: true
-                opacity: source !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 180 } }
-                                    cache: true
+                                    duration: 800
                                 }
                             }
 
                             Column {
+                                id: heroTextCol
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
                                 spacing: 8
+                                // 推入动画位移(不干扰布局)。
+                                transform: Translate {
+                                    id: heroTitleShift
+                                    y: 0
+                                }
 
                                 Row {
                                     width: parent.width
@@ -1098,29 +1193,14 @@ Item {
         function onItemDetailReady(serverUrl, d) {
             if (serverUrl !== root.serverUrl || d.id !== root.itemId)
                 return
-            root.detail = d
-            root.isFavorite = d.isFavorite
-            // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
-            // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
-            ColorProvider.requestColor(root.detail.posterId || root.posterId)
-            const c = root.creds()
-            // 选集条季列表:剧集自身 / 集详情的父剧。
-            // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见
-            // onEpisodesReceived),避免选集栏先渲染旧数据再跳新数据。
-            if (d.type === "Series") {
-                EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
-                // 全部集(跨季),供"继续观看"按进度定位目标集。
-                EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
-            } else if (d.type === "Episode" && d.seriesId) {
-                EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
+            // 原地替换且旧正文在显示:先淡出旧内容,动画中落地数据再淡入;
+            // 首次进入(加载动画中)直接落地渲染。
+            if (root.replacing && root.loaded) {
+                root.pendingDetail = d
+                fadeInOut.start()
             } else {
-                // 电影等无选集:detail 到达即渲染完整结构。
-                root.loaded = true
+                root.applyDetail(d, false)
             }
-            // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
-            // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
-            root.similarStale = true
-            EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
         }
     }
 
