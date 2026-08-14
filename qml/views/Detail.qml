@@ -63,6 +63,11 @@ Item {
         const c = ColorProvider.colors[pid]
         return c ? c.complement : Theme.textMuted
     }
+    // 藏白:白色融入一点莫奈取色(强调色色相 20% 混白),供未激活图标
+    // (未收藏爱心/未看勾圈),取代纯白与背景更协调。
+    property color iconWhite: Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
+                                      1 + (root.accentColor.g - 1) * 0.2,
+                                      1 + (root.accentColor.b - 1) * 0.2)
     property color complementDark: {
         const pid = root.detail.posterId || root.posterId
         const c = ColorProvider.colors[pid]
@@ -147,6 +152,8 @@ Item {
         const c = root.creds()
         EmbyClient.setWatched(root.serverUrl, c.token, c.userId,
                               root.itemId, played, 0, played ? 100 : 0)
+        // 本地同步已看状态(按钮即时反馈;服务器为准,下次重拉校正)。
+        root.detail = Object.assign({}, root.detail, { played: played })
     }
 
     // ---- 原地替换(切集/相似推荐/返回恢复):更新自身 id 触发
@@ -629,14 +636,6 @@ Item {
                             text: "← 返回"
                             onClicked: root.back()
                         }
-                        Button {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 16
-                            anchors.top: parent.top
-                            anchors.topMargin: 12
-                            text: root.isFavorite ? "♥ 已收藏" : "♡ 收藏"
-                            onClicked: root.toggleFavorite()
-                        }
 
                         Row {
                             anchors.left: parent.left
@@ -705,65 +704,114 @@ Item {
                                     opacity: text !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 200 } }
                                 }
-                                Row {
-                                    spacing: 10
-                                    Button {
-                                        text: root.detail.type === "Series" ? root.seriesPlayText() : root.playButtonText()
-                                        width: 220
-                                        height: 44
-                                        font.pixelSize: 16
-                                        onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
-                                        background: Rectangle {
-                                            radius: 10
-                                            // 强调色半透明(75%):透出莫奈背景,不显实色块。
-                                            color: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                          root.accentColor.b, 0.75)
-                                            Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
-                                        }
-                                        contentItem: AppText {
-                                            text: parent.text
-                                            color: "white"
-                                            font.pixelSize: 16
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
+                                // 按钮行(播放/收藏/已看)已移至 Hero 底部独立区。
+                            }
+                        }
+
+                        Row {
+                            // 按钮行独立于 heroTextCol(其宽度公式下限 280 容不下
+                            // 播放220+收藏44+已看44),锚定 hero 底部海报右缘。
+                            anchors.left: parent.left
+                            anchors.leftMargin: 32 + Constants.detailPosterW + 24
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 24
+                            spacing: 10
+                            opacity: root.textFade
+                            Button {
+                                text: root.detail.type === "Series" ? root.seriesPlayText() : root.playButtonText()
+                                width: 220
+                                height: 44
+                                font.pixelSize: 16
+                                onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
+                                background: Rectangle {
+                                    radius: 10
+                                    // 强调色半透明(75%):透出莫奈背景,不显实色块。
+                                    color: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                  root.accentColor.b, 0.75)
+                                    Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
+                                }
+                                contentItem: AppText {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 16
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                            // 收藏:爱心图标。未收藏藏白实心,已收藏红(粉)实心。
+                            Button {
+                                width: 44
+                                height: 44
+                                onClicked: root.toggleFavorite()
+                                background: Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                  root.complementColor.b, 0.28)
+                                    border.width: 1
+                                    border.color: root.complementColor
+                                }
+                                contentItem: AppText {
+                                    text: "♥"
+                                    color: root.isFavorite ? Theme.favorite : root.iconWhite
+                                    font.pixelSize: 24
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                    Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
+                                }
+                            }
+                            // 已看/未看:圆圈 + 勾。已看绿色,未看藏白。
+                            Button {
+                                width: 44
+                                height: 44
+                                onClicked: root.toggleWatched()
+                                background: Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                  root.complementColor.b, 0.28)
+                                    border.width: 1
+                                    border.color: root.complementColor
+                                }
+                                contentItem: Item {
+                                    // 圈:声明式边框,随已看状态变色。
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        radius: width / 2
+                                        color: "transparent"
+                                        border.width: 2.5
+                                        border.color: root.detail.played ? Theme.success : root.iconWhite
                                     }
-                                    Button {
-                                        text: "从头播放"
-                                        visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
-                                        height: 44
-                                        onClicked: root.startPlayback(false)
-                                        // 辅助色(分裂互补)半透明底:30% 层,与强调按钮拉开层级。
-                                        background: Rectangle {
-                                            radius: 10
-                                            color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                          root.complementColor.b, 0.28)
-                                            border.width: 1
-                                            border.color: root.complementColor
-                                        }
-                                        contentItem: AppText {
-                                            text: parent.text
-                                            font.pixelSize: 14
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
-                                    }
-                                    Button {
-                                        text: root.detail.played ? "标记未看" : "标记已看"
-                                        visible: root.detail.type !== "Series"
-                                        height: 44
-                                        onClicked: root.toggleWatched()
-                                    }
-                                    Button {
-                                        text: root.detail.played ? "标记未看" : "标记已看"
-                                        visible: root.detail.type === "Series"
-                                        height: 44
-                                        onClicked: root.toggleWatched()
+                                    // 勾:字符叠加在圈上(与爱心同机制,渲染可靠)。
+                                    AppText {
+                                        text: "✓"
+                                        color: root.detail.played ? Theme.success : root.iconWhite
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        anchors.centerIn: parent
                                     }
                                 }
                             }
-                        }
-                    }
+                            Button {
+                                text: "从头播放"
+                                visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
+                                height: 44
+                                onClicked: root.startPlayback(false)
+                                // 辅助色(分裂互补)半透明底:30% 层,与强调按钮拉开层级。
+                                background: Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                  root.complementColor.b, 0.28)
+                                    border.width: 1
+                                    border.color: root.complementColor
+                                }
+                                contentItem: AppText {
+                                    text: parent.text
+                                    font.pixelSize: 14
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                        }                    }
 
                     // ================= 演职人员 =================
                     Column {
