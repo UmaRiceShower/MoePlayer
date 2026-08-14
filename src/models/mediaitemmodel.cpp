@@ -68,6 +68,9 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString 
     it.runtimeTicks = o.value(QLatin1String("RunTimeTicks")).toDouble(0);
     it.episodeNo = o.value(QLatin1String("IndexNumber")).toInt(0);
     it.seasonNo = o.value(QLatin1String("ParentIndexNumber")).toInt(0);
+    // 季条目(/Shows/x/Seasons)无 ParentIndexNumber,季号在 IndexNumber。
+    if (it.type == QLatin1String("Season") && it.seasonNo == 0)
+        it.seasonNo = it.episodeNo;
     // UserData 随 /Items 列表返回:已看状态、观看进度、未看集数零额外请求。
     const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
     it.played = ud.value(QLatin1String("Played")).toBool(false);
