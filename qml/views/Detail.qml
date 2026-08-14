@@ -29,8 +29,11 @@ Item {
     property int lastItemPushTime: 0
     // 原地替换动画:数据落地前先淡出旧正文(replacing 期间 detail 暂存
     // pendingDetail),动画中 applyDetail 落地并淡入,完成后复位。
+    // 只对文字层淡入淡出(textFade),图片各自走圆形扩散溶解(CrossfadeImage)。
     property bool replacing: false
     property var pendingDetail: null
+    // 文字层透明度:详情切换时正文文字淡出→换字→淡入;图片不受此影响。
+    property real textFade: 1
 
     // 该服务器凭据(账号缺失返回空 map)。
     function creds() {
@@ -220,19 +223,19 @@ Item {
         root.similarStale = true
         EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
         if (fromReplace) {
-            // 标题推入:上移 8px + 淡入(与正文淡入同步进行)。
-            heroTextCol.opacity = 0
+            // 标题推入:上移 8px(淡入由 textFade 统一驱动,不再手动置 opacity)。
             heroTitleShift.y = 8
             titleReveal.start()
         }
     }
 
-    // 正文交叉淡化:淡出旧内容 → 落地新数据 → 淡入。
+    // 正文文字交叉淡化:淡出文字 → 落地新数据 → 淡入文字。
+    // 图片(backdrop/海报/演职/缩略图)不走此层,各自圆形扩散溶解。
     SequentialAnimation {
         id: fadeInOut
         NumberAnimation {
-            target: overview
-            property: "opacity"
+            target: root
+            property: "textFade"
             to: 0
             duration: 140
             easing.type: Easing.InQuad
@@ -245,8 +248,8 @@ Item {
             }
         }
         NumberAnimation {
-            target: overview
-            property: "opacity"
+            target: root
+            property: "textFade"
             to: 1
             duration: 160
             easing.type: Easing.OutCubic
@@ -254,20 +257,12 @@ Item {
         onFinished: root.replacing = false
         onStopped: {
             root.replacing = false
-            overview.opacity = 1
+            root.textFade = 1
         }
     }
-    // 标题推入:替换落地时标题区上移 8px + 淡入,模拟"新页面进入"。
+    // 标题推入:替换落地时标题区上移 8px(淡入由 textFade 统一驱动)。
     ParallelAnimation {
         id: titleReveal
-        NumberAnimation {
-            target: heroTextCol
-            property: "opacity"
-            from: 0
-            to: 1
-            duration: 200
-            easing.type: Easing.OutCubic
-        }
         NumberAnimation {
             target: heroTitleShift
             property: "y"
@@ -548,15 +543,14 @@ Item {
                 GradientStop { position: 0.0; color: root.heroFrom }
                 GradientStop { position: 1.0; color: root.bgTint }
             }
-            // 背景图:大图不做逐像素溶解(性能),retain + 淡入平滑换图。
-            Image {
+            // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
+            // 与海报同速,切换时氛围同步换新)。
+            CrossfadeImage {
                 anchors.fill: parent
                 source: root.backdropSource()
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
-                retainWhileLoading: true
-                opacity: source !== "" ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 220 } }
+                duration: 800
                 cache: true
             }
             // 底部渐变遮罩:保证标题/按钮文字可读,并让选集栏区域自然淡出;
@@ -672,6 +666,8 @@ Item {
                                 id: heroTextCol
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
                                 spacing: 8
+                                // 文字层:切换时随 textFade 淡出淡入(图片溶解不走此层)。
+                                opacity: root.textFade
                                 // 推入动画位移(不干扰布局)。
                                 transform: Translate {
                                     id: heroTitleShift
@@ -775,7 +771,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.people && root.detail.people.length > 0
-                        opacity: visible ? 1 : 0
+                        opacity: root.textFade * (visible ? 1 : 0)
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -804,16 +800,15 @@ Item {
                                                 width: 60
                                                 height: 60
                                                 radius: 30
+                                                clip: true
                                                 color: root.surfaceTint
                                                 anchors.horizontalCenter: parent.horizontalCenter
-                                                Image {
+                                                CrossfadeImage {
                                                     anchors.fill: parent
                                                     source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
                                                     asynchronous: true
-                                                    retainWhileLoading: true
-                                        opacity: source !== "" ? 1 : 0
-                                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                                    duration: 500
                                                     cache: true
                                                 }
                                                 AppText {
@@ -853,7 +848,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
-                        opacity: visible ? 1 : 0
+                        opacity: root.textFade * (visible ? 1 : 0)
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -894,7 +889,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
-                        opacity: visible ? 1 : 0
+                        opacity: root.textFade * (visible ? 1 : 0)
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -918,15 +913,13 @@ Item {
                                     height: Constants.detailCardH
                                     color: root.surfaceTint
                                     radius: 6
-                                    Image {
+                                    CrossfadeImage {
                                         anchors.fill: parent
                                         anchors.margins: 3
                                         source: model.posterId ? "image://emby/" + model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
-                                        retainWhileLoading: true
-                                        opacity: source !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 180 } }
+                                        duration: 500
                                         cache: true
                                     }
                                     AppText {
@@ -1118,14 +1111,13 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 color: Theme.bg
                                 radius: 4
-                                Image {
+                                CrossfadeImage {
                                     id: thumb
                                     anchors.fill: parent
                                     source: model.posterId ? "image://emby/" + model.posterId : ""
                                     fillMode: Image.PreserveAspectCrop
-                                    retainWhileLoading: true
-                opacity: source !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 180 } }
+                                    asynchronous: true
+                                    duration: 500
                                     cache: true
                                 }
                                 // 无海报/加载失败回退:播放图标
@@ -1148,6 +1140,7 @@ Item {
                                     color: model.id === root.itemId ? "white" : Theme.textPrimary
                                     font.pixelSize: 14
                                     elide: Text.ElideRight
+                                    opacity: root.textFade
                                 }
                                 // 观看进度条
                                 Item {
