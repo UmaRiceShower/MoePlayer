@@ -86,6 +86,9 @@ Item {
         const stepW = root.cardW + root.gridSpacing
         const stepH = root.cardH + root.gridSpacing
         const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
+        // 网格居中偏移:内容区比 cols×stepW 宽时,整行卡整体右移居中;
+        // 极端窄窗(内容区 < 卡宽)时为 0,卡片贴左。
+        const offset = Math.max(0, (grid.width - cols * stepW) / 2)
         let hover = -1
         for (let i = 0; i < n; ++i) {
             const c = cardRepeater.itemAt(i)
@@ -109,7 +112,7 @@ Item {
         // 新卡(无快照)直接定位 + 淡入,不参与位置动画。
         const wave = root.reordering && hover < 0 && animate
         // 占位卡(格 0):行 0 且有同行放大卡时一并左移让位。
-        root.placeCard(plusCard, hrow === 0 ? -root.expandHalf : 0, 0, animate, restore, false, 0)
+        root.placeCard(plusCard, (hrow === 0 ? -root.expandHalf : 0) + offset, 0, animate, restore, false, 0)
         for (let i = 0; i < n; ++i) {
             const c = cardRepeater.itemAt(i)
             if (!c || c.Drag.active)
@@ -118,7 +121,7 @@ Item {
             const col = cell % cols
             const row = Math.floor(cell / cols)
             const y = row * stepH
-            let x = col * stepW
+            let x = col * stepW + offset
             if (hover >= 0 && row === hrow) {
                 if (cell < hcell)
                     x -= root.expandHalf
@@ -208,7 +211,10 @@ Item {
         const lx = dx - grid.x
         const ly = dy - grid.y
         const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
-        const col = Math.max(0, Math.min(cols - 1, Math.floor((lx + root.gridSpacing / 2) / stepW)))
+        // 与 layoutCards 同源居中偏移:落点坐标须减去偏移后再换算格位,
+        // 否则拖到卡片中央会命中相邻格。
+        const offset = Math.max(0, (grid.width - cols * stepW) / 2)
+        const col = Math.max(0, Math.min(cols - 1, Math.floor((lx - offset + root.gridSpacing / 2) / stepW)))
         const row = Math.max(0, Math.floor((ly + root.gridSpacing / 2) / stepH))
         const cell = row * cols + col
         return Math.max(0, Math.min(cell - 1, n - 1))
