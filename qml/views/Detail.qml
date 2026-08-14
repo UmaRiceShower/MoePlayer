@@ -31,6 +31,18 @@ Item {
     property var pendingDetail: null
     // 文字层透明度:详情切换时正文文字淡出→换字→淡入;图片不受此影响。
     property real textFade: 1
+    // hero 文字块双树揭示动画状态:换字前快照旧文字到旧树(heroOldTree,
+    // 右缘固定),新树(heroNewTree,左缘固定)绑当前 detail;textReveal 1→0
+    // 一趟:旧树宽度 W→0(从左往右消失)、新树 0→W(从左往右出现),配合
+    // old/newOpacity 交叉淡化(旧淡出/新淡入),压住透明文字间隙透出对方的
+    // 叠影。稳态 textReveal=0/oldOpacity=0/newOpacity=1(新树全宽全显)。
+    property real textReveal: 0
+    property real oldTextOpacity: 0
+    property real newTextOpacity: 1
+    // 旧树内容快照(换字前冻结旧值,动画期间旧树显示旧文字)。
+    property string heroOldTitle: ""
+    property string heroOldMeta: ""
+    property string heroOldOverview: ""
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
@@ -221,7 +233,8 @@ Item {
         root.backRequested()
     }
     // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步)。
-    // fromReplace 时正文已淡出,落地后触发标题推入(fadeInOut 后半段淡入)。
+    // 落地详情数据(fadeInOut 动画中调用,正文已淡出;fromReplace 仅标记
+    // 替换场景,文字揭示动画由 fadeInOut 自身编排)。
     function applyDetail(d, fromReplace) {
         root.detail = d
         root.isFavorite = d.isFavorite
@@ -246,11 +259,6 @@ Item {
         // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
         root.similarStale = true
         EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
-        if (fromReplace) {
-            // 标题推入:上移 8px(淡入由 textFade 统一驱动,不再手动置 opacity)。
-            heroTitleShift.y = 8
-            titleReveal.start()
-        }
     }
     // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
     // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
@@ -481,17 +489,31 @@ Item {
         return s.type
     }
 
-    // 正文文字交叉淡化:淡出文字 → 落地新数据 → 淡入文字。
+    // 快照旧文字并让旧树就位:旧树全宽全显盖住新树(此刻两者内容一致,
+    // 无缝;新树随后被 applyDetail 换新值,但 opacity 已 0,不产生叠影)。
+    function snapshotOldText() {
+        root.heroOldTitle = root.heroTitle()
+        root.heroOldMeta = root.metaLine()
+        root.heroOldOverview = root.detail.overview || ""
+        root.textReveal = 1
+        root.oldTextOpacity = 1
+        root.newTextOpacity = 0
+    }
+    // 动画结束复位:旧树隐藏,新树全宽全显(稳态)。
+    function finishTextSwap() {
+        root.textReveal = 0
+        root.oldTextOpacity = 0
+        root.newTextOpacity = 1
+    }
+
+    // hero 文字块滑动揭示:换字前快照旧文字 → 落地新值(新树在下层被旧树
+    // 盖住)→ 单程动画:旧树右缘固定宽度 W→0(从左往右消失)+ 新树左缘
+    // 固定 0→W(从左往右出现),同时交叉淡化(旧淡出/新淡入)。
     // 图片(backdrop/海报/演职/缩略图)不走此层,各自圆形扩散溶解。
+    // 其余文字区(按钮行/演职/相似推荐/选集)仍乘 textFade 整体淡入淡出。
     SequentialAnimation {
         id: fadeInOut
-        NumberAnimation {
-            target: root
-            property: "textFade"
-            to: 0
-            duration: 140
-            easing.type: Easing.InQuad
-        }
+        ScriptAction { script: root.snapshotOldText() }
         ScriptAction {
             script: {
                 const d = root.pendingDetail
@@ -499,29 +521,34 @@ Item {
                 root.applyDetail(d, true)
             }
         }
-        NumberAnimation {
-            target: root
-            property: "textFade"
-            to: 1
-            duration: 160
-            easing.type: Easing.OutCubic
+        ParallelAnimation {
+            NumberAnimation {
+                target: root
+                property: "textReveal"
+                to: 0
+                duration: 3000
+                easing.type: Easing.InQuad
+            }
+            NumberAnimation {
+                target: root
+                property: "oldTextOpacity"
+                to: 0
+                duration: 3000
+                easing.type: Easing.InQuad
+            }
+            NumberAnimation {
+                target: root
+                property: "newTextOpacity"
+                to: 1
+                duration: 3000
+                easing.type: Easing.OutCubic
+            }
         }
+        ScriptAction { script: root.finishTextSwap() }
         onFinished: root.replacing = false
         onStopped: {
             root.replacing = false
-            root.textFade = 1
-        }
-    }
-    // 标题推入:替换落地时标题区上移 8px(淡入由 textFade 统一驱动)。
-    ParallelAnimation {
-        id: titleReveal
-        NumberAnimation {
-            target: heroTitleShift
-            property: "y"
-            from: 8
-            to: 0
-            duration: 200
-            easing.type: Easing.OutCubic
+            root.finishTextSwap()
         }
     }
 
@@ -562,19 +589,19 @@ Item {
                 GradientStop { position: 1.0; color: root.bgTint }
             }
         }
-            // 选集栏莫奈色半透明 scrim:叠在全宽 Hero 之上,选集区透出
-            // 海报色氛围;低透明度(0.35)更通透,不再是大块深灰。
-            Rectangle {
-                id: sidebarScrim
-                width: Constants.detailSidebarW
-                x: parent.width - width
-                y: 0
-                height: parent.height
-                // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖色带。
-                visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
-                z: 1
-                color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.35)
-            }
+        // 选集栏莫奈色半透明 scrim:叠在全宽 Hero 之上,选集区透出
+        // 海报色氛围;低透明度(0.35)更通透,不再是大块深灰。
+        Rectangle {
+            id: sidebarScrim
+            width: Constants.detailSidebarW
+            x: parent.width - width
+            y: 0
+            height: parent.height
+            // 仅剧集/集详情(有选集栏)时显示;Movie 全宽正文不盖色带。
+            visible: root.loaded && (root.detail.type === "Series" || root.detail.type === "Episode")
+            z: 1
+            color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.35)
+        }
 
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
         // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
@@ -653,55 +680,113 @@ Item {
                                 }
                             }
 
-                            Column {
-                                id: heroTextCol
+                            // hero 文字块:双树滑动揭示。旧树(heroOldTree)内容 =
+                            // 换字前快照,右缘固定、宽度 W→0(从左往右消失);新树
+                            // (heroNewTree)绑当前 detail,左缘固定、宽度 0→W(从
+                            // 左往右出现)。textReveal 单程 1→0 驱动互补宽度,
+                            // opacity 交叉淡化压住透明文字间隙叠影。树内列宽固定
+                            // 显式宽度,容器宽度动画只裁剪不重排(wrapMode 下若
+                            // 直接作用文字宽度会重新换行)。
+                            Item {
+                                id: heroTextArea
                                 width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
-                                spacing: 8
-                                // 文字层:切换时随 textFade 淡出淡入(图片溶解不走此层)。
-                                opacity: root.textFade
-                                // 推入动画位移(不干扰布局)。
-                                transform: Translate {
-                                    id: heroTitleShift
-                                    y: 0
-                                }
+                                height: heroOldCol.height
 
-                                Row {
-                                    width: parent.width
-                                    spacing: 12
-
-                                    AppText {
-                                        text: root.heroTitle()
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 30
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        width: parent.width
+                                Item {
+                                    id: heroOldTree
+                                    anchors.right: heroTextArea.right
+                                    width: heroTextArea.width * root.textReveal
+                                    // Item 的 implicitHeight 默认 0(不随子项传播),
+                                    // 显式取列高,否则 clip 后文字被裁没。
+                                    height: heroTextArea.height
+                                    clip: true
+                                    opacity: root.oldTextOpacity
+                                    visible: root.oldTextOpacity > 0
+                                    Column {
+                                        id: heroOldCol
+                                        // 右缘贴容器右缘:容器右缘固定、宽度收缩时
+                                        // 列原点恒 0,裁剪落在列右半(左先消失)。
+                                        anchors.right: heroOldTree.right
+                                        width: heroTextArea.width
+                                        spacing: 8
+                                        Row {
+                                            width: parent.width
+                                            spacing: 12
+                                            AppText {
+                                                text: root.heroOldTitle
+                                                color: Theme.textPrimary
+                                                font.pixelSize: 30
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                                width: parent.width
+                                            }
+                                        }
+                                        AppText {
+                                            text: root.heroOldMeta
+                                            color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                            font.pixelSize: 14
+                                            opacity: text !== "" ? 1 : 0
+                                        }
+                                        AppText {
+                                            text: root.heroOldOverview
+                                            color: Theme.textMuted
+                                            font.pixelSize: 13
+                                            wrapMode: Text.Wrap
+                                            elide: Text.ElideRight
+                                            maximumLineCount: 2
+                                            width: parent.width
+                                            opacity: text !== "" ? 1 : 0
+                                        }
                                     }
                                 }
-                                AppText {
-                                    text: root.metaLine()
-                                    color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                    font.pixelSize: 14
-                                    opacity: text !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 200 } }
+                                Item {
+                                    id: heroNewTree
+                                    anchors.left: heroTextArea.left
+                                    width: heroTextArea.width * (1 - root.textReveal)
+                                    height: heroTextArea.height
+                                    clip: true
+                                    opacity: root.newTextOpacity
+                                    Column {
+                                        width: heroTextArea.width
+                                        spacing: 8
+                                        Row {
+                                            width: parent.width
+                                            spacing: 12
+                                            AppText {
+                                                text: root.heroTitle()
+                                                color: Theme.textPrimary
+                                                font.pixelSize: 30
+                                                font.bold: true
+                                                elide: Text.ElideRight
+                                                width: parent.width
+                                            }
+                                        }
+                                        AppText {
+                                            text: root.metaLine()
+                                            color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                            font.pixelSize: 14
+                                            opacity: text !== "" ? 1 : 0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
+                                        }
+                                        AppText {
+                                            text: root.detail.overview || ""
+                                            color: Theme.textMuted
+                                            font.pixelSize: 13
+                                            wrapMode: Text.Wrap
+                                            elide: Text.ElideRight
+                                            maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
+                                            width: parent.width
+                                            opacity: text !== "" ? 1 : 0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
+                                        }
+                                    }
                                 }
-                                AppText {
-                                    text: root.detail.overview || ""
-                                    color: Theme.textMuted
-                                    font.pixelSize: 13
-                                    wrapMode: Text.Wrap
-                                    elide: Text.ElideRight
-                                    maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
-                                    width: parent.width
-                                    opacity: text !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 200 } }
-                                }
-                                // 按钮行(播放/收藏/已看)已移至 Hero 底部独立区。
                             }
+                            // 按钮行(播放/收藏/已看)已移至 Hero 底部独立区。
                         }
 
                         Row {
-                            // 按钮行独立于 heroTextCol(其宽度公式下限 280 容不下
+                            // 按钮行独立于 hero 文字区(其宽度公式下限 280 容不下
                             // 播放220+收藏44+已看44),锚定 hero 底部海报右缘。
                             anchors.left: parent.left
                             anchors.leftMargin: 32 + Constants.detailPosterW + 24
