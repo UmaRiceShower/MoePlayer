@@ -61,7 +61,8 @@ Item {
         Image {
             id: posterImg
             anchors.fill: parent
-            anchors.margins: 4
+            // 不内缩:图片充满卡片(圆角由卡片 clip 裁切)。内缩会露出深色
+            // 卡片底(surfaceTint),观感像一圈黑框。
             source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true

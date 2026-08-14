@@ -670,7 +670,7 @@ Item {
                                 CrossfadeImage {
                                     id: posterFx
                                     anchors.fill: parent
-                                    anchors.margins: 3
+                                    // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
