@@ -21,9 +21,6 @@ ApplicationWindow {
     // 若不处理则播放窗口会残留继续播放、应用也不退出。
     property var playerWindows: []
 
-    // 剧集详情跳转防抖(同集 500ms 内只 push 一次)。
-    property string lastItemPush: ""
-    property int lastItemPushTime: 0
     // 媒体库页离开时的状态(viewId/排序/滚动位置),再次进入时恢复。
     property var libraryState: null
     // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
@@ -161,16 +158,9 @@ ApplicationWindow {
             onPlayRequested: function (url, headers, meta) {
                 root.openPlayerWindow(url, headers, meta)
             }
+            // 返回键:详情内导航(相似推荐/换集/历史)已在 Detail 内原地完成,
+            // 仅历史空时 pop 回上层页。
             onBackRequested: stackView.pop()
-            // 相似推荐点击 → 压入新条目详情(双击同条目短时间防抖)。
-            onOpenItem: function (itemId, posterId, title, serverUrl) {
-                const now = Date.now()
-                if (itemId === root.lastItemPush && now - root.lastItemPushTime < Constants.episodePushDebounceMs)
-                    return
-                root.lastItemPush = itemId
-                root.lastItemPushTime = now
-                root.pushDetail(itemId, posterId, title, serverUrl)
-            }
         }
     }
 

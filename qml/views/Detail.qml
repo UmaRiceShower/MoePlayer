@@ -18,8 +18,15 @@ Item {
 
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
-    // 打开另一条目详情(相似推荐点击):主窗口压栈。
-    signal openItem(string itemId, string posterId, string title, string serverUrl)
+
+    // 详情间导航历史(相似推荐原地替换):栈内保存被替换前的条目,
+    // back 时逐级恢复,替代"压新页再 pop"的整页重建。
+    property var detailHistory: []
+    // 相似推荐数据已过期(条目切换后、新推荐到达前):隐藏旧推荐防误导。
+    property bool similarStale: true
+    // 相似推荐双击防抖(沿用原 Main 侧逻辑)。
+    property string lastItemPush: ""
+    property int lastItemPushTime: 0
 
     // 该服务器凭据(账号缺失返回空 map)。
     function creds() {
@@ -135,27 +142,55 @@ Item {
                               root.itemId, played, 0, played ? 100 : 0)
     }
 
-    // ---- 原地替换(选集条切集):更新自身 id 触发 onItemIdChanged 重拉,不压栈。 ----
+    // ---- 原地替换(切集/相似推荐/返回恢复):更新自身 id 触发
+    // onItemIdChanged 重拉,不重建页面。旧正文保持显示直到新 detail
+    // 到达,选集/推荐区先行清空,图片经 retainWhileLoading 无空白换新。 ----
     function replaceItem(newItemId, newPosterId, newTitle) {
         root.itemId = newItemId
         root.posterId = newPosterId
         root.title = newTitle
-        // 切集:重置季与收藏(新集 detail 到达前不显示旧集状态)。
+        // 重置条目相关状态:季与收藏(新 detail 到达前不显示旧条目状态)、
+        // 候选季、相似推荐(stale 隐藏旧推荐)、滚动回顶。
         root.currentSeasonId = ""
         root.isFavorite = false
+        root.seasonNos = []
+        root.seasonCandidate = 1
+        root.similarStale = true
+        overview.contentY = 0
     }
-    // 返回键:集详情先原地回父剧详情,否则 pop。
+    // 相似推荐点击:压历史(记录当前条目)后原地替换,不 push 新页。
+    function openItemDetail(itemId, posterId, title, serverUrl) {
+        const now = Date.now()
+        if (itemId === root.lastItemPush && now - root.lastItemPushTime < Constants.episodePushDebounceMs)
+            return
+        root.lastItemPush = itemId
+        root.lastItemPushTime = now
+        // 历史深度上限,防相似推荐链无限增长。
+        if (root.detailHistory.length >= 16)
+            root.detailHistory.shift()
+        root.detailHistory.push({
+            itemId: root.itemId, posterId: root.posterId,
+            title: root.title, serverUrl: root.serverUrl
+        })
+        root.replaceItem(itemId, posterId, title)
+    }
+    // 返回键:集详情先原地回父剧详情;否则沿详情历史逐级恢复;
+    // 历史空则 pop 回上层页(首页/库)。
     function back() {
         if (root.detail.type === "Episode" && root.detail.seriesId) {
             root.replaceItem(root.detail.seriesId, "", root.detail.seriesName)
             return
         }
+        if (root.detailHistory.length > 0) {
+            const prev = root.detailHistory.pop()
+            root.replaceItem(prev.itemId, prev.posterId, prev.title)
+            return
+        }
         root.backRequested()
     }
-    // 首次进入/切集共用:置 loaded=false 显示加载动画,detail 到达后
-    // 经 onItemDetailReady 置 loaded=true 并一次性渲染完整结构。
+    // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
+    // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
     function reload() {
-        root.loaded = false
         root.playbackPending = false
         const c = root.creds()
         if (root.itemId !== "")
@@ -428,7 +463,8 @@ Item {
                 anchors.fill: parent
                 source: root.backdropSource()
                 fillMode: Image.PreserveAspectCrop
-                opacity: status === Image.Ready && source !== "" ? 1 : 0
+                retainWhileLoading: true
+                opacity: source !== "" ? 1 : 0
                 Behavior on opacity { NumberAnimation { duration: 220 } }
                 cache: true
             }
@@ -536,7 +572,8 @@ Item {
                                     source: root.heroPosterSource()
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
-                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                    retainWhileLoading: true
+                opacity: source !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                     cache: true
                                 }
@@ -679,7 +716,8 @@ Item {
                                                     source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
                                                     asynchronous: true
-                                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                                    retainWhileLoading: true
+                                        opacity: source !== "" ? 1 : 0
                                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                                     cache: true
                                                 }
@@ -760,7 +798,7 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
-                        visible: EmbyClient.similarModelFor(root.serverUrl).count > 0
+                        visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
                         opacity: visible ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
@@ -791,7 +829,8 @@ Item {
                                         source: model.posterId ? "image://emby/" + model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
-                                        opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                        retainWhileLoading: true
+                                        opacity: source !== "" ? 1 : 0
                                         Behavior on opacity { NumberAnimation { duration: 180 } }
                                         cache: true
                                     }
@@ -808,7 +847,7 @@ Item {
                                 }
                                 MouseArea {
                                     anchors.fill: parent
-                                    onClicked: root.openItem(model.id, model.posterId, model.name, root.serverUrl)
+                                    onClicked: root.openItemDetail(model.id, model.posterId, model.name, root.serverUrl)
                                 }
                             }
                         }
@@ -989,7 +1028,8 @@ Item {
                                     anchors.fill: parent
                                     source: model.posterId ? "image://emby/" + model.posterId : ""
                                     fillMode: Image.PreserveAspectCrop
-                                    opacity: status === Image.Ready && source !== "" ? 1 : 0
+                                    retainWhileLoading: true
+                opacity: source !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 180 } }
                                     cache: true
                                 }
@@ -1078,6 +1118,8 @@ Item {
                 root.loaded = true
             }
             // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
+            // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
+            root.similarStale = true
             EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
         }
     }
@@ -1113,6 +1155,12 @@ Item {
                 return
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
             root.loaded = true
+        }
+        function onSimilarReady(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            // 新条目推荐已填充模型,恢复显示。
+            root.similarStale = false
         }
         function onPlaybackReady(serverUrl, url, headers, meta) {
             root.playbackPending = false
