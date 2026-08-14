@@ -1,7 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 服务器管理页:枚举已保存的 Emby 服务器(账号)。
 //! 卡片网格展示:名称/用户名/地址/凭据状态。第一张为"添加服务器"
@@ -76,6 +76,11 @@ Item {
     // 一致挤压);y 不变(行距 16 > 上下视觉溢出 9,不重叠)。
     // animate=true 时位置变化走卡片内动画(挤压 220ms/复位 120ms,OutCubic),
     // false 用于初始/resize 直接定位。
+    // qmllint disable missing-property
+    // cardRepeater.itemAt() 的静态类型是 QQuickItem,delegate 自定义成员
+    // (expanded/isNew/accountId/animateTo 等)无法静态推导——这是 Repeater
+    // itemAt 回访的固有局限。所有访问均有空值守卫且 delegate 类型恒定,
+    // 运行时安全,故屏蔽该误报。
     function layoutCards(animate) {
         const n = cardRepeater.count
         const stepW = root.cardW + root.gridSpacing
@@ -184,6 +189,7 @@ Item {
         }
         dragResetTimer.restart()
     }
+    // qmllint enable missing-property
 
     // hover 状态/账号列表变化后延迟一帧重排(等 delegate 稳定)。
     function scheduleLayout() {
@@ -352,6 +358,8 @@ Item {
         anchors.fill: parent
         onPositionChanged: (drop) => root.updateDropTarget(drop)
         onExited: root.clearDropTarget()
+        // 同 layoutCards:itemAt 回访的动态类型访问,空值守卫下安全。
+        // qmllint disable missing-property
         onDropped: (drop) => {
             root.clearDropTarget()
             // 不触碰 drop.source(拖动中重建后可能已销毁,访问即 internal
@@ -381,6 +389,7 @@ Item {
                 }
             }
         }
+        // qmllint enable missing-property
     }
 
     // 顶栏:返回 + 标题 + 计数。
@@ -553,6 +562,9 @@ Item {
 
             Rectangle {
                 id: card
+                // Repeater 注入的模型元素。显式 required 声明让 qmllint 把
+                // delegate 内 modelData 视为本卡属性(否则逐处报 unqualified)。
+                required property var modelData
                 // hover 放大:等比例 scale(宽高同倍),200ms 触发阈值(快速
                 // 划过不触发),拖动中收起。位置由 root.layoutCards 管理:
                 // 放大卡左右邻居对称让位(expandHalf),动画走 animX/animY
@@ -573,10 +585,10 @@ Item {
                 Drag.source: card
                 Drag.hotSpot.x: width / 2
                 Drag.hotSpot.y: height / 2
-                property string accountId: modelData.id
+                property string accountId: card.modelData.id
                 // 凭据失效(重登失败)标红边;拖动落点高亮用强调色。
-                border.width: modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
-                border.color: modelData.tokenValid === false ? Theme.danger
+                border.width: card.modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
+                border.color: card.modelData.tokenValid === false ? Theme.danger
                               : (card.dropTarget ? Theme.accent
                               : (card.hovered ? Qt.rgba(Theme.accent.r, Theme.accent.g,
                                                         Theme.accent.b, 0.5)
@@ -602,8 +614,8 @@ Item {
                     opacityAnim.stop()
                 }
                 Component.onCompleted: {
-                    const p = root.posSnapshot[modelData.id]
-                    card.isNew = !root.prevAccountIds.includes(modelData.id)
+                    const p = root.posSnapshot[card.modelData.id]
+                    card.isNew = !root.prevAccountIds.includes(card.modelData.id)
                     if (p) {
                         card.x = p.x
                         card.y = p.y
@@ -720,9 +732,9 @@ Item {
                     color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                     ServerIcon {
                         anchors.fill: parent
-                        customIcon: modelData.icon
-                        defaultIcon: modelData.serverIcon
-                        fallbackText: (modelData.name !== "" ? modelData.name : modelData.userName).charAt(0)
+                        customIcon: card.modelData.icon
+                        defaultIcon: card.modelData.serverIcon
+                        fallbackText: (card.modelData.name !== "" ? card.modelData.name : card.modelData.userName).charAt(0)
                     }
                 }
 
@@ -739,15 +751,15 @@ Item {
                         width: parent.width
                         spacing: 6
                         AppText {
-                            text: modelData.name !== "" ? modelData.name : modelData.userName
+                            text: card.modelData.name !== "" ? card.modelData.name : card.modelData.userName
                             color: Theme.textPrimary
                             font.pixelSize: 15
                             font.bold: true
                             elide: Text.ElideRight
-                            width: parent.width - (modelData.tokenValid === false ? 78 : 0)
+                            width: parent.width - (card.modelData.tokenValid === false ? 78 : 0)
                         }
                         AppText {
-                            visible: modelData.tokenValid === false
+                            visible: card.modelData.tokenValid === false
                             text: "[凭据失效]"
                             color: Theme.danger
                             font.pixelSize: 12
@@ -755,7 +767,7 @@ Item {
                     }
                     AppText {
                         width: parent.width
-                        text: modelData.userName + " · " + modelData.serverUrl
+                        text: card.modelData.userName + " · " + card.modelData.serverUrl
                         color: Theme.textMuted
                         font.pixelSize: 12
                         elide: Text.ElideRight
@@ -800,10 +812,10 @@ Item {
                     onClicked: (mouse) => {
                         // 右键弹出卡片菜单(设置图标等);左键点击无操作。
                         if (mouse.button === Qt.RightButton) {
-                            cardMenu.accountId = modelData.id
-                            cardMenu.currentIcon = modelData.icon
-                            cardMenu.serverUrl = modelData.serverUrl
-                            cardMenu.serverIcon = modelData.serverIcon
+                            cardMenu.accountId = card.modelData.id
+                            cardMenu.currentIcon = card.modelData.icon
+                            cardMenu.serverUrl = card.modelData.serverUrl
+                            cardMenu.serverIcon = card.modelData.serverIcon
                             const g = card.mapToGlobal(mouse.x, mouse.y)
                             cardMenu.x = g.x
                             cardMenu.y = g.y

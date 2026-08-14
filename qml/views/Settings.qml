@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 Item {
     id: root

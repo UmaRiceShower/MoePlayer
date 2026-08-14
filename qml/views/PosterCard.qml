@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 通用海报卡片(媒体库网格/搜索浮层共用):海报 + 评分/已看/未看集数角标
 //! + 观看进度条 + 悬停收藏/已看快捷操作。点击进详情;操作经信号上抛,
@@ -9,6 +8,11 @@ import "qrc:/qml/theme"
 Item {
     id: root
 
+    // delegate 用法下由 GridView/ListView 注入,使用方在实例上经
+    // model.<角色> 读取条目;required 声明让 qmllint 静态识别
+    // (C++ 模型角色无法从类型推导,未声明则报 unqualified)。
+    required property var model
+    required property int index
     // 条目数据(由使用方从模型角色绑定)。
     property string itemId: ""
     property string posterId: ""

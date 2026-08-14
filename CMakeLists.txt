@@ -7,11 +7,31 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
+# 生成源码根的 .qmlls.ini 与 build/.qt/.qmlls.build.ini:Qt VS Code 扩展的
+# QML Language Server 据此解析 MoePlayer.Core 模块(qmldir/qmltypes)与
+# qrc 资源路径。buildDir 由 qmlls 自动读取,无需手动配置扩展。
+set(QT_QML_GENERATE_QMLLS_INI ON)
+
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets)
+# QTP0004 NEW:为模块内含 .qml 的子目录(views/theme/player)自动生成 qmldir。
+qt_policy(SET QTP0004 NEW)
+# 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
+# (默认输出 build/MoePlayer/Core 会占用 build/MoePlayer 目录名)。
+set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
+
+# pragma Singleton 文件须显式声明,qmldir 才会生成 singleton 条目
+# (qmlls/LSP 才能识别 Theme/Constants 为单例并解析 Theme.bg 等成员)。
+set_source_files_properties(qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/theme/Constants.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
-add_executable(MoePlayer
+# QML 模块:所有 QML 文件 + C++ 类型统一归入 URI MoePlayer.Core,
+# 替代旧的 qml.qrc + 运行时 qmlRegister 布局。qt_add_qml_module 生成
+# qmldir/MoePlayer.Core.qmltypes 到 build/qml/MoePlayer/Core/,资源嵌入
+# qrc:/qt/qml/MoePlayer/Core/。NO_PLUGIN 对可执行目标自动生效。
+qt_add_executable(MoePlayer
     src/main.cpp
     src/core/settingsstore.cpp
     src/core/embyclient.cpp
@@ -20,10 +40,37 @@ add_executable(MoePlayer
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvitem.cpp
-    qml.qrc
+    assets.qrc
 )
 
-target_include_directories(MoePlayer PRIVATE src)
+qt_add_qml_module(MoePlayer
+    URI MoePlayer.Core
+    VERSION 1.0
+    RESOURCE_PREFIX /qt/qml
+    # 让生成的源码根 .qmlls.ini 自带模块 import 路径(模块查找按
+    # <importPath>/MoePlayer/Core,故此处为 build/qml 父目录):无 CMake
+    # Tools 提供 -b buildDir 时,qmlls 仅靠 .qmlls.ini 也能解析。
+    IMPORT_PATH "${CMAKE_BINARY_DIR}/qml"
+    QML_FILES
+        qml/Main.qml
+        qml/player/PlayerWindow.qml
+        qml/theme/Theme.qml
+        qml/theme/Constants.qml
+        qml/theme/AppText.qml
+        qml/theme/CrossfadeImage.qml
+        qml/views/Home.qml
+        qml/views/Library.qml
+        qml/views/Detail.qml
+        qml/views/Settings.qml
+        qml/views/ServerManager.qml
+        qml/views/SearchOverlay.qml
+        qml/views/PosterCard.qml
+        qml/views/ServerIcon.qml
+)
+
+# 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件
+# 的 basename include 惯例记录)才能解析;无同名头文件冲突。
+target_include_directories(MoePlayer PRIVATE src src/core src/models src/playback)
 # 应用名/版本单一来源:CMake project() → 编译期宏 → 运行时引用。
 # applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE

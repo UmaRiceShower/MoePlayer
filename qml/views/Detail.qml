@@ -1,7 +1,7 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 条目详情页(Hero + 左栏正文 + 右侧竖向选集条)。
 //! 无状态浏览:详情/播放协商/已看/收藏/相似推荐均按 serverUrl 凭据路由。
@@ -723,7 +723,7 @@ Item {
                                     Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
                                 }
                                 contentItem: AppText {
-                                    text: parent.text
+                                    text: (parent as Button).text
                                     color: "white"
                                     font.pixelSize: 16
                                     horizontalAlignment: Text.AlignHCenter
@@ -797,7 +797,7 @@ Item {
                                     border.color: root.complementColor
                                 }
                                 contentItem: AppText {
-                                    text: parent.text
+                                    text: (parent as Button).text
                                     font.pixelSize: 14
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -831,6 +831,10 @@ Item {
                                 Repeater {
                                     model: root.detail.people
                                     delegate: Item {
+                                        id: peopleCard
+                                        // Repeater 注入的元素;显式 required 声明让 qmllint
+                                        // 静态识别 modelData(否则复杂文件内注入失效报 unqualified)。
+                                        required property var modelData
                                         width: 72
                                         height: 100
                                         Column {
@@ -845,7 +849,7 @@ Item {
                                                 anchors.horizontalCenter: parent.horizontalCenter
                                                 CrossfadeImage {
                                                     anchors.fill: parent
-                                                    source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
+                                                    source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
                                                     fillMode: Image.PreserveAspectCrop
                                                     asynchronous: true
                                                     duration: 500
@@ -853,14 +857,14 @@ Item {
                                                 }
                                                 AppText {
                                                     anchors.centerIn: parent
-                                                    text: modelData.name ? modelData.name.charAt(0) : ""
+                                                    text: peopleCard.modelData.name ? peopleCard.modelData.name.charAt(0) : ""
                                                     color: Theme.textMuted
                                                     font.pixelSize: 20
-                                                    visible: !(modelData.posterId)
+                                                    visible: !(peopleCard.modelData.posterId)
                                                 }
                                             }
                                             AppText {
-                                                text: modelData.name || ""
+                                                text: peopleCard.modelData.name || ""
                                                 color: Theme.textPrimary
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -868,7 +872,7 @@ Item {
                                                 horizontalAlignment: Text.AlignHCenter
                                             }
                                             AppText {
-                                                text: modelData.role || modelData.type || ""
+                                                text: peopleCard.modelData.role || peopleCard.modelData.type || ""
                                                 color: Theme.textMuted
                                                 font.pixelSize: 11
                                                 elide: Text.ElideRight
@@ -900,21 +904,25 @@ Item {
                         Repeater {
                             model: root.detail.mediaSources
                             delegate: Column {
+                                id: mediaSourceItem
+                                // 同 people delegate:required 声明让 qmllint 识别 modelData。
+                                required property var modelData
                                 width: parent.width
                                 spacing: 2
                                 AppText {
-                                    text: (modelData.name || "版本") + " · "
-                                            + (modelData.container ? modelData.container.toUpperCase() + " · " : "")
-                                            + formatSize(modelData.sizeBytes)
-                                            + (modelData.bitrate > 0 ? " · " + formatBitrate(modelData.bitrate) : "")
-                                            + (modelData.runTimeTicks > 0 ? " · " + formatTime(modelData.runTimeTicks / Constants.ticksPerSecond) : "")
+                                    text: (mediaSourceItem.modelData.name || "版本") + " · "
+                                            + (mediaSourceItem.modelData.container ? mediaSourceItem.modelData.container.toUpperCase() + " · " : "")
+                                            + root.formatSize(mediaSourceItem.modelData.sizeBytes)
+                                            + (mediaSourceItem.modelData.bitrate > 0 ? " · " + root.formatBitrate(mediaSourceItem.modelData.bitrate) : "")
+                                            + (mediaSourceItem.modelData.runTimeTicks > 0 ? " · " + root.formatTime(mediaSourceItem.modelData.runTimeTicks / Constants.ticksPerSecond) : "")
                                     color: Theme.textPrimary
                                     font.pixelSize: 14
                                 }
                                 Repeater {
-                                    model: modelData.streams
+                                    model: mediaSourceItem.modelData.streams
                                     delegate: AppText {
-                                        text: streamLabel(modelData)
+                                        required property var modelData
+                                        text: root.streamLabel(modelData)
                                         color: Theme.textMuted
                                         font.pixelSize: 13
                                     }
@@ -946,6 +954,9 @@ Item {
                             clip: true
                             model: EmbyClient.similarModelFor(root.serverUrl)
                             delegate: Item {
+                                id: similarCard
+                                // 同上:required 声明让 qmllint 识别 C++ 模型的 model 角色访问。
+                                required property var model
                                 width: Constants.detailCardW
                                 height: Constants.detailCardH
                                 Rectangle {
@@ -956,7 +967,7 @@ Item {
                                     CrossfadeImage {
                                         anchors.fill: parent
                                         anchors.margins: 3
-                                        source: model.posterId ? "image://emby/" + model.posterId : ""
+                                        source: similarCard.model.posterId ? "image://emby/" + similarCard.model.posterId : ""
                                         fillMode: Image.PreserveAspectCrop
                                         asynchronous: true
                                         duration: 500
@@ -967,7 +978,7 @@ Item {
                                         anchors.left: parent.left
                                         anchors.right: parent.right
                                         anchors.margins: 6
-                                        text: model.name
+                                        text: similarCard.model.name
                                         color: Theme.textPrimary
                                         font.pixelSize: 12
                                         elide: Text.ElideRight
@@ -975,7 +986,8 @@ Item {
                                 }
                                 MouseArea {
                                     anchors.fill: parent
-                                    onClicked: root.openItemDetail(model.id, model.posterId, model.name, root.serverUrl)
+                                    onClicked: root.openItemDetail(similarCard.model.id, similarCard.model.posterId,
+                                                                   similarCard.model.name, root.serverUrl)
                                 }
                             }
                         }
@@ -1059,6 +1071,7 @@ Item {
                                 Repeater {
                                     model: 2
                                     AnimatedImage {
+                                        required property var model
                                         readonly property int digit: model.index === 0
                                                                    ? Math.floor(root.seasonCandidate / 10) % 10
                                                                    : root.seasonCandidate % 10
@@ -1123,6 +1136,9 @@ Item {
                     model: EmbyClient.episodesModelFor(root.serverUrl)
                     ScrollBar.vertical: ScrollBar {}
                     delegate: Item {
+                        id: episodeItem
+                        // 同上:required 声明识别 C++ 模型角色。
+                        required property var model
                         width: episodeList.width - 12
                         height: Constants.detailEpisodeRowH
                         x: 6
@@ -1133,7 +1149,7 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 6
-                            color: model.id === root.itemId
+                            color: episodeItem.model.id === root.itemId
                                    ? Qt.rgba(root.accentColor.r, root.accentColor.g,
                                              root.accentColor.b, 0.75)
                                    : (mouse.containsMouse || ListView.isCurrentItem) ? root.surfaceTint
@@ -1154,7 +1170,7 @@ Item {
                                 CrossfadeImage {
                                     id: thumb
                                     anchors.fill: parent
-                                    source: model.posterId ? "image://emby/" + model.posterId : ""
+                                    source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId : ""
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     duration: 500
@@ -1164,9 +1180,9 @@ Item {
                                 AppText {
                                     anchors.centerIn: parent
                                     text: "▶"
-                                    color: model.id === root.itemId ? "white" : Theme.textMuted
+                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
                                     font.pixelSize: 16
-                                    visible: !model.posterId || thumb.status === Image.Error
+                                    visible: !episodeItem.model.posterId || thumb.status === Image.Error
                                 }
                             }
                             // 右:集名 + 进度/已看
@@ -1176,8 +1192,8 @@ Item {
                                 spacing: 3
                                 AppText {
                                     width: parent.width
-                                    text: model.episodeNo > 0 ? "E" + model.episodeNo + " · " + model.name : model.name
-                                    color: model.id === root.itemId ? "white" : Theme.textPrimary
+                                    text: episodeItem.model.episodeNo > 0 ? "E" + episodeItem.model.episodeNo + " · " + episodeItem.model.name : episodeItem.model.name
+                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
                                     font.pixelSize: 14
                                     elide: Text.ElideRight
                                     opacity: root.textFade
@@ -1186,23 +1202,23 @@ Item {
                                 Item {
                                     width: parent.width
                                     height: 3
-                                    visible: model.positionTicks > 0 && !model.played && model.runtimeTicks > 0
+                                    visible: episodeItem.model.positionTicks > 0 && !episodeItem.model.played && episodeItem.model.runtimeTicks > 0
                                     Rectangle {
                                         anchors.fill: parent
-                                        color: model.id === root.itemId ? Qt.rgba(1,1,1,0.4) : root.surfaceTint
+                                        color: episodeItem.model.id === root.itemId ? Qt.rgba(1,1,1,0.4) : root.surfaceTint
                                     }
                                     Rectangle {
-                                        width: parent.width * Math.min(1, model.positionTicks / model.runtimeTicks)
+                                        width: parent.width * Math.min(1, episodeItem.model.positionTicks / episodeItem.model.runtimeTicks)
                                         height: parent.height
-                                        color: model.id === root.itemId ? "white" : root.accentColor
+                                        color: episodeItem.model.id === root.itemId ? "white" : root.accentColor
                                         Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
                                 }
                                 AppText {
                                     text: "已看"
-                                    color: model.id === root.itemId ? "white" : Theme.success
+                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.success
                                     font.pixelSize: 11
-                                    visible: model.played
+                                    visible: episodeItem.model.played
                                 }
                             }
                         }
@@ -1212,7 +1228,7 @@ Item {
                             hoverEnabled: true
                             onClicked: {
                                 // 选集条点集:原地替换(剧集页与集详情页一致,栈深恒为 1)。
-                                root.replaceItem(model.id, model.posterId, model.name)
+                                root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name)
                             }
                         }
                     }

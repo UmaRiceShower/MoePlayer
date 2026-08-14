@@ -1,6 +1,5 @@
 import QtQuick
 import MoePlayer.Core
-import "qrc:/qml/theme"
 
 //! 服务器图标:自定义图标(图片 URL)→ 服务器默认图标 → 名称首字。
 //! 服务器默认图标在添加服务器时浏览器式解析一次(见
