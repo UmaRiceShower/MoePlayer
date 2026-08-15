@@ -40,14 +40,25 @@ Item {
     // 滚轮速度(px/s):最近 350ms 窗口内滚轮步长换算,驱动滚动动画
     // 时长(距离/速度)——滚得越快动画越快,内容跟得上节奏不丢动画。
     property real scrollVelocity: Constants.scrollVelocityInitial
-    property var wheelLog: []
+    // 滚轮速度记账窗口(首尾时间/累计步长):O(1) 更新,无数组 shift。
+    property var wheelLog: ({ count: 0, total: 0, firstT: 0, lastT: 0 })
 
-    // 平滑滚动动画对象:每次滚动新建(见 scrollBy)——QML 动画对象复用
-    // 有状态残留导致 start() 偶发无效,新对象保证动画必然执行。
-    // 时长按滚轮速度动态换算,快速滚动时动画更快,内容跟得上节奏。
-    property var scrollAnim: null
+    // 平滑滚动动画对象:声明式复用(官方动画文档模式——stop 后重设
+    // from/to/target 再 start 即可复用,无状态残留)。运行时设
+    // target/from/to/duration,easing 按滚动类型切换。
+    NumberAnimation {
+        id: scrollAnim
+        property: "contentY"
+        running: false
+        easing.type: Easing.OutCubic
+    }
     // 横向条目滚动动画对象(普通滚轮驱动),模式同 scrollAnim。
-    property var hAnim: null
+    NumberAnimation {
+        id: hAnim
+        property: "contentX"
+        running: false
+        easing.type: Easing.OutCubic
+    }
 
     // 选中块:焦点行(loopRows 索引,几何居中行)与列(-1=库海报,≥0=条目)。
     // 上下滚动后选中新居中行的库海报;左右键在可视区内移动列,
@@ -87,16 +98,16 @@ Item {
     // 记录滚轮事件步长并换算滚动速度(行/秒 → px/s,夹到合理范围)。
     function noteWheel(step) {
         const now = Date.now()
-        root.wheelLog.push([now, step])
-        while (root.wheelLog.length > 0 && now - root.wheelLog[0][0] > Constants.wheelLogWindowMs)
-            root.wheelLog.shift()
-        let total = 0
-        for (let i = 0; i < root.wheelLog.length; i++)
-            total += root.wheelLog[i][1]
-        const first = root.wheelLog[0]
-        const last = root.wheelLog[root.wheelLog.length - 1]
-        const span = last[0] - first[0]
-        const rowsPerSec = span > 0 ? total * 1000 / span : 0
+        const w = root.wheelLog
+        if (w.count === 0 || now - w.firstT > Constants.wheelLogWindowMs) {
+            // 窗口过期/空:重置窗口(单条)。
+            root.wheelLog = { count: 1, total: step, firstT: now, lastT: now }
+        } else {
+            // 窗口内:累计步长,滑动 lastT(窗口内总和/跨度 = 速度)。
+            root.wheelLog = { count: w.count + 1, total: w.total + step, firstT: w.firstT, lastT: now }
+        }
+        const span = root.wheelLog.lastT - root.wheelLog.firstT
+        const rowsPerSec = span > 0 ? root.wheelLog.total * 1000 / span : 0
         root.scrollVelocity = Math.max(Constants.scrollVelocityMin, Math.min(Constants.scrollVelocityMax, rowsPerSec * root.rowStep))
     }
 
@@ -122,29 +133,20 @@ Item {
         return list.itemAtIndex(root.focusRowIdx)
     }
 
-    // 焦点行横向条目视图的 contentX 动画(新建对象,先 stop 再 destroy)。
+    // 焦点行横向条目视图的 contentX 动画(复用 hAnim,stop 后重设再 start)。
     function animateContentX(v, to, withBounce) {
         const from = v.contentX
         const dist = Math.abs(to - from)
         if (dist < 0.5)
             return
-        if (root.hAnim) {
-            root.hAnim.stop()
-            root.hAnim.destroy()
-            root.hAnim = null
-        }
-        root.hAnim = Qt.createQmlObject(
-            'import QtQuick; NumberAnimation { property: "contentX"; easing.type: Easing.OutCubic }',
-            root)
-        root.hAnim.target = v
-        root.hAnim.from = from
-        root.hAnim.to = to
-        if (withBounce) {
-            root.hAnim.easing.type = Easing.OutBack
-            root.hAnim.easing.overshoot = Constants.bounceOvershoot
-        }
-        root.hAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
-        root.hAnim.start()
+        hAnim.stop()
+        hAnim.target = v
+        hAnim.from = from
+        hAnim.to = to
+        hAnim.easing.type = withBounce ? Easing.OutBack : Easing.OutCubic
+        hAnim.easing.overshoot = Constants.bounceOvershoot
+        hAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
+        hAnim.start()
     }
 
     // 横向滚动展示当前焦点行(居中行)的条目:每次滚两卡,行首库海报
@@ -240,11 +242,7 @@ Item {
 
     function rebuildLoop() {
         // 模型重建旧行销毁,横向动画若还在跑会写到已销毁的视图上,先停。
-        if (root.hAnim) {
-            root.hAnim.stop()
-            root.hAnim.destroy()
-            root.hAnim = null
-        }
+        hAnim.stop()
         pullSeq.stop()
         const prevAbs = root.absRow
         root.loopRows = root.rows.concat(root.rows).concat(root.rows)
@@ -298,13 +296,7 @@ Item {
         // 首次/模型重建后 contentY 可能停在 0(第一副本起点,定位未生效):
         // 中间副本及之后的滚动瞬间校正到对应行,避免首滚跳变。
         if (root.absRow >= n && list.contentY < n * root.rowStep) {
-            if (root.scrollAnim) {
-                // destroy 延迟到安全点才真正删除,先 stop 停止写 contentY,
-                // 避免旧动画继续朝旧目标走和新动画打架。
-                root.scrollAnim.stop()
-                root.scrollAnim.destroy()
-                root.scrollAnim = null
-            }
+            scrollAnim.stop()
             list.contentY = root.absRow * root.rowStep
         }
         root.absRow += step
@@ -320,11 +312,7 @@ Item {
             else if (curAbs < n)
                 mid = curAbs + n
             root.absRow = mid
-            if (root.scrollAnim) {
-                root.scrollAnim.stop()
-                root.scrollAnim.destroy()
-                root.scrollAnim = null
-            }
+            scrollAnim.stop()
             list.contentY = mid * root.rowStep
             root.absRow += step
         }
@@ -334,36 +322,24 @@ Item {
         const target = root.absRow * root.rowStep
         const dist = Math.abs(target - list.contentY)
         if (dist > 0.5) {
-            // 每次新建动画对象,start 必然生效;旧对象先 stop 再 destroy,
-            // 避免延迟删除期间旧动画继续写 contentY。
-            if (root.scrollAnim) {
-                root.scrollAnim.stop()
-                root.scrollAnim.destroy()
-                root.scrollAnim = null
-            }
-            root.scrollAnim = Qt.createQmlObject(
-                'import QtQuick; NumberAnimation { target: list; property: "contentY"; easing.type: Easing.OutCubic }',
-                root)
-            root.scrollAnim.from = list.contentY
-            root.scrollAnim.to = target
+            // 复用动画对象:stop 停止写 contentY,重设 from/to 再 start,
+            // 旧目标与新动画不打架(官方动画复用模式)。
+            scrollAnim.stop()
+            scrollAnim.target = list
+            scrollAnim.from = list.contentY
+            scrollAnim.to = target
             // 大幅滚动(单次≥2行)结尾超调目标再回弹:OutBack 是 boomerang
             // 曲线,末段越过终点再返回,overshoot 控制超调幅度(约 17%)。
             // 小幅滚动保持 OutCubic 平滑收尾,回弹会显得拖沓;快速连滚
             // 每步 1 行不弹,不打断节奏。超调期间仍在中间副本内不露边界。
-            if (dist >= root.rowStep * 2) {
-                root.scrollAnim.easing.type = Easing.OutBack
-                root.scrollAnim.easing.overshoot = Constants.bigBounceOvershoot
-            }
+            scrollAnim.easing.type = dist >= root.rowStep * 2 ? Easing.OutBack : Easing.OutCubic
+            scrollAnim.easing.overshoot = Constants.bigBounceOvershoot
             // 动态时长:距离/滚轮速度(px/s)。慢速滚动长动画平滑,
             // 快速滚动动画更快,内容移动速度与滚轮一致,不丢动画。
-            root.scrollAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
-            root.scrollAnim.start()
+            scrollAnim.duration = Math.max(Constants.animMinMs, Math.min(Constants.animMaxMs, dist / root.scrollVelocity * 1000))
+            scrollAnim.start()
         } else {
-            if (root.scrollAnim) {
-                root.scrollAnim.stop()
-                root.scrollAnim.destroy()
-                root.scrollAnim = null
-            }
+            scrollAnim.stop()
             list.contentY = target
         }
     }
@@ -668,19 +644,9 @@ Item {
             // 就绪通知:实例化完成(布局可用)后由 root 定位(见 rowReady)。
             Component.onCompleted: root.rowReady()
             // 行中心到视口中心的距离(随滚动变化)驱动缩放与透明度。
-            function centerDist() {
-                const centerY = rowDelegate.y + rowDelegate.height / 2 - list.contentY
-                return Math.abs(centerY - list.height / 2)
-            }
-            // 堆叠缩放/透明度:距中心越远越小越暗。
-            function stackScale() {
-                const maxDist = Math.max(1, list.height / 2 - 60)
-                return Math.max(0.55, 1 - 0.14 * rowDelegate.centerDist() / maxDist)
-            }
-            function stackOpacity() {
-                const maxDist = Math.max(1, list.height / 2 - 60)
-                return Math.max(0.3, 1 - 0.7 * rowDelegate.centerDist() / maxDist)
-            }
+            // 属性绑定只算一次,scale/opacity/z 三处复用(原各自调函数
+            // 重复求值);魔数集中在 Constants。
+            readonly property real centerDist: Math.abs((rowDelegate.y + rowDelegate.height / 2 - list.contentY) - list.height / 2)
             width: list.width
             // 显式行高(标题 24 + 卡片 172):行距 = 行高 - 重叠 = 常量,
             // root 侧行几何可公式计算,无需遍历 delegate(重建中遍历会
@@ -690,13 +656,15 @@ Item {
             // 堆叠层级:距视口中心越近越靠前(离散三档,滚动动画中跨档
             // 才重排场景图,比逐帧浮点 z 便宜得多);中间行最前可点,
             // 上下行被相邻行覆盖。
-            z: {
-                const d = rowDelegate.centerDist()
-                return d < 90 ? 3 : (d < 220 ? 2 : 1)
-            }
+            z: rowDelegate.centerDist < Constants.rowZNear ? 3
+               : (rowDelegate.centerDist < Constants.rowZMid ? 2 : 1)
             // 滚动动画中实时过渡:行随距中心距离连续缩放/变暗。
-            scale: rowDelegate.stackScale()
-            opacity: rowDelegate.stackOpacity()
+            scale: Math.max(Constants.rowMinScale,
+                            1 - Constants.rowScaleFactor * rowDelegate.centerDist
+                                / Math.max(1, list.height / 2 - Constants.rowCenterBand))
+            opacity: Math.max(Constants.rowMinOpacity,
+                              1 - Constants.rowOpacityFactor * rowDelegate.centerDist
+                                  / Math.max(1, list.height / 2 - Constants.rowCenterBand))
 
             // 行标题:服务器名 - 媒体库名(同一服务器多库时区分来源)。
             AppText {

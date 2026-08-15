@@ -49,45 +49,24 @@ Item {
 
     property var detail: ({})
     property bool isFavorite: false
+    // 莫奈取色缓存:单次 map 查找供全部颜色属性复用(原 7 个属性各自重复
+    // 求值 pid + map 查找)。本页单卡,绑定重算开销可忽略。
+    readonly property var _monet: ColorProvider.colors[root.detail.posterId || root.posterId] || null
     // 海报莫奈取色背景顶色(heroBackdrop 渐变起点);取色未完成/失败回退 surface。
-    property color heroFrom: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.heroFrom : Theme.surface
-    }
+    property color heroFrom: root._monet ? root._monet.heroFrom : Theme.surface
     // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
-    property color accentColor: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.accent : Theme.accent
-    }
+    property color accentColor: root._monet ? root._monet.accent : Theme.accent
     // 分裂互补辅助色(次要按钮/描边/焦点,30% 层)与极暗藏色(渐变暗部埋补色)。
-    property color complementColor: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.complement : Theme.textMuted
-    }
+    property color complementColor: root._monet ? root._monet.complement : Theme.textMuted
     // 藏白:白色融入一点莫奈取色(强调色色相 20% 混白),供未激活图标
     // (未收藏爱心/未看勾圈),取代纯白与背景更协调。
     property color iconWhite: Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
                                       1 + (root.accentColor.g - 1) * 0.2,
                                       1 + (root.accentColor.b - 1) * 0.2)
-    property color complementDark: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.complementDark : Theme.bg
-    }
+    property color complementDark: root._monet ? root._monet.complementDark : Theme.bg
     // 背景藏色倾向(带海报色相,取代中性灰);surfaceTint 用于卡片底色。
-    property color bgTint: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.bgTint : Theme.bg
-    }
-    property color surfaceTint: {
-        const pid = root.detail.posterId || root.posterId
-        const c = ColorProvider.colors[pid]
-        return c ? c.surfaceTint : Theme.surface
-    }
+    property color bgTint: root._monet ? root._monet.bgTint : Theme.bg
+    property color surfaceTint: root._monet ? root._monet.surfaceTint : Theme.surface
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
@@ -161,7 +140,11 @@ Item {
             return "从 " + formatTime(root.detail.positionTicks / Constants.ticksPerSecond) + " 继续播放"
         return "播放"
     }
-    function seriesPlayText() {
+    // 剧集页播放按钮文案:原绑定内每次重绘线性扫描全集(热点),改为
+    // 缓存属性,在集数据/详情到达时刷新一次(onItemDetailReady/
+    // onEpisodesReceived 见文件尾 Connections)。
+    property string seriesPlayCache: ""
+    function computeSeriesPlayText() {
         const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
         for (let i = 0; i < model.count; i++) {
             const it = model.itemAt(i)
@@ -169,6 +152,9 @@ Item {
                 return "继续观看" + (it.seasonNo > 0 && it.episodeNo > 0 ? " S" + it.seasonNo + "E" + it.episodeNo : "")
         }
         return "播放"
+    }
+    function refreshSeriesPlayText() {
+        root.seriesPlayCache = root.detail.type === "Series" ? root.computeSeriesPlayText() : ""
     }
 
     function toggleFavorite() {
@@ -802,7 +788,7 @@ Item {
                             opacity: root.textFade
                             Button {
                                 id: playBtn
-                                text: root.detail.type === "Series" ? root.seriesPlayText() : root.playButtonText()
+                                text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
                                 width: 220
                                 height: 44
                                 font.pixelSize: 16
@@ -1358,6 +1344,7 @@ Item {
             } else {
                 root.applyDetail(d, false)
             }
+            root.refreshSeriesPlayText()
         }
         function onSeasonsReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
@@ -1387,6 +1374,7 @@ Item {
                 return
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
             root.loaded = true
+            root.refreshSeriesPlayText()
         }
         function onSimilarReady(serverUrl) {
             if (serverUrl !== root.serverUrl)

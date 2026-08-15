@@ -29,19 +29,27 @@ Item {
     property bool showActions: true
 
     // 海报莫奈取色:底部渐变氛围尾色与进度条强调色跟随海报。
-    // 取色未完成/失败回退 surface/accent。
-    property color heroFrom: {
-        const c = ColorProvider.colors[root.posterId]
-        return c ? c.heroFrom : Theme.surface
-    }
-    property color accentColor: {
-        const c = ColorProvider.colors[root.posterId]
-        return c ? c.accent : Theme.accent
-    }
+    // 命令式更新 + colorReady(posterId) 信号:QML 绑定 colors 属性会在
+    // 任意海报取色完成时全量重算所有卡(colorsChanged 无参数);按 id
+    // 过滤信号只更新本卡。取色未完成/失败保持回退色。
+    property color heroFrom: Theme.surface
+    property color accentColor: Theme.accent
     // 卡片底色藏色:带海报色相倾向,取代中性灰。
-    property color surfaceTint: {
+    property color surfaceTint: Theme.surface
+
+    function applyMonet() {
+        // 无条件赋值:取色未完成/失败显示回退色,Grid 回收复用时不会
+        // 残留上一张海报的颜色(早退会导致新卡沿用旧卡取色)。
         const c = ColorProvider.colors[root.posterId]
-        return c ? c.surfaceTint : Theme.surface
+        if (c) {
+            root.heroFrom = c.heroFrom
+            root.accentColor = c.accent
+            root.surfaceTint = c.surfaceTint
+        } else {
+            root.heroFrom = Theme.surface
+            root.accentColor = Theme.accent
+            root.surfaceTint = Theme.surface
+        }
     }
 
     // 点击卡片(进详情)。
@@ -49,8 +57,21 @@ Item {
     // 悬停操作:收藏/已看切换请求(useById 翻转)。
     signal favoriteRequested(string itemId, bool fav)
     signal watchedRequested(string itemId, bool played)
-    onPosterIdChanged: ColorProvider.requestColor(root.posterId)
-    Component.onCompleted: ColorProvider.requestColor(root.posterId)
+    onPosterIdChanged: {
+        root.applyMonet()
+        ColorProvider.requestColor(root.posterId)
+    }
+    Component.onCompleted: {
+        root.applyMonet()
+        ColorProvider.requestColor(root.posterId)
+    }
+    Connections {
+        target: ColorProvider
+        function onColorReady(posterId) {
+            if (posterId === root.posterId)
+                root.applyMonet()
+        }
+    }
 
     Rectangle {
         anchors.fill: parent

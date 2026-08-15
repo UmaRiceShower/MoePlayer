@@ -71,6 +71,15 @@ QtObject {
     readonly property real bounceOvershoot: 1.6   // 横向单格滚动回弹
     readonly property real bigBounceOvershoot: 2.0 // 大幅跨行回弹
 
+    // ---- 首页堆叠行(缩放/透明度随距视口中心距离) ----
+    readonly property real rowMinScale: 0.55      // 最远行最小缩放
+    readonly property real rowScaleFactor: 0.14   // 缩放衰减斜率
+    readonly property real rowMinOpacity: 0.3     // 最远行最小透明度
+    readonly property real rowOpacityFactor: 0.7  // 透明度衰减斜率
+    readonly property real rowCenterBand: 60      // 距中心该距离内全尺寸/全透明
+    readonly property real rowZNear: 90           // z=3(最近层)距离阈值
+    readonly property real rowZMid: 220           // z=2(中间层)距离阈值
+
     // ---- 播放回传间隔 / 协议换算 ----
     readonly property int progressReportMs: 10000
     readonly property int pingIntervalMs: 600000

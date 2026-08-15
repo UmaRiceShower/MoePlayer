@@ -29,6 +29,9 @@ public:
 
 signals:
     void colorsChanged();
+    // 单张海报取色完成(posterId 粒度):QML 网格卡按 id 过滤,避免
+    // colorsChanged 全量重算所有卡的颜色绑定。
+    void colorReady(const QString &posterId);
 
 private slots:
     // 后台任务回填(GUI 线程执行):存 map 并广播重绑定。

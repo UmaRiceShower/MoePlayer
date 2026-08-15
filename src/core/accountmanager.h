@@ -17,6 +17,8 @@ class AccountManager : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
+    // 账号数(只读标量):绑定/高频路径用,避免每次 accounts() 重建整表。
+    Q_PROPERTY(int accountCount READ accountCount NOTIFY accountsChanged)
     // 首页聚合行:所有账号的媒体库按账号顺序排列,每行含
     // {accountId, serverUrl, serverName, viewName, posterId, items}。
     Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReady)
@@ -24,6 +26,7 @@ public:
     explicit AccountManager(EmbyClient *client, QObject *parent = nullptr);
 
     QVariantList accounts() const;
+    int accountCount() const { return m_accounts.size(); }
     QVariantList homeRows() const { return m_homeRows; }
 
     // 是否已保存任何账号。

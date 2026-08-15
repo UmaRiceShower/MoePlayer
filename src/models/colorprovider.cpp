@@ -74,6 +74,7 @@ void ColorProvider::onColorReady(const QString &posterId, const QVariantMap &rol
     if (!roles.isEmpty())
         m_colors.insert(posterId, roles);
     emit colorsChanged();
+    emit colorReady(posterId);
 }
 
 namespace {
