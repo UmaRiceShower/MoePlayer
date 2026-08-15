@@ -230,9 +230,10 @@ Item {
         id: cardHover
     }
 
-    MouseArea {
-        anchors.fill: parent
-        onClicked: root.clicked()
+    // 点击进详情:TapHandler(Pointer Handler 体系,与 HoverHandler 一致;
+    // 官方推荐替代 MouseArea 做点击检测)。
+    TapHandler {
+        onTapped: root.clicked()
     }
 
     // 悬停快捷操作:♥ 收藏 / ✓ 已看切换,置于最上层(MouseArea 之后声明)。

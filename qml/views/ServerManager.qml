@@ -821,12 +821,10 @@ Item {
                         if (mouse.button === Qt.RightButton) {
                             cardMenu.accountId = card.modelData.id
                             cardMenu.currentIcon = card.modelData.icon
-                            cardMenu.serverUrl = card.modelData.serverUrl
                             cardMenu.serverIcon = card.modelData.serverIcon
-                            const g = card.mapToGlobal(mouse.x, mouse.y)
-                            cardMenu.x = g.x
-                            cardMenu.y = g.y
-                            cardMenu.open()
+                            // popup(item, x, y):菜单锚定卡片坐标系,替代
+                            // mapToGlobal 手动定位(官方推荐 API)。
+                            cardMenu.popup(card, mouse.x, mouse.y)
                         }
                     }
                     onReleased: {

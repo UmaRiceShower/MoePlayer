@@ -30,6 +30,8 @@ Item {
         id: iconImg
         anchors.fill: parent
         source: root.currentSource
+        // 网络图异步解码,避免阻塞 UI。
+        asynchronous: true
         fillMode: Image.PreserveAspectCrop
         visible: status === Image.Ready
     }

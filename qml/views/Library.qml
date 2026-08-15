@@ -33,14 +33,16 @@ Item {
     readonly property bool showForm: !root.browseReady
 
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
-    property var sortOptions: [
-        { label: "加入时间", key: "DateCreated" },
-        { label: "修改时间", key: "DateModified" },
-        { label: "上映日期", key: "PremiereDate" },
-        { label: "年份", key: "ProductionYear" },
-        { label: "评分", key: "CommunityRating" },
-        { label: "名称", key: "SortName" }
-    ]
+    // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
+    ListModel {
+        id: sortOptions
+        ListElement { label: "加入时间"; key: "DateCreated" }
+        ListElement { label: "修改时间"; key: "DateModified" }
+        ListElement { label: "上映日期"; key: "PremiereDate" }
+        ListElement { label: "年份"; key: "ProductionYear" }
+        ListElement { label: "评分"; key: "CommunityRating" }
+        ListElement { label: "名称"; key: "SortName" }
+    }
 
     signal playRequested(string url, var headers, var meta)
     // 点击条目进入详情页(携带所在服务器)。
@@ -69,8 +71,8 @@ Item {
                 // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
                 root.currentSortBy = root.restore.sortBy
                 root.currentSortOrder = root.restore.sortOrder
-                for (let i = 0; i < root.sortOptions.length; ++i) {
-                    if (root.sortOptions[i].key === root.restore.sortBy) {
+                for (let i = 0; i < sortOptions.count; ++i) {
+                    if (sortOptions.get(i).key === root.restore.sortBy) {
                         sortSelector.currentIndex = i
                         break
                     }
@@ -229,10 +231,10 @@ Item {
             ComboBox {
                 id: sortSelector
                 onActivated: function (index) {
-                    root.changeSort(root.sortOptions[index].key)
+                    root.changeSort(sortOptions.get(index).key)
                 }
                 width: 130
-                model: root.sortOptions
+                model: sortOptions
                 textRole: "label"
                 // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
                 currentIndex: 1

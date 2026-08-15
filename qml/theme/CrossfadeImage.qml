@@ -1,10 +1,10 @@
 //! 双层图片圆形扩散溶解替换(awww 壁纸切换式):source 变化时,新图从圆心
 //! 一点按圆形裁剪扩散,圆内新图渐入、圆外保持旧图(inward=true 反向)。
 //!
-//! 实现:bottom/top Image 元素 visible:false + layer.enabled 离屏渲染
-//! (官方示例模式:不可见 + layer 化的 item 可被 ShaderEffectSource 采样,
-//! 且不遮挡场景),ShaderEffect 溶解层采样两离屏纹理,在 shader 内完成
-//! 圆形扩散 + 圆角裁切。
+//! 实现:bottom/top Image 元素 visible:false(防遮挡)+ ShaderEffectSource
+//! 直接采样(官方文档:sourceItem 本身可 invisible,仍渲染进纹理;无需
+//! layer.enabled,避免额外一层 FBO),ShaderEffect 溶解层采样两纹理,
+//! 在 shader 内完成圆形扩散 + 圆角裁切。
 //! - 圆角:corner SDF 在溶解 shader 内做(cornerRadius >= 短边一半即圆形,
 //!   如演职人员头像);圆角外 alpha=0 真透明,透出页面背景(离屏纹理源
 //!   visible:false,无直角内容可露)。
@@ -84,13 +84,12 @@ Item {
         revealAnim.start()
     }
 
-    // 底层:当前图。离屏渲染(visible:false + layer),仅作采样纹理源;
-    // 不遮挡场景,圆角透明区下方无直角内容。
+    // 底层:当前图。visible:false 防遮挡,ShaderEffectSource 直接采样
+    // 渲染进纹理(官方文档:sourceItem 可 invisible 仍入纹理)。
     Image {
         id: bottom
         anchors.fill: parent
         visible: false
-        layer.enabled: true
         retainWhileLoading: true
     }
     // 顶层:过渡中的新图(同离屏处理)。
@@ -98,7 +97,6 @@ Item {
         id: top
         anchors.fill: parent
         visible: false
-        layer.enabled: true
         fillMode: bottom.fillMode
         asynchronous: bottom.asynchronous
         cache: bottom.cache

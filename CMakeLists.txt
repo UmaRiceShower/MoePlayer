@@ -4,8 +4,8 @@ project(MoePlayer VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
+# AUTOMOC/AUTOUIC 与 Qt CMake 策略由下方 qt_standard_project_setup 一站式
+# 启用(官方 6.3+ 推荐);AUTORCC 不需要——无 .qrc,资源走 qt_add_resources。
 
 # 生成源码根的 .qmlls.ini 与 build/.qt/.qmlls.build.ini:Qt VS Code 扩展的
 # QML Language Server 据此解析 MoePlayer.Core 模块(qmldir/qmltypes)与
@@ -13,8 +13,10 @@ set(CMAKE_AUTORCC ON)
 set(QT_QML_GENERATE_QMLLS_INI ON)
 
 find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
-# QTP0004 NEW:为模块内含 .qml 的子目录(views/theme/player)自动生成 qmldir。
-qt_policy(SET QTP0004 NEW)
+# 官方推荐项目默认(Qt 6.3+):开 AUTOMOC/AUTOUIC、GNUInstallDirs、RPATH,
+# 并按 REQUIRES 6.8 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
+# 不设 AUTORCC(无 .qrc)与 C++ 标准(上方手动设置,该命令不涉及)。
+qt_standard_project_setup(REQUIRES 6.8)
 # 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
 # (默认输出 build/MoePlayer/Core 会占用 build/MoePlayer 目录名)。
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
@@ -40,7 +42,6 @@ qt_add_executable(MoePlayer
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvitem.cpp
-    assets.qrc
 )
 
 qt_add_qml_module(MoePlayer
@@ -77,6 +78,25 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     # OpenGL)。
     GLSL "100es,120,150"
     FILES shaders/crossfade.frag
+)
+
+# 计数器 GIF:qt_add_resources 替代 AUTORCC + assets.qrc(官方推荐路径)。
+# BASE 裁剪到 counter 目录(文件相对 BASE 为 0.gif…9.gif),
+# PREFIX /counter 拼出 qrc:/counter/N.gif,与原 assets.qrc alias 一致。
+qt_add_resources(MoePlayer "counter_assets"
+    PREFIX "/counter"
+    BASE "qml/assets/counter"
+    FILES
+        qml/assets/counter/0.gif
+        qml/assets/counter/1.gif
+        qml/assets/counter/2.gif
+        qml/assets/counter/3.gif
+        qml/assets/counter/4.gif
+        qml/assets/counter/5.gif
+        qml/assets/counter/6.gif
+        qml/assets/counter/7.gif
+        qml/assets/counter/8.gif
+        qml/assets/counter/9.gif
 )
 
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件
