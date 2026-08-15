@@ -56,6 +56,11 @@ Item {
                                      : null
     // 海报莫奈取色背景顶色(heroBackdrop 渐变起点);取色未完成/失败回退 surface。
     property color heroFrom: root._monet ? root._monet.heroFrom : Theme.surface
+    // hero 文字水平对齐:LayoutMirroring 不镜像 Text 内容,文字区靠右时
+    // 须显式右对齐(靠文字区起始侧),与靠左时对称。
+    readonly property int heroTextAlign: (ConfigManager.detailTextPos === "top-left"
+                                          || ConfigManager.detailTextPos === "bottom-left")
+                                         ? Text.AlignLeft : Text.AlignRight
     // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
     property color accentColor: root._monet ? root._monet.accent : Theme.accent
     // 分裂互补辅助色(次要按钮/描边/焦点,30% 层)与极暗藏色(渐变暗部埋补色)。
@@ -84,6 +89,16 @@ Item {
     property bool playbackPending: false
 
     property bool _ready: false
+
+
+
+
+
+
+
+
+
+
 
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
@@ -616,6 +631,9 @@ Item {
             anchors.fill: parent
             visible: root.loaded
             z: 2
+            // 选季栏左/右:只镜像本 positioner 的子项顺序(官方 RTL 机制,
+            // 不 childrenInherit,overview/sidebar 内部布局不受影响)。
+            LayoutMirroring.enabled: ConfigManager.detailSidebarLeft
 
             // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
             Flickable {
@@ -632,8 +650,70 @@ Item {
 
                     // ================= Hero =================
                     Item {
+                        id: heroItem
                         width: parent.width
                         height: Constants.detailHeroH
+                        // ===== 定位代理(slot):全部位置判断收敛于三个槽,
+                        // 内容控件(海报/文字/按钮)静态锚定到槽,不再各自
+                        // 计算坐标。新增配置维度时只改对应槽。=====
+
+                        // 海报槽:posterLeft 决定左右,垂直沉底。
+                        Item {
+                            id: posterSlot
+                            x: ConfigManager.detailPosterLeft ? 32 : parent.width - Constants.detailPosterW - 32
+                            y: parent.height - Constants.detailPosterH - 24
+                            width: Constants.detailPosterW
+                            height: Constants.detailPosterH
+                        }
+                        // 文字槽:textPos 四角预设。
+                        // 水平:与海报同侧 → 海报内侧;异侧 → 贴对侧边缘。
+                        // 垂直:top → 返回按钮下方;bottom → follow poster 且
+                        // 与海报同侧时避让按钮(贴其上方),否则沉底与海报
+                        // 下缘对齐(异侧文字与按钮 x 错开,无需考虑按钮高)。
+                        Item {
+                            id: textSlot
+                            width: ConfigManager.detailTextWidth
+                            height: ConfigManager.detailTextHeight
+                            readonly property bool _left: ConfigManager.detailTextPos === "top-left"
+                                                          || ConfigManager.detailTextPos === "bottom-left"
+                            readonly property bool _top: ConfigManager.detailTextPos === "top-left"
+                                                         || ConfigManager.detailTextPos === "top-right"
+                            x: _left
+                                ? (ConfigManager.detailPosterLeft ? 32 + Constants.detailPosterW + 24 : 32)
+                                : (parent.width - width
+                                   - (ConfigManager.detailPosterLeft ? 32 : 32 + Constants.detailPosterW + 24))
+                            y: _top
+                                ? 64
+                                : ((ConfigManager.detailButtonsFollow === "poster"
+                                    && ConfigManager.detailPosterLeft === _left)
+                                       ? Math.max(24, parent.height - 44 - 24 - height - 16)
+                                       : Math.max(24, parent.height - height - 24))
+                        }
+                        // 按钮槽:follow poster → 海报内侧(左右对称锚距 256,
+                        // 位置用按钮组实际宽回推);follow text → 标题文字外侧
+                        // (标题文字宽 = heroNewTitle.implicitWidth,非文字区
+                        // 边缘)。垂直:follow poster → 沉底;follow text → 与
+                        // 标题同高(文字区 y + 内容偏移 heroNewCol.y)。
+                        Item {
+                            id: buttonSlot
+                            readonly property bool _leftSide: ConfigManager.detailButtonsFollow === "poster"
+                                ? ConfigManager.detailPosterLeft : textSlot._left
+                            readonly property real _ref: ConfigManager.detailButtonsFollow === "poster"
+                                ? 32 + Constants.detailPosterW + 24
+                                : (textSlot._left
+                                       ? textSlot.x + heroNewTitle.implicitWidth + 24
+                                       : parent.width - (textSlot.x + textSlot.width - heroNewTitle.implicitWidth - 24))
+                            // 播放键弹性宽:锚距内放不下时压缩(海报右+follow
+                            // poster 时锚距 256 → 播放键 170,收藏/已看完整
+                            // 可见;下限 120 保可点区域)。左/右锚统一公式,
+                            // 不依赖按钮实际宽(避免绑定循环)。
+                            readonly property real _playW: Math.min(220, Math.max(120,
+                                parent.width - _ref - 16 - 44 - 44 - 20))
+                            x: _leftSide ? _ref : parent.width - _ref - btnRow.width
+                            y: ConfigManager.detailButtonsFollow === "poster"
+                                ? parent.height - 44 - 24
+                                : textSlot.y + heroNewCol.y
+                        }
 
                         Button {
                             anchors.left: parent.left
@@ -644,20 +724,15 @@ Item {
                             onClicked: root.back()
                         }
 
-                        Row {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 32
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 24
-                            spacing: 24
-
-                            // 海报(2:3 竖版,独立前景锚点)
+                            // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
+                            // 决定,内容不再计算坐标)。
                             Rectangle {
                                 width: Constants.detailPosterW
                                 height: Constants.detailPosterH
                                 color: root.surfaceTint
                                 radius: 18
                                 clip: true
+                                anchors.fill: posterSlot
                                 CrossfadeImage {
                                     id: posterFx
                                     anchors.fill: parent
@@ -670,20 +745,11 @@ Item {
                                 }
                             }
 
-                            // hero 文字块:双树滑动揭示。旧树(heroOldTree)内容 =
-                            // 换字前快照,右缘固定、宽度 W→0(从左往右消失);新树
-                            // (heroNewTree)绑当前 detail,左缘固定、宽度 0→W(从
-                            // 左往右出现)。textReveal 单程 1→0 驱动互补宽度,
-                            // opacity 交叉淡化压住透明文字间隙叠影。树内列宽固定
-                            // 显式宽度,容器宽度动画只裁剪不重排(wrapMode 下若
-                            // 直接作用文字宽度会重新换行)。
+                            // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
+                            // 全部由 textSlot 决定(静态锚定,判断在槽内)。
                             Item {
                                 id: heroTextArea
-                                width: Math.max(280, overview.width - Constants.detailPosterW - 32 - 24 - 48)
-                                // 高度取两树列高较大者:首次进入时旧树快照为空(列高 0),
-                                // 只绑 heroOldCol 会把整个文字区裁没(overview 首屏消失);
-                                // 切换时旧树填值,取 max 保证两列都完整显示。
-                                height: Math.max(heroOldCol.height, heroNewCol.height)
+                                anchors.fill: textSlot
 
                                 Item {
                                     id: heroOldTree
@@ -701,6 +767,12 @@ Item {
                                         // 列原点恒 0,裁剪落在列右半(左先消失)。
                                         anchors.right: heroOldTree.right
                                         width: heroTextArea.width
+                                        // 内容垂直:top 预设顶部对齐;bottom 预设
+                                        // 沉底——用户看的是简介文字底缘而非容器下缘,
+                                        // 沉底后简介底缘 = 容器底 = 海报下缘。
+                                        y: (ConfigManager.detailTextPos === "top-left"
+                                            || ConfigManager.detailTextPos === "top-right")
+                                            ? 0 : parent.height - implicitHeight
                                         spacing: 8
                                         Row {
                                             width: parent.width
@@ -712,12 +784,17 @@ Item {
                                                 font.bold: true
                                                 elide: Text.ElideRight
                                                 width: parent.width
+                                                horizontalAlignment: root.heroTextAlign
                                             }
                                         }
                                         AppText {
                                             text: root.heroOldMeta
                                             color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                             font.pixelSize: 14
+                                            // 显式宽 + 对齐跟随:文字区靠右时评分/
+                                            // 时间行右对齐(隐式宽下对齐无效)。
+                                            width: parent.width
+                                            horizontalAlignment: root.heroTextAlign
                                             opacity: text !== "" ? 1 : 0
                                             Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
@@ -729,6 +806,7 @@ Item {
                                             elide: Text.ElideRight
                                             maximumLineCount: 2
                                             width: parent.width
+                                            horizontalAlignment: root.heroTextAlign
                                             opacity: text !== "" ? 1 : 0
                                             Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
@@ -744,23 +822,32 @@ Item {
                                     Column {
                                         id: heroNewCol
                                         width: heroTextArea.width
+                                        // 内容垂直:top 顶部对齐;bottom 沉底(简介
+                                        // 文字底缘 = 海报下缘,同 heroOldCol)。
+                                        y: (ConfigManager.detailTextPos === "top-left"
+                                            || ConfigManager.detailTextPos === "top-right")
+                                            ? 0 : parent.height - implicitHeight
                                         spacing: 8
                                         Row {
                                             width: parent.width
                                             spacing: 12
                                             AppText {
+                                                id: heroNewTitle
                                                 text: root.heroTitle()
                                                 color: Theme.textPrimary
                                                 font.pixelSize: 30
                                                 font.bold: true
                                                 elide: Text.ElideRight
                                                 width: parent.width
+                                                horizontalAlignment: root.heroTextAlign
                                             }
                                         }
                                         AppText {
                                             text: root.metaLine()
                                             color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                             font.pixelSize: 14
+                                            width: parent.width
+                                            horizontalAlignment: root.heroTextAlign
                                             opacity: text !== "" ? 1 : 0
                                             Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
@@ -772,28 +859,36 @@ Item {
                                             elide: Text.ElideRight
                                             maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
                                             width: parent.width
+                                            horizontalAlignment: root.heroTextAlign
                                             opacity: text !== "" ? 1 : 0
                                             Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
                                     }
                                 }
                             }
-                            // 按钮行(播放/收藏/已看)已移至 Hero 底部独立区。
-                        }
+                            // 按钮行(播放/收藏/已看)作为整体独立锚定,
+                            // 水平锚由 btnLeft/btnMargin 驱动(见 root 属性)。
 
                         Row {
-                            // 按钮行独立于 hero 文字区(其宽度公式下限 280 容不下
-                            // 播放220+收藏44+已看44),锚定 hero 底部海报右缘。
-                            anchors.left: parent.left
-                            anchors.leftMargin: 32 + Constants.detailPosterW + 24
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 24
+                            id: btnRow
+                            // 按钮行:位置由 buttonSlot 决定(跟随海报内侧或
+                            // 标题文字外侧;垂直沉底或标题同高)。
+                            // 顺序:按钮组右缘锚定参考点(在参考左侧)时反转
+                            // 为 [已看][收藏][播放],主播放键仍贴参考;左缘
+                            // 锚定时保持 [播放][收藏][已看]。官方 Row
+                            // LayoutMirroring(不 childrenInherit,仅反转子项,
+                            // 按钮内容不镜像)。
+                            LayoutMirroring.enabled: !buttonSlot._leftSide
                             spacing: 10
                             opacity: root.textFade
+                            x: buttonSlot.x
+                            y: buttonSlot.y
                             Button {
                                 id: playBtn
                                 text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
-                                width: 220
+                                // 弹性宽由 buttonSlot._playW 决定(锚距内放不
+                                // 下时压缩,下限 120 保可点区域)。
+                                width: buttonSlot._playW
                                 height: 44
                                 font.pixelSize: 16
                                 onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)

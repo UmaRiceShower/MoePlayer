@@ -17,7 +17,9 @@ namespace {
 constexpr auto kConfigFileName = "config.toml";
 
 // 写回模板:注释对用户手改友好(键/顺序/注释一次生成)。
-QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sortOrder)
+QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sortOrder,
+                   bool detailSidebarLeft, bool detailPosterLeft, const QString &detailTextPos,
+                   const QString &detailButtonsFollow, int detailTextWidth, int detailTextHeight)
 {
     return QStringLiteral(
                "# MoePlayer \u7528\u6237\u914d\u7f6e(TOML)\n"
@@ -30,9 +32,23 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
                "\n"
                "[library]\n"
                "sortBy = \"%2\"      # \u9ed8\u8ba4\u6392\u5e8f\u5b57\u6bb5(Emby SortBy \u503c)\n"
-               "sortOrder = \"%3\"   # \u9ed8\u8ba4\u6392\u5e8f\u65b9\u5411(Ascending/Descending)\n")
+               "sortOrder = \"%3\"   # \u9ed8\u8ba4\u6392\u5e8f\u65b9\u5411(Ascending/Descending)\n"
+               "\n"
+               "[detail]\n"
+               "sidebarLeft = %4   # \u8be6\u60c5\u9875\u9009\u96c6/\u5b63\u680f\u9760\u5de6(true)/\u9760\u53f3(false,\u9ed8\u8ba4)\n"
+               "posterLeft = %5    # \u8be6\u60c5\u9875\u6d77\u62a5\u9760\u5de6(true,\u9ed8\u8ba4)/\u9760\u53f3(false)\n"
+               "textPos = \"%6\"   # \u6807\u9898+\u4ecb\u7ecd\u533a\u4f4d\u7f6e:top-left(\u9ed8\u8ba4)/top-right/bottom-left/bottom-right\n"
+               "buttonsFollow = \"%7\"  # \u64ad\u653e/\u6536\u85cf/\u5df2\u770b\u6309\u94ae\u7ec4\u8ddf\u968f:poster(\u6d77\u62a5\u5185\u4fa7,\u9ed8\u8ba4)/text(\u6807\u9898\u533a\u5916\u4fa7)\n"
+               "textWidth = %8     # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u5bbd\u5ea6(\u4e0d\u5360\u5269\u4f59\u5bbd\u5ea6,\u50cf\u7d20)\n"
+               "textHeight = %9    # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u9ad8\u5ea6(\u4e0d\u968f\u5185\u5bb9\u81ea\u9002\u5e94,\u50cf\u7d20)\n")
         .arg(monetEnabled ? QStringLiteral("true") : QStringLiteral("false"))
-        .arg(sortBy, sortOrder);
+        .arg(sortBy, sortOrder)
+        .arg(detailSidebarLeft ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(detailPosterLeft ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(detailTextPos)
+        .arg(detailButtonsFollow)
+        .arg(detailTextWidth)
+        .arg(detailTextHeight);
 }
 
 } // namespace
@@ -87,6 +103,64 @@ void ConfigManager::setLibrarySortOrder(const QString &v)
     commit();
 }
 
+void ConfigManager::setDetailSidebarLeft(bool v)
+{
+    if (v == m_detailSidebarLeft)
+        return;
+    m_detailSidebarLeft = v;
+    emit detailSidebarLeftChanged();
+    commit();
+}
+
+void ConfigManager::setDetailPosterLeft(bool v)
+{
+    if (v == m_detailPosterLeft)
+        return;
+    m_detailPosterLeft = v;
+    emit detailPosterLeftChanged();
+    commit();
+}
+
+void ConfigManager::setDetailTextPos(const QString &v)
+{
+    // 仅接受四角枚举(非法值忽略,防手误写坏布局)。
+    if (v != QStringLiteral("top-left") && v != QStringLiteral("top-right")
+        && v != QStringLiteral("bottom-left") && v != QStringLiteral("bottom-right"))
+        return;
+    if (v == m_detailTextPos)
+        return;
+    m_detailTextPos = v;
+    emit detailTextPosChanged();
+    commit();
+}
+
+void ConfigManager::setDetailButtonsFollow(const QString &v)
+{
+    if (v == m_detailButtonsFollow)
+        return;
+    m_detailButtonsFollow = v;
+    emit detailButtonsFollowChanged();
+    commit();
+}
+
+void ConfigManager::setDetailTextWidth(int v)
+{
+    if (v == m_detailTextWidth || v <= 0)
+        return;
+    m_detailTextWidth = v;
+    emit detailTextWidthChanged();
+    commit();
+}
+
+void ConfigManager::setDetailTextHeight(int v)
+{
+    if (v == m_detailTextHeight || v <= 0)
+        return;
+    m_detailTextHeight = v;
+    emit detailTextHeightChanged();
+    commit();
+}
+
 void ConfigManager::reload()
 {
     // 文件被删除(用户 rm 重置):重挂监视(文件路径 watcher 已失效),保持当前值。
@@ -102,9 +176,21 @@ void ConfigManager::resetToDefaults()
     m_monetEnabled = true;
     m_librarySortBy = QStringLiteral("DateModified");
     m_librarySortOrder = QStringLiteral("Descending");
+    m_detailSidebarLeft = false;
+    m_detailPosterLeft = true;
+    m_detailTextPos = QStringLiteral("top-left");
+    m_detailButtonsFollow = QStringLiteral("poster");
+    m_detailTextWidth = 280;
+    m_detailTextHeight = 140;
     emit monetEnabledChanged();
     emit librarySortByChanged();
     emit librarySortOrderChanged();
+    emit detailSidebarLeftChanged();
+    emit detailPosterLeftChanged();
+    emit detailTextPosChanged();
+    emit detailButtonsFollowChanged();
+    emit detailTextWidthChanged();
+    emit detailTextHeightChanged();
     commit();
 }
 
@@ -122,11 +208,30 @@ void ConfigManager::loadFromFile()
             m_librarySortBy = QString::fromStdString(library["sortBy"].value_or(m_librarySortBy.toStdString()));
             m_librarySortOrder = QString::fromStdString(library["sortOrder"].value_or(m_librarySortOrder.toStdString()));
         }
+
+        const auto detail = cfg["detail"];
+        if (detail.is_table()) {
+            m_detailSidebarLeft = detail["sidebarLeft"].value_or(m_detailSidebarLeft);
+            m_detailPosterLeft = detail["posterLeft"].value_or(m_detailPosterLeft);
+            m_detailTextPos = QString::fromStdString(detail["textPos"].value_or(m_detailTextPos.toStdString()));
+            if (m_detailTextPos != QStringLiteral("top-left") && m_detailTextPos != QStringLiteral("top-right")
+                && m_detailTextPos != QStringLiteral("bottom-left") && m_detailTextPos != QStringLiteral("bottom-right"))
+                m_detailTextPos = QStringLiteral("top-left"); // 非法值回退默认
+            m_detailButtonsFollow = QString::fromStdString(detail["buttonsFollow"].value_or(m_detailButtonsFollow.toStdString()));
+            m_detailTextWidth = detail["textWidth"].value_or(m_detailTextWidth);
+            m_detailTextHeight = detail["textHeight"].value_or(m_detailTextHeight);
+        }
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
         emit monetEnabledChanged();
         emit librarySortByChanged();
         emit librarySortOrderChanged();
+        emit detailSidebarLeftChanged();
+        emit detailPosterLeftChanged();
+        emit detailTextPosChanged();
+        emit detailButtonsFollowChanged();
+        emit detailTextWidthChanged();
+        emit detailTextHeightChanged();
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
                              << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));
@@ -139,7 +244,10 @@ void ConfigManager::commit()
     m_suppressReload = true;
     QSaveFile file(m_path);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(renderToml(m_monetEnabled, m_librarySortBy, m_librarySortOrder).toUtf8());
+        file.write(renderToml(m_monetEnabled, m_librarySortBy, m_librarySortOrder,
+                              m_detailSidebarLeft, m_detailPosterLeft, m_detailTextPos,
+                              m_detailButtonsFollow, m_detailTextWidth, m_detailTextHeight)
+                       .toUtf8());
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();
     } else {
@@ -152,5 +260,10 @@ void ConfigManager::scheduleReload()
 {
     if (m_suppressReload)
         return;
+    // 编辑器保存/原子替换常更换文件 inode,QFileSystemWatcher 在首次
+    // fileChanged 后即失效(仍监视旧 inode),须重新挂载,否则后续修改
+    // 不再触发(实测:sed -i 一次后热重载即断)。
+    m_watcher->removePath(m_path);
+    m_watcher->addPath(m_path);
     m_reloadTimer->start();
 }
