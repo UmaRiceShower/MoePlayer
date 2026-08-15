@@ -30,6 +30,9 @@ Item {
     readonly property int moveDuration: Constants.serverMoveMs
     readonly property int dragDuration: Constants.serverDragMs
     readonly property int fadeDuration: Constants.serverFadeMs
+    // hover 边框:强调色 50%(预计算一次,避免每帧 Qt.rgba 重建)。
+    readonly property color hoverBorder: Qt.rgba(Theme.accent.r, Theme.accent.g,
+                                                 Theme.accent.b, 0.5)
 
     // 重排状态(FLIP First):模型变化前抓各卡位置快照(id → {x,y}),
     // 新 delegate 按快照就位(消除瞬移 (0,0));dragAccountId 标记被拖卡
@@ -203,7 +206,7 @@ Item {
     // 加号占位卡占内容区第一格,账号卡从第二格起;坐标 clamp 到有效范围,
     // 保证松手必落入某账号位置(全页 DropArea,任何位置都归位)。
     function dropIndex(dx, dy) {
-        const n = AccountManager.accounts.length
+        const n = AccountManager.accountCount
         if (n <= 0)
             return 0
         const stepW = root.cardW + root.gridSpacing
@@ -420,7 +423,7 @@ Item {
         }
         AppText {
             anchors.verticalCenter: parent.verticalCenter
-            text: "· " + AccountManager.accounts.length
+            text: "· " + AccountManager.accountCount
             color: Theme.textMuted
             font.pixelSize: 16
         }
@@ -579,8 +582,7 @@ Item {
                 width: root.cardW
                 height: root.cardH
                 radius: 12
-                color: card.hovered ? Qt.rgba(Theme.surface.r, Theme.surface.g,
-                                              Theme.surface.b, 1) : Theme.surface
+                color: Theme.surface
                 // 拖动中半透明并置顶,松手恢复;放大卡同样置顶避免压边。
                 opacity: Drag.active ? 0.6 : 1.0
                 z: Drag.active ? 10 : (card.expanded ? 9 : 0)
@@ -597,9 +599,7 @@ Item {
                 border.width: card.modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
                 border.color: card.modelData.tokenValid === false ? Theme.danger
                               : (card.dropTarget ? Theme.accent
-                              : (card.hovered ? Qt.rgba(Theme.accent.r, Theme.accent.g,
-                                                        Theme.accent.b, 0.5)
-                                              : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 1)))
+                              : (card.hovered ? root.hoverBorder : Theme.bg))
                 property bool hovered: false
                 property bool dropTarget: false
                 property bool expanded: false

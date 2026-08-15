@@ -81,8 +81,8 @@ Item {
                 root.applyView(root.initialViewId)
             }
         } else {
-            // 无账号/凭据失效:预填默认服务器地址,等待表单直连。
-            serverField.text = SettingsStore.serverUrl
+            // 无账号/凭据失效:显示直连表单(serverField 声明式绑定
+            // SettingsStore.serverUrl 已预填,无需命令式赋值)。
         }
     }
 
@@ -153,8 +153,10 @@ Item {
         const started = AccountManager.addAccount("", serverField.text, userField.text,
                                                   passField.text, true)
         root.busy = started
-        if (started)
+        if (started) {
             statusText.text = "正在登录…"
+            statusText.isError = false
+        }
     }
 
     // 头部:标题 + 连接表单(未连接)/ 媒体库选择(已连接)。
@@ -239,8 +241,10 @@ Item {
 
         AppText {
             id: statusText
+            // 错误态显式状态,不嗅探文案(原 indexOf("失败") 脆弱)。
+            property bool isError: false
             text: ""
-            color: statusText.text.indexOf("失败") >= 0 ? Theme.danger : Theme.textMuted
+            color: statusText.isError ? Theme.danger : Theme.textMuted
         }
     }
 
@@ -341,6 +345,7 @@ Item {
                 return
             statusText.text = "已加载 " + root.im.count + " / "
                               + root.im.totalCount + " 个条目"
+            statusText.isError = false
             root.busy = false
             // 恢复浏览位置:重拉完成后定位到上次离开处(clamp 到可滚范围),
             // 后续触底自动补页。仅消费一次。
@@ -356,6 +361,7 @@ Item {
                 return
             root.busy = false
             statusText.text = "失败：" + message
+            statusText.isError = true
         }
     }
 
@@ -378,6 +384,7 @@ Item {
             } else {
                 root.busy = false
                 statusText.text = "登录失败：" + message
+                statusText.isError = true
             }
         }
     }
