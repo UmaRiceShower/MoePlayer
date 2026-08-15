@@ -526,21 +526,21 @@ Item {
                 target: root
                 property: "textReveal"
                 to: 0
-                duration: 3000
+                duration: Constants.detailTextRevealMs
                 easing.type: Easing.InQuad
             }
             NumberAnimation {
                 target: root
                 property: "oldTextOpacity"
                 to: 0
-                duration: 3000
+                duration: Constants.detailTextRevealMs
                 easing.type: Easing.InQuad
             }
             NumberAnimation {
                 target: root
                 property: "newTextOpacity"
                 to: 1
-                duration: 3000
+                duration: Constants.detailTextRevealMs
                 easing.type: Easing.OutCubic
             }
         }
@@ -729,6 +729,7 @@ Item {
                                             color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                             font.pixelSize: 14
                                             opacity: text !== "" ? 1 : 0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
                                         AppText {
                                             text: root.heroOldOverview
@@ -739,6 +740,7 @@ Item {
                                             maximumLineCount: 2
                                             width: parent.width
                                             opacity: text !== "" ? 1 : 0
+                                            Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
                                     }
                                 }
@@ -799,6 +801,7 @@ Item {
                             spacing: 10
                             opacity: root.textFade
                             Button {
+                                id: playBtn
                                 text: root.detail.type === "Series" ? root.seriesPlayText() : root.playButtonText()
                                 width: 220
                                 height: 44
@@ -812,7 +815,7 @@ Item {
                                     Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
                                 }
                                 contentItem: AppText {
-                                    text: (parent as Button).text
+                                    text: playBtn.text
                                     color: "white"
                                     font.pixelSize: 16
                                     horizontalAlignment: Text.AlignHCenter
@@ -873,6 +876,7 @@ Item {
                                 }
                             }
                             Button {
+                                id: replayBtn
                                 text: "从头播放"
                                 visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
                                 height: 44
@@ -886,7 +890,7 @@ Item {
                                     border.color: root.complementColor
                                 }
                                 contentItem: AppText {
-                                    text: (parent as Button).text
+                                    text: replayBtn.text
                                     font.pixelSize: 14
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -900,7 +904,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.people && root.detail.people.length > 0
-                        opacity: root.textFade * (visible ? 1 : 0)
+                        opacity: root.textFade * visible
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -983,7 +987,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
-                        opacity: root.textFade * (visible ? 1 : 0)
+                        opacity: root.textFade * visible
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -1028,7 +1032,7 @@ Item {
                         width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
                         spacing: 8
                         visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
-                        opacity: root.textFade * (visible ? 1 : 0)
+                        opacity: root.textFade * visible
                         Behavior on opacity { NumberAnimation { duration: 200 } }
 
                         AppText {
@@ -1164,8 +1168,8 @@ Item {
                                 Repeater {
                                     model: 2
                                     AnimatedImage {
-                                        required property var model
-                                        readonly property int digit: model.index === 0
+                                        required property int index
+                                        readonly property int digit: index === 0
                                                                    ? Math.floor(root.seasonCandidate / 10) % 10
                                                                    : root.seasonCandidate % 10
                                         source: "qrc:/counter/" + digit + ".gif"
@@ -1355,11 +1359,6 @@ Item {
                 root.applyDetail(d, false)
             }
         }
-    }
-
-
-    Connections {
-        target: EmbyClient
         function onSeasonsReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return

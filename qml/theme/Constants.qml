@@ -13,6 +13,7 @@ QtObject {
 
     // ---- 详情页(Hero + 右侧选集条) ----
     readonly property int detailHeroH: 400        // Hero 内容区高度(海报/文字/按钮;桌面端随窗口缩放)
+    readonly property int detailTextRevealMs: 3000 // hero 文字滑动揭示动画时长
     readonly property int detailBackdropH: 560    // Hero 背景图总高 = 内容区 + 向下延伸 160(延伸区
                                                   // 经渐变遮罩融入正文底色;只延伸背景,不动内容布局)
     readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
@@ -43,6 +44,16 @@ QtObject {
     // ---- 交互阈值/防抖 ----
     readonly property int dragThresholdCard: 30
     readonly property int dragThresholdBlank: 40
+
+    // ---- 服务器管理卡(ServerManager) ----
+    readonly property int serverCardW: 280
+    readonly property int serverCardH: 150
+    readonly property int serverIconSize: 52
+    readonly property int serverGridSpacing: 16
+    readonly property real serverHoverScale: 1.12
+    readonly property int serverMoveMs: 320
+    readonly property int serverDragMs: 480
+    readonly property int serverFadeMs: 320
     readonly property int searchDebounceMs: 300
     readonly property int episodePushDebounceMs: 500
     readonly property int wheelLogWindowMs: 350 // 滚轮速度记账窗口
@@ -63,5 +74,5 @@ QtObject {
     // ---- 播放回传间隔 / 协议换算 ----
     readonly property int progressReportMs: 10000
     readonly property int pingIntervalMs: 600000
-    readonly property double ticksPerSecond: 1e7 // 100ns ticks → 秒
+    readonly property real ticksPerSecond: 1e7 // 100ns ticks → 秒
 }

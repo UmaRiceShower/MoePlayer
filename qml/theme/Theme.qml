@@ -21,5 +21,7 @@ QtObject {
 
     // 半透明底(卡片角标/快捷按钮)
     readonly property color overlayBg: "#000000aa"
-    readonly property color badgeBg: Qt.rgba(0, 0, 0, 0.6)
+    readonly property color badgeBg: "#99000000" // 黑 60%,与 overlayBg 同 hex 风格
+    // 角标/图标上的纯白文字(显式覆盖场景)。
+    readonly property color textOnBadge: "#ffffff"
 }
