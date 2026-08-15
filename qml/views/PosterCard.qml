@@ -38,9 +38,11 @@ Item {
     property color surfaceTint: Theme.surface
 
     function applyMonet() {
-        // 无条件赋值:取色未完成/失败显示回退色,Grid 回收复用时不会
-        // 残留上一张海报的颜色(早退会导致新卡沿用旧卡取色)。
-        const c = ColorProvider.colors[root.posterId]
+        // 无条件赋值:取色未完成/失败或配置关闭时显示回退色,Grid 回收
+        // 复用时不会残留上一张海报的颜色(早退会导致新卡沿用旧卡取色)。
+        let c = null
+        if (ConfigManager.monetEnabled)
+            c = ColorProvider.colors[root.posterId]
         if (c) {
             root.heroFrom = c.heroFrom
             root.accentColor = c.accent
@@ -59,11 +61,13 @@ Item {
     signal watchedRequested(string itemId, bool played)
     onPosterIdChanged: {
         root.applyMonet()
-        ColorProvider.requestColor(root.posterId)
+        if (ConfigManager.monetEnabled)
+            ColorProvider.requestColor(root.posterId)
     }
     Component.onCompleted: {
         root.applyMonet()
-        ColorProvider.requestColor(root.posterId)
+        if (ConfigManager.monetEnabled)
+            ColorProvider.requestColor(root.posterId)
     }
     Connections {
         target: ColorProvider

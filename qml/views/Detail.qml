@@ -51,7 +51,9 @@ Item {
     property bool isFavorite: false
     // 莫奈取色缓存:单次 map 查找供全部颜色属性复用(原 7 个属性各自重复
     // 求值 pid + map 查找)。本页单卡,绑定重算开销可忽略。
-    readonly property var _monet: ColorProvider.colors[root.detail.posterId || root.posterId] || null
+    readonly property var _monet: ConfigManager.monetEnabled
+                                     ? (ColorProvider.colors[root.detail.posterId || root.posterId] || null)
+                                     : null
     // 海报莫奈取色背景顶色(heroBackdrop 渐变起点);取色未完成/失败回退 surface。
     property color heroFrom: root._monet ? root._monet.heroFrom : Theme.surface
     // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
@@ -226,7 +228,9 @@ Item {
         root.isFavorite = d.isFavorite
         // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
         // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
-        ColorProvider.requestColor(root.detail.posterId || root.posterId)
+        // 配置关闭取色时不请求(colors 无该 id,_monet 已回退主题色)。
+        if (ConfigManager.monetEnabled)
+            ColorProvider.requestColor(root.detail.posterId || root.posterId)
         const c = root.creds()
         // 选集条季列表:剧集自身 / 集详情的父剧。
         // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见

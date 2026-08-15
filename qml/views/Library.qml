@@ -22,8 +22,9 @@ Item {
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
     // 当前服务端排序(DateLastMediaAdded 在 4.9.5 条目级查询报错,不在档位内)。
-    property string currentSortBy: "DateModified"
-    property string currentSortOrder: "Descending"
+    // 默认值来自用户配置(ConfigManager);restore 恢复时会覆盖。
+    property string currentSortBy: ConfigManager.librarySortBy
+    property string currentSortOrder: ConfigManager.librarySortOrder
     property bool busy: false
     // 该服务器的视图/条目模型(浏览绑定,页面生命周期内一次性取引用)。
     property var vm: null
@@ -80,7 +81,14 @@ Item {
                 root.pendingRestoreY = root.restore.contentY || 0
                 root.applyView(root.restore.viewId)
             } else {
+                // 无恢复状态:按配置默认排序(非默认值时下拉须同步到对应档位)。
                 root.applyView(root.initialViewId)
+                for (let i = 0; i < sortOptions.count; ++i) {
+                    if (sortOptions.get(i).key === root.currentSortBy) {
+                        sortSelector.currentIndex = i
+                        break
+                    }
+                }
             }
         } else {
             // 无账号/凭据失效:显示直连表单(serverField 声明式绑定
