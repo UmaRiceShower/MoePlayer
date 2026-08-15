@@ -16,20 +16,20 @@ Item {
     id: root
 
     // 卡片尺寸(与 PosterCard 同风格:圆角 + surface 底)。
-    readonly property int cardW: 280
-    readonly property int cardH: 150
-    readonly property int iconSize: 52
+    readonly property int cardW: Constants.serverCardW
+    readonly property int cardH: Constants.serverCardH
+    readonly property int iconSize: Constants.serverIconSize
     // 网格间距与 hover 放大参数。
-    readonly property int gridSpacing: 16
+    readonly property int gridSpacing: Constants.serverGridSpacing
     // 放大倍数:等比例 scale(宽高同倍),不单独加宽。
-    readonly property real hoverScale: 1.12
+    readonly property real hoverScale: Constants.serverHoverScale
     // 放大后每侧视觉溢出 = 卡宽 × (scale-1)/2;左右邻居各让出该距离(一致)。
     readonly property real expandHalf: root.cardW * (root.hoverScale - 1) / 2
     // 重排动画(水波):让位卡 320ms、被拖卡 1.5 倍时长追赶(480ms);跨行
     // 换行/被拖卡淡入 0.5→1。均 OutCubic 无回弹。
-    readonly property int moveDuration: 320
-    readonly property int dragDuration: 480
-    readonly property int fadeDuration: 320
+    readonly property int moveDuration: Constants.serverMoveMs
+    readonly property int dragDuration: Constants.serverDragMs
+    readonly property int fadeDuration: Constants.serverFadeMs
 
     // 重排状态(FLIP First):模型变化前抓各卡位置快照(id → {x,y}),
     // 新 delegate 按快照就位(消除瞬移 (0,0));dragAccountId 标记被拖卡
@@ -165,7 +165,7 @@ Item {
     // 放置卡片:位置变化时 animate=true 走卡片内部 animateTo(restore=true
     // 用短时复位动画),否则直接赋值。卡片内动画以 id 引用(delegate 内部
     // 合法),外部经函数访问(QML id 不是对象属性,itemAt(i).animX 无法直达)。
-    // fade/duration 仅重排(水波)时使用:跨行卡淡入、被拖卡 330ms 追赶。
+    // fade/duration 仅重排(水波)时使用:跨行卡淡入、被拖卡 480ms 追赶。
     function placeCard(c, x, y, animate, restore, fade, duration) {
         if (animate)
             c.animateTo(x, y, restore, fade, duration)
@@ -202,7 +202,8 @@ Item {
     // 把落点坐标(相对 root,即 DropArea 原点)换算为账号索引。
     // 加号占位卡占内容区第一格,账号卡从第二格起;坐标 clamp 到有效范围,
     // 保证松手必落入某账号位置(全页 DropArea,任何位置都归位)。
-    function dropIndex(dx, dy) {        const n = AccountManager.accounts.length
+    function dropIndex(dx, dy) {
+        const n = AccountManager.accounts.length
         if (n <= 0)
             return 0
         const stepW = root.cardW + root.gridSpacing
@@ -259,7 +260,7 @@ Item {
         passField.text = "" // 不留密码于控件,避免二次读取
     }
 
-    function openIconDialog(id, current, serverUrl, serverDefault) {
+    function openIconDialog(id, current, serverDefault) {
         root.iconAccountId = id
         root.iconServerDefault = serverDefault
         iconUrlField.text = current || ""
@@ -300,7 +301,7 @@ Item {
                                   passField.text.length > 0)
     }
 
-    // 重排动画(被拖卡 330ms)结束后清状态,防后续 hover 挤压误判。
+    // 重排动画(被拖卡 480ms)结束后清状态,防后续 hover 挤压误判。
     Timer {
         id: dragResetTimer
         interval: root.dragDuration + 80
@@ -334,15 +335,15 @@ Item {
         id: cardMenu
         property string accountId: ""
         property string currentIcon: ""
-        property string serverUrl: ""
         property string serverIcon: ""
         MenuItem {
             text: "设置图标…"
             onTriggered: root.openIconDialog(cardMenu.accountId, cardMenu.currentIcon,
-                                             cardMenu.serverUrl, cardMenu.serverIcon)
+                                             cardMenu.serverIcon)
         }
         MenuSeparator {}
         MenuItem {
+            text: "删除"
             onTriggered: {
                 // 删除前抓快照:补位卡逐格前移动画(跨行淡入),被删卡消失。
                 root.snapshotPositions("")

@@ -59,7 +59,7 @@ Item {
         clip: true
 
         // CrossfadeImage:圆角在绘制层裁切(Item::clip 只裁矩形;Rectangle
-        // radius 不影响子项)。静态场景 Canvas 仅绘制一次,无重绘开销。
+        // radius 不影响子项)。duration 0 = delegate 复用瞬时切换,无动画开销。
         CrossfadeImage {
             id: posterImg
             anchors.fill: parent
@@ -198,7 +198,7 @@ Item {
                     text: root.played ? "✓ 已看"
                          : (root.unplayedCount >= 100 ? "99+ 未看"
                             : root.unplayedCount + " 未看")
-                    color: "#ffffff"
+                    color: Theme.textOnBadge
                     font.pixelSize: 12
                 }
             }
@@ -230,7 +230,7 @@ Item {
             background: Rectangle { radius: 15; color: Theme.overlayBg }
             contentItem: AppText {
                 text: root.favorite ? "♥" : "♡"
-                color: root.favorite ? Theme.favorite : "#ffffff"
+                color: root.favorite ? Theme.favorite : Theme.textOnBadge
                 font.pixelSize: 16
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter

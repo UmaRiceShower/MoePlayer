@@ -113,13 +113,13 @@ Item {
         id: fx
         anchors.fill: parent
         z: 2
-        property variant srcOld: ShaderEffectSource {
+        property var srcOld: ShaderEffectSource {
             sourceItem: bottom
             live: true
             textureSize: Qt.size(Math.round(root.width * Screen.devicePixelRatio),
                                  Math.round(root.height * Screen.devicePixelRatio))
         }
-        property variant srcNew: ShaderEffectSource {
+        property var srcNew: ShaderEffectSource {
             sourceItem: top
             live: true
             textureSize: Qt.size(Math.round(root.width * Screen.devicePixelRatio),

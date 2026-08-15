@@ -26,7 +26,7 @@ Item {
                 font.pixelSize: 13
             }
             TextField {
-                width: 480
+                width: parent.width
                 text: SettingsStore.serverUrl
                 onEditingFinished: SettingsStore.serverUrl = text
             }
