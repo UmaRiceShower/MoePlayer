@@ -38,6 +38,7 @@ qt_add_executable(MoePlayer
     src/core/settingsstore.cpp
     src/core/embyclient.cpp
     src/core/accountmanager.cpp
+    src/core/configmanager.cpp
     src/models/colorprovider.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
@@ -101,7 +102,7 @@ qt_add_resources(MoePlayer "counter_assets"
 
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件
 # 的 basename include 惯例记录)才能解析;无同名头文件冲突。
-target_include_directories(MoePlayer PRIVATE src src/core src/models src/playback)
+target_include_directories(MoePlayer PRIVATE src src/core src/models src/playback third_party/tomlplusplus)
 # 应用名/版本单一来源:CMake project() → 编译期宏 → 运行时引用。
 # applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE

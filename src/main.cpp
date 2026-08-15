@@ -10,6 +10,7 @@
 #include <clocale>
 
 #include "core/accountmanager.h"
+#include "core/configmanager.h"
 #include "core/constants.h"
 #include "core/embyclient.h"
 #include "core/settingsstore.h"
@@ -75,8 +76,12 @@ int main(int argc, char *argv[])
     // EmbyClient/AccountManager;ColorProvider 复用 PosterProvider),按官方
     // 推荐用 qmlRegisterSingletonInstance 注入现有实例,不声明 QML_SINGLETON,
     // 避免与自动注册构成双注册。
+    // 用户配置:无依赖,但须随应用启动即初始化(生成/读取 TOML 配置并挂
+    // 热重载监视),不能等 QML 首次引用(惰性)才落盘,故同样显式构造注入。
+    ConfigManager configManager;
     EmbyClient embyClient;
     AccountManager accountManager(&embyClient);
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ConfigManager", &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
     // 海报取色:复用 PosterProvider 加载(实例须在 addImageProvider 前创建,
