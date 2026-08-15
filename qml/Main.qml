@@ -190,20 +190,20 @@ ApplicationWindow {
 
     // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S,搜索 Ctrl+K。
     Shortcut {
-        sequence: "Ctrl+F"
+        sequences: ["Ctrl+F"]
         // pop 到根即返回首页(initialItem);已在首页时无操作。
         onActivated: stackView.pop(null)
     }
     Shortcut {
-        sequence: "Ctrl+O"
+        sequences: ["Ctrl+O"]
         onActivated: stackView.push(serverManagerPage)
     }
     Shortcut {
-        sequence: "Ctrl+S"
+        sequences: ["Ctrl+S"]
         onActivated: stackView.push(settingsPage)
     }
     Shortcut {
-        sequence: "Ctrl+K"
+        sequences: ["Ctrl+K"]
         onActivated: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
     }
 }

@@ -139,7 +139,7 @@ Item {
 
     // Esc 关闭。
     Shortcut {
-        sequence: "Esc"
+        sequences: ["Esc"]
         onActivated: root.close()
     }
 }

@@ -1067,10 +1067,10 @@ Item {
                                         elide: Text.ElideRight
                                     }
                                 }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: root.openItemDetail(similarCard.model.id, similarCard.model.posterId,
-                                                                   similarCard.model.name, root.serverUrl)
+                                // 点击进详情:TapHandler(替代 MouseArea)。
+                                TapHandler {
+                                    onTapped: root.openItemDetail(similarCard.model.id, similarCard.model.posterId,
+                                                                  similarCard.model.name, root.serverUrl)
                                 }
                             }
                         }
@@ -1226,7 +1226,7 @@ Item {
                         height: Constants.detailEpisodeRowH
                         x: 6
                         // hover 放大(基础样式)
-                        scale: mouse.containsMouse ? Constants.detailEpisodeHoverScale : 1.0
+                        scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
                         Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
 
                         Rectangle {
@@ -1235,7 +1235,7 @@ Item {
                             color: episodeItem.model.id === root.itemId
                                    ? Qt.rgba(root.accentColor.r, root.accentColor.g,
                                              root.accentColor.b, 0.75)
-                                   : (mouse.containsMouse || ListView.isCurrentItem) ? root.surfaceTint
+                                   : (episodeHover.hovered || ListView.isCurrentItem) ? root.surfaceTint
                                    : "transparent"
                             Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                         }
@@ -1307,11 +1307,13 @@ Item {
                                 }
                             }
                         }
-                        MouseArea {
-                            id: mouse
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
+                        // 悬停高亮/点击选集:Pointer Handler 组合(替代
+                        // MouseArea hover+click)。
+                        HoverHandler {
+                            id: episodeHover
+                        }
+                        TapHandler {
+                            onTapped: {
                                 // 选集条点集:原地替换(剧集页与集详情页一致,栈深恒为 1)。
                                 root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name)
                             }
