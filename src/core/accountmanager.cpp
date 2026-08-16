@@ -19,6 +19,7 @@
 namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
+const QString kFoldersKey = QStringLiteral("accounts/folders");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
@@ -31,6 +32,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     , m_client(client)
 {
     load();
+    loadFolders();
     loadServerNames();
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
@@ -550,6 +552,177 @@ void AccountManager::moveAccount(const QString &id, int toIndex)
         emit homeRowsReady();
         return;
     }
+}
+
+// ---- 服务器文件夹(分类)----
+// 纯视觉分组:不影响账号列表/首页聚合顺序,只决定服务器管理页的展示
+// 归属。持久化于 QSettings 独立 key(accounts/folders),账号结构不动。
+
+QVariantList AccountManager::folders() const
+{
+    QVariantList out;
+    for (const auto &f : m_folders) {
+        QVariantMap m;
+        m.insert(QLatin1String("id"), f.id);
+        m.insert(QLatin1String("name"), f.name);
+        QVariantList ids;
+        for (const auto &id : f.accountIds)
+            ids.append(id);
+        m.insert(QLatin1String("accountIds"), ids);
+        out.append(m);
+    }
+    return out;
+}
+
+QString AccountManager::addFolder(const QString &name)
+{
+    FolderInfo f;
+    f.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // 空名自动命名:取未占用的"文件夹 N"(N 从 2 起递增,避免与"文件夹 1"
+    // 歧义;首个空名即"文件夹 1")。
+    if (name.trimmed().isEmpty()) {
+        f.name = QStringLiteral("文件夹 1");
+        for (int n = 2;; ++n) {
+            bool taken = false;
+            for (const auto &e : m_folders) {
+                if (e.name == f.name) {
+                    taken = true;
+                    break;
+                }
+            }
+            if (!taken)
+                break;
+            f.name = QStringLiteral("文件夹 %1").arg(n);
+        }
+    } else {
+        f.name = name.trimmed();
+    }
+    m_folders.append(f);
+    saveFolders();
+    emit foldersChanged();
+    return f.id;
+}
+
+void AccountManager::removeFolder(const QString &id)
+{
+    for (int i = 0; i < m_folders.size(); ++i) {
+        if (m_folders.at(i).id != id)
+            continue;
+        m_folders.removeAt(i);
+        saveFolders();
+        emit foldersChanged();
+        return;
+    }
+}
+
+void AccountManager::renameFolder(const QString &id, const QString &name)
+{
+    FolderInfo *f = folderByIdMutable(id);
+    if (!f)
+        return;
+    const QString n = name.trimmed();
+    if (n.isEmpty() || f->name == n)
+        return;
+    f->name = n;
+    saveFolders();
+    emit foldersChanged();
+}
+
+QString AccountManager::folderIdOfAccount(const QString &accountId) const
+{
+    for (const auto &f : m_folders)
+        if (f.accountIds.contains(accountId))
+            return f.id;
+    return QString();
+}
+
+void AccountManager::addAccountToFolder(const QString &folderId, const QString &accountId)
+{
+    FolderInfo *f = folderByIdMutable(folderId);
+    if (!f)
+        return;
+    if (f->accountIds.contains(accountId))
+        return; // 已在目标文件夹:忽略
+    // 在其他文件夹:先移出(一个账号只属于一个文件夹)。
+    for (auto &e : m_folders) {
+        if (e.id == folderId)
+            continue;
+        if (e.accountIds.removeOne(accountId))
+            break;
+    }
+    f->accountIds.append(accountId);
+    saveFolders();
+    emit foldersChanged();
+}
+
+void AccountManager::removeAccountFromFolder(const QString &accountId)
+{
+    for (auto &f : m_folders) {
+        if (f.accountIds.removeOne(accountId)) {
+            saveFolders();
+            emit foldersChanged();
+            return;
+        }
+    }
+}
+
+int AccountManager::folderIndexById(const QString &id) const
+{
+    for (int i = 0; i < m_folders.size(); ++i)
+        if (m_folders.at(i).id == id)
+            return i;
+    return -1;
+}
+
+const AccountManager::FolderInfo *AccountManager::folderById(const QString &id) const
+{
+    const int i = folderIndexById(id);
+    return i >= 0 ? &m_folders.at(i) : nullptr;
+}
+
+AccountManager::FolderInfo *AccountManager::folderByIdMutable(const QString &id)
+{
+    const int i = folderIndexById(id);
+    return i >= 0 ? &m_folders[i] : nullptr;
+}
+
+void AccountManager::loadFolders()
+{
+    const QJsonArray arr =
+        QJsonDocument::fromJson(m_settings.value(kFoldersKey).toString().toUtf8()).array();
+    for (const auto &v : arr) {
+        const QJsonObject o = v.toObject();
+        FolderInfo f;
+        f.id = o.value(QLatin1String("id")).toString();
+        f.name = o.value(QLatin1String("name")).toString();
+        const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
+        for (const auto &id : ids) {
+            const QString aid = id.toString();
+            // 防御:引用已删除账号的成员记录直接丢弃。
+            if (!accountById(aid) || f.accountIds.contains(aid))
+                continue;
+            f.accountIds.append(aid);
+        }
+        if (!f.id.isEmpty())
+            m_folders.append(f);
+    }
+}
+
+void AccountManager::saveFolders()
+{
+    QJsonArray arr;
+    for (const auto &f : m_folders) {
+        QJsonObject o;
+        o.insert(QLatin1String("id"), f.id);
+        o.insert(QLatin1String("name"), f.name);
+        QJsonArray ids;
+        for (const auto &id : f.accountIds)
+            ids.append(id);
+        o.insert(QLatin1String("accountIds"), ids);
+        arr.append(o);
+    }
+    m_settings.setValue(kFoldersKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    m_settings.sync();
 }
 
 // 设置图标即持久化(conf 落盘 + UI 通知),用户无需额外保存。
