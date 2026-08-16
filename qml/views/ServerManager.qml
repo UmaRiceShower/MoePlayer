@@ -72,6 +72,12 @@ Item {
     property string iconAccountId: ""
     property string iconServerDefault: ""
 
+    // ---- 服务器修改浮窗 ----
+    // Ctrl+点击账号卡打开:编辑名称/地址/用户名、设置图标、删除。
+    property bool editOpen: false
+    property string editAccountId: ""
+    property string editError: ""
+
     // ---- 文件夹(分类) ----
     // 已展开的文件夹 id 列表(纯 UI 层状态,不持久化):点击文件夹卡切换,
     // 展开时成员卡显示在文件夹卡后,收起时隐藏。
@@ -441,6 +447,54 @@ Item {
         root.closeFolderDialog()
     }
 
+    // ---- 服务器修改浮窗 ----
+    function openEditDialog(id) {
+        root.editAccountId = id
+        // 预填当前值(名称/地址/用户名)。
+        const acc = AccountManager.accounts.find(a => a.id === id)
+        if (acc) {
+            editNameField.text = acc.name
+            editUrlField.text = acc.serverUrl
+            editUserField.text = acc.userName
+        }
+        root.editError = ""
+        root.editOpen = true
+        editNameField.forceActiveFocus()
+    }
+    function closeEditDialog() {
+        root.editOpen = false
+    }
+    function submitEdit() {
+        const url = editUrlField.text.trim()
+        const user = editUserField.text.trim()
+        if (url === "") {
+            root.editError = "请输入服务器地址"
+            return
+        }
+        if (user === "") {
+            root.editError = "请输入用户名"
+            return
+        }
+        const full = url.indexOf("://") < 0 ? "http://" + url : url
+        // 仅改存储(token/密码保留),保存即落盘并通知 UI。
+        AccountManager.updateAccount(root.editAccountId, editNameField.text.trim(), full, user)
+        root.closeEditDialog()
+    }
+    // 删除:先向服务器发登出(结果忽略),再删本地数据(见
+    // AccountManager.removeAccount),账号卡自动补位。
+    function deleteEditAccount() {
+        root.snapshotPositions("")
+        AccountManager.removeAccount(root.editAccountId)
+        root.closeEditDialog()
+    }
+    // 从修改浮窗打开图标设置(传递当前图标/服务器默认图标)。
+    function openEditIconDialog() {
+        const acc = AccountManager.accounts.find(a => a.id === root.editAccountId)
+        root.openIconDialog(root.editAccountId,
+                            acc ? acc.icon : "",
+                            acc ? acc.serverIcon : "")
+    }
+
     function openAddDialog() {
         root.addOpen = true
         nameField.text = ""
@@ -536,65 +590,12 @@ Item {
         }
     }
 
-    // 卡片右键菜单:设置图标 / 删除(登出服务器 + 删除本地数据)。
-    Menu {
-        id: cardMenu
-        property string accountId: ""
-        property string currentIcon: ""
-        property string serverIcon: ""
-        MenuItem {
-            text: "设置图标…"
-            onTriggered: root.openIconDialog(cardMenu.accountId, cardMenu.currentIcon,
-                                             cardMenu.serverIcon)
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: "删除"
-            onTriggered: {
-                // 删除前抓快照:补位卡逐格前移动画(跨行淡入),被删卡消失。
-                root.snapshotPositions("")
-                AccountManager.removeAccount(cardMenu.accountId)
-            }
-            // 删除:先向服务器发登出(结果忽略),再删本地数据(见
-            // AccountManager.removeAccount),账号卡自动补位。
-            contentItem: AppText {
-                text: "删除"
-                color: Theme.danger
-                font.pixelSize: 14
-            }
-        }
-    }
-
     // 空白区右键菜单:新建文件夹。
     Menu {
         id: blankMenu
         MenuItem {
             text: "新建文件夹…"
             onTriggered: root.openFolderDialog("")
-        }
-    }
-
-    // 文件夹卡右键菜单:重命名 / 删除(成员自动释放回未分组,账号不删)。
-    Menu {
-        id: folderMenu
-        property string folderId: ""
-        MenuItem {
-            text: "重命名…"
-            onTriggered: root.openFolderDialog(folderMenu.folderId)
-        }
-        MenuSeparator {}
-        MenuItem {
-            text: "删除文件夹"
-            // 删除前抓快照:其余卡水波让位,成员卡回到未分组区。
-            onTriggered: {
-                root.snapshotPositions("")
-                AccountManager.removeFolder(folderMenu.folderId)
-            }
-            contentItem: AppText {
-                text: "删除文件夹"
-                color: Theme.danger
-                font.pixelSize: 14
-            }
         }
     }
 
@@ -1099,7 +1100,8 @@ Item {
                     id: dragArea
                     anchors.fill: parent
                     hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // 仅左键:拖动排序 + Ctrl+点击修改;右键不再弹菜单。
+                    acceptedButtons: Qt.LeftButton
                     drag {
                         target: card
                         threshold: 8
@@ -1127,15 +1129,10 @@ Item {
                         root.dragDirty = false // 新一轮拖动,清模型变化标记
                     }
                     onClicked: (mouse) => {
-                        // 右键弹出卡片菜单(设置图标等);左键点击无操作。
-                        if (mouse.button === Qt.RightButton) {
-                            cardMenu.accountId = card.modelData.id
-                            cardMenu.currentIcon = card.modelData.icon
-                            cardMenu.serverIcon = card.modelData.serverIcon
-                            // popup(item, x, y):菜单锚定卡片坐标系,替代
-                            // mapToGlobal 手动定位(官方推荐 API)。
-                            cardMenu.popup(card, mouse.x, mouse.y)
-                        }
+                        // Ctrl+点击打开修改浮窗(名称/地址/用户名/图标/删除);
+                        // 普通点击无操作(拖动排序是主要交互)。
+                        if (mouse.modifiers & Qt.ControlModifier)
+                            root.openEditDialog(card.modelData.id)
                     }
                     onReleased: {
                         // 事件顺序:released 先于 drop 投递。Drag.drop() 在
@@ -1164,8 +1161,9 @@ Item {
         }
 
         // 文件夹卡(同款卡片):点击切换展开/收起(展开时成员卡跟在文件夹
-        // 卡后),右键重命名/删除;拖放目标(账号卡拖入即加入,拖到其上
-        // 高亮)。不参与拖动(无 Drag,布局/落点经 visualSequence 合成)。
+        // 卡后),Ctrl+点击打开修改浮窗(重命名/删除);拖放目标(账号卡
+        // 拖入即加入,拖到其上高亮)。不参与拖动(无 Drag,布局/落点经
+        // visualSequence 合成)。
         Repeater {
             id: folderRepeater
             model: AccountManager.folders
@@ -1376,12 +1374,13 @@ Item {
                     font.pixelSize: 13
                 }
 
-                // 点击切换展开/收起;右键弹出文件夹菜单(重命名/删除)。
+                // 点击切换展开/收起;Ctrl+点击打开修改浮窗(重命名/删除)。
                 MouseArea {
                     id: farea
                     anchors.fill: parent
                     hoverEnabled: true
-                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    // 仅左键:点击展开/收起,Ctrl+点击修改;右键不再弹菜单。
+                    acceptedButtons: Qt.LeftButton
                     onEntered: {
                         fcard.hovered = true
                         fcardHoverTimer.start()
@@ -1392,19 +1391,18 @@ Item {
                         fcard.expanded = false
                     }
                     onPressed: (mouse) => {
-                        // 按住立即收起放大(同账号卡):右键弹菜单/左键点击
-                        // 时卡片不保持放大,两侧正常复位。原缺失:右键
-                        // 文件夹卡会保持放大、两侧持续让位。
+                        // 按住立即收起放大(同账号卡):点击/Ctrl+点击时卡片
+                        // 不保持放大,两侧正常复位。
                         fcardHoverTimer.stop()
                         fcard.expanded = false
                     }
                     onClicked: (mouse) => {
-                        if (mouse.button === Qt.RightButton) {
-                            folderMenu.folderId = fcard.folderId
-                            folderMenu.popup(fcard, mouse.x, mouse.y)
-                        } else {
+                        // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
+                        // 展开/收起成员。
+                        if (mouse.modifiers & Qt.ControlModifier)
+                            root.openFolderDialog(fcard.folderId)
+                        else
                             root.toggleFolder(fcard.folderId)
-                        }
                     }
                 }
             }
@@ -1736,6 +1734,171 @@ Item {
                         width: 120
                         text: "取消"
                         onClicked: root.closeFolderDialog()
+                    }
+                }
+
+                // 删除文件夹(仅重命名场景):成员自动释放回未分组,账号不删。
+                Button {
+                    visible: root.folderEditId !== ""
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 120
+                    text: "删除文件夹"
+                    // 删除前抓快照:其余卡水波让位,成员卡回到未分组区。
+                    onClicked: {
+                        root.snapshotPositions("")
+                        AccountManager.removeFolder(root.folderEditId)
+                        root.closeFolderDialog()
+                    }
+                    contentItem: AppText {
+                        text: "删除文件夹"
+                        color: Theme.danger
+                        font.pixelSize: 14
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 服务器修改浮窗 ----
+    // Ctrl+点击账号卡打开:编辑名称/地址/用户名(保存即 updateAccount,
+    // token/密码保留),设置图标(复用图标浮窗),删除(登出+删本地数据)。
+    // 点击遮罩取消。
+    Rectangle {
+        id: editOverlay
+        visible: root.editOpen
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.55)
+        z: 100
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeEditDialog()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 420
+            height: editCol.implicitHeight + 48
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+
+            // 吞掉点击:卡片空白处不穿透到遮罩误关。
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            Column {
+                id: editCol
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 48
+                spacing: 14
+
+                AppText {
+                    text: "修改服务器"
+                    color: Theme.textPrimary
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+
+                // 名称(可选)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "服务器名称（可选，留空自动获取）"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: editNameField
+                        width: parent.width
+                        onAccepted: editUrlField.forceActiveFocus()
+                    }
+                }
+                // 地址(必填)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "服务器地址"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: editUrlField
+                        width: parent.width
+                        onAccepted: editUserField.forceActiveFocus()
+                    }
+                }
+                // 用户名(必填,回车保存)。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "用户名"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: editUserField
+                        width: parent.width
+                        onAccepted: root.submitEdit()
+                    }
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
+                    Button {
+                        width: 120
+                        text: "保存"
+                        onClicked: root.submitEdit()
+                    }
+                    Button {
+                        width: 120
+                        text: "设置图标…"
+                        onClicked: root.openEditIconDialog()
+                    }
+                    Button {
+                        width: 120
+                        text: "取消"
+                        onClicked: root.closeEditDialog()
+                    }
+                }
+
+                // 失败提示(按钮下方):红色"失败" + 详细原因。
+                Column {
+                    visible: root.editError !== ""
+                    width: parent.width
+                    spacing: 4
+                    AppText {
+                        text: "失败"
+                        color: Theme.danger
+                        font.pixelSize: 15
+                        font.bold: true
+                    }
+                    AppText {
+                        width: parent.width
+                        text: root.editError
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+                }
+
+                // 删除(危险操作):登出 + 删本地数据,账号卡自动补位。
+                Button {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 120
+                    text: "删除服务器"
+                    onClicked: root.deleteEditAccount()
+                    contentItem: AppText {
+                        text: "删除服务器"
+                        color: Theme.danger
+                        font.pixelSize: 14
                     }
                 }
             }
