@@ -42,7 +42,7 @@ public:
         if (m_posters->resolveImageId(m_posterId, &serverUrl, &token, &itemId, &tag, &kind)) {
             const QUrl url = PosterProvider::imageUrl(serverUrl, itemId, tag, kind);
             QString err;
-            const QImage img = PosterProvider::loadImageSync(url, token, &err);
+            const QImage img = PosterProvider::loadImageSync(url, token, &err, m_posters->proxy());
             if (!img.isNull())
                 roles = ColorProvider::extractRoles(img);
         }

@@ -62,7 +62,19 @@ Window {
     MpvItem {
         id: mpv
         anchors.fill: parent
-        Component.onCompleted: load(root.source, root.headers)
+        Component.onCompleted: {
+            // 播放流代理:配置层已限 HTTP(https 目标走 CONNECT 隧道)。
+            mpv.httpProxy = ConfigManager.proxy
+            load(root.source, root.headers)
+        }
+    }
+
+    // 代理热重载:新开的流用新代理(进行中的流不受影响)。
+    Connections {
+        target: ConfigManager
+        function onProxyChanged() {
+            mpv.httpProxy = ConfigManager.proxy
+        }
     }
 
     // 播放状态回传驱动。用 Connections 而非 MpvItem 内联 handler:

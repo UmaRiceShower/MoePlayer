@@ -1,6 +1,8 @@
 #include <QDir>
 #include <QGuiApplication>
 #include <QLockFile>
+#include <QNetworkProxy>
+#include <QNetworkProxyFactory>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QSGRendererInterface>
@@ -23,6 +25,28 @@ namespace {
 // 集中定义便于修改(API 变更递增版本)与 issue 定位。
 constexpr int kQmlModuleMajor = 1;
 constexpr int kQmlModuleMinor = 0;
+
+// 应用级代理工厂:未显式 setProxy 的 QNetworkAccessManager(如 QML Image
+// 直接加载原始 URL 时 QQuickPixmap 的内部管理器,服务器自定义图标等)
+// 统一走配置代理;显式设置代理的(EmbyClient/PosterProvider)不受影响。
+class AppProxyFactory : public QNetworkProxyFactory
+{
+public:
+    explicit AppProxyFactory(ConfigManager *config)
+        : m_config(config)
+    {
+    }
+    QList<QNetworkProxy> queryProxy(const QNetworkProxyQuery &) override
+    {
+        const QNetworkProxy p = m_config->proxyObject();
+        return p.type() == QNetworkProxy::NoProxy
+                   ? QList<QNetworkProxy>{QNetworkProxy::NoProxy}
+                   : QList<QNetworkProxy>{p};
+    }
+
+private:
+    ConfigManager *m_config;
+};
 } // namespace
 
 // qmltyperegistrar 生成的模块注册函数(moeplayer_qmltyperegistrations.cpp),
@@ -80,15 +104,29 @@ int main(int argc, char *argv[])
     // 热重载监视),不能等 QML 首次引用(惰性)才落盘,故同样显式构造注入。
     ConfigManager configManager;
     EmbyClient embyClient;
+    // 全局代理(配置为空 = 直连):先按初始配置应用,热重载(用户手改
+    // config.toml)后经 proxyChanged 再应用,新请求即时生效。
+    embyClient.setProxy(configManager.proxyObject());
+    QObject::connect(&configManager, &ConfigManager::proxyChanged, &embyClient,
+                     [&configManager, &embyClient]() { embyClient.setProxy(configManager.proxyObject()); });
+    // 未显式设代理的 QNAM(QML Image 原始 URL 等)统一走配置代理。
+    QNetworkProxyFactory::setApplicationProxyFactory(new AppProxyFactory(&configManager));
     AccountManager accountManager(&embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ConfigManager", &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
     // 海报取色:复用 PosterProvider 加载(实例须在 addImageProvider 前创建,
     // 且与 PosterProvider 同生命周期,ColorProvider 后台任务经 QPointer 自管)。
-    PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager);
+    PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager, &configManager);
     ColorProvider colorProvider(posterProvider);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
+
+    // 启动日志:当前网络代理(直连/HTTP),便于确认配置生效。
+    const QNetworkProxy appProxy = configManager.proxyObject();
+    if (appProxy.type() == QNetworkProxy::NoProxy)
+        qInfo() << "network proxy: direct";
+    else
+        qInfo() << "network proxy: http" << appProxy.hostName() << appProxy.port();
 
 
     // 首页聚合与启动 token 校验均由 Home 页 onCompleted 触发(见 Home.qml),

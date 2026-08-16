@@ -42,10 +42,16 @@ QStringList requiredHeaders(const QJsonObject &source)
 EmbyClient::EmbyClient(QObject *parent)
     : QObject(parent)
 {
-    // Emby 为局域网服务,不走系统代理(http_proxy);Qt 在 Linux 上不识别 no_proxy,
-    // 且网络管理器会在构造时读取环境代理,故此处显式指定 NoProxy。
+    // 默认直连(配置未接线时);main.cpp 按 ConfigManager.proxy 覆盖。
+    // Qt 在 Linux 上不识别 no_proxy,且网络管理器会在构造时读取环境代理,
+    // 故始终显式指定,避免意外走系统代理(Emby 多为局域网服务)。
     m_nam.setProxy(QNetworkProxy::NoProxy);
     m_nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+}
+
+void EmbyClient::setProxy(const QNetworkProxy &proxy)
+{
+    m_nam.setProxy(proxy); // 对后续新请求生效
 }
 
 QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) const

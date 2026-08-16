@@ -23,6 +23,10 @@ class EmbyClient : public QObject
 public:
     explicit EmbyClient(QObject *parent = nullptr);
 
+    // 全局代理(来自 ConfigManager;NoProxy = 直连,默认)。热重载后
+    // main.cpp 经 proxyChanged 重新调用,作用于之后的所有请求。
+    void setProxy(const QNetworkProxy &proxy);
+
     // 按服务器取模型(首次访问创建);账号删除时用 dropServerModels 清理。
     Q_INVOKABLE MediaItemModel *viewsModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl);

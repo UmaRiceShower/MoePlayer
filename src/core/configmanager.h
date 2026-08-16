@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QNetworkProxy>
 #include <QObject>
 #include <QString>
 
@@ -43,6 +44,11 @@ class ConfigManager : public QObject
     // 详情页标题+介绍区固定宽度/高度(不随内容自适应,不占剩余宽度)。
     Q_PROPERTY(int detailTextWidth READ detailTextWidth WRITE setDetailTextWidth NOTIFY detailTextWidthChanged)
     Q_PROPERTY(int detailTextHeight READ detailTextHeight WRITE setDetailTextHeight NOTIFY detailTextHeightChanged)
+    // 全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,
+    // https 目标走 CONNECT 隧道),可带 user:pass@ 认证。仅支持 HTTP(SOCKS
+    // 不支持:mpv 播放流无 SOCKS;mihomo mixed-port 同端口说 HTTP 方言,
+    // 填 http:// 即可)。非法值忽略回退直连。
+    Q_PROPERTY(QString proxy READ proxy WRITE setProxy NOTIFY proxyChanged)
     // 配置文件绝对路径(只读,供 UI 展示/排障)。
     Q_PROPERTY(QString configPath READ configPath CONSTANT)
 public:
@@ -66,6 +72,11 @@ public:
     void setDetailTextWidth(int v);
     int detailTextHeight() const { return m_detailTextHeight; }
     void setDetailTextHeight(int v);
+    QString proxy() const { return m_proxy; }
+    void setProxy(const QString &v);
+    // 当前代理(按 proxy 串解析;空/非法 = NoProxy)。网络层每请求现取,
+    // 热重载后新请求自动用新代理。
+    QNetworkProxy proxyObject() const;
     QString configPath() const { return m_path; }
 
     // 从磁盘重读配置(丢弃内存未落盘改动;热重载内部也走这里)。
@@ -83,6 +94,7 @@ signals:
     void detailButtonsPosChanged();
     void detailTextWidthChanged();
     void detailTextHeightChanged();
+    void proxyChanged();
 
 private:
     // 解析文件并应用(缺失/类型不合法回退默认值;解析失败仅告警不崩溃)。
@@ -104,6 +116,8 @@ private:
     int m_detailTextWidth = 280;
     // 默认 140:容纳 标题30+元数据14+简介2行40+间距 的内容高(~100)有余。
     int m_detailTextHeight = 140;
+    // 空 = 直连。
+    QString m_proxy;
     QString m_path;
     QFileSystemWatcher *m_watcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
