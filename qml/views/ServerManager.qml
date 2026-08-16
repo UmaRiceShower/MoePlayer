@@ -95,6 +95,9 @@ Item {
     // Repeater delegate 无 id 直达,由 delegate onCompleted/onDestruction
     // 注册注销(模型重建时旧卡先删新卡后建,顺序安全)。
     property var accountCardById: ({})
+    // folderId → 文件夹卡 delegate 映射(同 accountCardById):visualSequence
+    // 按 layoutOrder 查找文件夹卡用,delegate onCompleted/onDestruction 注册注销。
+    property var folderCardById: ({})
     // 重建前各卡 hover/放大状态(key = accountId/folderId)。Repeater 对
     // QVariantList model 变化是整体重建(旧 delegate 销毁、新 delegate
     // 创建);鼠标静止时引擎不会对新卡补发 enter 事件,重建前放大的卡
@@ -120,30 +123,35 @@ Item {
     // (expanded/isNew/accountId/animateTo 等)无法静态推导——这是 Repeater
     // itemAt 回访的固有局限。所有访问均有空值守卫且 delegate 类型恒定,
     // 运行时安全,故屏蔽该误报。
-    // 视觉序列:占位卡(格 0)→ 各文件夹卡(展开时其后紧跟成员卡,成员
-    // 按加入顺序)→ 未分组账号卡(按 accounts 顺序)。布局与拖放落点共用
-    // 此序列,"成员卡跟在文件夹后"与"未分组区顺序 = 账号顺序"两条规则
-    // 在同一处实现,不会各写各的导致错位。
+    // 视觉序列:占位卡(格 0)→ 按 AccountManager.layoutOrder 遍历:文件夹项
+    // = 文件夹卡(展开时其后紧跟成员卡,成员按该文件夹 accountIds 加入顺序),
+    // 账号项 = 未分组账号卡。layoutOrder 是混合视觉顺序(文件夹块 + 未分组
+    // 账号交错),由 C++ 维护(账号视觉顺序展平恒等于 accounts 顺序)。
+    // 布局与拖放落点共用此序列,顺序规则只在 C++ setLayoutOrder 一处实现,
+    // 不会各写各的导致错位。
     function visualSequence() {
         const seq = [plusCard]
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (!f)
-                continue
-            seq.push(f)
-            if (root.isFolderExpanded(f.folderId)) {
-                const ids = f.modelData.accountIds
-                for (let j = 0; j < ids.length; ++j) {
-                    const m = root.accountCardById[ids[j]]
-                    if (m)
-                        seq.push(m)
+        const order = AccountManager.layoutOrder
+        for (let i = 0; i < order.length; ++i) {
+            const e = order[i]
+            if (e.type === "folder") {
+                const f = root.folderCardById[e.id]
+                if (!f)
+                    continue
+                seq.push(f)
+                if (root.isFolderExpanded(e.id)) {
+                    const ids = f.modelData.accountIds
+                    for (let j = 0; j < ids.length; ++j) {
+                        const m = root.accountCardById[ids[j]]
+                        if (m)
+                            seq.push(m)
+                    }
                 }
+            } else {
+                const c = root.accountCardById[e.id]
+                if (c)
+                    seq.push(c)
             }
-        }
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c && AccountManager.folderIdOfAccount(c.accountId) === "")
-                seq.push(c)
         }
         return seq
     }
@@ -244,10 +252,12 @@ Item {
                 root.placeCard(c, x, y, animate, restore, false, 0)
                 continue
             }
-            // 重建后无快照的非新卡(添加场景旧卡):位置不变,静默定位
-            // (1ms 内完成,不渲染 (0,0)),不走 (0,0) 飞行动画。
+            // 无快照的非新卡(添加场景旧卡)或快照为初始位 (0,0) 的卡
+            // (首次展开前成员卡从未布局,位置停初始 0,0,快照抓到 0,0):
+            // 静默定位(同帧直接赋值,不渲染 (0,0)),不走 (0,0) 飞行动画。
             const key = c.accountId || c.folderId
-            if (!root.posSnapshot[key]) {
+            const p0 = root.posSnapshot[key]
+            if (!p0 || (p0.x === 0 && p0.y === 0)) {
                 c.x = x
                 c.y = y
                 continue
@@ -408,15 +418,21 @@ Item {
         // (重登/添加触发 accountsChanged),旧卡已销毁,访问其属性会触发
         // 引擎 internal error。
         if (root.pressCardType === "folder") {
-            // 文件夹拖动:目标为另一文件夹卡 = 排序(高亮);账号卡/空白
-            // 不预高亮(排序在松手时生效,与账号卡"拖出文件夹"同风格)。
+            // 文件夹拖动:目标为另一文件夹卡 = 排序;账号卡(未分组或
+            // 其他文件夹成员)= 跨类排序——均高亮(与账号拖动同款落点
+            // 高亮)。自己的成员不高亮(无操作)。
             if (AccountManager.folders.findIndex(f => f.id === root.pressCardId) < 0)
                 return
             const t = root.dropTargetCard(drop.x, drop.y)
             if (!t || !t.hit)
                 return
-            if (t.card.folderId && t.card.folderId !== root.pressCardId)
-                t.card.dropTarget = true
+            const c = t.card
+            if (c.folderId) {
+                if (c.folderId !== root.pressCardId)
+                    c.dropTarget = true
+            } else if (c.accountId && AccountManager.folderIdOfAccount(c.accountId) !== root.pressCardId) {
+                c.dropTarget = true
+            }
             return
         }
         if (AccountManager.accounts.findIndex(a => a.id === root.pressCardId) < 0)
@@ -453,6 +469,26 @@ Item {
                 break
             }
         }
+    }
+
+    // 跨类排序统一入口:把视觉元素(type/id)移到 beforeType/beforeId 之前
+    // (移除后插入),提交 AccountManager.setLayoutOrder 统一规范化 + 重排
+    // accounts/folders + 持久化。beforeType 空 = 移到最前(占位卡格位);
+    // 目标不在序列中(理论不可达,防御)= 移到末尾。
+    function moveLayoutElement(type, id, beforeType, beforeId) {
+        const order = JSON.parse(JSON.stringify(AccountManager.layoutOrder))
+        const from = order.findIndex(e => e.type === type && e.id === id)
+        if (from < 0)
+            return
+        order.splice(from, 1)
+        let to = 0
+        if (beforeType !== "") {
+            to = order.findIndex(e => e.type === beforeType && e.id === beforeId)
+            if (to < 0)
+                to = order.length
+        }
+        order.splice(to, 0, { type: type, id: id })
+        AccountManager.setLayoutOrder(order)
     }
     // qmllint enable missing-property
 
@@ -707,31 +743,40 @@ Item {
                     root.returnFolderToPress(fId)
                     return
                 }
-                // 落点 → 目标文件夹列表索引(视觉序列元素分类):
-                // - folder 卡(含兜底命中的自身位)→ 该 folder 索引
-                // - 账号卡:展开成员 → 所属 folder 索引;未分组账号 → 无操作
-                // - 占位卡(格 0,序列首)→ 最前(索引 0)
+                // 落点分类(视觉序列元素):
+                // - folder 卡 / 展开成员卡 → 目标 folder
+                // - 未分组账号卡 → 目标账号(跨类:文件夹插到该账号项前)
+                // - 占位卡(格 0)→ 最前
                 const tc = t.card
-                let toIdx = -1
-                if (tc.folderId) {
-                    toIdx = AccountManager.folders.findIndex(f => f.id === tc.folderId)
-                } else if (tc.accountId) {
-                    const memFolder = AccountManager.folderIdOfAccount(tc.accountId)
-                    if (memFolder !== "")
-                        toIdx = AccountManager.folders.findIndex(f => f.id === memFolder)
-                } else {
-                    toIdx = 0
+                let targetFolder = ""
+                let targetAccount = ""
+                if (tc.folderId)
+                    targetFolder = tc.folderId
+                else if (tc.accountId) {
+                    targetAccount = tc.accountId
+                    targetFolder = AccountManager.folderIdOfAccount(tc.accountId)
                 }
-                const fromIdx = AccountManager.folders.findIndex(f => f.id === fId)
-                if (toIdx < 0 || toIdx === fromIdx) {
-                    // 拖到未分组区/自身位:无操作,归位(模型未变,卡存活)。
+                if (targetFolder === fId) {
+                    // 拖回自身/自身成员附近:无操作,归位(模型未变,卡存活)。
                     root.returnFolderToPress(fId)
                     return
                 }
-                // 快照在模型变化前抓(folder 卡此刻 x/y 已是拖动位置,FLIP
-                // First),moveFolder → foldersChanged 重建后按快照复位水波。
+                if (targetFolder !== "") {
+                    // 排序:文件夹插到目标 folder 项前(hit=true 命中另一
+                    // 文件夹卡,或 hit=false 兜底落在 folder 块格位)。
+                    root.snapshotPositions(fId)
+                    root.moveLayoutElement("folder", fId, "folder", targetFolder)
+                    return
+                }
+                if (targetAccount !== "") {
+                    // 未分组账号位:文件夹插到该账号项前(跨类排序)。
+                    root.snapshotPositions(fId)
+                    root.moveLayoutElement("folder", fId, "account", targetAccount)
+                    return
+                }
+                // 占位卡位(序列首):移到最前。
                 root.snapshotPositions(fId)
-                AccountManager.moveFolder(fId, toIdx)
+                root.moveLayoutElement("folder", fId, "", "")
                 return
             }
             const fromId = root.pressCardId
@@ -743,9 +788,11 @@ Item {
                 return
             }
             const fromFolder = AccountManager.folderIdOfAccount(fromId)
-            // 纯空白落点(未命中任何卡):文件夹成员 = 拖出文件夹(移出后
-            // 回到未分组区,位置由重排决定);未分组账号 = 按兜底位排序
-            // (保持"任何位置松手都归位"语义)。
+            // 纯空白落点(未命中任何卡):恢复原判断方式——文件夹成员 =
+            // 拖出文件夹(移出后回到未分组区,位置由重排决定 = 序列末尾);
+            // 未分组账号 = 按兜底位排序(仅账号卡格位有意义);命中文件夹
+            // 块/占位卡格位 = 无操作归位(账号不跨类排序,只有文件夹可
+            // 拖到账号位置)。
             if (!t.hit) {
                 const bc = t.card
                 if (fromFolder !== "") {
@@ -753,7 +800,7 @@ Item {
                     AccountManager.removeAccountFromFolder(fromId)
                 } else if (bc && bc.accountId && fromId !== bc.accountId) {
                     root.snapshotPositions(fromId)
-                    AccountManager.moveAccount(fromId, AccountManager.accounts.findIndex(a => a.id === bc.accountId))
+                    root.moveLayoutElement("account", fromId, "account", bc.accountId)
                 } else {
                     root.returnToPress(fromId)
                 }
@@ -761,10 +808,10 @@ Item {
             }
             const tc = t.card
             if (tc.folderId !== undefined && tc.folderId !== "") {
-                // 命中文件夹卡:加入该文件夹(已在其中则拖回原位)。
-                // 快照在模型变化前抓(被拖卡此刻 x/y 已是拖动位置,FLIP
-                // First),foldersChanged 重建文件夹卡后按快照复位,成员卡
-                // 从拖动位置直接动画到文件夹后(无"先回原位"中间态)。
+                // 命中文件夹卡(矩形内 = "上方"):加入该文件夹(已在其中
+                // 则拖回原位)。快照在模型变化前抓(被拖卡此刻 x/y 已是
+                // 拖动位置,FLIP First),foldersChanged 重建文件夹卡后按
+                // 快照复位,成员卡从拖动位置直接动画到文件夹后。
                 if (fromFolder !== tc.folderId) {
                     root.snapshotPositions(fromId)
                     AccountManager.addAccountToFolder(tc.folderId, fromId)
@@ -774,12 +821,12 @@ Item {
                 return
             }
             // 命中账号卡:按源/目标归属执行——同上下文(未分组↔未分组)走
-            // 原有排序;同文件夹成员间无操作;跨上下文为加入/转移/移出。
+            // 排序;同文件夹成员间无操作;跨上下文为加入/转移/移出。
             const toFolder = AccountManager.folderIdOfAccount(tc.accountId)
             if (fromFolder === toFolder) {
                 if (fromFolder === "" && fromId !== tc.accountId) {
                     root.snapshotPositions(fromId)
-                    AccountManager.moveAccount(fromId, AccountManager.accounts.findIndex(a => a.id === tc.accountId))
+                    root.moveLayoutElement("account", fromId, "account", tc.accountId)
                 } else {
                     root.returnToPress(fromId)
                 }
@@ -790,12 +837,10 @@ Item {
                 root.snapshotPositions(fromId)
                 AccountManager.addAccountToFolder(toFolder, fromId)
             } else {
-                // 从文件夹拖到未分组区:移出文件夹 + 按目标位排序(账号
-                // 顺序不变,移出后再 moveAccount 落到目标账号处)。
-                const toIdx = AccountManager.accounts.findIndex(a => a.id === tc.accountId)
+                // 从文件夹拖到未分组账号卡:移出 + 落到该账号前。
                 root.snapshotPositions(fromId)
                 AccountManager.removeAccountFromFolder(fromId)
-                AccountManager.moveAccount(fromId, toIdx)
+                root.moveLayoutElement("account", fromId, "account", tc.accountId)
             }
         }
         // qmllint enable missing-property
@@ -1321,9 +1366,10 @@ Item {
                     return col !== "" ? col : Theme.surface
                 }
                 // 放大卡置顶避免压边;拖动中半透明并置顶(与账号卡一致)。
-                // 文件夹卡可拖动排序:拖动 = 调整文件夹排列顺序(见 onDropped
-                // 的 pressCardType==="folder" 分支);点击展开/收起不受影响
-                // (drag.threshold 保证未拖动的按下-释放仍为 click)。
+                // 文件夹卡可拖动排序(跨类:可插到未分组账号项前,见
+                // onDropped 的 pressCardType==="folder" 分支与
+                // moveLayoutElement);点击展开/收起不受影响(drag.threshold
+                // 保证未拖动的按下-释放仍为 click)。
                 opacity: Drag.active ? 0.6 : 1.0
                 z: Drag.active ? 10 : (fcard.expanded ? 9 : 0)
                 scale: fcard.expanded ? root.hoverScale : 1.0
@@ -1429,15 +1475,19 @@ Item {
                     easing.type: Easing.OutCubic
                 }
 
-                // 销毁前停掉所有动画(同账号卡:target 随 delegate 销毁)。
+                // 销毁前停掉所有动画并注销映射(同账号卡:动画 target 随
+                // delegate 销毁;映射不注销会残留悬空引用)。
                 Component.onDestruction: {
                     fcardAnimX.stop()
                     fcardAnimY.stop()
                     fcardAnimXBack.stop()
                     fcardAnimYBack.stop()
                     fcardOpacityAnim.stop()
+                    delete root.folderCardById[fcard.folderId]
                 }
                 Component.onCompleted: {
+                    // 注册到 id → 卡映射(visualSequence 按 layoutOrder 查找)。
+                    root.folderCardById[fcard.folderId] = fcard
                     // 重建前该卡 hover 放大中(鼠标未动):立即恢复放大,
                     // 避免"放大消失→延迟重现"两段挤开。鼠标移开时
                     // onExited 正常收起,不会残留。

@@ -23,6 +23,13 @@ class AccountManager : public QObject
     // 每项 {id, name, accountIds:[账号id按加入顺序]}。成员卡展开时跟在
     // 文件夹卡后,收起时隐藏。持久化于 QSettings(accounts/folders)。
     Q_PROPERTY(QVariantList folders READ folders NOTIFY foldersChanged)
+    // 管理页视觉顺序(混合序列):顶层元素 = 文件夹块 + 未分组账号,
+    // 每项 {type: "folder"|"account", id};成员账号跟随所属文件夹块
+    // (顺序 = 该文件夹 accountIds 加入顺序),不在序列中。顺序即管理页
+    // 展示顺序,持久化于 QSettings(accounts/layoutOrder);账号视觉顺序
+    // (展平:各文件夹块成员 + 未分组账号)恒等于 accounts 顺序,首页
+    // 聚合与视觉一致。
+    Q_PROPERTY(QVariantList layoutOrder READ layoutOrder NOTIFY layoutOrderChanged)
     // 首页聚合行:所有账号的媒体库按账号顺序排列,每行含
     // {accountId, serverUrl, serverName, viewName, posterId, items}。
     Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReady)
@@ -33,6 +40,7 @@ public:
     int accountCount() const { return m_accounts.size(); }
     QVariantList homeRows() const { return m_homeRows; }
     QVariantList folders() const;
+    QVariantList layoutOrder() const { return m_layoutOrder; }
 
     // 是否已保存任何账号。
     Q_INVOKABLE bool hasAccounts() const;
@@ -65,6 +73,10 @@ public:
     Q_INVOKABLE void moveAccountDown(const QString &id);
     // 账号拖动排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
     Q_INVOKABLE void moveAccount(const QString &id, int toIndex);
+    // 提交新的管理页视觉顺序(跨类排序统一入口):规范化(过滤未知/
+    // 重复、成员不占位、缺失补全)后按序重排文件夹与账号(首页聚合
+    // 跟随视觉),持久化并发信号。
+    Q_INVOKABLE void setLayoutOrder(const QVariantList &order);
 
     // 设置账号自定义图标(图片 URL;空串 = 恢复名称首字)。
     // 立即持久化并通知 UI,无需额外保存操作。
@@ -105,6 +117,7 @@ public:
 signals:
     void accountsChanged();
     void foldersChanged();
+    void layoutOrderChanged();
     // 登录/切换结果:ok=false 时 message 为失败原因。
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
@@ -152,6 +165,21 @@ private:
     // 文件夹读写(独立 key,账号结构不动)。
     void loadFolders();
     void saveFolders();
+    // 视觉顺序读写(accounts/layoutOrder,见 layoutOrder 属性)。
+    void loadLayoutOrder();
+    void persistLayoutOrder();
+    // 展平视觉账号顺序:遍历 layoutOrder,folder 项 → 其成员(按
+    // accountIds 加入顺序),account 项 → 该账号。与 accounts 顺序
+    // 恒一致(首页聚合跟随视觉)。
+    QStringList visualAccountOrder(const QVariantList &order) const;
+    // 按 layoutOrder 的文件夹顺序重排 m_folders,返回是否变化。
+    bool reorderFoldersToLayout(const QVariantList &order);
+    // 按展平视觉账号顺序重排 m_accounts,返回是否变化(仅顺序,不动数据)。
+    bool reorderAccountsToVisual(const QVariantList &order);
+    // 从 layoutOrder 移除指定项(结构变化维护:账号进文件夹不占位)。
+    void removeFromLayoutOrder(const QString &type, const QString &id);
+    // 构造 {type, id} 项。
+    static QVariantMap makeLayoutEntry(const QString &type, const QString &id);
     const FolderInfo *folderById(const QString &id) const;
     FolderInfo *folderByIdMutable(const QString &id);
     int folderIndexById(const QString &id) const;
@@ -164,6 +192,7 @@ private:
     QSettings m_settings;
     QList<AccountInfo> m_accounts;
     QList<FolderInfo> m_folders;
+    QVariantList m_layoutOrder; // 规范化后的视觉顺序 [{type, id}](见属性注释)
     // 待保存的登录(正在走 EmbyClient.login 的账号)。
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。

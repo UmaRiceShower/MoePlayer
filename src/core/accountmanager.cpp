@@ -21,6 +21,7 @@ namespace {
 // QSettings 键。
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kFoldersKey = QStringLiteral("accounts/folders");
+const QString kLayoutOrderKey = QStringLiteral("accounts/layoutOrder");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
@@ -47,6 +48,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
 {
     load();
     loadFolders();
+    loadLayoutOrder();
     loadServerNames();
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
@@ -88,6 +90,10 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                     *it = acc;
                 } else {
                     m_accounts.append(acc);
+                    // 新账号进入视觉顺序(未分组,追加尾部;更新已有账号
+                    // 时 id 不变,不重复追加)。
+                    m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), acc.id));
+                    persistLayoutOrder();
                 }
                 save();
                 emit accountsChanged();
@@ -514,58 +520,80 @@ QString AccountManager::tokenForServer(const QString &serverUrl) const
     return QString();
 }
 
+// 账号排序统一委托 setLayoutOrder(单一通道):账号项(未分组账号)移到
+// 账号项序列 toIndex 位,规范化后统一重排 accounts/folders 并持久化,
+// "展平视觉账号顺序 == accounts 顺序"不变量任何时刻成立。QML 拖动
+// 排序直接调 setLayoutOrder(moveLayoutElement),moveAccount* 保留供
+// 外部索引式调用(toIndex 为账号项序列索引)。
+void AccountManager::moveAccount(const QString &id, int toIndex)
+{
+    int acctCount = 0;
+    for (const auto &v : m_layoutOrder)
+        if (v.toMap().value(QLatin1String("type")).toString() == QLatin1String("account"))
+            ++acctCount;
+    if (acctCount < 2)
+        return;
+    toIndex = qBound(0, toIndex, acctCount - 1);
+    QVariantList order;
+    int seen = 0;
+    bool moved = false;
+    for (const auto &v : m_layoutOrder) {
+        const QVariantMap m = v.toMap();
+        const bool isAcct = m.value(QLatin1String("type")).toString() == QLatin1String("account");
+        if (isAcct && m.value(QLatin1String("id")).toString() == id)
+            continue; // 目标元素:移除,稍后插入
+        if (isAcct) {
+            if (!moved && seen == toIndex) {
+                order.append(makeLayoutEntry(QLatin1String("account"), id));
+                moved = true;
+            }
+            order.append(v);
+            ++seen;
+        } else {
+            order.append(v);
+        }
+    }
+    if (!moved)
+        order.append(makeLayoutEntry(QLatin1String("account"), id));
+    setLayoutOrder(order);
+}
+
 void AccountManager::moveAccountUp(const QString &id)
 {
-    for (int i = 1; i < m_accounts.size(); ++i) {
-        if (m_accounts.at(i).id != id)
+    // 账号项序列中 id 的位置 → 前移一位。
+    int pos = -1;
+    int seen = 0;
+    for (const auto &v : m_layoutOrder) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QLatin1String("type")).toString() != QLatin1String("account"))
             continue;
-        std::swap(m_accounts[i], m_accounts[i - 1]);
-        reorderHomeRows(); // 本地重排,不重拉网络(见 moveAccount)
-        save();
-        emit accountsChanged();
-        emit homeRowsReady();
-        return;
+        if (m.value(QLatin1String("id")).toString() == id) {
+            pos = seen;
+            break;
+        }
+        ++seen;
     }
+    if (pos > 0)
+        moveAccount(id, pos - 1);
 }
 
 void AccountManager::moveAccountDown(const QString &id)
 {
-    for (int i = 0; i + 1 < m_accounts.size(); ++i) {
-        if (m_accounts.at(i).id != id)
+    // 账号项序列中 id 的位置 → 后移一位。
+    int pos = -1;
+    int seen = 0;
+    int total = 0;
+    for (const auto &v : m_layoutOrder) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QLatin1String("type")).toString() != QLatin1String("account"))
             continue;
-        std::swap(m_accounts[i], m_accounts[i + 1]);
-        reorderHomeRows(); // 本地重排,不重拉网络(见 moveAccount)
-        save();
-        emit accountsChanged();
-        emit homeRowsReady();
-        return;
+        if (m.value(QLatin1String("id")).toString() == id)
+            pos = seen;
+        ++seen;
+        ++total;
     }
-}
-
-// 拖动排序:从当前位置移除后插入到 toIndex(稳定移动,其余账号顺移)。
-// 与 moveAccountUp/Down 的相邻交换不同,拖动可跨任意距离。
-void AccountManager::moveAccount(const QString &id, int toIndex)
-{
-    const int n = m_accounts.size();
-    if (n < 2)
-        return;
-    toIndex = qBound(0, toIndex, n - 1);
-    for (int i = 0; i < n; ++i) {
-        if (m_accounts.at(i).id != id)
-            continue;
-        if (i == toIndex)
-            return;
-        const AccountInfo a = m_accounts.takeAt(i);
-        m_accounts.insert(toIndex, a);
-        // 首页聚合行按新账号顺序本地重排:拖拽只改顺序,数据未变,不
-        // 重拉网络——否则会撞上启动重登中的 token 失效,401 触发连锁
-        // 重登,并导致首页反复重建。
-        reorderHomeRows();
-        save();
-        emit accountsChanged();
-        emit homeRowsReady();
-        return;
-    }
+    if (pos >= 0 && pos + 1 < total)
+        moveAccount(id, pos + 1);
 }
 
 // ---- 服务器文件夹(分类)----
@@ -587,6 +615,177 @@ QVariantList AccountManager::folders() const
         out.append(m);
     }
     return out;
+}
+
+// ---- 视觉顺序(混合序列)----
+// 顶层元素 = 文件夹块 + 未分组账号,顺序即管理页展示顺序。账号视觉
+// 顺序(展平)恒等于 accounts 顺序:任何重排同步 accounts 顺序,首页
+// 聚合(reorderHomeRows)跟随视觉,不重拉网络。
+
+QVariantMap AccountManager::makeLayoutEntry(const QString &type, const QString &id)
+{
+    QVariantMap m;
+    m.insert(QLatin1String("type"), type);
+    m.insert(QLatin1String("id"), id);
+    return m;
+}
+
+QStringList AccountManager::visualAccountOrder(const QVariantList &order) const
+{
+    QStringList out;
+    for (const auto &v : order) {
+        const QVariantMap m = v.toMap();
+        const QString type = m.value(QLatin1String("type")).toString();
+        if (type == QLatin1String("folder")) {
+            const auto *f = folderById(m.value(QLatin1String("id")).toString());
+            if (f)
+                out.append(f->accountIds);
+        } else if (type == QLatin1String("account")) {
+            out.append(m.value(QLatin1String("id")).toString());
+        }
+    }
+    return out;
+}
+
+bool AccountManager::reorderFoldersToLayout(const QVariantList &order)
+{
+    QList<FolderInfo> reordered;
+    for (const auto &v : order) {
+        const QVariantMap m = v.toMap();
+        if (m.value(QLatin1String("type")).toString() != QLatin1String("folder"))
+            continue;
+        const auto *f = folderById(m.value(QLatin1String("id")).toString());
+        if (f)
+            reordered.append(*f);
+    }
+    bool changed = reordered.size() != m_folders.size();
+    if (!changed) {
+        for (int i = 0; i < m_folders.size(); ++i)
+            if (m_folders.at(i).id != reordered.at(i).id) {
+                changed = true;
+                break;
+            }
+    }
+    if (changed)
+        m_folders = reordered;
+    return changed;
+}
+
+bool AccountManager::reorderAccountsToVisual(const QVariantList &order)
+{
+    const QStringList visual = visualAccountOrder(order);
+    bool changed = visual.size() != m_accounts.size();
+    if (!changed) {
+        for (int i = 0; i < m_accounts.size(); ++i)
+            if (m_accounts.at(i).id != visual.at(i)) {
+                changed = true;
+                break;
+            }
+    }
+    if (changed) {
+        QList<AccountInfo> reordered;
+        reordered.reserve(visual.size());
+        for (const auto &id : visual)
+            reordered.append(*accountById(id));
+        m_accounts = reordered;
+    }
+    return changed;
+}
+
+void AccountManager::setLayoutOrder(const QVariantList &order)
+{
+    // 1. 过滤:未知/重复项丢弃;成员账号不占视觉位(跟随所属文件夹块)。
+    QVariantList cleaned;
+    QSet<QString> seen;
+    auto push = [&](const QString &type, const QString &id) {
+        const QString key = type + QLatin1Char(':') + id;
+        if (seen.contains(key))
+            return;
+        seen.insert(key);
+        cleaned.append(makeLayoutEntry(type, id));
+    };
+    for (const auto &v : order) {
+        const QVariantMap m = v.toMap();
+        const QString type = m.value(QLatin1String("type")).toString();
+        const QString id = m.value(QLatin1String("id")).toString();
+        if (type == QLatin1String("folder")) {
+            if (folderIndexById(id) >= 0)
+                push(type, id);
+        } else if (type == QLatin1String("account")) {
+            if (accountById(id) && folderIdOfAccount(id).isEmpty())
+                push(type, id);
+        }
+    }
+    // 2. 补全:未出现的文件夹(现顺序)与未分组账号(accounts 顺序)追加尾部。
+    for (const auto &f : m_folders)
+        push(QLatin1String("folder"), f.id);
+    for (const auto &a : m_accounts)
+        if (folderIdOfAccount(a.id).isEmpty())
+            push(QLatin1String("account"), a.id);
+
+    // 3. 按序重排文件夹与账号(仅顺序,不动数据)。
+    const bool foldersReordered = reorderFoldersToLayout(cleaned);
+    const bool accountsReordered = reorderAccountsToVisual(cleaned);
+    m_layoutOrder = cleaned;
+    persistLayoutOrder();
+    if (foldersReordered) {
+        saveFolders();
+        emit foldersChanged();
+    }
+    if (accountsReordered) {
+        reorderHomeRows();
+        save();
+        emit accountsChanged();
+        emit homeRowsReady(); // 首页聚合行顺序已变,通知 UI 重建
+    }
+    emit layoutOrderChanged();
+}
+
+void AccountManager::loadLayoutOrder()
+{
+    // 旧数据无 key → 合成默认(全部文件夹 + 全部未分组账号按 accounts
+    // 顺序),与升级前视觉一致;有 key → 读入经 setLayoutOrder 规范化
+    // (过滤已删账号/文件夹、重复项、成员账号项,补全缺失),持久化结果。
+    QVariantList order;
+    const QString raw = m_settings.value(kLayoutOrderKey).toString();
+    if (!raw.isEmpty()) {
+        const QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
+        for (const auto &v : arr) {
+            const QJsonObject o = v.toObject();
+            const QString type = o.value(QLatin1String("type")).toString();
+            const QString id = o.value(QLatin1String("id")).toString();
+            if (type == QLatin1String("folder") || type == QLatin1String("account"))
+                order.append(makeLayoutEntry(type, id));
+        }
+    }
+    setLayoutOrder(order);
+}
+
+void AccountManager::persistLayoutOrder()
+{
+    QJsonArray arr;
+    for (const auto &v : m_layoutOrder) {
+        const QVariantMap m = v.toMap();
+        QJsonObject o;
+        o.insert(QLatin1String("type"), m.value(QLatin1String("type")).toString());
+        o.insert(QLatin1String("id"), m.value(QLatin1String("id")).toString());
+        arr.append(o);
+    }
+    m_settings.setValue(kLayoutOrderKey,
+                        QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
+    m_settings.sync();
+}
+
+void AccountManager::removeFromLayoutOrder(const QString &type, const QString &id)
+{
+    for (int i = 0; i < m_layoutOrder.size(); ++i) {
+        const QVariantMap m = m_layoutOrder.at(i).toMap();
+        if (m.value(QLatin1String("type")).toString() == type
+            && m.value(QLatin1String("id")).toString() == id) {
+            m_layoutOrder.removeAt(i);
+            return;
+        }
+    }
 }
 
 QString AccountManager::addFolder(const QString &name, const QString &color)
@@ -618,6 +817,8 @@ QString AccountManager::addFolder(const QString &name, const QString &color)
         f.name = name.trimmed();
     }
     m_folders.append(f);
+    m_layoutOrder.append(makeLayoutEntry(QLatin1String("folder"), f.id));
+    persistLayoutOrder();
     saveFolders();
     emit foldersChanged();
     return f.id;
@@ -628,8 +829,33 @@ void AccountManager::removeFolder(const QString &id)
     for (int i = 0; i < m_folders.size(); ++i) {
         if (m_folders.at(i).id != id)
             continue;
+        const QStringList members = m_folders.at(i).accountIds;
         m_folders.removeAt(i);
+        // 视觉顺序:删文件夹项;成员释放为未分组,占位插到该文件夹项
+        // 原位置(按加入顺序),保持视觉连续。
+        int pos = -1;
+        for (int j = 0; j < m_layoutOrder.size(); ++j) {
+            const QVariantMap m = m_layoutOrder.at(j).toMap();
+            if (m.value(QLatin1String("type")).toString() == QLatin1String("folder")
+                && m.value(QLatin1String("id")).toString() == id) {
+                pos = j;
+                break;
+            }
+        }
+        if (pos >= 0) {
+            m_layoutOrder.removeAt(pos);
+            for (int k = members.size() - 1; k >= 0; --k)
+                m_layoutOrder.insert(pos, makeLayoutEntry(QLatin1String("account"), members.at(k)));
+        }
+        const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
+        persistLayoutOrder();
         saveFolders();
+        if (acctChanged) {
+            reorderHomeRows();
+            save();
+            emit accountsChanged();
+            emit homeRowsReady();
+        }
         emit foldersChanged();
         return;
     }
@@ -637,15 +863,34 @@ void AccountManager::removeFolder(const QString &id)
 
 void AccountManager::moveFolder(const QString &id, int toIndex)
 {
-    const int from = folderIndexById(id);
-    if (from < 0)
+    // 委托 setLayoutOrder(单一通道):把 folder 项移到 folder 项序列
+    // toIndex 位,规范化后统一重排 folders/accounts 并持久化——展平
+    // 视觉账号顺序 == accounts 顺序的不变量任何时刻成立。QML 排序现
+    // 统一走 setLayoutOrder,moveFolder 保留供外部索引式调用。
+    if (folderIndexById(id) < 0)
         return;
-    const int to = qBound(0, toIndex, m_folders.size() - 1);
-    if (from == to)
-        return;
-    m_folders.move(from, to);
-    saveFolders();
-    emit foldersChanged();
+    QVariantList order;
+    int folderSeen = 0;
+    bool moved = false;
+    for (const auto &v : m_layoutOrder) {
+        const QVariantMap m = v.toMap();
+        const bool isFolder = m.value(QLatin1String("type")).toString() == QLatin1String("folder");
+        if (isFolder && m.value(QLatin1String("id")).toString() == id)
+            continue; // 目标元素:移除,稍后插入
+        if (isFolder) {
+            if (!moved && folderSeen == toIndex) {
+                order.append(makeLayoutEntry(QLatin1String("folder"), id));
+                moved = true;
+            }
+            order.append(v);
+            ++folderSeen;
+        } else {
+            order.append(v);
+        }
+    }
+    if (!moved)
+        order.append(makeLayoutEntry(QLatin1String("folder"), id));
+    setLayoutOrder(order);
 }
 
 void AccountManager::renameFolder(const QString &id, const QString &name)
@@ -702,18 +947,40 @@ void AccountManager::addAccountToFolder(const QString &folderId, const QString &
             break;
     }
     f->accountIds.append(accountId);
+    // 成员不占视觉位:从 layoutOrder 移除账号项,并按展平顺序重排
+    // accounts(账号进文件夹块,首页聚合跟随视觉)。
+    removeFromLayoutOrder(QLatin1String("account"), accountId);
+    const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
+    persistLayoutOrder();
     saveFolders();
+    if (acctChanged) {
+        reorderHomeRows();
+        save();
+        emit accountsChanged();
+        emit homeRowsReady();
+    }
     emit foldersChanged();
 }
 
 void AccountManager::removeAccountFromFolder(const QString &accountId)
 {
     for (auto &f : m_folders) {
-        if (f.accountIds.removeOne(accountId)) {
-            saveFolders();
-            emit foldersChanged();
-            return;
+        if (!f.accountIds.removeOne(accountId))
+            continue;
+        // 账号回到未分组:占位插入 layoutOrder 末尾;拖出目标位由 QML
+        // 紧接 setLayoutOrder 调整(同步执行,无渲染中间态)。
+        m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), accountId));
+        const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
+        persistLayoutOrder();
+        saveFolders();
+        if (acctChanged) {
+            reorderHomeRows();
+            save();
+            emit accountsChanged();
+            emit homeRowsReady();
         }
+        emit foldersChanged();
+        return;
     }
 }
 
@@ -936,6 +1203,10 @@ void AccountManager::removeAccount(const QString &id)
         return;
     const QString serverUrl = it->serverUrl;
     m_accounts.erase(it, m_accounts.end());
+    // 视觉顺序同步:未分组账号项移除(成员账号不在序列中;folder.accountIds
+    // 残留由 loadFolders 下次过滤,运行时 visualSequence 按卡映射跳过)。
+    removeFromLayoutOrder(QLatin1String("account"), id);
+    persistLayoutOrder();
     m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
     reorderHomeRows(); // 被删服的行一并移除,本地重排不重拉网络(见 moveAccount)
     save();
