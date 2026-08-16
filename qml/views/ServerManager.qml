@@ -80,6 +80,13 @@ Item {
     // Repeater delegate 无 id 直达,由 delegate onCompleted/onDestruction
     // 注册注销(模型重建时旧卡先删新卡后建,顺序安全)。
     property var accountCardById: ({})
+    // 重建前各卡 hover/放大状态(key = accountId/folderId)。Repeater 对
+    // QVariantList model 变化是整体重建(旧 delegate 销毁、新 delegate
+    // 创建);鼠标静止时引擎不会对新卡补发 enter 事件,重建前放大的卡
+    // 重建后放大消失,直到鼠标移动才恢复——拖入文件夹等场景表现为
+    // "先收拢再挤开"两段动画。saveCardHoverState 在重建前保存,新卡
+    // onCompleted 恢复(鼠标移开时 onExited 正常收起,无残留放大)。
+    property var cardHoverState: ({})
     // 文件夹编辑浮窗:folderEditId 空 = 新建,非空 = 重命名该文件夹。
     property bool folderOpen: false
     property string folderEditId: ""
@@ -125,6 +132,17 @@ Item {
     }
 
     function layoutCards(animate) {
+        // 模型变化后 Repeater 异步重建:旧卡已销毁、新卡 incubation 中
+        // 时,Repeater.count 与 model 大小不一致。此时布局会拿到残缺
+        // 视觉序列(缺文件夹卡)→ 成员卡被误判为收起而隐藏、未分组卡带
+        // 动画前移,新卡 onCompleted 再布局又移回——卡片来回跳(账号卡
+        // 重建时 count=0 序列只剩占位卡,无卡可动故未暴露;文件夹重建
+        // 时账号卡满,问题显现)。跳过中间态:最后一张 delegate 的
+        // onCompleted 在全部就绪后触发一次布局(每张卡都调 scheduleLayout,
+        // Timer 触发时 count 已更新完毕)。
+        if (cardRepeater.count !== AccountManager.accountCount
+            || folderRepeater.count !== AccountManager.folders.length)
+            return
         const seq = root.visualSequence()
         const n = seq.length - 1 // 卡数(不含占位卡)
         const stepW = root.cardW + root.gridSpacing
@@ -267,6 +285,23 @@ Item {
     // hover 状态/账号列表变化后延迟一帧重排(等 delegate 稳定)。
     function scheduleLayout() {
         layoutTimer.restart()
+    }
+
+    // 重建前保存各卡 hover 状态(见 cardHoverState 注释)。须在 Repeater
+    // 重建前调用:信号 handler 同步执行时旧 delegate 尚未销毁,可遍历
+    // 读取;Repeater 的 model 绑定惰性求值,重建发生在下一帧。
+    function saveCardHoverState() {
+        root.cardHoverState = {}
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f)
+                root.cardHoverState[f.folderId] = f.expanded || f.hovered
+        }
+        for (let i = 0; i < cardRepeater.count; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c)
+                root.cardHoverState[c.accountId] = c.expanded || c.hovered
+        }
     }
 
     // 落点目标:优先命中文件夹卡(矩形),其次视觉序列中的账号卡(矩形),
@@ -478,6 +513,8 @@ Item {
     Connections {
         target: AccountManager
         function onAccountsChanged() {
+            // 重建前保存 hover 状态(新卡 onCompleted 恢复,见注释)。
+            root.saveCardHoverState()
             // 模型变化 → 旧卡 context 失效(见 dragDirty 说明),onReleased
             // 不得再触碰卡函数。
             root.dragDirty = true
@@ -492,6 +529,8 @@ Item {
         // 文件夹增删/成员变化(拖入/移出)后重排:视觉序列变化,账号卡
         // 不重建(accounts 未变),文件夹卡由 Repeater 按 model 重建。
         function onFoldersChanged() {
+            // 重建前保存 hover 状态(新卡 onCompleted 恢复,见注释)。
+            root.saveCardHoverState()
             root.dragDirty = true
             root.scheduleLayout()
         }
@@ -871,6 +910,14 @@ Item {
                 }
                 Component.onCompleted: {
                     root.accountCardById[card.modelData.id] = card
+                    // 重建前该卡 hover 放大中(鼠标未动):立即恢复放大,
+                    // 避免"放大消失→延迟重现"两段挤开。鼠标移开时
+                    // onExited 正常收起,不会残留。
+                    if (root.cardHoverState[card.modelData.id]) {
+                        card.hovered = true
+                        card.expanded = true
+                    }
+                    delete root.cardHoverState[card.modelData.id]
                     const p = root.posSnapshot[card.modelData.id]
                     card.isNew = !root.prevAccountIds.includes(card.modelData.id)
                     if (p) {
@@ -1218,6 +1265,14 @@ Item {
                     fcardOpacityAnim.stop()
                 }
                 Component.onCompleted: {
+                    // 重建前该卡 hover 放大中(鼠标未动):立即恢复放大,
+                    // 避免"放大消失→延迟重现"两段挤开。鼠标移开时
+                    // onExited 正常收起,不会残留。
+                    if (root.cardHoverState[fcard.folderId]) {
+                        fcard.hovered = true
+                        fcard.expanded = true
+                    }
+                    delete root.cardHoverState[fcard.folderId]
                     // 重排后按快照复位到旧位置(FLIP Invert,key = folderId),
                     // 消除瞬移 (0,0);新文件夹卡无快照,由布局静默定位。
                     const p = root.posSnapshot[fcard.folderId]
