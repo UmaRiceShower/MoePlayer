@@ -35,6 +35,13 @@ Item {
     // 分页加载中(防并发翻页)。
     property bool loadingMore: false
 
+    // 选中 chip 底色:accent 降饱和加深(H192° 100% → 35% 饱和)。
+    // chip 选中是实心大面积背景,直接套 accent 太艳;边框/进度条等
+    // 小面积场景仍用 Theme.accent。
+    readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
+    // 选中 chip 悬停:同色相提亮一档。
+    readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
+
     // 点击结果进详情(携带所在服务器)。
     signal showDetail(string itemId, string posterId, string title, string serverUrl)
 
@@ -156,10 +163,19 @@ Item {
         anchors.top: parent.top
         anchors.topMargin: 48
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(760, parent.width - 64)
+        width: parent.width*0.8
         height: parent.height - 96
         radius: 12
         color: Theme.surface
+
+        // 吞掉面板内空白处的点击,防止穿透到遮罩 MouseArea 误关闭;
+        // z:-1 置于所有内容之下,GridView/按钮/输入框交互不受影响。
+        // (Rectangle 自身不接收鼠标事件,点击其子控件间隙会落到遮罩。)
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onClicked: { }
+        }
 
         ColumnLayout {
             anchors.fill: parent
@@ -170,7 +186,7 @@ Item {
                 id: searchField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
-                placeholderText: root.canSearch ? "搜索影片 / 剧集 / 单集(Esc 关闭)"
+                placeholderText: root.canSearch ? "搜索...(Esc 关闭)"
                                                 : "先在首页打开一个媒体库再搜索(Esc 关闭)"
                 placeholderTextColor: "white"
                 color: "white"
@@ -221,12 +237,13 @@ Item {
                             root.searchNow(true)
                         }
                         background: Rectangle {
-                            radius: 15
+                            radius: 10
                             color: root.activeTypes.indexOf(modelData.value) >= 0
-                                   ? Theme.accent : Theme.bg
+                                   ? (parent.hovered ? root.chipActiveHover : root.chipActive)
+                                   : (parent.hovered ? Theme.surface : Theme.bg)
                             border.width: root.activeTypes.indexOf(modelData.value) >= 0
                                           ? 0 : 1
-                            border.color: Theme.textMuted
+                            border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
                         }
                         contentItem: AppText {
                             text: modelData.label
@@ -316,7 +333,7 @@ Item {
                         }
                         background: Rectangle {
                             radius: 6
-                            color: Theme.bg
+                            color: parent.hovered ? Theme.surface : Theme.bg
                         }
                         contentItem: AppText {
                             text: parent.text
@@ -356,12 +373,13 @@ Item {
                                 root.searchNow(true)
                             }
                             background: Rectangle {
-                                radius: 15
+                                radius: 10
                                 color: root.activeFilters.indexOf(modelData.filter) >= 0
-                                       ? Theme.accent : Theme.bg
+                                       ? (parent.hovered ? root.chipActiveHover : root.chipActive)
+                                       : (parent.hovered ? Theme.surface : Theme.bg)
                                 border.width: root.activeFilters.indexOf(modelData.filter) >= 0
                                               ? 0 : 1
-                                border.color: Theme.textMuted
+                                border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
                             }
                             contentItem: AppText {
                                 text: modelData.label
@@ -397,36 +415,48 @@ Item {
                 }
             }
 
-            GridView {
-                id: resultGrid
+            // 外层 Item 由 ColumnLayout 铺满(显式赋值宽度,无隐式依赖);
+            // GridView 锚定 Item 计算列数。直接放 ColumnLayout 里时,
+            // 布局按 implicitWidth 放置,显式 width 绑定被覆盖 → 只有 1 列。
+            Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                cellWidth: Constants.cellW
-                cellHeight: Constants.cellH
-                model: root.sm
-                // 滚动到底自动加载下一页(内容不满一屏时持续加载直到填满或到底)。
-                onAtYEndChanged: {
-                    if (atYEnd)
-                        root.loadMore()
-                }
-                // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
-                delegate: PosterCard {
-                    width: 152
-                    height: 236
-                    showActions: false
-                    itemId: model.id
-                    posterId: model.posterId
-                    title: model.name
-                    year: model.year
-                    rating: model.rating
-                    played: model.played
-                    favorite: model.favorite
-                    positionTicks: model.positionTicks
-                    runtimeTicks: model.runtimeTicks
-                    unplayedCount: model.unplayedCount
-                    itemType: model.type
-                    onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                GridView {
+                    id: resultGrid
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    // 宽度 = 整数列 × cellW 并水平居中:结果不满一行时
+                    // 内容居中显示,而非左贴边;满行时与容器等宽。
+                    width: Math.max(1, Math.floor((parent.width - 4) / Constants.cellW))
+                           * Constants.cellW
+                    cellWidth: Constants.cellW
+                    cellHeight: Constants.cellH
+                    model: root.sm
+                    // 滚动到底自动加载下一页(内容不满一屏时持续加载直到填满或到底)。
+                    onAtYEndChanged: {
+                        if (atYEnd)
+                            root.loadMore()
+                    }
+                    // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
+                    delegate: PosterCard {
+                        width: 152
+                        height: 236
+                        showActions: false
+                        itemId: model.id
+                        posterId: model.posterId
+                        title: model.name
+                        year: model.year
+                        rating: model.rating
+                        played: model.played
+                        favorite: model.favorite
+                        positionTicks: model.positionTicks
+                        runtimeTicks: model.runtimeTicks
+                        unplayedCount: model.unplayedCount
+                        itemType: model.type
+                        onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                        }
                 }
             }
         }
