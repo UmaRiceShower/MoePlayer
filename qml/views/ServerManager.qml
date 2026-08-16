@@ -402,7 +402,7 @@ Item {
         // qmllint enable missing-property
     }
 
-    // 顶栏:返回 + 标题 + 计数。
+    // 顶栏:标题 + 计数。
     Row {
         id: header
         anchors.top: parent.top
@@ -410,10 +410,6 @@ Item {
         anchors.right: parent.right
         anchors.margins: 24
         spacing: 12
-        Button {
-            text: "← 返回"
-            onClicked: root.backRequested()
-        }
         AppText {
             anchors.verticalCenter: parent.verticalCenter
             text: "服务器管理（Ctrl+O）"
@@ -427,6 +423,13 @@ Item {
             color: Theme.textMuted
             font.pixelSize: 16
         }
+    }
+
+    // 返回快捷键:Alt+←(原"← 返回"按钮移除后替代);仅本页可见时生效。
+    Shortcut {
+        sequences: ["Alt+Left"]
+        enabled: root.visible
+        onActivated: root.backRequested()
     }
 
     // 卡片网格(手动布局,见 layoutCards):第一张为加号占位卡,其后每账号一张。

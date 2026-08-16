@@ -18,11 +18,10 @@ QtObject {
                                                   // 经渐变遮罩融入正文底色;只延伸背景,不动内容布局)
     readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
     readonly property int detailPosterH: 300      // Hero 海报高
-    readonly property int detailSidebarW: 280     // 右侧选集条宽
-    readonly property int detailEpisodeRowH: 110   // 选集条行高(含海报缩略图)
-    readonly property int detailEpisodeRowMargin: 10
-    // 全宽 Hero 背景底部渐隐带高度(占背景高度比例):0.1 = 底 10% 内淡出。
-    readonly property real detailHeroFadeBand: 0.1
+    readonly property int detailSidebarW: 260     // 右侧选集条宽
+    readonly property int detailEpisodeRowH: 165   // 选集条行高(含海报缩略图)
+    readonly property int detailEpisodeRowMargin: 15
+    readonly property real detailHeroFadeBand: 0.2
     readonly property real detailEpisodeHoverScale: 1.06 // 选集条行 hover 放大
     readonly property int detailBodyMaxW: 1000    // 正文区最大宽(窗口过宽时不拉成一条线)
     readonly property int detailCardW: 112        // 相似推荐/演职人员头像卡宽
