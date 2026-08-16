@@ -180,7 +180,8 @@ Item {
                 Layout.preferredHeight: 40
                 placeholderText: root.canSearch ? "搜索影片 / 剧集 / 单集(Esc 关闭)"
                                                 : "先在首页打开一个媒体库再搜索(Esc 关闭)"
-                placeholderTextColor: Theme.textMuted
+                placeholderTextColor: "white"
+                color: "white"
                 enabled: root.canSearch
                 font.pixelSize: 15
                 // 输入防抖:停止输入 300ms 后才发服务端搜索(过滤区即时触发)。
@@ -237,8 +238,7 @@ Item {
                         }
                         contentItem: AppText {
                             text: modelData.label
-                            color: root.activeTypes.indexOf(modelData.value) >= 0
-                                   ? "white" : Theme.textPrimary
+                            color: "white"
                             font.pixelSize: 13
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -258,7 +258,7 @@ Item {
                     spacing: 4
                     AppText {
                         text: "年份"
-                        color: Theme.textMuted
+                        color: "white"
                         font.pixelSize: 13
                     }
                     TextField {
@@ -266,7 +266,8 @@ Item {
                         Layout.preferredWidth: 60
                         Layout.preferredHeight: 30
                         placeholderText: "起"
-                        placeholderTextColor: Theme.textMuted
+                        placeholderTextColor: "white"
+                        color: "white"
                         enabled: root.canSearch
                         font.pixelSize: 13
                         validator: IntValidator { bottom: 1900; top: 2100 }
@@ -284,7 +285,7 @@ Item {
                     }
                     AppText {
                         text: "至"
-                        color: Theme.textMuted
+                        color: "white"
                         font.pixelSize: 13
                     }
                     TextField {
@@ -292,7 +293,8 @@ Item {
                         Layout.preferredWidth: 60
                         Layout.preferredHeight: 30
                         placeholderText: "止"
-                        placeholderTextColor: Theme.textMuted
+                        placeholderTextColor: "white"
+                        color: "white"
                         enabled: root.canSearch
                         font.pixelSize: 13
                         validator: IntValidator { bottom: 1900; top: 2100 }
@@ -326,7 +328,7 @@ Item {
                         }
                         contentItem: AppText {
                             text: parent.text
-                            color: Theme.textMuted
+                            color: "white"
                             font.pixelSize: 12
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -371,8 +373,7 @@ Item {
                             }
                             contentItem: AppText {
                                 text: modelData.label
-                                color: root.activeFilters.indexOf(modelData.filter) >= 0
-                                       ? "white" : Theme.textPrimary
+                                color: "white"
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -386,7 +387,7 @@ Item {
                     spacing: 4
                     AppText {
                         text: "排序"
-                        color: Theme.textMuted
+                        color: "white"
                         font.pixelSize: 13
                     }
                     ComboBox {
@@ -423,14 +424,14 @@ Item {
                         }
                         contentItem: AppText {
                             text: sortBox.displayText
-                            color: Theme.textPrimary
+                            color: "white"
                             font.pixelSize: 13
                             leftPadding: 8
                             verticalAlignment: Text.AlignVCenter
                         }
                         indicator: AppText {
                             text: "▾"
-                            color: Theme.textMuted
+                            color: "white"
                             font.pixelSize: 11
                             anchors.right: parent.right
                             anchors.rightMargin: 8
@@ -448,7 +449,7 @@ Item {
                             readonly property bool _hl: sortBox.highlightedIndex === index
                             contentItem: AppText {
                                 text: modelData.label
-                                color: parent._hl ? "white" : Theme.textPrimary
+                                color: "white"
                                 font.pixelSize: 13
                                 leftPadding: 8
                                 verticalAlignment: Text.AlignVCenter
@@ -492,7 +493,7 @@ Item {
                         }
                         contentItem: AppText {
                             text: root.sortOrder === "Ascending" ? "↑" : "↓"
-                            color: parent.enabled ? Theme.textPrimary : Theme.textMuted
+                            color: parent.enabled ? "white" : Theme.textMuted
                             font.pixelSize: 13
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -507,7 +508,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 16
                 font.pixelSize: 12
-                color: Theme.textMuted
+                color: "white"
                 text: {
                     if (!root.canSearch)
                         return ""
