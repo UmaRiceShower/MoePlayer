@@ -289,7 +289,25 @@ Item {
     // Component.onCompleted),重排动画从旧位置出发;dragId 为空表示删除
     // 场景(无被拖卡)。动画结束后由 dragResetTimer 清状态,避免后续
     // hover 挤压误判为重排。
+    // 重排前把所有位移动画瞬移到目标位(complete):动画移动期间点击
+    // 触发的新重排,快照与布局起点必须是稳定布局位。否则快照/placeCard
+    // 从中间值出发——卡绕路、回弹,或与前卡之间出现空位(展开文件夹1
+    // 动画中点击文件夹2 → 文件夹2 与前卡空出距离)。不拦截点击,hover
+    // 挤压动画同样被瞬移,点击响应不受影响。
+    function settleAllAnimations() {
+        for (let i = 0; i < cardRepeater.count; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c && c.settle) c.settle()
+        }
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f && f.settle) f.settle()
+        }
+        if (plusCard && plusCard.settle) plusCard.settle()
+    }
+
     function snapshotPositions(dragId) {
+        root.settleAllAnimations()
         root.posSnapshot = {}
         root.dragAccountId = dragId || ""
         root.reordering = true
@@ -298,12 +316,12 @@ Item {
         for (let i = 0; i < cardRepeater.count; ++i) {
             const c = cardRepeater.itemAt(i)
             if (c)
-                root.posSnapshot[c.accountId] = { x: c.x, y: c.y }
+                root.posSnapshot[c.accountId] = { x: c.layoutTargetX(), y: c.layoutTargetY() }
         }
         for (let i = 0; i < folderRepeater.count; ++i) {
             const f = folderRepeater.itemAt(i)
             if (f)
-                root.posSnapshot[f.folderId] = { x: f.x, y: f.y }
+                root.posSnapshot[f.folderId] = { x: f.layoutTargetX(), y: f.layoutTargetY() }
         }
         dragResetTimer.restart()
     }
@@ -927,6 +945,13 @@ Item {
                           ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
                           : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
             // 被同行放大卡挤压时同样让位/复位(经 animateTo 驱动)。
+            // 位移动画进行中瞬移到目标位(同账号卡 settle,见其注释)。
+            function settle() {
+                if (plusAnimX.running) plusAnimX.complete()
+                if (plusAnimY.running) plusAnimY.complete()
+                if (plusAnimXBack.running) plusAnimXBack.complete()
+                if (plusAnimYBack.running) plusAnimYBack.complete()
+            }
             function animateTo(tx, ty, restore) {
                 if (Math.abs(plusCard.x - tx) > 0.5) {
                     if (restore) {
@@ -1116,6 +1141,30 @@ Item {
                     root.scheduleLayout()
                 }
 
+                // 布局目标位置(位移动画中返回动画 to 值,否则当前 x/y):
+                // 重排/挤压动画进行中抓快照用目标位,避免动画中间值进入
+                // 快照——点击移动中的卡触发重排时,布局从旧布局位动画到
+                // 新位(无中间值跳变,"不可预知"动画)。
+                function layoutTargetX() {
+                    if (animX.running) return animX.to
+                    if (animXBack.running) return animXBack.to
+                    return card.x
+                }
+                function layoutTargetY() {
+                    if (animY.running) return animY.to
+                    if (animYBack.running) return animYBack.to
+                    return card.y
+                }
+                // 位移动画进行中瞬移到目标位(complete 直接落 to 值):
+                // 动画移动期间点击触发重排时,快照与布局起点必须是稳定
+                // 布局位而非中间值——从中间值出发的布局会让卡绕路/回弹,
+                // 或与前卡之间产生空位。snapshotPositions 开头统一调用。
+                function settle() {
+                    if (animX.running) animX.complete()
+                    if (animY.running) animY.complete()
+                    if (animXBack.running) animXBack.complete()
+                    if (animYBack.running) animYBack.complete()
+                }
                 // 放大状态变化 → 重排(左右邻居让位/复位)。
                 onExpandedChanged: root.scheduleLayout()
                 // 位移动画:线性插值 + easeOutCubic(挤压与复位一致,无回弹);
@@ -1305,8 +1354,10 @@ Item {
                         card.dragStartY = card.y
                         root.pressCardId = card.accountId
                         root.pressCardType = "account"
-                        root.pressStartX = card.x
-                        root.pressStartY = card.y
+                        // 同 folder 卡:动画中按下时归位目标用稳定位(layout
+                        // TargetX 动画中返回 to 值),防卡拉回动画中间值。
+                        root.pressStartX = card.layoutTargetX()
+                        root.pressStartY = card.layoutTargetY()
                         root.dragActive = true // 拖动期间抑制其他卡放大
                         root.dragDirty = false // 新一轮拖动,清模型变化标记
                     }
@@ -1505,6 +1556,26 @@ Item {
                     }
                     root.scheduleLayout()
                 }
+                // 布局目标位置(位移动画中返回动画 to 值,否则当前 x/y):
+                // 同账号卡 layoutTargetX/Y——快照抓动画目标位,防中间值
+                // 导致点击移动中的卡时布局跳变。
+                function layoutTargetX() {
+                    if (fcardAnimX.running) return fcardAnimX.to
+                    if (fcardAnimXBack.running) return fcardAnimXBack.to
+                    return fcard.x
+                }
+                function layoutTargetY() {
+                    if (fcardAnimY.running) return fcardAnimY.to
+                    if (fcardAnimYBack.running) return fcardAnimYBack.to
+                    return fcard.y
+                }
+                // 位移动画进行中瞬移到目标位(同账号卡 settle,见其注释)。
+                function settle() {
+                    if (fcardAnimX.running) fcardAnimX.complete()
+                    if (fcardAnimY.running) fcardAnimY.complete()
+                    if (fcardAnimXBack.running) fcardAnimXBack.complete()
+                    if (fcardAnimYBack.running) fcardAnimYBack.complete()
+                }
                 // 放大状态变化 → 重排(左右邻居让位/复位)。
                 onExpandedChanged: root.scheduleLayout()
 
@@ -1613,8 +1684,12 @@ Item {
                         fcard.dragStartY = fcard.y
                         root.pressCardId = fcard.folderId
                         root.pressCardType = "folder"
-                        root.pressStartX = fcard.x
-                        root.pressStartY = fcard.y
+                        // 动画中按下(点击移动中的卡):归位/排序目标用稳定位
+                        // (layoutTargetX 动画中返回 to 值),否则 returnFolder
+                        // ToPress 会把卡拉回按下时的动画中间值——"先到目标位
+                        // 置,再拉回鼠标位置,再飞向目标位置"三段运动。
+                        root.pressStartX = fcard.layoutTargetX()
+                        root.pressStartY = fcard.layoutTargetY()
                         root.dragActive = true // 拖动期间抑制其他卡放大
                         root.dragDirty = false // 新一轮拖动,清模型变化标记
                     }
@@ -1634,6 +1709,12 @@ Item {
                         if (act === Qt.IgnoreAction && !r.dragDirty && fcard.animateTo)
                             fcard.animateTo(sx, sy, true)
                     }
+                    // 不绑定 onDoubleClicked:Qt 只在存在该处理器时进入双击
+                    // 检测(第一次 click 被抑制等待双击窗口,连点事件流不
+                    // 完整)。不绑定则每次 click 独立、立即发出——快速连点
+                    // 两次 = 两次完整 toggle(展开+收起),时序由布局层防御
+                    // (settleAllAnimations,snapshotPositions 开头瞬移动画)
+                    // 兜底,无错乱。
                     onClicked: (mouse) => {
                         // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
                         // 展开/收起成员。拖动超过 threshold 后不触发 click。
