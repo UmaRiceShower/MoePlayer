@@ -653,7 +653,6 @@ Item {
                 height: parent.height
                 clip: true
                 contentHeight: overviewColumn.implicitHeight
-                ScrollBar.vertical: ScrollBar {}
 
                 Column {
                     id: overviewColumn
@@ -663,7 +662,9 @@ Item {
                     Item {
                         id: heroItem
                         width: parent.width
-                        height: Constants.detailHeroH
+                        // 内容区与背景图同高(16:9 随窗口):bottom-* 位置即
+                        // 背景图底部,海报/文字/按钮相对背景图定位成立。
+                        height: root.width * 9 / 16
                         // ===== 定位代理(slot):三个槽各自用 states +
                         // AnchorChanges(官方推荐的条件锚切换机制,自动处理
                         // 解锚/设锚顺序,免手动坐标计算)。poster/text 槽按
