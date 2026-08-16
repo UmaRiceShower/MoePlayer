@@ -35,6 +35,8 @@ public:
     Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *similarModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *allEpisodesModelFor(const QString &serverUrl);
+    Q_INVOKABLE MediaItemModel *genresModelFor(const QString &serverUrl);
+    Q_INVOKABLE MediaItemModel *foldersModelFor(const QString &serverUrl);
     Q_INVOKABLE void dropServerModels(const QString &serverUrl);
 
     // 服务器公开信息(/System/Info/Public,无需认证),取 ServerName。
@@ -65,11 +67,30 @@ public:
                                 const QString &userId);
     // 获取视图条目(/Users/{id}/Items,分页),填充该服务器的 itemsModel。
     // startIndex=0 替换模型否则追加;TotalRecordCount 写入 totalCount。
+    // genres/years/minRating/filters 为可选过滤(空串不传):Genres 单值、
+    // Years 单值、MinCommunityRating 评分下限、Filters 状态;配合 ParentId
+    // (视图或子文件夹 id)即库内多维筛选。
     Q_INVOKABLE void fetchItems(const QString &serverUrl, const QString &token,
                                 const QString &userId, const QString &viewId,
                                 int startIndex, int limit,
                                 const QString &sortBy = QStringLiteral("DateModified"),
-                                const QString &sortOrder = QStringLiteral("Descending"));
+                                const QString &sortOrder = QStringLiteral("Descending"),
+                                const QString &genres = QString(),
+                                const QString &years = QString(),
+                                const QString &minRating = QString(),
+                                const QString &filters = QString());
+    // 库内类型枚举(/Genres?ParentId=,Genre 为 BaseItemDto 带 Id/图),
+    // 填充该服务器的 genresModel(名称即 Genres 过滤参数值)。
+    Q_INVOKABLE void fetchGenres(const QString &serverUrl, const QString &token,
+                                 const QString &userId, const QString &viewId);
+    // 库内年份枚举(/Years?ParentId=,TagItem 仅 Name,兼容实现无 Id),
+    // 结果经 yearsReceived(serverUrl, names) 返回,QML 端过滤脏值/排序。
+    Q_INVOKABLE void fetchYears(const QString &serverUrl, const QString &token,
+                                const QString &userId, const QString &viewId);
+    // 当前层顶层子文件夹(/Users/{id}/Items?ParentId=&IncludeItemTypes=Folder,
+    // 不 Recursive),填充该服务器的 foldersModel,供分组下钻入口。
+    Q_INVOKABLE void fetchFolders(const QString &serverUrl, const QString &token,
+                                  const QString &userId, const QString &viewId);
     // 收藏/取消收藏(/Users/{id}/FavoriteItems/{itemId} POST/DELETE)。
     Q_INVOKABLE void setFavorite(const QString &serverUrl, const QString &token,
                                  const QString &userId, const QString &itemId, bool fav);
@@ -145,6 +166,11 @@ signals:
     void episodesReceived(const QString &serverUrl);
     void similarReady(const QString &serverUrl);
     void allEpisodesReady(const QString &serverUrl);
+    // 库内分类枚举结果(见 fetchGenres/fetchYears/fetchFolders):
+    // genres/folders 填模型发 serverUrl;years 轻量返回名称列表。
+    void genresReceived(const QString &serverUrl);
+    void yearsReceived(const QString &serverUrl, const QStringList &years);
+    void foldersReceived(const QString &serverUrl);
     // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
     void itemDetailReady(const QString &serverUrl, const QVariantMap &detail);
     // 登录成功:携带目标服务器与凭据(AccountManager 存账号 / 页面直连浏览)。
@@ -225,6 +251,8 @@ private:
     QHash<QString, MediaItemModel *> m_searchModels;
     QHash<QString, MediaItemModel *> m_similarModels;
     QHash<QString, MediaItemModel *> m_allEpisodesModels;
+    QHash<QString, MediaItemModel *> m_genresModels;
+    QHash<QString, MediaItemModel *> m_foldersModels;
     QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"(Range 前缀探测缓存)
     // 请求序号按服务器隔离,丢弃过期响应(视图快速切换/输入防抖窗口内旧请求)。
     QHash<QString, int> m_itemsSeq;
