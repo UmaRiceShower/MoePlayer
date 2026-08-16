@@ -22,8 +22,10 @@ Item {
     // 类型多选(IncludeItemTypes):Movie/Series/Episode/Season/Video/BoxSet;
     // 默认电影+剧集;空数组 = 不传(服务器返回全部类型)。
     property var activeTypes: ["Movie", "Series"]
-    // 年份:0=全部,否则单年(Years)。
-    property int year: 0
+    // 年份范围(Years):0=不限;仅一端 = 精确单年;两端(起<=止)=
+    // 区间展开为逗号年份列表(服务器不支持范围语法,实测 500)。
+    property int yearFrom: 0
+    property int yearTo: 0
     // 状态过滤(Filters,多选):已看/未看/收藏 的 "IsPlayed" 等值数组。
     property var activeFilters: []
     // 排序:""=相关度(不传 SortBy),否则 CommunityRating/ProductionYear/SortName。
@@ -54,6 +56,25 @@ Item {
         return root.activeTypes.join(",")
     }
 
+    // 年份范围 → Years 参数:两端 = 区间展开为逗号列表(起>止时取起端
+    // 单值);仅一端 = 精确单年;都空 = 不传。
+    function yearsParam() {
+        if (root.yearFrom > 0 && root.yearTo > 0) {
+            if (root.yearFrom <= root.yearTo) {
+                let out = []
+                for (let y = root.yearFrom; y <= root.yearTo; ++y)
+                    out.push(String(y))
+                return out.join(",")
+            }
+            return String(root.yearFrom)
+        }
+        if (root.yearFrom > 0)
+            return String(root.yearFrom)
+        if (root.yearTo > 0)
+            return String(root.yearTo)
+        return ""
+    }
+
     // 状态过滤 → 逗号拼接的 Filters 参数。
     function filtersParam() {
         let out = []
@@ -73,7 +94,7 @@ Item {
         const c = root.creds()
         EmbyClient.search(root.serverUrl, c.token, c.userId, searchField.text,
                           root.typesParam(),
-                          root.year > 0 ? String(root.year) : "",
+                          root.yearsParam(),
                           root.filtersParam(),
                           root.sortBy, root.sortOrder,
                           root.startIndex, Constants.searchPageSize)
@@ -93,9 +114,11 @@ Item {
     function open() {
         root.visible = true
         root.activeTypes = ["Movie", "Series"]
-        root.year = 0
+        root.yearFrom = 0
+        root.yearTo = 0
         root.activeFilters = []
-        yearField.text = ""
+        yearFromField.text = ""
+        yearToField.text = ""
         sortBox.currentIndex = 0
         root.sortBy = ""
         root.sortOrder = ""
@@ -229,7 +252,8 @@ Item {
                 Layout.fillWidth: true
                 spacing: 14
 
-                // 年份(Years,单年输入;空 = 全部)。
+                // 年份范围(Years):单端 = 精确单年,双端 = 区间展开;
+                // 空 = 不限。服务器不支持范围语法(实测 500),展开逗号列表。
                 RowLayout {
                     spacing: 4
                     AppText {
@@ -238,17 +262,42 @@ Item {
                         font.pixelSize: 13
                     }
                     TextField {
-                        id: yearField
-                        Layout.preferredWidth: 64
+                        id: yearFromField
+                        Layout.preferredWidth: 60
                         Layout.preferredHeight: 30
-                        placeholderText: "全部"
+                        placeholderText: "起"
                         placeholderTextColor: Theme.textMuted
                         enabled: root.canSearch
                         font.pixelSize: 13
                         validator: IntValidator { bottom: 1900; top: 2100 }
-                        // 回车 / 失焦提交;非法文本回退 0(全部)。
+                        // 回车 / 失焦提交;非法文本回退 0(不限)。
                         onEditingFinished: {
-                            root.year = yearField.text.length > 0 ? parseInt(yearField.text) : 0
+                            root.yearFrom = yearFromField.text.length > 0 ? parseInt(yearFromField.text) : 0
+                            root.searchNow(true)
+                        }
+                        background: Rectangle {
+                            radius: 6
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: Theme.textMuted
+                        }
+                    }
+                    AppText {
+                        text: "至"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    TextField {
+                        id: yearToField
+                        Layout.preferredWidth: 60
+                        Layout.preferredHeight: 30
+                        placeholderText: "止"
+                        placeholderTextColor: Theme.textMuted
+                        enabled: root.canSearch
+                        font.pixelSize: 13
+                        validator: IntValidator { bottom: 1900; top: 2100 }
+                        onEditingFinished: {
+                            root.yearTo = yearToField.text.length > 0 ? parseInt(yearToField.text) : 0
                             root.searchNow(true)
                         }
                         background: Rectangle {
@@ -261,12 +310,14 @@ Item {
                     Button {
                         Layout.preferredWidth: 24
                         Layout.preferredHeight: 30
-                        visible: yearField.text.length > 0
+                        visible: yearFromField.text.length > 0 || yearToField.text.length > 0
                         enabled: root.canSearch
                         text: "✕"
                         onClicked: {
-                            yearField.text = ""
-                            root.year = 0
+                            yearFromField.text = ""
+                            yearToField.text = ""
+                            root.yearFrom = 0
+                            root.yearTo = 0
                             root.searchNow(true)
                         }
                         background: Rectangle {
@@ -290,6 +341,7 @@ Item {
                         model: [
                             { label: "已看", filter: "IsPlayed" },
                             { label: "未看", filter: "IsUnplayed" },
+                            { label: "进行中", filter: "IsResumable" },
                             { label: "收藏", filter: "IsFavorite" },
                         ]
                         delegate: Button {
@@ -339,15 +391,28 @@ Item {
                     }
                     ComboBox {
                         id: sortBox
-                        Layout.preferredWidth: 92
+                        Layout.preferredWidth: 110
                         Layout.preferredHeight: 30
                         enabled: root.canSearch
-                        model: ["相关度", "评分", "年份", "片名"]
+                        textRole: "label"
+                        // 名称/时间 + 评分/热度全量 SortBy;相关度 = 不传
+                        // (服务器默认匹配度)。方向默认:片名升序,其余降序。
+                        model: [
+                            { label: "相关度", sortBy: "", order: "" },
+                            { label: "片名", sortBy: "SortName", order: "Ascending" },
+                            { label: "年份", sortBy: "ProductionYear", order: "Descending" },
+                            { label: "首映", sortBy: "PremiereDate", order: "Descending" },
+                            { label: "入库时间", sortBy: "DateCreated", order: "Descending" },
+                            { label: "时长", sortBy: "Runtime", order: "Descending" },
+                            { label: "最近播放", sortBy: "DatePlayed", order: "Descending" },
+                            { label: "评分", sortBy: "CommunityRating", order: "Descending" },
+                            { label: "专业评分", sortBy: "CriticRating", order: "Descending" },
+                            { label: "播放次数", sortBy: "PlayCount", order: "Descending" },
+                        ]
                         onActivated: (index) => {
-                            if (index === 0) { root.sortBy = ""; root.sortOrder = "" }
-                            else if (index === 1) { root.sortBy = "CommunityRating"; root.sortOrder = "Descending" }
-                            else if (index === 2) { root.sortBy = "ProductionYear"; root.sortOrder = "Descending" }
-                            else { root.sortBy = "SortName"; root.sortOrder = "Ascending" }
+                            const it = sortBox.model[index]
+                            root.sortBy = it.sortBy
+                            root.sortOrder = it.order
                             root.searchNow(true)
                         }
                         background: Rectangle {
@@ -382,7 +447,7 @@ Item {
                             // background 作用域仍不可见,顶层捕获为属性。
                             readonly property bool _hl: sortBox.highlightedIndex === index
                             contentItem: AppText {
-                                text: modelData
+                                text: modelData.label
                                 color: parent._hl ? "white" : Theme.textPrimary
                                 font.pixelSize: 13
                                 leftPadding: 8
