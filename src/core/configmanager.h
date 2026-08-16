@@ -30,14 +30,16 @@ class ConfigManager : public QObject
     Q_PROPERTY(QString librarySortOrder READ librarySortOrder WRITE setLibrarySortOrder NOTIFY librarySortOrderChanged)
     // 详情页选集/季栏靠左(默认 false = 靠右,现状)。
     Q_PROPERTY(bool detailSidebarLeft READ detailSidebarLeft WRITE setDetailSidebarLeft NOTIFY detailSidebarLeftChanged)
-    // 详情页海报靠左(默认 true = 靠左,现状;false = 海报靠右)。
-    Q_PROPERTY(bool detailPosterLeft READ detailPosterLeft WRITE setDetailPosterLeft NOTIFY detailPosterLeftChanged)
-    // 详情页"标题+介绍"区位置预设:top-left/top-right/bottom-left/
-    // bottom-right(hero 四角;水平位置与海报同侧时自动内缩不重叠)。
+    // 详情页海报位置:9 宫格 top/middle/bottom × left/center/right
+    // (默认 bottom-left = 左下,原"靠左+沉底")。
+    Q_PROPERTY(QString detailPosterPos READ detailPosterPos WRITE setDetailPosterPos NOTIFY detailPosterPosChanged)
+    // 详情页"标题+介绍"区位置:followPoster(跟随海报,默认)/9 宫格
+    // (相对 hero 内容区,优先级高于海报)。
     Q_PROPERTY(QString detailTextPos READ detailTextPos WRITE setDetailTextPos NOTIFY detailTextPosChanged)
-    // 详情页播放/收藏/已看按钮组跟随目标:"poster"(海报内侧,现状)/
-    // "text"(标题区外侧)。
-    Q_PROPERTY(QString detailButtonsFollow READ detailButtonsFollow WRITE setDetailButtonsFollow NOTIFY detailButtonsFollowChanged)
+    // 详情页播放/收藏/已看按钮组位置:text(跟随标题,上下与标题对齐)/
+    // poster(跟随海报,底部与海报底对齐,默认)/backdrop(背景图左下角,
+    // 优先于另两组)。
+    Q_PROPERTY(QString detailButtonsPos READ detailButtonsPos WRITE setDetailButtonsPos NOTIFY detailButtonsPosChanged)
     // 详情页标题+介绍区固定宽度/高度(不随内容自适应,不占剩余宽度)。
     Q_PROPERTY(int detailTextWidth READ detailTextWidth WRITE setDetailTextWidth NOTIFY detailTextWidthChanged)
     Q_PROPERTY(int detailTextHeight READ detailTextHeight WRITE setDetailTextHeight NOTIFY detailTextHeightChanged)
@@ -54,12 +56,12 @@ public:
     void setLibrarySortOrder(const QString &v);
     bool detailSidebarLeft() const { return m_detailSidebarLeft; }
     void setDetailSidebarLeft(bool v);
-    bool detailPosterLeft() const { return m_detailPosterLeft; }
-    void setDetailPosterLeft(bool v);
+    QString detailPosterPos() const { return m_detailPosterPos; }
+    void setDetailPosterPos(const QString &v);
     QString detailTextPos() const { return m_detailTextPos; }
     void setDetailTextPos(const QString &v);
-    QString detailButtonsFollow() const { return m_detailButtonsFollow; }
-    void setDetailButtonsFollow(const QString &v);
+    QString detailButtonsPos() const { return m_detailButtonsPos; }
+    void setDetailButtonsPos(const QString &v);
     int detailTextWidth() const { return m_detailTextWidth; }
     void setDetailTextWidth(int v);
     int detailTextHeight() const { return m_detailTextHeight; }
@@ -76,9 +78,9 @@ signals:
     void librarySortByChanged();
     void librarySortOrderChanged();
     void detailSidebarLeftChanged();
-    void detailPosterLeftChanged();
+    void detailPosterPosChanged();
     void detailTextPosChanged();
-    void detailButtonsFollowChanged();
+    void detailButtonsPosChanged();
     void detailTextWidthChanged();
     void detailTextHeightChanged();
 
@@ -94,9 +96,9 @@ private:
     QString m_librarySortBy = QStringLiteral("DateModified");
     QString m_librarySortOrder = QStringLiteral("Descending");
     bool m_detailSidebarLeft = false;
-    bool m_detailPosterLeft = true;
-    QString m_detailTextPos = QStringLiteral("top-left");
-    QString m_detailButtonsFollow = QStringLiteral("poster");
+    QString m_detailPosterPos = QStringLiteral("bottom-left");
+    QString m_detailTextPos = QStringLiteral("followPoster");
+    QString m_detailButtonsPos = QStringLiteral("poster");
     // 默认 280 = 原实现文字区下限(hero 有选季栏时宽 550,280+海报 200+
     // margin 才放得下;更大值需拉宽窗口)。
     int m_detailTextWidth = 280;
