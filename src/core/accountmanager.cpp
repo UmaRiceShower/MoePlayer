@@ -635,6 +635,19 @@ void AccountManager::removeFolder(const QString &id)
     }
 }
 
+void AccountManager::moveFolder(const QString &id, int toIndex)
+{
+    const int from = folderIndexById(id);
+    if (from < 0)
+        return;
+    const int to = qBound(0, toIndex, m_folders.size() - 1);
+    if (from == to)
+        return;
+    m_folders.move(from, to);
+    saveFolders();
+    emit foldersChanged();
+}
+
 void AccountManager::renameFolder(const QString &id, const QString &name)
 {
     FolderInfo *f = folderByIdMutable(id);

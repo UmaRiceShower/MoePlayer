@@ -47,6 +47,10 @@ Item {
     // (拖动中重建后 source 可能是已销毁的旧卡,访问即 internal error),
     // 统一走这里记录的值。
     property string pressCardId: ""
+    // 拖动来源类型("" = 无,"account" = 账号卡,"folder" = 文件夹卡):
+    // onPressed 记录,drop 处理据此分流(账号 = 排序/加入文件夹,
+    // 文件夹 = 文件夹排序)。
+    property string pressCardType: ""
     // 是否有卡在拖动中:拖动期间抑制其他卡 hover 放大。Qt Quick 的 hover
     // 事件派发给鼠标下所有 hoverEnabled MouseArea(不因 z/覆盖抑制),
     // 拖动卡(z=10)经过其他卡时其 onEntered 照常触发,不抑制会放大并
@@ -339,7 +343,13 @@ Item {
         const ly = dy - grid.y
         for (let i = 0; i < folderRepeater.count; ++i) {
             const f = folderRepeater.itemAt(i)
-            if (f && lx >= f.x && lx <= f.x + f.width && ly >= f.y && ly <= f.y + f.height)
+            if (!f)
+                continue
+            // 拖动文件夹卡时跳过自身(同账号卡:拖动卡跟手,z=10 悬于最上
+            // 层,其矩形恒含鼠标点,不跳过永远命中自己,排序失效)。
+            if (root.pressCardType === "folder" && f.folderId === root.pressCardId)
+                continue
+            if (lx >= f.x && lx <= f.x + f.width && ly >= f.y && ly <= f.y + f.height)
                 return { card: f, hit: true }
         }
         const seq = root.visualSequence()
@@ -397,6 +407,18 @@ Item {
         // 用 onPressed 记录的 id,不触碰 drop.source:拖动中模型可能被重建
         // (重登/添加触发 accountsChanged),旧卡已销毁,访问其属性会触发
         // 引擎 internal error。
+        if (root.pressCardType === "folder") {
+            // 文件夹拖动:目标为另一文件夹卡 = 排序(高亮);账号卡/空白
+            // 不预高亮(排序在松手时生效,与账号卡"拖出文件夹"同风格)。
+            if (AccountManager.folders.findIndex(f => f.id === root.pressCardId) < 0)
+                return
+            const t = root.dropTargetCard(drop.x, drop.y)
+            if (!t || !t.hit)
+                return
+            if (t.card.folderId && t.card.folderId !== root.pressCardId)
+                t.card.dropTarget = true
+            return
+        }
         if (AccountManager.accounts.findIndex(a => a.id === root.pressCardId) < 0)
             return
         const t = root.dropTargetCard(drop.x, drop.y)
@@ -416,6 +438,18 @@ Item {
             const c = cardRepeater.itemAt(i)
             if (c && c.accountId === fromId) {
                 c.animateTo(root.pressStartX, root.pressStartY, true)
+                break
+            }
+        }
+    }
+    // 文件夹卡拖回原位/无操作(类比 returnToPress):找到存活卡按按下时
+    // 位置短时复位归位。仅在未调用 moveFolder(模型未变、卡必然存活)
+    // 时使用,故可直接 animateTo。
+    function returnFolderToPress(folderId) {
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f && f.folderId === folderId) {
+                f.animateTo(root.pressStartX, root.pressStartY, true)
                 break
             }
         }
@@ -662,6 +696,44 @@ Item {
             root.clearDropTarget()
             // 不触碰 drop.source(拖动中重建后可能已销毁,访问即 internal
             // error),来源 id 与归位值统一用 onPressed 记录的 root 状态。
+            // 文件夹拖动:排序分支(pressCardId 此时是 folderId,先于账号
+            // 逻辑;账号拖动 pressCardType === "account",走下方原逻辑)。
+            if (root.pressCardType === "folder") {
+                const fId = root.pressCardId
+                if (AccountManager.folders.findIndex(f => f.id === fId) < 0)
+                    return
+                const t = root.dropTargetCard(drop.x, drop.y)
+                if (!t) {
+                    root.returnFolderToPress(fId)
+                    return
+                }
+                // 落点 → 目标文件夹列表索引(视觉序列元素分类):
+                // - folder 卡(含兜底命中的自身位)→ 该 folder 索引
+                // - 账号卡:展开成员 → 所属 folder 索引;未分组账号 → 无操作
+                // - 占位卡(格 0,序列首)→ 最前(索引 0)
+                const tc = t.card
+                let toIdx = -1
+                if (tc.folderId) {
+                    toIdx = AccountManager.folders.findIndex(f => f.id === tc.folderId)
+                } else if (tc.accountId) {
+                    const memFolder = AccountManager.folderIdOfAccount(tc.accountId)
+                    if (memFolder !== "")
+                        toIdx = AccountManager.folders.findIndex(f => f.id === memFolder)
+                } else {
+                    toIdx = 0
+                }
+                const fromIdx = AccountManager.folders.findIndex(f => f.id === fId)
+                if (toIdx < 0 || toIdx === fromIdx) {
+                    // 拖到未分组区/自身位:无操作,归位(模型未变,卡存活)。
+                    root.returnFolderToPress(fId)
+                    return
+                }
+                // 快照在模型变化前抓(folder 卡此刻 x/y 已是拖动位置,FLIP
+                // First),moveFolder → foldersChanged 重建后按快照复位水波。
+                root.snapshotPositions(fId)
+                AccountManager.moveFolder(fId, toIdx)
+                return
+            }
             const fromId = root.pressCardId
             if (AccountManager.accounts.findIndex(a => a.id === fromId) < 0)
                 return
@@ -1187,6 +1259,7 @@ Item {
                         card.dragStartX = card.x
                         card.dragStartY = card.y
                         root.pressCardId = card.accountId
+                        root.pressCardType = "account"
                         root.pressStartX = card.x
                         root.pressStartY = card.y
                         root.dragActive = true // 拖动期间抑制其他卡放大
@@ -1247,10 +1320,20 @@ Item {
                     const col = root.hexToRgba(fcard.modelData.color, 0.30)
                     return col !== "" ? col : Theme.surface
                 }
-                // 放大卡置顶避免压边(与账号卡一致);文件夹不拖动。
-                z: fcard.expanded ? 9 : 0
+                // 放大卡置顶避免压边;拖动中半透明并置顶(与账号卡一致)。
+                // 文件夹卡可拖动排序:拖动 = 调整文件夹排列顺序(见 onDropped
+                // 的 pressCardType==="folder" 分支);点击展开/收起不受影响
+                // (drag.threshold 保证未拖动的按下-释放仍为 click)。
+                opacity: Drag.active ? 0.6 : 1.0
+                z: Drag.active ? 10 : (fcard.expanded ? 9 : 0)
                 scale: fcard.expanded ? root.hoverScale : 1.0
                 Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                // 官方拖放模式(同账号卡):MouseArea.drag 移动卡片自身并驱动
+                // Drag.active;drop 侧经 folderId 识别来源。
+                Drag.active: farea.drag.active
+                Drag.source: fcard
+                Drag.hotSpot.x: width / 2
+                Drag.hotSpot.y: height / 2
                 property string folderId: fcard.modelData.id
                 // 展开状态(绑定 root.expandedFolders,切换即刷新)。
                 property bool isOpen: root.isFolderExpanded(fcard.folderId)
@@ -1263,6 +1346,9 @@ Item {
                 property bool hovered: false
                 property bool dropTarget: false
                 property bool expanded: false
+                // 拖动起点(onPressed 记录,drop 未投递时手动归位用)。
+                property real dragStartX: 0
+                property real dragStartY: 0
 
                 // 位移动画(与账号卡同套:挤压/复位/重排水波共用)。
                 function animateTo(tx, ty, restore, fade, duration) {
@@ -1444,13 +1530,18 @@ Item {
                     font.pixelSize: 13
                 }
 
-                // 点击切换展开/收起;Ctrl+点击打开修改浮窗(重命名/删除)。
+                // 点击切换展开/收起;Ctrl+点击打开修改浮窗(重命名/删除);
+                // 按住拖动 = 文件夹排序(threshold 内释放仍是点击)。
                 MouseArea {
                     id: farea
                     anchors.fill: parent
                     hoverEnabled: true
                     // 仅左键:点击展开/收起,Ctrl+点击修改;右键不再弹菜单。
                     acceptedButtons: Qt.LeftButton
+                    drag {
+                        target: fcard
+                        threshold: 8
+                    }
                     onEntered: {
                         fcard.hovered = true
                         // 拖动进行中不放大(同账号卡,见 root.dragActive 注释)。
@@ -1464,13 +1555,38 @@ Item {
                     }
                     onPressed: (mouse) => {
                         // 按住立即收起放大(同账号卡):点击/Ctrl+点击时卡片
-                        // 不保持放大,两侧正常复位。
+                        // 不保持放大,两侧正常复位;同时记录拖动状态(root
+                        // 级,drop 处理经此访问,不触碰可能随重建销毁的 source)。
                         fcardHoverTimer.stop()
                         fcard.expanded = false
+                        fcard.dragStartX = fcard.x
+                        fcard.dragStartY = fcard.y
+                        root.pressCardId = fcard.folderId
+                        root.pressCardType = "folder"
+                        root.pressStartX = fcard.x
+                        root.pressStartY = fcard.y
+                        root.dragActive = true // 拖动期间抑制其他卡放大
+                        root.dragDirty = false // 新一轮拖动,清模型变化标记
+                    }
+                    onReleased: {
+                        // 同账号卡:released 先于 drop 投递,全部取值在 drop
+                        // 前完成(r 引用 drop 后仍可安全读),drop 后不再做
+                        // 任何 id 查找(moveFolder 触发 foldersChanged 会使
+                        // 本卡 delegate 的 context 失效)。
+                        const r = root
+                        r.dragActive = false // 拖动结束(须在 drop 前,r 引用安全)
+                        const sx = fcard.dragStartX
+                        const sy = fcard.dragStartY
+                        const act = fcard.Drag.drop()
+                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)且模型未变
+                        // (dragDirty 仍 false,本卡有效)时手动归位;投递成功
+                        // 时归位由 onDropped 或重排布局完成,本卡已失效。
+                        if (act === Qt.IgnoreAction && !r.dragDirty && fcard.animateTo)
+                            fcard.animateTo(sx, sy, true)
                     }
                     onClicked: (mouse) => {
                         // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
-                        // 展开/收起成员。
+                        // 展开/收起成员。拖动超过 threshold 后不触发 click。
                         if (mouse.modifiers & Qt.ControlModifier)
                             root.openFolderDialog(fcard.folderId)
                         else
