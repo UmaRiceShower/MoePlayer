@@ -21,6 +21,9 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged) // "idle" | "paused" | "playing"
     Q_PROPERTY(int volume READ volume WRITE setVolume NOTIFY volumeChanged)
+    // 播放流 HTTP 代理(ConfigManager.proxy;mpv/ffmpeg 仅支持 HTTP 代理,
+    // https 目标走 CONNECT 隧道;空 = 直连)。
+    Q_PROPERTY(QString httpProxy READ httpProxy WRITE setHttpProxy)
 public:
     explicit MpvItem(QQuickItem *parent = nullptr);
     ~MpvItem() override;
@@ -36,6 +39,10 @@ public:
     // 音量(0-100),写属性同时下发到 mpv。
     int volume() const { return m_volume; }
     void setVolume(int v);
+    // 当前播放流 HTTP 代理串(空 = 直连)。
+    QString httpProxy() const { return m_httpProxy; }
+    // 设置播放流 HTTP 代理(空串/非 http(s) 忽略 = 直连)。
+    void setHttpProxy(const QString &spec);
 
     // 加载并播放 url;headers 为流请求所需 "Name: Value" 头列表(可空)。
     Q_INVOKABLE void load(const QString &url, const QStringList &headers = {});
@@ -75,4 +82,5 @@ private:
     bool m_paused = false;
     bool m_idle = true;
     int m_volume = 100;
+    QString m_httpProxy;
 };

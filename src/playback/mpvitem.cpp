@@ -154,11 +154,25 @@ void MpvItem::setVolume(int v)
     emit volumeChanged();
 }
 
+void MpvItem::setHttpProxy(const QString &spec)
+{
+    // 仅 http/https scheme 生效(防御性:配置层已限 HTTP,防手改配置绕过);
+    // 空串 = 直连,清空选项。
+    const QString trimmed = spec.trimmed();
+    m_httpProxy = (trimmed.startsWith(QLatin1String("http://"))
+                   || trimmed.startsWith(QLatin1String("https://")))
+                      ? trimmed
+                      : QString();
+}
+
 void MpvItem::load(const QString &url, const QStringList &headers)
 {
     // 流请求所需的自定义头(如 Emby 认证)经 http-header-fields 选项下发,须在 loadfile 前设置。
     if (!headers.isEmpty())
         mpv_set_option_string(m_mpv, "http-header-fields", headers.join(QStringLiteral(", ")).toUtf8().constData());
+    // 播放流代理(HTTP;经选项下发,须在 loadfile 前设置)。
+    if (!m_httpProxy.isEmpty())
+        mpv_set_option_string(m_mpv, "http-proxy", m_httpProxy.toUtf8().constData());
     command({ QStringLiteral("loadfile"), url });
 }
 

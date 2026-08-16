@@ -20,13 +20,21 @@
 #include <QUrlQuery>
 
 #include "core/accountmanager.h"
+#include "core/configmanager.h"
 #include "core/constants.h"
 #include "core/embyclient.h"
 
-PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts)
+PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts,
+                               ConfigManager *config)
     : m_client(client)
     , m_accounts(accounts)
+    , m_config(config)
 {
+}
+
+QNetworkProxy PosterProvider::proxy() const
+{
+    return m_config ? m_config->proxyObject() : QNetworkProxy::NoProxy;
 }
 
 namespace {
@@ -55,10 +63,12 @@ QString cacheFilePath(const QString &key)
 class LoadTask : public QRunnable
 {
 public:
-    LoadTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token)
+    LoadTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token,
+             const QNetworkProxy &proxy)
         : m_self(self)
         , m_url(url)
         , m_token(token)
+        , m_proxy(proxy)
     {
     }
 
@@ -66,7 +76,7 @@ public:
     {
         // 加载(磁盘缓存/回源)抽至 PosterProvider::loadImageSync,取色等复用。
         QString err;
-        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err);
+        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err, m_proxy);
         if (m_self)
             QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
                                       Q_ARG(QImage, img), Q_ARG(QString, err));
@@ -76,6 +86,7 @@ private:
     QPointer<PosterResponse> m_self;
     QUrl m_url;
     QString m_token;
+    QNetworkProxy m_proxy;
 };
 } // namespace
 
@@ -93,7 +104,7 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
         if (g_memCache.contains(url.toString()))
             return new PosterResponse(url, *g_memCache.object(url.toString()));
     }
-    return new PosterResponse(url, token);
+    return new PosterResponse(url, token, proxy());
 }
 
 bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token,
@@ -165,7 +176,8 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                                    .arg(itemId, kind, q.toString()));
 }
 
-QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error)
+QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error,
+                                     const QNetworkProxy &proxy)
 {
     const QString key = url.toString();
     if (error)
@@ -188,7 +200,9 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     // 2) 回源:占闸(后台阻塞无碍);QNAM 在本线程创建使用(线程亲和)。
     g_fetchGate.acquire();
     QNetworkAccessManager nam;
-    nam.setProxy(QNetworkProxy::NoProxy); // Emby 为局域网服务,不走系统代理
+    // 配置代理(空 = 直连)。不走系统代理:Emby 多为局域网服务,且 Qt 在
+    // Linux 上不识别 no_proxy,显式指定避免意外走系统代理。
+    nam.setProxy(proxy);
     nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
     QNetworkRequest req(url);
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
@@ -229,10 +243,11 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     return img;
 }
 
-PosterResponse::PosterResponse(const QUrl &url, const QString &token)
+PosterResponse::PosterResponse(const QUrl &url, const QString &token,
+                               const QNetworkProxy &proxy)
 {
     // 加载(磁盘/网络)全部在线程池线程执行,不阻塞调用线程(GUI)。
-    QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token));
+    QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token, proxy));
 }
 
 PosterResponse::PosterResponse(const QUrl &url, const QImage &img, const QString &error)

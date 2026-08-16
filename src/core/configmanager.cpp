@@ -7,6 +7,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
+#include <QUrl>
 
 // toml++ 单头(third_party/tomlplusplus,已加入 include 路径)。
 #include <toml.hpp>
@@ -30,11 +31,34 @@ const QStringList kTextPos = {
     QStringLiteral("bottom-left"), QStringLiteral("bottom-center"), QStringLiteral("bottom-right"),
 };
 
+// 解析代理串为 QNetworkProxy;空串/非法 → NoProxy(直连),并告警。
+// 仅支持 HTTP 代理:http:// / https://(Qt 对 https 目标走 CONNECT 隧道),
+// 可带 user:pass@ 认证。SOCKS 不支持(mpv 播放流无 SOCKS)。
+QNetworkProxy parseProxy(const QString &spec)
+{
+    const QString trimmed = spec.trimmed();
+    if (trimmed.isEmpty())
+        return QNetworkProxy::NoProxy;
+    const QUrl url(trimmed);
+    if ((url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))
+        || !url.isValid() || url.host().isEmpty() || url.port() <= 0 || url.port() > 65535) {
+        qWarning().noquote() << "ConfigManager: invalid proxy spec (http/https only), using direct connection:"
+                             << trimmed;
+        return QNetworkProxy::NoProxy;
+    }
+    QNetworkProxy p(QNetworkProxy::HttpProxy, url.host(), url.port());
+    if (!url.userName().isEmpty()) {
+        p.setUser(url.userName());
+        p.setPassword(url.password());
+    }
+    return p;
+}
+
 // 写回模板:注释对用户手改友好(键/顺序/注释一次生成)。
 QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sortOrder,
                    bool detailSidebarLeft, const QString &detailPosterPos,
                    const QString &detailTextPos, const QString &detailButtonsPos,
-                   int detailTextWidth, int detailTextHeight)
+                   int detailTextWidth, int detailTextHeight, const QString &proxy)
 {
     return QStringLiteral(
                "# MoePlayer \u7528\u6237\u914d\u7f6e(TOML)\n"
@@ -58,7 +82,17 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
                "buttonsPos = \"%7\"# \u64ad\u653e/\u6536\u85cf/\u5df2\u770b\u6309\u94ae\u7ec4:poster(\u6d77\u62a5,\u9ed8\u8ba4)/\n"
                "                  #   text(\u8ddf\u968f\u6807\u9898)/backdrop(\u80cc\u666f\u56fe\u5de6\u4e0b\u89d2,\u4f18\u5148)\n"
                "textWidth = %8     # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u5bbd\u5ea6(\u4e0d\u5360\u5269\u4f59\u5bbd\u5ea6,\u50cf\u7d20)\n"
-               "textHeight = %9    # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u9ad8\u5ea6(\u4e0d\u968f\u5185\u5bb9\u81ea\u9002\u5e94,\u50cf\u7d20)\n")
+               "textHeight = %9    # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u9ad8\u5ea6(\u4e0d\u968f\u5185\u5bb9\u81ea\u9002\u5e94,\u50cf\u7d20)\n"
+               "\n"
+               "[network]\n"
+               "proxy = \"%10\"   # \u5168\u5c40\u4ee3\u7406(\u7a7a=\u76f4\u8fde):http://host:port \u6216\n"
+               "                # https://host:port(HTTP \u4ee3\u7406,https \u76ee\u6807\u8d70\n"
+               "                # CONNECT \u96a7\u9053);\u53ef\u5e26 user:pass@ \u8ba4\u8bc1\u3002\n"
+               "                # \u4ec5\u652f\u6301 HTTP(SOCKS \u4e0d\u652f\u6301:mpv \u64ad\u653e\u6d41\u65e0\n"
+               "                # SOCKS);mihomo mixed-port \u540c\u7aef\u53e3\u8bf4 HTTP \u65b9\u8a00,\n"
+               "                # \u586b http:// \u5373\u53ef\u3002\u914d\u7f6e\u540e\u6d4f\u89c8/\u56fe\u7247/\u56fe\u6807\n"
+               "                # \u5747\u8d70\u4ee3\u7406;\u64ad\u653e\u7ecf mpv --http-proxy(\u672c\u673a\n"
+               "                # \u5b9e\u6d4b https \u4ea6 CONNECT \u96a7\u9053,\u5176\u5b83\u7248\u672c\u672a\u9a8c\u8bc1)\u3002\n")
         .arg(monetEnabled ? QStringLiteral("true") : QStringLiteral("false"))
         .arg(sortBy, sortOrder)
         .arg(detailSidebarLeft ? QStringLiteral("true") : QStringLiteral("false"))
@@ -66,7 +100,8 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
         .arg(detailTextPos)
         .arg(detailButtonsPos)
         .arg(detailTextWidth)
-        .arg(detailTextHeight);
+        .arg(detailTextHeight)
+        .arg(proxy);
 }
 
 } // namespace
@@ -185,6 +220,23 @@ void ConfigManager::setDetailTextHeight(int v)
     commit();
 }
 
+void ConfigManager::setProxy(const QString &v)
+{
+    // 非法值忽略(防手误写坏网络配置;回退直连见 proxyObject)。
+    if (parseProxy(v).type() == QNetworkProxy::NoProxy && !v.trimmed().isEmpty())
+        return;
+    if (v == m_proxy)
+        return;
+    m_proxy = v;
+    emit proxyChanged();
+    commit();
+}
+
+QNetworkProxy ConfigManager::proxyObject() const
+{
+    return parseProxy(m_proxy);
+}
+
 void ConfigManager::reload()
 {
     // 文件被删除(用户 rm 重置):重挂监视(文件路径 watcher 已失效),保持当前值。
@@ -206,6 +258,7 @@ void ConfigManager::resetToDefaults()
     m_detailButtonsPos = QStringLiteral("poster");
     m_detailTextWidth = 280;
     m_detailTextHeight = 140;
+    m_proxy = QString();
     emit monetEnabledChanged();
     emit librarySortByChanged();
     emit librarySortOrderChanged();
@@ -215,6 +268,7 @@ void ConfigManager::resetToDefaults()
     emit detailButtonsPosChanged();
     emit detailTextWidthChanged();
     emit detailTextHeightChanged();
+    emit proxyChanged();
     commit();
 }
 
@@ -250,6 +304,13 @@ void ConfigManager::loadFromFile()
             m_detailTextWidth = detail["textWidth"].value_or(m_detailTextWidth);
             m_detailTextHeight = detail["textHeight"].value_or(m_detailTextHeight);
         }
+
+        const auto network = cfg["network"];
+        if (network.is_table()) {
+            m_proxy = QString::fromStdString(network["proxy"].value_or(m_proxy.toStdString()));
+            if (parseProxy(m_proxy).type() == QNetworkProxy::NoProxy && !m_proxy.trimmed().isEmpty())
+                m_proxy.clear(); // 非法值回退直连(与其它键一致)
+        }
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
         emit monetEnabledChanged();
@@ -261,6 +322,7 @@ void ConfigManager::loadFromFile()
         emit detailButtonsPosChanged();
         emit detailTextWidthChanged();
         emit detailTextHeightChanged();
+        emit proxyChanged();
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
                              << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));
@@ -275,7 +337,8 @@ void ConfigManager::commit()
     if (file.open(QIODevice::WriteOnly)) {
         file.write(renderToml(m_monetEnabled, m_librarySortBy, m_librarySortOrder,
                               m_detailSidebarLeft, m_detailPosterPos, m_detailTextPos,
-                              m_detailButtonsPos, m_detailTextWidth, m_detailTextHeight)
+                              m_detailButtonsPos, m_detailTextWidth, m_detailTextHeight,
+                              m_proxy)
                        .toUtf8());
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();
