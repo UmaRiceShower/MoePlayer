@@ -10,6 +10,7 @@ struct MediaItem {
     QString name;
     QString id;
     QString posterId;
+    QString parentBackdropId;  // 无海报回退:父级(剧集)背景图 id(无则空)。
     QString type;
     int year = 0;              // ProductionYear,无则为 0。
     double rating = 0;         // CommunityRating,无则为 0。
@@ -24,7 +25,8 @@ struct MediaItem {
 
 //! Emby 视图/媒体库条目列表模型,由 EmbyClient 填充。
 //! 角色:name(名称)、id(条目 id)、posterId("<serverKey>~<itemId>~<tag>",
-//! 无主图则为空)、type(条目类型,如 "Movie")、year(年份)、rating(评分)、
+//! 无主图则为空)、parentBackdropId(无海报时的父级背景回退图,无则为空)、
+//! type(条目类型,如 "Movie")、year(年份)、rating(评分)、
 //! played(已看完)、favorite(收藏)、positionTicks/runtimeTicks(观看进度/总时长)、
 //! unplayedCount(未看集数)。
 class MediaItemModel : public QAbstractListModel
@@ -39,6 +41,7 @@ public:
         NameRole = Qt::UserRole + 1,
         IdRole,
         PosterIdRole,
+        ParentBackdropIdRole,
         TypeRole,
         YearRole,
         RatingRole,
