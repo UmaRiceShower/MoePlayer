@@ -71,11 +71,16 @@ public:
     Q_INVOKABLE void setAccountIcon(const QString &id, const QString &icon);
 
     // ---- 服务器文件夹(分类)----
-    // 新建文件夹(name 空自动命名"文件夹 N"),返回新文件夹 id。
-    Q_INVOKABLE QString addFolder(const QString &name);
+    // 新建文件夹(name 空自动命名"文件夹 N";color 空自动随机挑预设色),
+    // 返回新文件夹 id。
+    Q_INVOKABLE QString addFolder(const QString &name, const QString &color = QString());
     // 删除文件夹:成员自动释放为未分组,账号本身不删。
     Q_INVOKABLE void removeFolder(const QString &id);
     Q_INVOKABLE void renameFolder(const QString &id, const QString &name);
+    // 修改文件夹颜色(hex "#RRGGBB",空值忽略)。
+    Q_INVOKABLE void setFolderColor(const QString &id, const QString &color);
+    // 预设颜色列表(新建随机/修改选择 UI 共用)。
+    Q_INVOKABLE QStringList presetFolderColors() const;
     // 账号所在文件夹 id(空串 = 未分组)。
     Q_INVOKABLE QString folderIdOfAccount(const QString &accountId) const;
     // 把账号加入文件夹(已在目标文件夹则忽略;已在其他文件夹则转移)。
@@ -138,6 +143,7 @@ private:
     struct FolderInfo {
         QString id;
         QString name;
+        QString color; // 预设色 hex("#RRGGBB"),卡片背景用
         QStringList accountIds; // 成员账号 id,按加入顺序
     };
     // 文件夹读写(独立 key,账号结构不动)。

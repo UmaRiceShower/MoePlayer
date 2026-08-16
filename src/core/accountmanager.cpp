@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
@@ -23,6 +24,19 @@ const QString kFoldersKey = QStringLiteral("accounts/folders");
 const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
+// 文件夹预设色(hex):新建随机/修改选择 UI 共用,顺序即 UI 展示顺序。
+const QStringList kPresetFolderColors = {
+    QStringLiteral("#EF5350"), // 红
+    QStringLiteral("#FF9800"), // 橙
+    QStringLiteral("#FFC107"), // 琥珀
+    QStringLiteral("#8BC34A"), // 浅绿
+    QStringLiteral("#26A69A"), // 青
+    QStringLiteral("#29B6F6"), // 浅蓝
+    QStringLiteral("#5C6BC0"), // 靛
+    QStringLiteral("#AB47BC"), // 紫
+    QStringLiteral("#EC407A"), // 粉
+    QStringLiteral("#78909C"), // 蓝灰
+};
 // 首页聚合缓存文件名(CacheLocation 下)。
 const QString kHomeCacheFileName = QStringLiteral("/home-rows.json");
 } // namespace
@@ -565,6 +579,7 @@ QVariantList AccountManager::folders() const
         QVariantMap m;
         m.insert(QLatin1String("id"), f.id);
         m.insert(QLatin1String("name"), f.name);
+        m.insert(QLatin1String("color"), f.color);
         QVariantList ids;
         for (const auto &id : f.accountIds)
             ids.append(id);
@@ -574,10 +589,15 @@ QVariantList AccountManager::folders() const
     return out;
 }
 
-QString AccountManager::addFolder(const QString &name)
+QString AccountManager::addFolder(const QString &name, const QString &color)
 {
     FolderInfo f;
     f.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    // 颜色:显式传入优先,空则随机挑预设色。
+    f.color = color.trimmed();
+    if (f.color.isEmpty())
+        f.color = kPresetFolderColors.at(QRandomGenerator::global()
+                                             ->bounded(kPresetFolderColors.size()));
     // 空名自动命名:取未占用的"文件夹 N"(N 从 2 起递增,避免与"文件夹 1"
     // 歧义;首个空名即"文件夹 1")。
     if (name.trimmed().isEmpty()) {
@@ -626,6 +646,24 @@ void AccountManager::renameFolder(const QString &id, const QString &name)
     f->name = n;
     saveFolders();
     emit foldersChanged();
+}
+
+void AccountManager::setFolderColor(const QString &id, const QString &color)
+{
+    FolderInfo *f = folderByIdMutable(id);
+    if (!f)
+        return;
+    const QString c = color.trimmed();
+    if (c.isEmpty() || f->color == c)
+        return;
+    f->color = c;
+    saveFolders();
+    emit foldersChanged();
+}
+
+QStringList AccountManager::presetFolderColors() const
+{
+    return kPresetFolderColors;
 }
 
 QString AccountManager::folderIdOfAccount(const QString &accountId) const
@@ -695,6 +733,11 @@ void AccountManager::loadFolders()
         FolderInfo f;
         f.id = o.value(QLatin1String("id")).toString();
         f.name = o.value(QLatin1String("name")).toString();
+        f.color = o.value(QLatin1String("color")).toString();
+        // 旧数据(升级前创建)无颜色:随机挑一个,与新建默认行为一致。
+        if (f.color.isEmpty())
+            f.color = kPresetFolderColors.at(QRandomGenerator::global()
+                                                 ->bounded(kPresetFolderColors.size()));
         const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
         for (const auto &id : ids) {
             const QString aid = id.toString();
@@ -715,6 +758,7 @@ void AccountManager::saveFolders()
         QJsonObject o;
         o.insert(QLatin1String("id"), f.id);
         o.insert(QLatin1String("name"), f.name);
+        o.insert(QLatin1String("color"), f.color);
         QJsonArray ids;
         for (const auto &id : f.accountIds)
             ids.append(id);

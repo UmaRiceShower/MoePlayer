@@ -96,6 +96,8 @@ Item {
     // 文件夹编辑浮窗:folderEditId 空 = 新建,非空 = 重命名该文件夹。
     property bool folderOpen: false
     property string folderEditId: ""
+    // 浮窗中当前选中的颜色(新建默认随机预设色,重命名预填当前色)。
+    property string folderSelectedColor: ""
 
     signal backRequested()
 
@@ -428,9 +430,41 @@ Item {
                 return folders[i].name
         return ""
     }
+    function folderColorById(id) {
+        const folders = AccountManager.folders
+        for (let i = 0; i < folders.length; ++i)
+            if (folders[i].id === id)
+                return folders[i].color
+        return ""
+    }
+    // 账号所属文件夹的颜色(空 = 未分组)。
+    function folderColorOfAccount(accountId) {
+        return root.folderColorById(AccountManager.folderIdOfAccount(accountId))
+    }
+    // "#RRGGBB" → 带透明度的 QML 颜色;非法/空返回空串(调用方 fallback)。
+    function hexToRgba(hex, alpha) {
+        if (!hex || hex.length < 7)
+            return ""
+        const h = hex.indexOf("#") === 0 ? hex.substring(1) : hex
+        if (h.length < 6)
+            return ""
+        const r = parseInt(h.substring(0, 2), 16)
+        const g = parseInt(h.substring(2, 4), 16)
+        const b = parseInt(h.substring(4, 6), 16)
+        if (isNaN(r) || isNaN(g) || isNaN(b))
+            return ""
+        return Qt.rgba(r / 255, g / 255, b / 255, alpha)
+    }
     function openFolderDialog(id) {
         root.folderEditId = id
         folderNameField.text = id === "" ? "" : root.folderNameById(id)
+        // 颜色:新建随机挑预设色,重命名预填当前色(可改)。
+        if (id === "") {
+            const colors = AccountManager.presetFolderColors()
+            root.folderSelectedColor = colors[Math.floor(Math.random() * colors.length)]
+        } else {
+            root.folderSelectedColor = root.folderColorById(id)
+        }
         root.folderOpen = true
         folderNameField.forceActiveFocus()
     }
@@ -440,9 +474,12 @@ Item {
     function saveFolder() {
         const name = folderNameField.text.trim()
         if (root.folderEditId === "") {
-            AccountManager.addFolder(name)
-        } else if (name !== "" && name !== root.folderNameById(root.folderEditId)) {
-            AccountManager.renameFolder(root.folderEditId, name)
+            AccountManager.addFolder(name, root.folderSelectedColor)
+        } else {
+            if (name !== "" && name !== root.folderNameById(root.folderEditId))
+                AccountManager.renameFolder(root.folderEditId, name)
+            if (root.folderSelectedColor !== "" && root.folderSelectedColor !== root.folderColorById(root.folderEditId))
+                AccountManager.setFolderColor(root.folderEditId, root.folderSelectedColor)
         }
         root.closeFolderDialog()
     }
@@ -875,7 +912,16 @@ Item {
                 width: root.cardW
                 height: root.cardH
                 radius: 12
-                color: Theme.surface
+                // 背景:所属文件夹颜色(半透明,保持文字可读);未分组或
+                // 颜色非法用 surface。依赖 AccountManager.folders
+                // (foldersChanged 时绑定重估,加入/移出文件夹即时着色)。
+                color: {
+                    const c = root.folderColorOfAccount(card.modelData.id)
+                    if (c === "")
+                        return Theme.surface
+                    const col = root.hexToRgba(c, 0.30)
+                    return col !== "" ? col : Theme.surface
+                }
                 // 拖动中半透明并置顶,松手恢复;放大卡同样置顶避免压边。
                 opacity: Drag.active ? 0.6 : 1.0
                 z: Drag.active ? 10 : (card.expanded ? 9 : 0)
@@ -1176,7 +1222,12 @@ Item {
                 width: root.cardW
                 height: root.cardH
                 radius: 12
-                color: Theme.surface
+                // 背景 = 文件夹颜色(半透明,保持文字可读);无/非法颜色
+                // fallback surface(loadFolders 已兜底随机色,双保险)。
+                color: {
+                    const col = root.hexToRgba(fcard.modelData.color, 0.30)
+                    return col !== "" ? col : Theme.surface
+                }
                 // 放大卡置顶避免压边(与账号卡一致);文件夹不拖动。
                 z: fcard.expanded ? 9 : 0
                 scale: fcard.expanded ? root.hoverScale : 1.0
@@ -1720,6 +1771,34 @@ Item {
                     width: parent.width
                     placeholderText: "文件夹名称(留空自动命名)"
                     onAccepted: root.saveFolder()
+                }
+
+                // 预设颜色选择:色点一排,点击选中(选中加边框指示)。
+                // 新建默认随机、重命名预填当前色,均可在保存前修改。
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 8
+                    Repeater {
+                        // 无参 invokable 须带括号调用:不带括号是函数对象
+                        // 引用,赋给 model 报 "Unable to assign a function"。
+                        model: AccountManager.presetFolderColors()
+                        Rectangle {
+                            required property string modelData
+                            width: 24
+                            height: 24
+                            radius: 12
+                            color: modelData
+                            // 选中指示:白边 + 外圈(与背景色区分)。
+                            border.width: root.folderSelectedColor === modelData ? 3 : 0
+                            border.color: Theme.textPrimary
+                            scale: root.folderSelectedColor === modelData ? 1.15 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: root.folderSelectedColor = modelData
+                            }
+                        }
+                    }
                 }
 
                 Row {
