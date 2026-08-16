@@ -293,6 +293,9 @@ Item {
     // 选集条选季:拉该季分集并回顶部。
     function selectSeason(seasonId) {
         root.currentSeasonId = seasonId
+        // 候选季号跟随实际选中季:进入详情/切季/确认季都经此,
+        // 否则初始显示停留在 resetDetail 的默认 1,仅 hover 才纠正。
+        root.seasonCandidate = root.currentSeasonNo()
         const seriesId = root.detail.type === "Series" ? root.detail.id : root.detail.seriesId
         if (seriesId && seasonId) {
             const c = root.creds()
