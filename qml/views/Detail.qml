@@ -656,8 +656,9 @@ Item {
                         }
                         // 文字槽:textPos 四角预设。
                         // 水平:与海报同侧 → 海报内侧;异侧 → 贴对侧边缘。
-                        // 垂直:top → 返回按钮下方;bottom → follow poster 且
-                        // 与海报同侧时避让按钮(贴其上方),否则沉底与海报
+                        // 垂直:top → 贴顶(原"返回按钮下方"预留位已随按钮
+                        // 移除,收紧到 24);bottom → follow poster 且与海报
+                        // 同侧时避让播放按钮行(贴其上方),否则沉底与海报
                         // 下缘对齐(异侧文字与按钮 x 错开,无需考虑按钮高)。
                         Item {
                             id: textSlot
@@ -672,7 +673,7 @@ Item {
                                 : (parent.width - width
                                    - (ConfigManager.detailPosterLeft ? 32 : 32 + Constants.detailPosterW + 24))
                             y: _top
-                                ? 64
+                                ? 24
                                 : ((ConfigManager.detailButtonsFollow === "poster"
                                     && ConfigManager.detailPosterLeft === _left)
                                        ? Math.max(24, parent.height - 44 - 24 - height - 16)
@@ -704,16 +705,7 @@ Item {
                                 : textSlot.y + heroNewCol.y
                         }
 
-                        Button {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 16
-                            anchors.top: parent.top
-                            anchors.topMargin: 12
-                            text: "← 返回"
-                            onClicked: root.back()
-                        }
-
-                            // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
+                        // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
                             // 决定,内容不再计算坐标)。
                             Rectangle {
                                 width: Constants.detailPosterW
@@ -1201,9 +1193,9 @@ Item {
                         anchors.right: digitCol.left
                         anchors.rightMargin: 8
                         anchors.top: parent.top
-                        anchors.topMargin: 41
+                        anchors.topMargin: 42
                     }
-                    // 数字区:行高固定(上 18 + 候选牌 56 + 下 18),每行内容
+                    // 数字区:行高固定(上 16 + 候选牌 62 + 下 16),每行内容
                     // 垂直居中 → 候选牌原位缩放,不上下移动;上下邻季行
                     // 始终占位,折叠时仅透明(淡入淡出)。
                     Column {
@@ -1211,14 +1203,14 @@ Item {
                         anchors.top: parent.top
                         anchors.topMargin: 2
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 62
-                        height: 92
+                        width: 66
+                        height: 94
                         spacing: 0
                         // 上一季(列表内实际存在的季;无则隐藏)。
                         AppText {
                             id: upText
-                            width: 62
-                            height: 18
+                            width: 66
+                            height: 16
                             verticalAlignment: Text.AlignVCenter
                             text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
                                   ? root.pad2(root.seasonPrevNo()) : ""
@@ -1232,8 +1224,8 @@ Item {
                         // 候选季号:两位 Counter Girls 牌(十位/个位),牌原位
                         // 放大(中心不动),牌上的数字随季号切换。
                         Item {
-                            width: 62
-                            height: 56
+                            width: 66
+                            height: 62
                             Row {
                                 anchors.centerIn: parent
                                 spacing: 2
@@ -1245,8 +1237,8 @@ Item {
                                                                    ? Math.floor(root.seasonCandidate / 10) % 10
                                                                    : root.seasonCandidate % 10
                                         source: "qrc:/counter/" + digit + ".gif"
-                                        width: seasonStrip.stripHovered ? 26 : 18
-                                        height: seasonStrip.stripHovered ? 56 : 40
+                                        width: seasonStrip.stripHovered ? 28 : 22
+                                        height: seasonStrip.stripHovered ? 62 : 48
                                         smooth: true
                                         Behavior on width { NumberAnimation { duration: 160 } }
                                         Behavior on height { NumberAnimation { duration: 160 } }
@@ -1257,8 +1249,8 @@ Item {
                         // 下一季(列表内实际存在的季;无则隐藏)。
                         AppText {
                             id: downText
-                            width: 62
-                            height: 18
+                            width: 66
+                            height: 16
                             verticalAlignment: Text.AlignVCenter
                             text: seasonStrip.stripHovered && root.seasonNextNo() > 0
                                   ? root.pad2(root.seasonNextNo()) : ""
@@ -1278,7 +1270,7 @@ Item {
                         anchors.left: digitCol.right
                         anchors.leftMargin: 8
                         anchors.top: parent.top
-                        anchors.topMargin: 41
+                        anchors.topMargin: 42
                     }
                     MouseArea {
                         id: seasonMa
@@ -1312,9 +1304,8 @@ Item {
                         id: episodeItem
                         // 同上:required 声明识别 C++ 模型角色。
                         required property var model
-                        width: episodeList.width - 12
+                        width: episodeList.width
                         height: Constants.detailEpisodeRowH
-                        x: 6
                         // hover 放大(基础样式)
                         scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
                         Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
@@ -1329,23 +1320,27 @@ Item {
                                    : "transparent"
                             Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                         }
-                        Row {
-                            anchors.fill: parent
-                            anchors.margins: Constants.detailEpisodeRowMargin
-                            spacing: 10
-                            // 左:海报缩略图(16:9 剧照)
+                        // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方)。
+                        // 缩略图高 = 行高 - 上下外边距 - 列间距 - 集名行高,总高恒填满行。
+                        Column {
+                            id: cardCol
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: Constants.detailEpisodeRowMargin
+                            spacing: 6
+                            // 海报缩略图(16:9 剧照)
                             Rectangle {
                                 id: thumbBox
-                                height: Constants.detailEpisodeRowH-Constants.detailEpisodeRowMargin*2
+                                height: Constants.detailEpisodeRowH - Constants.detailEpisodeRowMargin*2
+                                       - cardCol.spacing - episodeTitle.implicitHeight
                                 width: height/9*16
-                                anchors.verticalCenter: parent.verticalCenter
                                 color: Theme.bg
-                                radius: 16
+                                radius: 18
                                 clip: true
                                 CrossfadeImage {
                                     id: thumb
                                     anchors.fill: parent
-                                    cornerRadius: 16
+                                    cornerRadius: 18
                                     // 无海报回退:父级(剧集)背景图;两者都无则为空(显示播放图标)。
                                     source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId
                                           : (episodeItem.model.parentBackdropId ? "image://emby/" + episodeItem.model.parentBackdropId : "")
@@ -1359,7 +1354,7 @@ Item {
                                     anchors.centerIn: parent
                                     text: "▶"
                                     color: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
-                                    font.pixelSize: 16
+                                    font.pixelSize: 22
                                     visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
                                              || thumb.status === Image.Error
                                 }
@@ -1370,11 +1365,11 @@ Item {
                                     // 颜色随莫奈取色更新(Canvas 不随外部属性自动重绘)。
                                     property color badgeColor: root.accentColor
                                     onBadgeColorChanged: requestPaint()
-                                    width: 24
-                                    height: 24
+                                    width: 34
+                                    height: 34
                                     anchors.top: parent.top
                                     anchors.right: parent.right
-                                    anchors.margins: 6
+                                    anchors.margins: 9
                                     visible: episodeItem.model.played
                                     onPaint: {
                                         const ctx = getContext("2d")
@@ -1397,36 +1392,39 @@ Item {
                                         ctx.stroke()
                                     }
                                 }
-                            }
-                            // 右:集名 + 进度(宽度跟随缩略图实际宽度)
-                            Column {
-                                width: parent.width - thumbBox.width - 10
-                                anchors.verticalCenter: parent.verticalCenter
-                                spacing: 3
-                                AppText {
-                                    width: parent.width
-                                    text: episodeItem.model.episodeNo > 0 ? "E" + episodeItem.model.episodeNo + " · " + episodeItem.model.name : episodeItem.model.name
-                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
-                                    font.pixelSize: 14
-                                    elide: Text.ElideRight
-                                    opacity: root.textFade
-                                }
-                                // 观看进度条
+                                // 观看进度条:居中,悬于缩略图底部上方(不与底边
+                                // 重合);宽 = 缩略图宽 - 圆角(18),圆角区不再
+                                // 构成干扰;填充莫奈互补色,轨道半透明黑压暗。
                                 Item {
-                                    width: parent.width
-                                    height: 3
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 3
+                                    width: parent.width - thumbBox.radius
+                                    height: 5
                                     visible: episodeItem.model.positionTicks > 0 && !episodeItem.model.played && episodeItem.model.runtimeTicks > 0
                                     Rectangle {
                                         anchors.fill: parent
-                                        color: episodeItem.model.id === root.itemId ? Qt.rgba(1,1,1,0.4) : root.surfaceTint
+                                        radius: 2.5
+                                        color: Qt.rgba(0, 0, 0, 0.45)
                                     }
                                     Rectangle {
                                         width: parent.width * Math.min(1, episodeItem.model.positionTicks / episodeItem.model.runtimeTicks)
                                         height: parent.height
-                                        color: episodeItem.model.id === root.itemId ? "white" : root.accentColor
-                                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
+                                        radius: 2.5
+                                        color: root.complementColor
                                     }
                                 }
+                            }
+                            // 集名:缩略图下方,单行省略,居中。
+                            AppText {
+                                id: episodeTitle
+                                width: thumbBox.width
+                                text: episodeItem.model.name
+                                color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                                opacity: root.textFade
                             }
                         }
                         // 悬停高亮/点击选集:Pointer Handler 组合(替代
@@ -1520,6 +1518,14 @@ Item {
                 return
             root.playbackPending = false
         }
+    }
+
+    // 返回快捷键:Alt+←(原"← 返回"按钮移除后替代);仅本页可见时生效,
+    // 被上层页覆盖/pop 后不误触发。
+    Shortcut {
+        sequences: ["Alt+Left"]
+        enabled: root.visible
+        onActivated: root.back()
     }
 
 }
