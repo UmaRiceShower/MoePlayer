@@ -72,6 +72,18 @@ Item {
     property string iconAccountId: ""
     property string iconServerDefault: ""
 
+    // ---- 文件夹(分类) ----
+    // 已展开的文件夹 id 列表(纯 UI 层状态,不持久化):点击文件夹卡切换,
+    // 展开时成员卡显示在文件夹卡后,收起时隐藏。
+    property var expandedFolders: []
+    // 账号 id → 账号卡 delegate 映射:布局/拖放按 id 查找成员卡用。
+    // Repeater delegate 无 id 直达,由 delegate onCompleted/onDestruction
+    // 注册注销(模型重建时旧卡先删新卡后建,顺序安全)。
+    property var accountCardById: ({})
+    // 文件夹编辑浮窗:folderEditId 空 = 新建,非空 = 重命名该文件夹。
+    property bool folderOpen: false
+    property string folderEditId: ""
+
     signal backRequested()
 
     // 手动布局:占位卡第 0 格,账号卡其后。hover 卡等比例放大(scale),
@@ -84,29 +96,55 @@ Item {
     // (expanded/isNew/accountId/animateTo 等)无法静态推导——这是 Repeater
     // itemAt 回访的固有局限。所有访问均有空值守卫且 delegate 类型恒定,
     // 运行时安全,故屏蔽该误报。
+    // 视觉序列:占位卡(格 0)→ 各文件夹卡(展开时其后紧跟成员卡,成员
+    // 按加入顺序)→ 未分组账号卡(按 accounts 顺序)。布局与拖放落点共用
+    // 此序列,"成员卡跟在文件夹后"与"未分组区顺序 = 账号顺序"两条规则
+    // 在同一处实现,不会各写各的导致错位。
+    function visualSequence() {
+        const seq = [plusCard]
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (!f)
+                continue
+            seq.push(f)
+            if (root.isFolderExpanded(f.folderId)) {
+                const ids = f.modelData.accountIds
+                for (let j = 0; j < ids.length; ++j) {
+                    const m = root.accountCardById[ids[j]]
+                    if (m)
+                        seq.push(m)
+                }
+            }
+        }
+        for (let i = 0; i < cardRepeater.count; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c && AccountManager.folderIdOfAccount(c.accountId) === "")
+                seq.push(c)
+        }
+        return seq
+    }
+
     function layoutCards(animate) {
-        const n = cardRepeater.count
+        const seq = root.visualSequence()
+        const n = seq.length - 1 // 卡数(不含占位卡)
         const stepW = root.cardW + root.gridSpacing
         const stepH = root.cardH + root.gridSpacing
         const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
         // 网格居中偏移:内容区比 cols×stepW 宽时,整行卡整体右移居中;
         // 极端窄窗(内容区 < 卡宽)时为 0,卡片贴左。
         const offset = Math.max(0, (grid.width - cols * stepW) / 2)
+        // hover 放大卡在序列中的索引(账号卡与文件夹卡都有 expanded)。
         let hover = -1
-        for (let i = 0; i < n; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c && c.expanded) {
+        for (let i = 1; i < seq.length; ++i) {
+            if (seq[i].expanded) {
                 hover = i
                 break
             }
         }
         // hover 卡所在行:挤压只作用于同行左右,其他行不受影响。
-        let hcell = -1
         let hrow = -1
-        if (hover >= 0) {
-            hcell = hover + 1
-            hrow = Math.floor(hcell / cols)
-        }
+        if (hover >= 0)
+            hrow = Math.floor(hover / cols)
         // 无放大卡 = 复原:全部卡片用短时复位动画(时长 < hover 触发阈值,
         // 复原期间移回不与放大动画冲突)。
         const restore = hover < 0
@@ -116,20 +154,41 @@ Item {
         const wave = root.reordering && hover < 0 && animate
         // 占位卡(格 0):行 0 且有同行放大卡时一并左移让位。
         root.placeCard(plusCard, (hrow === 0 ? -root.expandHalf : 0) + offset, 0, animate, restore, false, 0)
-        for (let i = 0; i < n; ++i) {
+        // 收起(不在序列)的账号卡:隐藏并复位 hover 放大(避免残留放大,
+        // 展开后直接放大);序列内此前隐藏的成员卡(展开)由下方循环
+        // 显示 + 淡入。
+        for (let i = 0; i < cardRepeater.count; ++i) {
             const c = cardRepeater.itemAt(i)
-            if (!c || c.Drag.active)
+            if (!c || seq.indexOf(c) >= 0)
                 continue
-            const cell = i + 1 // 占位卡占第 0 格
+            if (c.visible)
+                c.visible = false
+            c.hovered = false
+            if (c.expanded)
+                c.expanded = false
+        }
+        for (let i = 1; i < seq.length; ++i) {
+            const c = seq[i]
+            if (c.Drag.active)
+                continue
+            const cell = i // 占位卡占第 0 格,序列索引即格位
             const col = cell % cols
             const row = Math.floor(cell / cols)
             const y = row * stepH
             let x = col * stepW + offset
             if (hover >= 0 && row === hrow) {
-                if (cell < hcell)
+                if (cell < hover)
                     x -= root.expandHalf
-                else if (cell > hcell)
+                else if (cell > hover)
                     x += root.expandHalf
+            }
+            // 展开的成员卡此前隐藏:显示 + 淡入(收进去的卡展开出场)。
+            if (!c.visible) {
+                c.visible = true
+                if (animate)
+                    c.fadeInFromZero()
+                else
+                    c.opacity = 1
             }
             if (c.isNew) {
                 // 新账号卡:直接定位(位置无需动画)+ 淡入;初始/无动画场景
@@ -152,7 +211,8 @@ Item {
             }
             // 重建后无快照的非新卡(添加场景旧卡):位置不变,静默定位
             // (1ms 内完成,不渲染 (0,0)),不走 (0,0) 飞行动画。
-            if (!root.posSnapshot[c.accountId]) {
+            const key = c.accountId || c.folderId
+            if (!root.posSnapshot[key]) {
                 c.x = x
                 c.y = y
                 continue
@@ -178,10 +238,12 @@ Item {
         }
     }
 
-    // 重排前抓位置快照(FLIP First):遍历当前卡片记录 id → {x,y}。新
-    // delegate 按快照复位(见 delegate Component.onCompleted),重排动画
-    // 从旧位置出发;dragId 为空表示删除场景(无被拖卡)。动画结束后由
-    // dragResetTimer 清状态,避免后续 hover 挤压误判为重排。
+    // 重排前抓位置快照(FLIP First):遍历当前卡片记录 id → {x,y}(账号卡
+    // 与文件夹卡都要抓;被收起的成员卡也抓——它们位置停在上次布局位,
+    // 展开时从停靠位动画到新位)。新 delegate 按快照复位(见 delegate
+    // Component.onCompleted),重排动画从旧位置出发;dragId 为空表示删除
+    // 场景(无被拖卡)。动画结束后由 dragResetTimer 清状态,避免后续
+    // hover 挤压误判为重排。
     function snapshotPositions(dragId) {
         root.posSnapshot = {}
         root.dragAccountId = dragId || ""
@@ -193,6 +255,11 @@ Item {
             if (c)
                 root.posSnapshot[c.accountId] = { x: c.x, y: c.y }
         }
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f)
+                root.posSnapshot[f.folderId] = { x: f.x, y: f.y }
+        }
         dragResetTimer.restart()
     }
     // qmllint enable missing-property
@@ -202,26 +269,57 @@ Item {
         layoutTimer.restart()
     }
 
-    // 把落点坐标(相对 root,即 DropArea 原点)换算为账号索引。
-    // 加号占位卡占内容区第一格,账号卡从第二格起;坐标 clamp 到有效范围,
-    // 保证松手必落入某账号位置(全页 DropArea,任何位置都归位)。
-    function dropIndex(dx, dy) {
-        const n = AccountManager.accountCount
-        if (n <= 0)
-            return 0
-        const stepW = root.cardW + root.gridSpacing
-        const stepH = root.cardH + root.gridSpacing
-        // 内容区坐标系 = grid 自身坐标系(drop 坐标减去 grid 偏移)。
+    // 落点目标:优先命中文件夹卡(矩形),其次视觉序列中的账号卡(矩形),
+    // 最后行列换算兜底(任何位置松手都归位到最近的卡位)。返回
+    // {card, hit}:hit=true 表示落在卡矩形内(真正"拖到某张卡上"),
+    // false 表示纯空白兜底(拖到文件夹外空白 = 拖出文件夹的判定依据)。
+    // card 为账号卡(有 accountId)或文件夹卡(有 folderId)。坐标为
+    // DropArea 坐标系(相对 root),先减 grid 偏移换到内容区坐标系。
+    // qmllint disable missing-property
+    // (同 layoutCards:itemAt 回访的动态类型访问,空值守卫下安全。)
+    function dropTargetCard(dx, dy) {
         const lx = dx - grid.x
         const ly = dy - grid.y
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f && lx >= f.x && lx <= f.x + f.width && ly >= f.y && ly <= f.y + f.height)
+                return { card: f, hit: true }
+        }
+        const seq = root.visualSequence()
+        for (let i = 1; i < seq.length; ++i) {
+            const c = seq[i]
+            if (!c.accountId)
+                continue
+            // 跳过拖动中的卡自身:拖动卡跟手(Drag.target 随鼠标移动,z=10
+            // 悬于最上层),其矩形恒包含鼠标点。不跳过会永远命中自己,
+            // 拖到其他卡/空白全被判为"拖回原位"——排序与拖出文件夹失效。
+            if (c.accountId === root.pressCardId)
+                continue
+            if (lx >= c.x && lx <= c.x + c.width && ly >= c.y && ly <= c.y + c.height)
+                return { card: c, hit: true }
+        }
+        // 兜底:行列换算 → 视觉序列索引(与 layoutCards 同源居中偏移)。
+        const stepW = root.cardW + root.gridSpacing
+        const stepH = root.cardH + root.gridSpacing
         const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
-        // 与 layoutCards 同源居中偏移:落点坐标须减去偏移后再换算格位,
-        // 否则拖到卡片中央会命中相邻格。
         const offset = Math.max(0, (grid.width - cols * stepW) / 2)
         const col = Math.max(0, Math.min(cols - 1, Math.floor((lx - offset + root.gridSpacing / 2) / stepW)))
         const row = Math.max(0, Math.floor((ly + root.gridSpacing / 2) / stepH))
-        const cell = row * cols + col
-        return Math.max(0, Math.min(cell - 1, n - 1))
+        const idx = Math.max(1, Math.min(row * cols + col, seq.length - 1))
+        return { card: seq[idx], hit: false }
+    }
+
+    // 拖到该目标是否有实际意义(决定是否高亮):同文件夹成员间无操作
+    // (成员排序暂不支持),未分组账号间为排序(有意义),跨上下文为
+    // 加入/转移/移出(有意义)。
+    function dropMeaningful(fromId, targetFolderId, targetAccountId) {
+        const fromFolder = AccountManager.folderIdOfAccount(fromId)
+        if (targetFolderId !== "")
+            return fromFolder !== targetFolderId
+        const toFolder = AccountManager.folderIdOfAccount(targetAccountId)
+        if (fromFolder === toFolder)
+            return fromFolder === "" && fromId !== targetAccountId
+        return true
     }
 
     function clearDropTarget() {
@@ -230,6 +328,11 @@ Item {
             if (c)
                 c.dropTarget = false
         }
+        for (let i = 0; i < folderRepeater.count; ++i) {
+            const f = folderRepeater.itemAt(i)
+            if (f)
+                f.dropTarget = false
+        }
     }
 
     function updateDropTarget(drop) {
@@ -237,15 +340,70 @@ Item {
         // 用 onPressed 记录的 id,不触碰 drop.source:拖动中模型可能被重建
         // (重登/添加触发 accountsChanged),旧卡已销毁,访问其属性会触发
         // 引擎 internal error。
-        const fromIdx = AccountManager.accounts.findIndex(a => a.id === root.pressCardId)
-        if (fromIdx < 0)
+        if (AccountManager.accounts.findIndex(a => a.id === root.pressCardId) < 0)
             return
-        const idx = root.dropIndex(drop.x, drop.y)
-        if (idx === fromIdx)
+        const t = root.dropTargetCard(drop.x, drop.y)
+        // 纯空白兜底无落点高亮(拖出文件夹在松手时生效,不预高亮)。
+        if (!t || !t.hit)
             return
-        const c = cardRepeater.itemAt(idx)
-        if (c)
-            c.dropTarget = true
+        const c = t.card
+        if (!root.dropMeaningful(root.pressCardId, c.folderId || "", c.accountId || ""))
+            return
+        c.dropTarget = true
+    }
+
+    // 拖回原位/无操作:找到存活卡按按下时位置短时复位归位(拖动中模型
+    // 重建过则位置已在布局位,找到即复位;找不到说明卡已销毁,布局接管)。
+    function returnToPress(fromId) {
+        for (let i = 0; i < cardRepeater.count; ++i) {
+            const c = cardRepeater.itemAt(i)
+            if (c && c.accountId === fromId) {
+                c.animateTo(root.pressStartX, root.pressStartY, true)
+                break
+            }
+        }
+    }
+    // qmllint enable missing-property
+
+    // ---- 文件夹(分类) ----
+    function isFolderExpanded(id) {
+        return root.expandedFolders.indexOf(id) >= 0
+    }
+    // 点击文件夹卡:切换展开/收起。展开 = 成员卡进入视觉序列(从停靠位
+    // 动画到新位 + 淡入);收起 = 成员卡移出序列隐藏(收进文件夹)。
+    // 快照先于布局抓,展开的成员卡停靠位置被记录,重排从停靠位出发。
+    function toggleFolder(id) {
+        if (root.isFolderExpanded(id))
+            root.expandedFolders = root.expandedFolders.filter(f => f !== id)
+        else
+            root.expandedFolders = root.expandedFolders.concat([id])
+        root.snapshotPositions("")
+        root.scheduleLayout()
+    }
+    function folderNameById(id) {
+        const folders = AccountManager.folders
+        for (let i = 0; i < folders.length; ++i)
+            if (folders[i].id === id)
+                return folders[i].name
+        return ""
+    }
+    function openFolderDialog(id) {
+        root.folderEditId = id
+        folderNameField.text = id === "" ? "" : root.folderNameById(id)
+        root.folderOpen = true
+        folderNameField.forceActiveFocus()
+    }
+    function closeFolderDialog() {
+        root.folderOpen = false
+    }
+    function saveFolder() {
+        const name = folderNameField.text.trim()
+        if (root.folderEditId === "") {
+            AccountManager.addFolder(name)
+        } else if (name !== "" && name !== root.folderNameById(root.folderEditId)) {
+            AccountManager.renameFolder(root.folderEditId, name)
+        }
+        root.closeFolderDialog()
     }
 
     function openAddDialog() {
@@ -331,6 +489,12 @@ Item {
             // 导致新增卡误判为旧卡)。
             root.scheduleLayout()
         }
+        // 文件夹增删/成员变化(拖入/移出)后重排:视觉序列变化,账号卡
+        // 不重建(accounts 未变),文件夹卡由 Repeater 按 model 重建。
+        function onFoldersChanged() {
+            root.dragDirty = true
+            root.scheduleLayout()
+        }
     }
 
     // 卡片右键菜单:设置图标 / 删除(登出服务器 + 删除本地数据)。
@@ -362,6 +526,39 @@ Item {
         }
     }
 
+    // 空白区右键菜单:新建文件夹。
+    Menu {
+        id: blankMenu
+        MenuItem {
+            text: "新建文件夹…"
+            onTriggered: root.openFolderDialog("")
+        }
+    }
+
+    // 文件夹卡右键菜单:重命名 / 删除(成员自动释放回未分组,账号不删)。
+    Menu {
+        id: folderMenu
+        property string folderId: ""
+        MenuItem {
+            text: "重命名…"
+            onTriggered: root.openFolderDialog(folderMenu.folderId)
+        }
+        MenuSeparator {}
+        MenuItem {
+            text: "删除文件夹"
+            // 删除前抓快照:其余卡水波让位,成员卡回到未分组区。
+            onTriggered: {
+                root.snapshotPositions("")
+                AccountManager.removeFolder(folderMenu.folderId)
+            }
+            contentItem: AppText {
+                text: "删除文件夹"
+                color: Theme.danger
+                font.pixelSize: 14
+            }
+        }
+    }
+
     // 拖放目标:覆盖整页,任何位置松手都换算并重排(拖出网格也不会失序)。
     DropArea {
         id: gridDrop
@@ -375,28 +572,67 @@ Item {
             // 不触碰 drop.source(拖动中重建后可能已销毁,访问即 internal
             // error),来源 id 与归位值统一用 onPressed 记录的 root 状态。
             const fromId = root.pressCardId
-            const fromIdx = AccountManager.accounts.findIndex(a => a.id === fromId)
-            if (fromIdx < 0)
+            if (AccountManager.accounts.findIndex(a => a.id === fromId) < 0)
                 return
-            const toIdx = root.dropIndex(drop.x, drop.y)
-            if (fromIdx !== toIdx) {
-                // 真实交换:立即执行。快照在模型变化前抓(被拖卡此刻 x/y
-                // 已是拖动位置,FLIP First),重建后新 delegate 按快照复位,
-                // 直接从拖动位置动画到目标格位(无"先回原位"的中间态)。
-                // Home 侧的去重/行就绪门控已消除 drop() 调用栈内重建的
-                // 引擎错误,无需延迟。
-                root.snapshotPositions(fromId)
-                AccountManager.moveAccount(fromId, toIdx)
-            } else {
-                // 拖回原位:模型不变。若拖动中被重建过,当前卡是新实例,
-                // 位置已在布局位;找到存活卡按按下时位置短时复位归位。
-                for (let i = 0; i < cardRepeater.count; ++i) {
-                    const c = cardRepeater.itemAt(i)
-                    if (c && c.accountId === fromId) {
-                        c.animateTo(root.pressStartX, root.pressStartY, true)
-                        break
-                    }
+            const t = root.dropTargetCard(drop.x, drop.y)
+            if (!t) {
+                root.returnToPress(fromId)
+                return
+            }
+            const fromFolder = AccountManager.folderIdOfAccount(fromId)
+            // 纯空白落点(未命中任何卡):文件夹成员 = 拖出文件夹(移出后
+            // 回到未分组区,位置由重排决定);未分组账号 = 按兜底位排序
+            // (保持"任何位置松手都归位"语义)。
+            if (!t.hit) {
+                const bc = t.card
+                if (fromFolder !== "") {
+                    root.snapshotPositions(fromId)
+                    AccountManager.removeAccountFromFolder(fromId)
+                } else if (bc && bc.accountId && fromId !== bc.accountId) {
+                    root.snapshotPositions(fromId)
+                    AccountManager.moveAccount(fromId, AccountManager.accounts.findIndex(a => a.id === bc.accountId))
+                } else {
+                    root.returnToPress(fromId)
                 }
+                return
+            }
+            const tc = t.card
+            if (tc.folderId !== undefined && tc.folderId !== "") {
+                // 命中文件夹卡:加入该文件夹(已在其中则拖回原位)。
+                // 快照在模型变化前抓(被拖卡此刻 x/y 已是拖动位置,FLIP
+                // First),foldersChanged 重建文件夹卡后按快照复位,成员卡
+                // 从拖动位置直接动画到文件夹后(无"先回原位"中间态)。
+                if (fromFolder !== tc.folderId) {
+                    root.snapshotPositions(fromId)
+                    AccountManager.addAccountToFolder(tc.folderId, fromId)
+                } else {
+                    root.returnToPress(fromId)
+                }
+                return
+            }
+            // 命中账号卡:按源/目标归属执行——同上下文(未分组↔未分组)走
+            // 原有排序;同文件夹成员间无操作;跨上下文为加入/转移/移出。
+            const toFolder = AccountManager.folderIdOfAccount(tc.accountId)
+            if (fromFolder === toFolder) {
+                if (fromFolder === "" && fromId !== tc.accountId) {
+                    root.snapshotPositions(fromId)
+                    AccountManager.moveAccount(fromId, AccountManager.accounts.findIndex(a => a.id === tc.accountId))
+                } else {
+                    root.returnToPress(fromId)
+                }
+                return
+            }
+            if (toFolder !== "") {
+                // 拖到成员卡:加入(转移)该文件夹。
+                root.snapshotPositions(fromId)
+                AccountManager.addAccountToFolder(toFolder, fromId)
+            } else {
+                // 从文件夹拖到未分组区:移出文件夹 + 按目标位排序(账号
+                // 顺序不变,移出后再 moveAccount 落到目标账号处)。
+                const toIdx = AccountManager.accounts.findIndex(a => a.id === tc.accountId)
+                root.snapshotPositions(fromId)
+                AccountManager.removeAccountFromFolder(fromId)
+                AccountManager.moveAccount(fromId, toIdx)
             }
         }
         // qmllint enable missing-property
@@ -460,6 +696,15 @@ Item {
             interval: 1
             repeat: false
             onTriggered: root.layoutCards(true)
+        }
+
+        // 空白区右键:新建文件夹。置于最底层(先声明),卡片区域由卡片自身
+        // 的 MouseArea 拦截,空白处(含加号卡外区域)命中这里。
+        MouseArea {
+            id: blankArea
+            anchors.fill: parent
+            acceptedButtons: Qt.RightButton
+            onClicked: (mouse) => blankMenu.popup(blankArea, mouse.x, mouse.y)
         }
 
         // 添加服务器占位卡(具体添加 UI 后续设计,先占位)。
@@ -617,6 +862,7 @@ Item {
                 // 避免动画引擎在失效对象上求值(QQmlVMEMetaObject internal
                 // error——重登等触发的重建可能发生在动画进行中)。
                 Component.onDestruction: {
+                    delete root.accountCardById[card.modelData.id]
                     animX.stop()
                     animY.stop()
                     animXBack.stop()
@@ -624,6 +870,7 @@ Item {
                     opacityAnim.stop()
                 }
                 Component.onCompleted: {
+                    root.accountCardById[card.modelData.id] = card
                     const p = root.posSnapshot[card.modelData.id]
                     card.isNew = !root.prevAccountIds.includes(card.modelData.id)
                     if (p) {
@@ -851,6 +1098,232 @@ Item {
                         // 已失效,不再触碰。
                         if (act === Qt.IgnoreAction && !r.dragDirty && card.animateTo)
                             card.animateTo(sx, sy, true)
+                    }
+                }
+            }
+        }
+
+        // 文件夹卡(同款卡片):点击切换展开/收起(展开时成员卡跟在文件夹
+        // 卡后),右键重命名/删除;拖放目标(账号卡拖入即加入,拖到其上
+        // 高亮)。不参与拖动(无 Drag,布局/落点经 visualSequence 合成)。
+        Repeater {
+            id: folderRepeater
+            model: AccountManager.folders
+
+            Rectangle {
+                id: fcard
+                // Repeater 注入的模型元素(同账号卡:required 声明让
+                // 静态检查把 modelData 视为本卡属性)。
+                required property var modelData
+                width: root.cardW
+                height: root.cardH
+                radius: 12
+                color: Theme.surface
+                // 放大卡置顶避免压边(与账号卡一致);文件夹不拖动。
+                z: fcard.expanded ? 9 : 0
+                scale: fcard.expanded ? root.hoverScale : 1.0
+                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                property string folderId: fcard.modelData.id
+                // 展开状态(绑定 root.expandedFolders,切换即刷新)。
+                property bool isOpen: root.isFolderExpanded(fcard.folderId)
+                // 拖放落点高亮 / hover 边框;展开态边框用强调色淡描边,
+                // 一眼区分"打开中"的文件夹。
+                border.width: fcard.dropTarget ? 2 : 1
+                border.color: fcard.dropTarget ? Theme.accent
+                              : (fcard.isOpen ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.4)
+                              : (fcard.hovered ? root.hoverBorder : Theme.bg))
+                property bool hovered: false
+                property bool dropTarget: false
+                property bool expanded: false
+
+                // 位移动画(与账号卡同套:挤压/复位/重排水波共用)。
+                function animateTo(tx, ty, restore, fade, duration) {
+                    if (Math.abs(fcard.x - tx) > 0.5) {
+                        if (restore) {
+                            fcardAnimXBack.from = fcard.x
+                            fcardAnimXBack.to = tx
+                            fcardAnimXBack.start()
+                        } else {
+                            fcardAnimX.duration = duration > 0 ? duration : root.moveDuration
+                            fcardAnimX.from = fcard.x
+                            fcardAnimX.to = tx
+                            fcardAnimX.start()
+                        }
+                    }
+                    if (Math.abs(fcard.y - ty) > 0.5) {
+                        if (restore) {
+                            fcardAnimYBack.from = fcard.y
+                            fcardAnimYBack.to = ty
+                            fcardAnimYBack.start()
+                        } else {
+                            fcardAnimY.duration = duration > 0 ? duration : root.moveDuration
+                            fcardAnimY.from = fcard.y
+                            fcardAnimY.to = ty
+                            fcardAnimY.start()
+                        }
+                    }
+                    if (fade && !restore) {
+                        fcardOpacityAnim.from = 0.5
+                        fcardOpacityAnim.to = 1
+                        fcardOpacityAnim.start()
+                    }
+                }
+                function fadeInFromZero() {
+                    fcardOpacityAnim.from = 0
+                    fcardOpacityAnim.to = 1
+                    fcardOpacityAnim.start()
+                }
+                NumberAnimation {
+                    id: fcardAnimX
+                    target: fcard
+                    property: "x"
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: fcardAnimY
+                    target: fcard
+                    property: "y"
+                    duration: 220
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: fcardAnimXBack
+                    target: fcard
+                    property: "x"
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: fcardAnimYBack
+                    target: fcard
+                    property: "y"
+                    duration: 120
+                    easing.type: Easing.OutCubic
+                }
+                NumberAnimation {
+                    id: fcardOpacityAnim
+                    target: fcard
+                    property: "opacity"
+                    duration: root.fadeDuration
+                    easing.type: Easing.OutCubic
+                }
+
+                // 销毁前停掉所有动画(同账号卡:target 随 delegate 销毁)。
+                Component.onDestruction: {
+                    fcardAnimX.stop()
+                    fcardAnimY.stop()
+                    fcardAnimXBack.stop()
+                    fcardAnimYBack.stop()
+                    fcardOpacityAnim.stop()
+                }
+                Component.onCompleted: {
+                    // 重排后按快照复位到旧位置(FLIP Invert,key = folderId),
+                    // 消除瞬移 (0,0);新文件夹卡无快照,由布局静默定位。
+                    const p = root.posSnapshot[fcard.folderId]
+                    if (p) {
+                        fcard.x = p.x
+                        fcard.y = p.y
+                    }
+                    root.scheduleLayout()
+                }
+                // 放大状态变化 → 重排(左右邻居让位/复位)。
+                onExpandedChanged: root.scheduleLayout()
+
+                // hover 触发阈值(同账号卡:200ms,快速划过不触发)。
+                Timer {
+                    id: fcardHoverTimer
+                    interval: 200
+                    repeat: false
+                    onTriggered: fcard.expanded = true
+                }
+
+                // 图标区:两页交叠的文件夹图形(描边),hover 变强调色。
+                Rectangle {
+                    width: root.iconSize
+                    height: root.iconSize
+                    radius: 10
+                    anchors.top: parent.top
+                    anchors.topMargin: 14
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    Canvas {
+                        id: folderGlyph
+                        anchors.fill: parent
+                        property color lineColor: farea.containsMouse ? Theme.accent : Theme.textMuted
+                        onLineColorChanged: requestPaint()
+                        onPaint: {
+                            const ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = lineColor
+                            ctx.lineWidth = 2
+                            // 后页 + 前页错位,构成文件夹感。
+                            ctx.strokeRect(width * 0.22, height * 0.30, width * 0.56, height * 0.42)
+                            ctx.strokeRect(width * 0.14, height * 0.42, width * 0.66, height * 0.38)
+                        }
+                    }
+                }
+
+                // 名称 + 成员数。
+                Column {
+                    anchors.top: parent.top
+                    anchors.topMargin: 18
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14 + root.iconSize + 12
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    spacing: 4
+                    AppText {
+                        width: parent.width
+                        text: fcard.modelData.name
+                        color: Theme.textPrimary
+                        font.pixelSize: 15
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                    AppText {
+                        width: parent.width
+                        text: fcard.modelData.accountIds.length + " 台服务器"
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                }
+
+                // 展开/收起箭头(右下角):▸ 收起 / ▾ 展开。
+                AppText {
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    text: fcard.isOpen ? "▾" : "▸"
+                    color: farea.containsMouse ? Theme.accent : Theme.textMuted
+                    font.pixelSize: 13
+                }
+
+                // 点击切换展开/收起;右键弹出文件夹菜单(重命名/删除)。
+                MouseArea {
+                    id: farea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onEntered: {
+                        fcard.hovered = true
+                        fcardHoverTimer.start()
+                    }
+                    onExited: {
+                        fcard.hovered = false
+                        fcardHoverTimer.stop()
+                        fcard.expanded = false
+                    }
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton) {
+                            folderMenu.folderId = fcard.folderId
+                            folderMenu.popup(fcard, mouse.x, mouse.y)
+                        } else {
+                            root.toggleFolder(fcard.folderId)
+                        }
                     }
                 }
             }
@@ -1107,6 +1580,81 @@ Item {
                         width: 110
                         text: "取消"
                         onClicked: root.closeIconDialog()
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- 文件夹编辑浮窗(新建/重命名)----
+    // 半透明遮罩 + 居中卡片:输入文件夹名称,确定创建/重命名。新建时
+    // 名称留空走 AccountManager 自动命名("文件夹 N")。点击遮罩取消。
+    Rectangle {
+        id: folderOverlay
+        visible: root.folderOpen
+        anchors.fill: parent
+        color: Qt.rgba(0, 0, 0, 0.55)
+        z: 100
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.closeFolderDialog()
+        }
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 380
+            height: folderCol.implicitHeight + 48
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+
+            // 吞掉点击:卡片空白处不穿透到遮罩误关。
+            MouseArea {
+                anchors.fill: parent
+            }
+
+            Column {
+                id: folderCol
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 48
+                spacing: 14
+
+                AppText {
+                    text: root.folderEditId === "" ? "新建文件夹" : "重命名文件夹"
+                    color: Theme.textPrimary
+                    font.pixelSize: 20
+                    font.bold: true
+                }
+                AppText {
+                    text: root.folderEditId === ""
+                          ? "新建后拖动服务器卡片到文件夹上即可归类"
+                          : "重命名后立即生效"
+                    color: Theme.textMuted
+                    font.pixelSize: 12
+                }
+
+                TextField {
+                    id: folderNameField
+                    width: parent.width
+                    placeholderText: "文件夹名称(留空自动命名)"
+                    onAccepted: root.saveFolder()
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
+                    Button {
+                        width: 120
+                        text: "确定"
+                        onClicked: root.saveFolder()
+                    }
+                    Button {
+                        width: 120
+                        text: "取消"
+                        onClicked: root.closeFolderDialog()
                     }
                 }
             }

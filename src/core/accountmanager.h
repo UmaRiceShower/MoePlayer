@@ -19,6 +19,10 @@ class AccountManager : public QObject
     Q_PROPERTY(QVariantList accounts READ accounts NOTIFY accountsChanged)
     // 账号数(只读标量):绑定/高频路径用,避免每次 accounts() 重建整表。
     Q_PROPERTY(int accountCount READ accountCount NOTIFY accountsChanged)
+    // 服务器文件夹(分类):纯视觉分组,不影响账号列表与首页聚合顺序。
+    // 每项 {id, name, accountIds:[账号id按加入顺序]}。成员卡展开时跟在
+    // 文件夹卡后,收起时隐藏。持久化于 QSettings(accounts/folders)。
+    Q_PROPERTY(QVariantList folders READ folders NOTIFY foldersChanged)
     // 首页聚合行:所有账号的媒体库按账号顺序排列,每行含
     // {accountId, serverUrl, serverName, viewName, posterId, items}。
     Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReady)
@@ -28,6 +32,7 @@ public:
     QVariantList accounts() const;
     int accountCount() const { return m_accounts.size(); }
     QVariantList homeRows() const { return m_homeRows; }
+    QVariantList folders() const;
 
     // 是否已保存任何账号。
     Q_INVOKABLE bool hasAccounts() const;
@@ -65,6 +70,19 @@ public:
     // 立即持久化并通知 UI,无需额外保存操作。
     Q_INVOKABLE void setAccountIcon(const QString &id, const QString &icon);
 
+    // ---- 服务器文件夹(分类)----
+    // 新建文件夹(name 空自动命名"文件夹 N"),返回新文件夹 id。
+    Q_INVOKABLE QString addFolder(const QString &name);
+    // 删除文件夹:成员自动释放为未分组,账号本身不删。
+    Q_INVOKABLE void removeFolder(const QString &id);
+    Q_INVOKABLE void renameFolder(const QString &id, const QString &name);
+    // 账号所在文件夹 id(空串 = 未分组)。
+    Q_INVOKABLE QString folderIdOfAccount(const QString &accountId) const;
+    // 把账号加入文件夹(已在目标文件夹则忽略;已在其他文件夹则转移)。
+    Q_INVOKABLE void addAccountToFolder(const QString &folderId, const QString &accountId);
+    // 从所在文件夹移除账号(回到未分组);不在任何文件夹则忽略。
+    Q_INVOKABLE void removeAccountFromFolder(const QString &accountId);
+
     // 供 UI 读取某账号的明文密码(仅当 rememberPassword;混淆解码)。
     Q_INVOKABLE QString passwordFor(const QString &id) const;
 
@@ -78,6 +96,7 @@ public:
 
 signals:
     void accountsChanged();
+    void foldersChanged();
     // 登录/切换结果:ok=false 时 message 为失败原因。
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
@@ -115,6 +134,18 @@ private:
     void persistServerNames();
     // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
     int accountIndexByServer(const QString &serverUrl) const;
+    // 文件夹结构(见 folders 属性)。
+    struct FolderInfo {
+        QString id;
+        QString name;
+        QStringList accountIds; // 成员账号 id,按加入顺序
+    };
+    // 文件夹读写(独立 key,账号结构不动)。
+    void loadFolders();
+    void saveFolders();
+    const FolderInfo *folderById(const QString &id) const;
+    FolderInfo *folderByIdMutable(const QString &id);
+    int folderIndexById(const QString &id) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
     const AccountInfo *accountById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
@@ -123,6 +154,7 @@ private:
     EmbyClient *m_client;
     QSettings m_settings;
     QList<AccountInfo> m_accounts;
+    QList<FolderInfo> m_folders;
     // 待保存的登录(正在走 EmbyClient.login 的账号)。
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。
