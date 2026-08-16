@@ -552,14 +552,14 @@ Item {
         color: Theme.bg
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
-        // 高度 = hero 内容区(400)+ 延伸 160,背景图"漏出"到正文起始区,
-        // 底部经 ShaderEffect 渐隐(底 10% alpha 淡出)融入正文底色,
-        // 自然沉入页面而非硬切。
+        // 高度 = 宽度按 16:9 推导(Emby backdrop 全为 16:9),任意窗口宽度
+        // 下 PreserveAspectCrop 零裁切;"漏出"正文量随窗口宽度变化
+        // (窄窗短、宽窗深),底部经 ShaderEffect 渐隐融入正文底色。
         Rectangle {
             id: heroBackdrop
             y: 0
             width: parent.width
-            height: Constants.detailBackdropH
+            height: parent.width * 9 / 16
             visible: root.loaded
             z: 0
             // 底部渐隐:整块背景(图+氛围层)离屏合成后,底 10%

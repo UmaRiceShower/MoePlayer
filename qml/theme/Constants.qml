@@ -14,8 +14,6 @@ QtObject {
     // ---- 详情页(Hero + 右侧选集条) ----
     readonly property int detailHeroH: 400        // Hero 内容区高度(海报/文字/按钮;桌面端随窗口缩放)
     readonly property int detailTextRevealMs: 3000 // hero 文字滑动揭示动画时长
-    readonly property int detailBackdropH: 560    // Hero 背景图总高 = 内容区 + 向下延伸 160(延伸区
-                                                  // 经渐变遮罩融入正文底色;只延伸背景,不动内容布局)
     readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
     readonly property int detailPosterH: 300      // Hero 海报高
     readonly property int detailSidebarW: 260     // 右侧选集条宽
