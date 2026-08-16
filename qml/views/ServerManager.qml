@@ -761,10 +761,13 @@ Item {
             function animateTo(tx, ty, restore) {
                 if (Math.abs(plusCard.x - tx) > 0.5) {
                     if (restore) {
+                        // 同属性动画互斥(与账号卡一致):挤压进行中恢复先停前者。
+                        plusAnimX.stop()
                         plusAnimXBack.from = plusCard.x
                         plusAnimXBack.to = tx
                         plusAnimXBack.start()
                     } else {
+                        plusAnimXBack.stop()
                         plusAnimX.from = plusCard.x
                         plusAnimX.to = tx
                         plusAnimX.start()
@@ -772,10 +775,12 @@ Item {
                 }
                 if (Math.abs(plusCard.y - ty) > 0.5) {
                     if (restore) {
+                        plusAnimY.stop()
                         plusAnimYBack.from = plusCard.y
                         plusAnimYBack.to = ty
                         plusAnimYBack.start()
                     } else {
+                        plusAnimYBack.stop()
                         plusAnimY.from = plusCard.y
                         plusAnimY.to = ty
                         plusAnimY.start()
@@ -942,10 +947,16 @@ Item {
                 function animateTo(tx, ty, restore, fade, duration) {
                     if (Math.abs(card.x - tx) > 0.5) {
                         if (restore) {
+                            // 同属性动画互斥:挤压(animX)进行中启动恢复时先
+                            // 停掉前者。否则两动画每帧双写 x,恢复被挤压
+                            // 动画结束帧覆盖——放大/挤压刚启动时右键,卡片
+                            // 停在被挤开位、两侧不收回(复现场景)。
+                            animX.stop()
                             animXBack.from = card.x
                             animXBack.to = tx
                             animXBack.start()
                         } else {
+                            animXBack.stop()
                             animX.duration = duration > 0 ? duration : root.moveDuration
                             animX.from = card.x
                             animX.to = tx
@@ -954,10 +965,12 @@ Item {
                     }
                     if (Math.abs(card.y - ty) > 0.5) {
                         if (restore) {
+                            animY.stop()
                             animYBack.from = card.y
                             animYBack.to = ty
                             animYBack.start()
                         } else {
+                            animYBack.stop()
                             animY.duration = duration > 0 ? duration : root.moveDuration
                             animY.from = card.y
                             animY.to = ty
@@ -1187,10 +1200,14 @@ Item {
                 function animateTo(tx, ty, restore, fade, duration) {
                     if (Math.abs(fcard.x - tx) > 0.5) {
                         if (restore) {
+                            // 同属性动画互斥(与账号卡一致):挤压进行中恢复
+                            // 先停前者,防双写同一属性。
+                            fcardAnimX.stop()
                             fcardAnimXBack.from = fcard.x
                             fcardAnimXBack.to = tx
                             fcardAnimXBack.start()
                         } else {
+                            fcardAnimXBack.stop()
                             fcardAnimX.duration = duration > 0 ? duration : root.moveDuration
                             fcardAnimX.from = fcard.x
                             fcardAnimX.to = tx
@@ -1199,10 +1216,12 @@ Item {
                     }
                     if (Math.abs(fcard.y - ty) > 0.5) {
                         if (restore) {
+                            fcardAnimY.stop()
                             fcardAnimYBack.from = fcard.y
                             fcardAnimYBack.to = ty
                             fcardAnimYBack.start()
                         } else {
+                            fcardAnimYBack.stop()
                             fcardAnimY.duration = duration > 0 ? duration : root.moveDuration
                             fcardAnimY.from = fcard.y
                             fcardAnimY.to = ty
@@ -1369,6 +1388,13 @@ Item {
                     }
                     onExited: {
                         fcard.hovered = false
+                        fcardHoverTimer.stop()
+                        fcard.expanded = false
+                    }
+                    onPressed: (mouse) => {
+                        // 按住立即收起放大(同账号卡):右键弹菜单/左键点击
+                        // 时卡片不保持放大,两侧正常复位。原缺失:右键
+                        // 文件夹卡会保持放大、两侧持续让位。
                         fcardHoverTimer.stop()
                         fcard.expanded = false
                     }
