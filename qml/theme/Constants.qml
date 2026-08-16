@@ -21,7 +21,9 @@ QtObject {
     readonly property int detailEpisodeRowMargin: 15
     readonly property real detailHeroFadeBand: 0.2
     readonly property real detailEpisodeHoverScale: 1.06 // 选集条行 hover 放大
-    readonly property int detailBodyMaxW: 1000    // 正文区最大宽(窗口过宽时不拉成一条线)
+    // 正文区块(演职/媒体信息/相似推荐)靠左边距;区块宽 = 内容区 - 2×边距
+    // (内容区宽 = 窗口 - 选集栏,overview 已减过栏宽)。
+    readonly property int detailSectionMargin: 24
     readonly property int detailCardW: 112        // 相似推荐/演职人员头像卡宽
     readonly property int detailCardH: 168        // 相似推荐海报卡高
 

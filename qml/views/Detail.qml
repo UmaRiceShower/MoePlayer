@@ -1050,8 +1050,9 @@ Item {
 
                     // ================= 演职人员 =================
                     Column {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.detailSectionMargin
+                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
                         spacing: 8
                         visible: !!root.detail.people && root.detail.people.length > 0
                         opacity: root.textFade * visible
@@ -1133,8 +1134,9 @@ Item {
 
                     // ================= 媒体信息 =================
                     Column {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.detailSectionMargin
+                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
                         spacing: 8
                         visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
                         opacity: root.textFade * visible
@@ -1178,8 +1180,9 @@ Item {
 
                     // ================= 相似推荐 =================
                     Column {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: Math.min(parent.width - 48, Constants.detailBodyMaxW)
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.detailSectionMargin
+                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
                         spacing: 8
                         visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
                         opacity: root.textFade * visible
