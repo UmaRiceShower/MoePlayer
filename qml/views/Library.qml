@@ -1,6 +1,8 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
+import QtQuick.Shapes
 import MoePlayer.Core
 
 //! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
@@ -8,9 +10,13 @@ import MoePlayer.Core
 //! AccountManager.credsForServer 取凭据按服务器路由,不依赖任何会话;
 //! 无账号/凭据失效时显示连接表单(直连登录 = 添加账号)。
 //! 顶部一行选择媒体库(下拉),主体为条目网格;播放/详情经信号交给主窗口。
+//! 结构遵循 Qt QML Coding Conventions:属性 → 信号 → 函数 → 子对象。
 Item {
     id: root
 
+    // ============================= 属性 =============================
+
+    // --- 浏览目标与恢复 ---
     // 进入页面时选中的媒体库 id(首页点某库海报时传入;空则默认第一个)。
     property string initialViewId: ""
     // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
@@ -19,19 +25,84 @@ Item {
     property var restore: null
     // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
     property real pendingRestoreY: 0
+
+    // --- 当前浏览上下文 ---
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
     // 当前服务端排序(DateLastMediaAdded 在 4.9.5 条目级查询报错,不在档位内)。
     // 默认值来自用户配置(ConfigManager);restore 恢复时会覆盖。
     property string currentSortBy: ConfigManager.librarySortBy
     property string currentSortOrder: ConfigManager.librarySortOrder
-    property bool busy: false
-    // 该服务器的视图/条目模型(浏览绑定,页面生命周期内一次性取引用)。
+
+    // --- 库内筛选状态(直接映射 API 查询参数,空 = 不传) ---
+    // 类型单选(Genres 多值实测为 AND 语义,单选安全):Genre 名称。
+    property string currentGenres: ""
+    // 年份单选(Years 单值):年份字符串;空 = 全部年份。
+    property string currentYear: ""
+    // 评分下限(MinCommunityRating):"6".."9";空 = 不限。
+    property string currentMinRating: ""
+    // 状态过滤(Filters):""|IsUnplayed|IsPlayed|IsFavorite。
+    property string currentFilter: ""
+    // 子文件夹下钻路径(元素为文件夹 id;空数组 = 库根)。进文件夹 push,
+    // 上级 pop、根清空;查询 ParentId = 末元素或库视图 id。
+    property var folderPath: []
+    // 年份下拉选项(服务端 Years 列表过滤脏值后倒序,首项"全部年份")。
+    property var yearOptions: ["全部年份"]
+
+    // --- 模型引用(浏览绑定,页面生命周期内一次性取引用) ---
     property var vm: null
     property var im: null
+    property var gm: null
+    property var fm: null
+
+    // --- 派生态 ---
+    property bool busy: false
     // 可浏览 = 有服务器且凭据有效。
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
     readonly property bool showForm: !root.browseReady
+
+    // --- chip 样式(与搜索浮窗一致) ---
+    // 选中 chip 底色:accent 降饱和加深(大色块不用纯 accent)。
+    readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
+    // 选中 chip 悬停:同色相提亮一档。
+    readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
+    // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
+    readonly property int bcTip: 14
+
+    // ============================= 信号 =============================
+
+    // 请求播放(携带完整播放地址/头/元数据)。
+    signal playRequested(string url, var headers, var meta)
+    // 点击条目进入详情页(携带所在服务器)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
+    signal libraryStateSaved(var state)
+
+    // ===================== 内部组件与数据 =====================
+
+    // 分类筛选 chip(选中实心/未选描边,与搜索浮窗类型 chips 同风格)。
+    component FilterChip: Button {
+        property string label: ""
+        property bool active: false
+
+        height: 30
+        padding: 14
+        background: Rectangle {
+            radius: 10
+            color: parent.active
+                   ? (parent.hovered ? root.chipActiveHover : root.chipActive)
+                   : (parent.hovered ? Theme.surface : Theme.bg)
+            border.width: parent.active ? 0 : 1
+            border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
+        }
+        contentItem: AppText {
+            text: label
+            color: "white"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
 
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
     // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
@@ -45,12 +116,177 @@ Item {
         ListElement { label: "名称"; key: "SortName" }
     }
 
-    signal playRequested(string url, var headers, var meta)
-    // 点击条目进入详情页(携带所在服务器)。
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
-    // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
-    signal libraryStateSaved(var state)
+    // 头部面包屑标签形状(QtQuick.Shapes 矢量多边形,右向尖角 ▸):
+    // leftNotch=false(服名)= 左直右尖五边形;
+    // leftNotch=true(媒体库)= 左边缘保留竖边、中点向内凹 V 槽(顶点 x=tip)
+    // + 右尖;服名尖角(凸 tip)插入槽内,仅余 2px 间隙,紧密咬合。
+    // 用 Shape 而非 Canvas:属性绑定(fill/尺寸)由场景图自动重新三角化,
+    // 无 Canvas 手动 requestPaint 的时序问题。ShapePath 自动闭合填充;
+    // 末段落在槽顶点,leftNotch=false 时与左直边共线退化为五边形。
+    component BreadcrumbShape: Shape {
+        id: shape
+        property color fillColor: "transparent"
+        property color borderColor: "transparent"
+        property bool leftNotch: false
+        property int tip: root.bcTip
 
+        ShapePath {
+            fillColor: shape.fillColor
+            strokeColor: shape.borderColor
+            strokeWidth: 1
+            joinStyle: ShapePath.MiterJoin
+            startX: 0
+            startY: 0
+            PathLine { x: shape.width - shape.tip; y: 0 }
+            PathLine { x: shape.width; y: shape.height / 2 }
+            PathLine { x: shape.width - shape.tip; y: shape.height }
+            PathLine { x: 0; y: shape.height }
+            PathLine { x: shape.leftNotch ? shape.tip : 0; y: shape.height / 2}
+        }
+    }
+
+    // ============================= 函数 =============================
+
+    // --- 基础 ---
+    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
+    function creds() {
+        return AccountManager.credsForServer(root.serverUrl)
+    }
+    // 服务器显示名:账号名/用户名,未匹配回退地址。
+    function serverLabel() {
+        const accs = AccountManager.accounts
+        for (const a of accs)
+            if (a.serverUrl === root.serverUrl)
+                return a.name !== "" ? a.name : a.userName
+        return root.serverUrl
+    }
+
+    // --- 请求核心 ---
+    // 当前查询的 ParentId:下钻到子文件夹则用文件夹 id,否则库视图 id。
+    function currentParentId() {
+        return root.folderPath.length > 0
+               ? root.folderPath[root.folderPath.length - 1]
+               : root.currentViewId
+    }
+    // 统一条目请求(筛选/排序随页面状态;startIndex=0 替换模型,>0 分页追加)。
+    function fetchPage(startIndex) {
+        if (!root.browseReady || root.currentViewId === "")
+            return
+        const c = root.creds()
+        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentParentId(),
+                              startIndex, Constants.pageSize,
+                              root.currentSortBy, root.currentSortOrder,
+                              root.currentGenres, root.currentYear,
+                              root.currentMinRating, root.currentFilter)
+    }
+    // 重拉条目 + 分类(类型/年份/子文件夹):切库与下钻时调用。
+    function reloadAll() {
+        if (!root.browseReady || root.currentViewId === "")
+            return
+        root.fetchPage(0)
+        const c = root.creds()
+        EmbyClient.fetchGenres(root.serverUrl, c.token, c.userId, root.currentParentId())
+        EmbyClient.fetchYears(root.serverUrl, c.token, c.userId, root.currentParentId())
+        EmbyClient.fetchFolders(root.serverUrl, c.token, c.userId, root.currentParentId())
+    }
+    // 筛选变化:仅重拉条目第一页(分类栏本身不变)。
+    function refetch() {
+        root.fetchPage(0)
+    }
+
+    // --- 筛选与下钻 ---
+    // 重置全部筛选(切库/进文件夹时),下拉同步回"全部"档。
+    // 注意:不清 folderPath——下钻路径由 enterFolder/goUp/goRoot 各自
+    // 维护,仅切库(applyView/onActivated)显式清空。
+    function resetFilters() {
+        root.currentGenres = ""
+        root.currentYear = ""
+        root.currentMinRating = ""
+        root.currentFilter = ""
+        yearSelector.currentIndex = 0
+        ratingSelector.currentIndex = 0
+        filterSelector.currentIndex = 0
+    }
+    // 进入子文件夹:下钻一层,重置筛选并按新 ParentId 重拉四件套。
+    function enterFolder(id) {
+        let p = root.folderPath.slice()
+        p.push(id)
+        root.folderPath = p
+        root.resetFilters()
+        root.reloadAll()
+    }
+    // 返回上一级(下钻中)。
+    function goUp() {
+        if (root.folderPath.length === 0)
+            return
+        let p = root.folderPath.slice()
+        p.pop()
+        root.folderPath = p
+        root.resetFilters()
+        root.reloadAll()
+    }
+    // 回到库根。
+    function goRoot() {
+        if (root.folderPath.length === 0)
+            return
+        root.folderPath = []
+        root.resetFilters()
+        root.reloadAll()
+    }
+    // 当前分类模型中是否含指定类型名(切换库/文件夹后清失效选中)。
+    function gmContains(name) {
+        for (let i = 0; i < root.gm.count; ++i) {
+            if (root.gm.nameAt(i) === name)
+                return true
+        }
+        return false
+    }
+
+    // --- 交互入口 ---
+    // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
+    // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
+    // 切换库即重置全部筛选与下钻路径,分类栏随新库重拉。
+    function applyView(preferredId) {
+        if (!root.vm || root.vm.count === 0)
+            return
+        let idx = 0
+        for (let i = 0; i < root.vm.count; ++i) {
+            if (root.vm.idAt(i) === preferredId) {
+                idx = i
+                break
+            }
+        }
+        viewSelector.currentIndex = idx
+        root.currentViewId = root.vm.idAt(idx)
+        root.folderPath = []
+        root.resetFilters()
+        root.reloadAll()
+    }
+    // 切换排序:服务端重查第一页(无 SearchTerm 时 SortBy 生效)。
+    function changeSort(sortBy) {
+        root.currentSortBy = sortBy
+        root.fetchPage(0)
+    }
+    // 播放结束(主窗口通知)后重拉当前库第一页:刷新已看/进度角标,
+    // 恢复滚动位置(onItemsReceived 消费 pendingRestoreY)。
+    function refreshAfterPlayback() {
+        if (!root.browseReady || root.currentViewId === "")
+            return
+        root.pendingRestoreY = grid.contentY
+        root.fetchPage(0)
+    }
+    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
+    function connectServer() {
+        const started = AccountManager.addAccount("", serverField.text, userField.text,
+                                                  passField.text, true)
+        root.busy = started
+        if (started) {
+            statusText.text = "正在登录…"
+            statusText.isError = false
+        }
+    }
+
+    // --- 生命周期 ---
     // 进入页面:有服务器则拉取;未指定时默认第一个有效账号;无账号则表单。
     Component.onCompleted: {
         if (root.serverUrl === "") {
@@ -65,6 +301,8 @@ Item {
         if (root.browseReady) {
             root.vm = EmbyClient.viewsModelFor(root.serverUrl)
             root.im = EmbyClient.itemsModelFor(root.serverUrl)
+            root.gm = EmbyClient.genresModelFor(root.serverUrl)
+            root.fm = EmbyClient.foldersModelFor(root.serverUrl)
             // 无状态化后视图不会预载,主动拉取(onViewsReceived 后应用目标库)。
             const c = root.creds()
             EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
@@ -95,7 +333,6 @@ Item {
             // SettingsStore.serverUrl 已预填,无需命令式赋值)。
         }
     }
-
     // 离开页面(pop 销毁)前保存浏览状态:视图/排序/滚动位置。
     Component.onDestruction: {
         if (root.currentViewId !== "")
@@ -107,69 +344,9 @@ Item {
             })
     }
 
-    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
-    function creds() {
-        return AccountManager.credsForServer(root.serverUrl)
-    }
-    // 服务器显示名:账号名/用户名,未匹配回退地址。
-    function serverLabel() {
-        const accs = AccountManager.accounts
-        for (const a of accs)
-            if (a.serverUrl === root.serverUrl)
-                return a.name !== "" ? a.name : a.userName
-        return root.serverUrl
-    }
+    // ============================= 界面 =============================
 
-    // 选中媒体库并加载条目:优先匹配 preferredId,未匹配(视图未就绪/不存在)
-    // 回退第一个;视图未就绪时保持待选,onViewsReceived 到达后再应用。
-    function applyView(preferredId) {
-        if (!root.vm || root.vm.count === 0)
-            return
-        let idx = 0
-        for (let i = 0; i < root.vm.count; ++i) {
-            if (root.vm.idAt(i) === preferredId) {
-                idx = i
-                break
-            }
-        }
-        viewSelector.currentIndex = idx
-        root.currentViewId = root.vm.idAt(idx)
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 切换排序:服务端重查第一页。
-    function changeSort(sortBy) {
-        root.currentSortBy = sortBy
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 播放结束(主窗口通知)后重拉当前库第一页:刷新已看/进度角标,
-    // 恢复滚动位置(onItemsReceived 消费 pendingRestoreY)。
-    function refreshAfterPlayback() {
-        if (!root.browseReady || root.currentViewId === "")
-            return
-        root.pendingRestoreY = grid.contentY
-        const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                              0, Constants.pageSize, root.currentSortBy, root.currentSortOrder)
-    }
-
-    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
-    function connectServer() {
-        const started = AccountManager.addAccount("", serverField.text, userField.text,
-                                                  passField.text, true)
-        root.busy = started
-        if (started) {
-            statusText.text = "正在登录…"
-            statusText.isError = false
-        }
-    }
-
-    // 头部:标题 + 连接表单(未连接)/ 媒体库选择(已连接)。
+    // --- 头部:服名 + 媒体库选择 ---
     Column {
         id: headerCol
         anchors.left: parent.left
@@ -177,75 +354,91 @@ Item {
         anchors.top: parent.top
         spacing: 12
         padding: 24
-
-        AppText {
-            text: "媒体库"
-            color: Theme.textPrimary
-            font.pixelSize: 28
-            font.bold: true
-        }
-
-        // --- 连接表单(无有效凭据时) ---
-        Row {
-            visible: root.showForm
-            spacing: 10
-            TextField {
-                id: serverField
-                width: 340
-                placeholderText: "服务器地址 (http://host:8096)"
-                text: SettingsStore.serverUrl
-            }
-            TextField {
-                id: userField
-                width: 150
-                placeholderText: "用户名"
-            }
-            TextField {
-                id: passField
-                width: 150
-                placeholderText: "密码"
-                echoMode: TextInput.Password
-            }
-            Button {
-                onClicked: root.connectServer()
-                text: "连接"
-                enabled: !root.busy
-            }
-        }
-
-        // --- 媒体库选择(已连接时) ---
-        Row {
+        // 媒体库选择(已连接时):面包屑链 [服名▸][媒体库▸]。
+        // 形状由容器 Canvas 绘制(尺寸显式可控),ComboBox 仅作透明交互层,
+        // 避免 QQC2 委托布局带来的不可控尺寸;两段 anchors 显式咬合。
+        Item {
             visible: root.browseReady
-            spacing: 12
-            AppText {
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.serverLabel()
-                color: Theme.textMuted
-                font.pixelSize: 13
-            }
-            ComboBox {
-                id: viewSelector
-                onActivated: function (index) {
-                    root.currentViewId = root.vm.idAt(index)
-                    const c = root.creds()
-                    EmbyClient.fetchItems(root.serverUrl, c.token, c.userId,
-                                          root.currentViewId, 0, Constants.pageSize,
-                                          root.currentSortBy, root.currentSortOrder)
+            width: serverTab.width + viewTab.width - root.bcTip + 2
+            height: 34
+
+            // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
+            Item {
+                id: serverTab
+                width: serverTabLabel.implicitWidth + 16 + root.bcTip
+                height: 34
+                BreadcrumbShape {
+                    anchors.fill: parent
+                    fillColor: Theme.surface
+                    borderColor: "transparent"
                 }
-                width: 320
-                model: root.vm
-                textRole: "name"
-            }
-            ComboBox {
-                id: sortSelector
-                onActivated: function (index) {
-                    root.changeSort(sortOptions.get(index).key)
+                AppText {
+                    id: serverTabLabel
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: root.serverLabel()
+                    color: "white"
+                    font.pixelSize: 13
+                    elide: Text.ElideMiddle
                 }
-                width: 130
-                model: sortOptions
-                textRole: "label"
-                // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
-                currentIndex: 1
+            }
+
+            // 媒体库:左缺口右尖六边形,缺口深度 = 服名尖角长度,
+            // anchors 负边距使尖角嵌入缺口(2px 重叠防接缝)。
+            Item {
+                id: viewTab
+                anchors.left: serverTab.right
+                anchors.leftMargin: -root.bcTip + 2
+                anchors.top: serverTab.top
+                width: viewTabText.implicitWidth + 16 + root.bcTip + 18
+                height: 34
+
+                BreadcrumbShape {
+                    id: viewTabShape
+                    anchors.fill: parent
+                    leftNotch: true
+                    // Shape 属性绑定自动重绘,hover 提亮无需手动触发。
+                    fillColor: viewSelector.hovered ? root.chipActiveHover : root.chipActive
+                    borderColor: "transparent"
+                }
+                AppText {
+                    id: viewTabText
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: viewSelector.displayText
+                    color: "white"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                AppText {
+                    anchors.right: parent.right
+                    anchors.rightMargin: root.bcTip + 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "▾"
+                    color: "white"
+                    font.pixelSize: 10
+                }
+                // 透明交互层:整块可点击弹出下拉,hover 驱动形状提亮。
+                ComboBox {
+                    id: viewSelector
+                    anchors.fill: parent
+                    padding: 0
+                    background: null
+                    contentItem: null
+                    indicator: null
+                    model: root.vm
+                    textRole: "name"
+                    onActivated: function (index) {
+                        if (root.currentViewId === root.vm.idAt(index))
+                            return
+                        root.currentViewId = root.vm.idAt(index)
+                        root.folderPath = []
+                        root.resetFilters()
+                        root.reloadAll()
+                    }
+                }
             }
         }
 
@@ -258,7 +451,163 @@ Item {
         }
     }
 
-    // 主体:选中媒体库的条目网格(填充头部以下空间)。
+    // --- 分类栏(已连接时):子文件夹下钻 + 类型/年份/评分/状态筛选 ---
+    Column {
+        id: filterCol
+        visible: root.browseReady
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: headerCol.bottom
+        anchors.leftMargin: 24
+        anchors.rightMargin: 24
+        spacing: 8
+
+        // 行1:子文件夹分组入口(当前层顶层文件夹,横向滚动;
+        // 仅存在子文件夹或已下钻时显示,下钻后"根/上级"可回退)。
+        RowLayout {
+            width: parent.width
+            spacing: 8
+            visible: root.folderPath.length > 0
+                     || (root.fm && root.fm.count > 0)
+            FilterChip {
+                label: "根目录"
+                active: root.folderPath.length === 0
+                onClicked: root.goRoot()
+            }
+            FilterChip {
+                label: "上级"
+                visible: root.folderPath.length > 0
+                onClicked: root.goUp()
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 30
+                orientation: ListView.Horizontal
+                spacing: 8
+                clip: true
+                model: root.fm
+                delegate: FilterChip {
+                    required property string name
+                    required property string id
+                    label: name
+                    active: root.folderPath.length > 0
+                            && root.folderPath[root.folderPath.length - 1] === id
+                    onClicked: root.enterFolder(id)
+                }
+            }
+        }
+
+        // 行2:类型分类(Genres,横向滚动,单选;"全部类型"清选)。
+        RowLayout {
+            width: parent.width
+            spacing: 8
+            FilterChip {
+                label: "全部类型"
+                active: root.currentGenres === ""
+                onClicked: {
+                    if (root.currentGenres !== "") {
+                        root.currentGenres = ""
+                        root.refetch()
+                    }
+                }
+            }
+            ListView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 30
+                orientation: ListView.Horizontal
+                spacing: 8
+                clip: true
+                model: root.gm
+                delegate: FilterChip {
+                    required property string name
+                    required property string id
+                    label: name
+                    active: root.currentGenres === name
+                    onClicked: {
+                        root.currentGenres = (root.currentGenres === name ? "" : name)
+                        root.refetch()
+                    }
+                }
+            }
+        }
+
+        // 行3:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉。
+        Row {
+            spacing: 12
+            AppText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "年份"
+                color: "white"
+                font.pixelSize: 13
+            }
+            ComboBox {
+                id: yearSelector
+                width: 130
+                model: root.yearOptions
+                onActivated: function (index) {
+                    const v = root.yearOptions[index]
+                    root.currentYear = (v === "全部年份") ? "" : v
+                    root.refetch()
+                }
+            }
+            AppText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "评分"
+                color: "white"
+                font.pixelSize: 13
+            }
+            ComboBox {
+                id: ratingSelector
+                width: 110
+                model: ListModel {
+                    ListElement { label: "不限"; value: "" }
+                    ListElement { label: "≥ 6"; value: "6" }
+                    ListElement { label: "≥ 7"; value: "7" }
+                    ListElement { label: "≥ 8"; value: "8" }
+                    ListElement { label: "≥ 9"; value: "9" }
+                }
+                textRole: "label"
+                onActivated: function (index) {
+                    root.currentMinRating = ratingSelector.model.get(index).value
+                    root.refetch()
+                }
+            }
+            AppText {
+                anchors.verticalCenter: parent.verticalCenter
+                text: "状态"
+                color: "white"
+                font.pixelSize: 13
+            }
+            ComboBox {
+                id: filterSelector
+                width: 110
+                model: ListModel {
+                    ListElement { label: "全部"; value: "" }
+                    ListElement { label: "未看"; value: "IsUnplayed" }
+                    ListElement { label: "已看"; value: "IsPlayed" }
+                    ListElement { label: "收藏"; value: "IsFavorite" }
+                }
+                textRole: "label"
+                onActivated: function (index) {
+                    root.currentFilter = filterSelector.model.get(index).value
+                    root.refetch()
+                }
+            }
+        }
+        ComboBox {
+            id: sortSelector
+            onActivated: function (index) {
+                root.changeSort(sortOptions.get(index).key)
+            }
+            width: 130
+            model: sortOptions
+            textRole: "label"
+            // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
+            currentIndex: 1
+        }
+    }
+
+    // --- 主体:选中媒体库的条目网格(填充头部以下空间) ---
     GridView {
         id: grid
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
@@ -267,16 +616,13 @@ Item {
                 return
             if (root.currentViewId !== "" && root.im.count < root.im.totalCount && !root.busy) {
                 root.busy = true
-                const c = root.creds()
-                EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentViewId,
-                                      root.im.count, Constants.pageSize,
-                                      root.currentSortBy, root.currentSortOrder)
+                root.fetchPage(root.im.count)
             }
         }
         visible: root.browseReady
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: headerCol.bottom
+        anchors.top: filterCol.bottom
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
@@ -285,6 +631,7 @@ Item {
         cellHeight: Constants.cellH
         clip: true
         model: root.im
+
         // 空库提示。
         AppText {
             visible: root.im && root.im.count === 0 && !root.busy
@@ -340,7 +687,9 @@ Item {
         }
     }
 
-    // 异步结果:按服务器路由(仅处理本页服务器的响应)。
+    // ========================= 异步结果 =========================
+
+    // 浏览结果:按服务器路由(仅处理本页服务器的响应)。
     Connections {
         target: EmbyClient
         function onViewsReceived(serverUrl) {
@@ -366,6 +715,38 @@ Item {
                 root.pendingRestoreY = 0
             }
         }
+        function onGenresReceived(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            // 类型 chips 自动随模型刷新;当前选中的类型不在新库/新文件夹
+            // 分类中时清选(如切换媒体库)。
+            if (root.currentGenres !== "" && root.gm
+                    && root.gm.count > 0 && !root.gmContains(root.currentGenres)) {
+                root.currentGenres = ""
+            }
+        }
+        function onYearsReceived(serverUrl, names) {
+            if (serverUrl !== root.serverUrl)
+                return
+            // 过滤脏年份(实测 nayo 返回 "1"),倒序展示;选中项失效则重置。
+            let arr = []
+            for (const n of names) {
+                const y = parseInt(n, 10)
+                if (y >= 1900 && y <= 2100)
+                    arr.push(String(y))
+            }
+            arr.sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
+            root.yearOptions = ["全部年份"].concat(arr)
+            if (root.currentYear !== "" && arr.indexOf(root.currentYear) < 0) {
+                root.currentYear = ""
+                root.refetch()
+            }
+        }
+        function onFoldersReceived(serverUrl) {
+            if (serverUrl !== root.serverUrl)
+                return
+            // 子文件夹 chips 自动随模型刷新,无额外动作。
+        }
         function onErrorOccurred(serverUrl, message) {
             if (serverUrl !== root.serverUrl)
                 return
@@ -387,6 +768,8 @@ Item {
                 if (root.browseReady && root.vm === null) {
                     root.vm = EmbyClient.viewsModelFor(root.serverUrl)
                     root.im = EmbyClient.itemsModelFor(root.serverUrl)
+                    root.gm = EmbyClient.genresModelFor(root.serverUrl)
+                    root.fm = EmbyClient.foldersModelFor(root.serverUrl)
                     const c = root.creds()
                     EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
                 }

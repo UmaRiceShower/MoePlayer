@@ -230,6 +230,22 @@ MediaItemModel *EmbyClient::allEpisodesModelFor(const QString &serverUrl)
     return m_allEpisodesModels.value(key);
 }
 
+MediaItemModel *EmbyClient::genresModelFor(const QString &serverUrl)
+{
+    const QString key = serverUrl.trimmed();
+    if (!m_genresModels.contains(key))
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_genresModels.insert(key, m); }
+    return m_genresModels.value(key);
+}
+
+MediaItemModel *EmbyClient::foldersModelFor(const QString &serverUrl)
+{
+    const QString key = serverUrl.trimmed();
+    if (!m_foldersModels.contains(key))
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_foldersModels.insert(key, m); }
+    return m_foldersModels.value(key);
+}
+
 void EmbyClient::dropServerModels(const QString &serverUrl)
 {
     const QString key = serverUrl.trimmed();
@@ -240,6 +256,8 @@ void EmbyClient::dropServerModels(const QString &serverUrl)
     delete m_searchModels.take(key);
     delete m_similarModels.take(key);
     delete m_allEpisodesModels.take(key);
+    delete m_genresModels.take(key);
+    delete m_foldersModels.take(key);
     m_itemsSeq.remove(key);
     m_searchSeq.remove(key);
 }
@@ -404,7 +422,9 @@ void EmbyClient::fetchViews(const QString &serverUrl, const QString &token, cons
 
 void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, const QString &userId,
                             const QString &viewId, int startIndex, int limit,
-                            const QString &sortBy, const QString &sortOrder)
+                            const QString &sortBy, const QString &sortOrder,
+                            const QString &genres, const QString &years,
+                            const QString &minRating, const QString &filters)
 {
     const QString key = serverUrl.trimmed();
     QUrlQuery q;
@@ -415,6 +435,16 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
     q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
     q.addQueryItem(QStringLiteral("SortBy"), sortBy);
     q.addQueryItem(QStringLiteral("SortOrder"), sortOrder);
+    // 库内筛选(空串不传):Genres 单值、Years 单值、MinCommunityRating 下限、
+    // Filters 状态;与 ParentId(视图或子文件夹)组合为多维筛选。
+    if (!genres.isEmpty())
+        q.addQueryItem(QStringLiteral("Genres"), genres);
+    if (!years.isEmpty())
+        q.addQueryItem(QStringLiteral("Years"), years);
+    if (!minRating.isEmpty())
+        q.addQueryItem(QStringLiteral("MinCommunityRating"), minRating);
+    if (!filters.isEmpty())
+        q.addQueryItem(QStringLiteral("Filters"), filters);
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize))); // Emby 单页上限 200
     const int seq = ++m_itemsSeq[key]; // 序号按服务器隔离,并行浏览不互相丢弃
@@ -435,6 +465,62 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
             qInfo() << "Emby: items =" << model->count() << "/" << total << "on" << key;
             emit itemsReceived(key);
         }, nullptr, QStringLiteral("获取媒体库条目"));
+}
+
+void EmbyClient::fetchGenres(const QString &serverUrl, const QString &token,
+                             const QString &userId, const QString &viewId)
+{
+    const QString key = serverUrl.trimmed();
+    // /Genres 为全局分类端点,ParentId 限定库/文件夹;Genre 是 BaseItemDto
+    // (带 Id/ImageTags,实测 ImageTags.Primary 有值),直接复用条目模型。
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("ParentId"), viewId);
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    get(key, token, userId, QStringLiteral("/Genres?%1").arg(q.toString()),
+        [this, key](const QJsonDocument &doc) {
+            genresModelFor(key)->setItems(doc.object().value(QLatin1String("Items")).toArray(), true);
+            qInfo() << "Emby: genres =" << genresModelFor(key)->count() << "on" << key;
+            emit genresReceived(key);
+        }, nullptr, QStringLiteral("获取类型分类"));
+}
+
+void EmbyClient::fetchYears(const QString &serverUrl, const QString &token,
+                            const QString &userId, const QString &viewId)
+{
+    const QString key = serverUrl.trimmed();
+    // /Years 返回轻量 TagItem(实测兼容实现仅 Name,无 Id),经信号返回
+    // 名称列表,QML 端过滤脏值(如 "1")并倒序展示。
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("ParentId"), viewId);
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    get(key, token, userId, QStringLiteral("/Years?%1").arg(q.toString()),
+        [this, key](const QJsonDocument &doc) {
+            QStringList names;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                names.append(v.toObject().value(QLatin1String("Name")).toString());
+            emit yearsReceived(key, names);
+        }, nullptr, QStringLiteral("获取年份分类"));
+}
+
+void EmbyClient::fetchFolders(const QString &serverUrl, const QString &token,
+                              const QString &userId, const QString &viewId)
+{
+    const QString key = serverUrl.trimmed();
+    // 当前层顶层子文件夹(分组入口):不 Recursive 只取本层,拿到 Id 后
+    // 以新 ParentId 下钻;条目带 Fields 供后续复用。
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("ParentId"), viewId);
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Folder"));
+    q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
+    q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Ascending"));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    get(key, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
+        [this, key](const QJsonDocument &doc) {
+            foldersModelFor(key)->setItems(doc.object().value(QLatin1String("Items")).toArray(), false);
+            qInfo() << "Emby: folders =" << foldersModelFor(key)->count() << "on" << key;
+            emit foldersReceived(key);
+        }, nullptr, QStringLiteral("获取子文件夹"));
 }
 
 void EmbyClient::setFavorite(const QString &serverUrl, const QString &token, const QString &userId,
