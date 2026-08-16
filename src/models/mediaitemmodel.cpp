@@ -21,6 +21,7 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
     case NameRole:           return it.name;
     case IdRole:             return it.id;
     case PosterIdRole:       return it.posterId;
+    case ParentBackdropIdRole: return it.parentBackdropId;
     case TypeRole:           return it.type;
     case YearRole:           return it.year;
     case RatingRole:         return it.rating;
@@ -41,6 +42,7 @@ QHash<int, QByteArray> MediaItemModel::roleNames() const
         { NameRole, "name" },
         { IdRole, "id" },
         { PosterIdRole, "posterId" },
+        { ParentBackdropIdRole, "parentBackdropId" },
         { TypeRole, "type" },
         { YearRole, "year" },
         { RatingRole, "rating" },
@@ -84,6 +86,13 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString 
         // 格式 <prefix>~<id>~<tag>(前缀与 id 之间必须有 ~,供提供器切分)。
         if (!tag.isEmpty())
             it.posterId = prefix + QLatin1Char('~') + it.id + QLatin1Char('~') + tag;
+        // 无海报回退图:父级(剧集)背景,格式 <prefix>~<ParentBackdropItemId>~
+        // <tag>~Backdrop(ParentBackdropImageTags 属默认返回组,列表请求即带)。
+        const QJsonArray pbt = o.value(QLatin1String("ParentBackdropImageTags")).toArray();
+        const QString pbid = o.value(QLatin1String("ParentBackdropItemId")).toString();
+        if (!pbt.isEmpty() && !pbid.isEmpty())
+            it.parentBackdropId = prefix + QLatin1Char('~') + pbid + QLatin1Char('~')
+                                  + pbt.first().toString() + QStringLiteral("~Backdrop");
     }
     return it;
 }
@@ -155,6 +164,7 @@ QVariantMap MediaItemModel::itemAt(int row) const
     m.insert(QStringLiteral("name"), it.name);
     m.insert(QStringLiteral("id"), it.id);
     m.insert(QStringLiteral("posterId"), it.posterId);
+    m.insert(QStringLiteral("parentBackdropId"), it.parentBackdropId);
     m.insert(QStringLiteral("type"), it.type);
     m.insert(QStringLiteral("year"), it.year);
     m.insert(QStringLiteral("rating"), it.rating);

@@ -1346,19 +1346,22 @@ Item {
                                     id: thumb
                                     anchors.fill: parent
                                     cornerRadius: 16
-                                    source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId : ""
+                                    // 无海报回退:父级(剧集)背景图;两者都无则为空(显示播放图标)。
+                                    source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId
+                                          : (episodeItem.model.parentBackdropId ? "image://emby/" + episodeItem.model.parentBackdropId : "")
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     duration: 500
                                     cache: true
                                 }
-                                // 无海报/加载失败回退:播放图标
+                                // 无海报且无父级背景(都拿不到图)或加载失败回退:播放图标
                                 AppText {
                                     anchors.centerIn: parent
                                     text: "▶"
                                     color: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
                                     font.pixelSize: 16
-                                    visible: !episodeItem.model.posterId || thumb.status === Image.Error
+                                    visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
+                                             || thumb.status === Image.Error
                                 }
                             }
                             // 右:集名 + 进度/已看(宽度跟随缩略图实际宽度)
