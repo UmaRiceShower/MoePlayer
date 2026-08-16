@@ -450,31 +450,59 @@ void EmbyClient::setFavorite(const QString &serverUrl, const QString &token, con
 }
 
 void EmbyClient::search(const QString &serverUrl, const QString &token, const QString &userId,
-                        const QString &term)
+                        const QString &term, const QString &itemTypes, const QString &years,
+                        const QString &filters, const QString &sortBy, const QString &sortOrder,
+                        int startIndex, int limit)
 {
     const QString key = serverUrl.trimmed();
     if (term.trimmed().isEmpty()) {
         ++m_searchSeq[key]; // 使在途响应过期
-        searchModelFor(key)->clear();
+        auto *m = searchModelFor(key);
+        m->clear();
+        m->setHasMore(false);
         emit searchResultsReady(key);
         return;
     }
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("SearchTerm"), term);
-    // 跨库递归搜索影片/剧集/单集;UserData 携带已看/进度/收藏,结果卡片零额外请求。
+    // 跨库递归搜索;UserData 携带已看/进度/收藏,结果卡片零额外请求。
     q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
-    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Series,Episode"));
+    if (!itemTypes.isEmpty())
+        q.addQueryItem(QStringLiteral("IncludeItemTypes"), itemTypes);
     q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
-    q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kSearchLimit));
-    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
+    if (!years.isEmpty())
+        q.addQueryItem(QStringLiteral("Years"), years);
+    if (!filters.isEmpty())
+        q.addQueryItem(QStringLiteral("Filters"), filters);
+    // 排序:sortBy 空 = 相关度(不传 SortBy 由服务器决定);方向默认降序。
+    if (!sortBy.isEmpty())
+        q.addQueryItem(QStringLiteral("SortBy"), sortBy);
+    if (!sortOrder.isEmpty())
+        q.addQueryItem(QStringLiteral("SortOrder"), sortOrder);
+    if (startIndex > 0)
+        q.addQueryItem(QStringLiteral("StartIndex"), QString::number(startIndex));
+    // Limit+1 探针:多出的 1 条说明还有更多,截断并标记 hasMore。
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(limit + 1));
     const int seq = ++m_searchSeq[key];
     get(key, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, key, seq](const QJsonDocument &doc) {
+        [this, key, seq, startIndex, limit](const QJsonDocument &doc) {
             // 输入防抖窗口内的旧请求结果直接丢弃。
             if (seq != m_searchSeq.value(key))
                 return;
-            const QJsonObject o = doc.object();
-            searchModelFor(key)->setItems(o.value(QLatin1String("Items")).toArray(), true);
+            QJsonArray arr = doc.object().value(QLatin1String("Items")).toArray();
+            const bool hasMore = arr.size() > limit;
+            if (hasMore) {
+                QJsonArray trimmed;
+                for (int i = 0; i < limit; ++i)
+                    trimmed.append(arr.at(i));
+                arr = trimmed;
+            }
+            auto *m = searchModelFor(key);
+            if (startIndex == 0)
+                m->setItems(arr, true);
+            else
+                m->appendItems(arr, true);
+            m->setHasMore(hasMore);
             emit searchResultsReady(key);
         }, nullptr, QStringLiteral("搜索"));
 }

@@ -36,6 +36,8 @@ class MediaItemModel : public QAbstractListModel
     Q_PROPERTY(int count READ count NOTIFY countChanged)
     //! 服务器端条目总数(Items 查询的 TotalRecordCount),用于分页判断。
     Q_PROPERTY(int totalCount READ totalCount NOTIFY totalCountChanged)
+    //! 还有更多未加载(分页探针:请求 Limit+1 截断后置 true)。
+    Q_PROPERTY(bool hasMore READ hasMore NOTIFY hasMoreChanged)
 public:
     enum Roles {
         NameRole = Qt::UserRole + 1,
@@ -62,6 +64,7 @@ public:
 
     int count() const { return m_items.size(); }
     int totalCount() const { return m_total; }
+    bool hasMore() const { return m_hasMore; }
 
     // 设置海报服务器前缀(encodeServerKey(serverUrl)),此后填充的海报
     // id 形如 <前缀>~<itemId>~<tag>;无状态浏览下所有海报必须带前缀,
@@ -74,6 +77,8 @@ public:
     Q_INVOKABLE void appendItems(const QJsonArray &items, bool withPosters);
     // 设置服务器端总数。
     Q_INVOKABLE void setTotal(int total);
+    // 设置是否还有更多(搜索分页探针结果)。
+    Q_INVOKABLE void setHasMore(bool hasMore);
     // 清空全部条目。
     Q_INVOKABLE void clear();
     // 取第 row 条的 id,越界返回空串。
@@ -96,9 +101,11 @@ public:
 signals:
     void countChanged();
     void totalCountChanged();
+    void hasMoreChanged();
 
 private:
     QList<MediaItem> m_items;
     int m_total = 0;
+    bool m_hasMore = false;
     QString m_serverPrefix; // 海报 id 服务器前缀(见 setServerPrefix)。
 };
