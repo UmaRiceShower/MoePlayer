@@ -1363,8 +1363,42 @@ Item {
                                     visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
                                              || thumb.status === Image.Error
                                 }
+                                // 已看徽标:缩略图右上角实心圆(莫奈强调色),中央镂空
+                                // 透明勾(Canvas destination-out 擦成洞,透出缩略图)。
+                                Canvas {
+                                    id: watchedBadge
+                                    // 颜色随莫奈取色更新(Canvas 不随外部属性自动重绘)。
+                                    property color badgeColor: root.accentColor
+                                    onBadgeColorChanged: requestPaint()
+                                    width: 24
+                                    height: 24
+                                    anchors.top: parent.top
+                                    anchors.right: parent.right
+                                    anchors.margins: 6
+                                    visible: episodeItem.model.played
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.reset()
+                                        const w = width, h = height
+                                        // 实心圆(内缩 0.5 防边缘锯齿切角)。
+                                        ctx.beginPath()
+                                        ctx.arc(w / 2, h / 2, w / 2 - 0.5, 0, Math.PI * 2)
+                                        ctx.fillStyle = badgeColor
+                                        ctx.fill()
+                                        // 镂空勾:勾笔画区域擦成透明。
+                                        ctx.globalCompositeOperation = "destination-out"
+                                        ctx.beginPath()
+                                        ctx.moveTo(w * 0.28, h * 0.52)
+                                        ctx.lineTo(w * 0.44, h * 0.68)
+                                        ctx.lineTo(w * 0.74, h * 0.34)
+                                        ctx.lineWidth = Math.max(2, w * 0.13)
+                                        ctx.lineCap = "round"
+                                        ctx.lineJoin = "round"
+                                        ctx.stroke()
+                                    }
+                                }
                             }
-                            // 右:集名 + 进度/已看(宽度跟随缩略图实际宽度)
+                            // 右:集名 + 进度(宽度跟随缩略图实际宽度)
                             Column {
                                 width: parent.width - thumbBox.width - 10
                                 anchors.verticalCenter: parent.verticalCenter
@@ -1392,12 +1426,6 @@ Item {
                                         color: episodeItem.model.id === root.itemId ? "white" : root.accentColor
                                         Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
                                     }
-                                }
-                                AppText {
-                                    text: "已看"
-                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.success
-                                    font.pixelSize: 11
-                                    visible: episodeItem.model.played
                                 }
                             }
                         }
