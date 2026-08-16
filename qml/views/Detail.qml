@@ -87,18 +87,7 @@ Item {
     property string pendingPlayItemId: ""
     property double resumeTicks: 0
     property bool playbackPending: false
-
     property bool _ready: false
-
-
-
-
-
-
-
-
-
-
 
     signal playRequested(string url, var headers, var meta)
     signal backRequested()
@@ -1199,20 +1188,18 @@ Item {
                     width: parent.width
                     height: 96
                     radius: 10
-                    color: Qt.rgba(root.surfaceTint.r, root.surfaceTint.g,
-                                  root.surfaceTint.b, 0.38)
-                    border.width: 1
-                    border.color: root.complementColor
+                    color: "transparent"
+                    border.width: 0
                     clip: true
 
-                    // "第"/"季":锚定条顶固定位置(中心 y=48,与数字同线),
-                    // hover 不移动。
+                    // "第"/"季":锚定数字牌两侧(右/左缘贴牌边 8px 间隙),
+                    // 往数字牌靠近且随其位置跟随,不再贴条边缘。
                     AppText {
                         text: "第"
                         color: Theme.textPrimary
                         font.pixelSize: 14
-                        anchors.left: parent.left
-                        anchors.leftMargin: 18
+                        anchors.right: digitCol.left
+                        anchors.rightMargin: 8
                         anchors.top: parent.top
                         anchors.topMargin: 41
                     }
@@ -1283,13 +1270,13 @@ Item {
                             Behavior on opacity { NumberAnimation { duration: 160 } }
                         }
                     }
-                    // "季" 同样固定。
+                    // "季" 同样锚定数字牌(左缘贴牌边 8px)。
                     AppText {
                         text: "季"
                         color: Theme.textPrimary
                         font.pixelSize: 14
-                        anchors.right: parent.right
-                        anchors.rightMargin: 18
+                        anchors.left: digitCol.right
+                        anchors.leftMargin: 8
                         anchors.top: parent.top
                         anchors.topMargin: 41
                     }
@@ -1316,7 +1303,11 @@ Item {
                     focus: true
                     keyNavigationWraps: true
                     model: EmbyClient.episodesModelFor(root.serverUrl)
-                    ScrollBar.vertical: ScrollBar {}
+                    layer.enabled: true
+                    layer.effect: ShaderEffect {
+                        property real u_margin: Constants.detailEpisodeRowMargin / episodeList.height
+                        fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/episode-fade.frag.qsb"
+                    }
                     delegate: Item {
                         id: episodeItem
                         // 同上:required 声明识别 C++ 模型角色。
@@ -1340,20 +1331,21 @@ Item {
                         }
                         Row {
                             anchors.fill: parent
-                            anchors.margins: 6
+                            anchors.margins: Constants.detailEpisodeRowMargin
                             spacing: 10
                             // 左:海报缩略图(16:9 剧照)
                             Rectangle {
-                                width: 88
-                                height: 50
+                                id: thumbBox
+                                height: Constants.detailEpisodeRowH-Constants.detailEpisodeRowMargin*2
+                                width: height/9*16
                                 anchors.verticalCenter: parent.verticalCenter
                                 color: Theme.bg
-                                radius: 12
+                                radius: 16
                                 clip: true
                                 CrossfadeImage {
                                     id: thumb
                                     anchors.fill: parent
-                                    cornerRadius: 12
+                                    cornerRadius: 16
                                     source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId : ""
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
@@ -1369,9 +1361,9 @@ Item {
                                     visible: !episodeItem.model.posterId || thumb.status === Image.Error
                                 }
                             }
-                            // 右:集名 + 进度/已看
+                            // 右:集名 + 进度/已看(宽度跟随缩略图实际宽度)
                             Column {
-                                width: parent.width - 88 - 10
+                                width: parent.width - thumbBox.width - 10
                                 anchors.verticalCenter: parent.verticalCenter
                                 spacing: 3
                                 AppText {
