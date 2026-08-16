@@ -6,7 +6,7 @@ import MoePlayer.Core
 
 //! 全局搜索浮层(Ctrl+K 开关):按最近浏览的服务器搜索(主窗口注入 serverUrl),
 //! 服务端搜索跨库递归(影片/剧集/单集),输入 300ms 防抖后请求。
-//! 过滤区(类型/年份/已看状态/排序)全部走服务端查询参数,客户端零过滤。
+//! 过滤区(类型/年份/已看状态)全部走服务端查询参数,客户端零过滤。
 //! 分页:请求 Limit+1 探针,多出的 1 条由 C++ 截断并置 model.hasMore,
 //! 滚动到底自动加载下一页。结果网格点击进详情;Esc / 点击背景关闭。
 Item {
@@ -28,10 +28,6 @@ Item {
     property int yearTo: 0
     // 状态过滤(Filters,多选):已看/未看/收藏 的 "IsPlayed" 等值数组。
     property var activeFilters: []
-    // 排序:""=相关度(不传 SortBy),否则 CommunityRating/ProductionYear/SortName。
-    property string sortBy: ""
-    // 排序方向(SortOrder);"" = 不传(服务器默认)。
-    property string sortOrder: ""
     // 分页游标:下一页 StartIndex;0 表示替换结果。
     property int startIndex: 0
     // 首屏/过滤重搜进行中(状态行显示"搜索中")。
@@ -96,7 +92,6 @@ Item {
                           root.typesParam(),
                           root.yearsParam(),
                           root.filtersParam(),
-                          root.sortBy, root.sortOrder,
                           root.startIndex, Constants.searchPageSize)
     }
 
@@ -119,9 +114,6 @@ Item {
         root.activeFilters = []
         yearFromField.text = ""
         yearToField.text = ""
-        sortBox.currentIndex = 0
-        root.sortBy = ""
-        root.sortOrder = ""
         root.startIndex = 0
         root.loadingMore = false
         searchField.text = ""
@@ -247,7 +239,7 @@ Item {
                 }
             }
 
-            // 行2:年份 + 已看状态(多选)+ 排序。
+            // 行2:年份范围 + 已看状态(多选)。
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 14
@@ -382,124 +374,6 @@ Item {
                     }
                 }
 
-                // 排序(SortBy + SortOrder;相关度 = 不传)。
-                RowLayout {
-                    spacing: 4
-                    AppText {
-                        text: "排序"
-                        color: "white"
-                        font.pixelSize: 13
-                    }
-                    ComboBox {
-                        id: sortBox
-                        Layout.preferredWidth: 110
-                        Layout.preferredHeight: 30
-                        enabled: root.canSearch
-                        textRole: "label"
-                        // 名称/时间 + 评分/热度全量 SortBy;相关度 = 不传
-                        // (服务器默认匹配度)。方向默认:片名升序,其余降序。
-                        model: [
-                            { label: "相关度", sortBy: "", order: "" },
-                            { label: "片名", sortBy: "SortName", order: "Ascending" },
-                            { label: "年份", sortBy: "ProductionYear", order: "Descending" },
-                            { label: "首映", sortBy: "PremiereDate", order: "Descending" },
-                            { label: "入库时间", sortBy: "DateCreated", order: "Descending" },
-                            { label: "时长", sortBy: "Runtime", order: "Descending" },
-                            { label: "最近播放", sortBy: "DatePlayed", order: "Descending" },
-                            { label: "评分", sortBy: "CommunityRating", order: "Descending" },
-                            { label: "专业评分", sortBy: "CriticRating", order: "Descending" },
-                            { label: "播放次数", sortBy: "PlayCount", order: "Descending" },
-                        ]
-                        onActivated: (index) => {
-                            const it = sortBox.model[index]
-                            root.sortBy = it.sortBy
-                            root.sortOrder = it.order
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: sortBox.displayText
-                            color: "white"
-                            font.pixelSize: 13
-                            leftPadding: 8
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        indicator: AppText {
-                            text: "▾"
-                            color: "white"
-                            font.pixelSize: 11
-                            anchors.right: parent.right
-                            anchors.rightMargin: 8
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                        delegate: ItemDelegate {
-                            required property var modelData
-                            // Qt 6 delegate 上下文经 required 属性注入:
-                            // 不声明则 index 不存在(旧式注入已移除)。
-                            required property int index
-                            width: sortBox.width
-                            height: 30
-                            // index 经 required 注入后,嵌套的 contentItem/
-                            // background 作用域仍不可见,顶层捕获为属性。
-                            readonly property bool _hl: sortBox.highlightedIndex === index
-                            contentItem: AppText {
-                                text: modelData.label
-                                color: "white"
-                                font.pixelSize: 13
-                                leftPadding: 8
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            background: Rectangle {
-                                color: parent._hl ? Theme.accent : "transparent"
-                            }
-                        }
-                        popup: Popup {
-                            y: sortBox.height + 4
-                            width: sortBox.width
-                            padding: 0
-                            background: Rectangle {
-                                color: Theme.surface
-                                radius: 6
-                                border.width: 1
-                                border.color: Theme.textMuted
-                            }
-                            contentItem: ListView {
-                                clip: true
-                                implicitHeight: contentHeight
-                                model: sortBox.popup.visible ? sortBox.delegateModel : null
-                                currentIndex: sortBox.highlightedIndex
-                            }
-                        }
-                    }
-                    // 排序方向:相关度时禁用(无方向)。
-                    Button {
-                        Layout.preferredWidth: 30
-                        Layout.preferredHeight: 30
-                        enabled: root.canSearch && sortBox.currentIndex !== 0
-                        onClicked: {
-                            root.sortOrder = root.sortOrder === "Ascending" ? "Descending" : "Ascending"
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: root.sortOrder === "Ascending" ? "↑" : "↓"
-                            color: parent.enabled ? "white" : Theme.textMuted
-                            font.pixelSize: 13
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                }
             }
 
             // 状态行:搜索中 / 无结果 / 已加载计数。

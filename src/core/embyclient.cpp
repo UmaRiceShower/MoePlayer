@@ -451,8 +451,7 @@ void EmbyClient::setFavorite(const QString &serverUrl, const QString &token, con
 
 void EmbyClient::search(const QString &serverUrl, const QString &token, const QString &userId,
                         const QString &term, const QString &itemTypes, const QString &years,
-                        const QString &filters, const QString &sortBy, const QString &sortOrder,
-                        int startIndex, int limit)
+                        const QString &filters, int startIndex, int limit)
 {
     const QString key = serverUrl.trimmed();
     if (term.trimmed().isEmpty()) {
@@ -474,11 +473,8 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
         q.addQueryItem(QStringLiteral("Years"), years);
     if (!filters.isEmpty())
         q.addQueryItem(QStringLiteral("Filters"), filters);
-    // 排序:sortBy 空 = 相关度(不传 SortBy 由服务器决定);方向默认降序。
-    if (!sortBy.isEmpty())
-        q.addQueryItem(QStringLiteral("SortBy"), sortBy);
-    if (!sortOrder.isEmpty())
-        q.addQueryItem(QStringLiteral("SortOrder"), sortOrder);
+    // 搜索排序:服务器固定按相关度返回,SortBy/SortOrder 无效(实测
+    // 4.9.5.0 各组合结果顺序相同),不传。
     if (startIndex > 0)
         q.addQueryItem(QStringLiteral("StartIndex"), QString::number(startIndex));
     // Limit+1 探针:多出的 1 条说明还有更多,截断并标记 hasMore。

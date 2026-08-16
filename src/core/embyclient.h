@@ -75,16 +75,15 @@ public:
                                  const QString &userId, const QString &itemId, bool fav);
     // 服务端搜索(/Users/{id}/Items?SearchTerm=),填充该服务器的 searchModel。
     // 空串清空结果;防抖在调用方(QML)做,响应按服务器+序号丢弃过期结果。
-    // itemTypes/years/filters 空串不传;sortBy 空串 = 相关度(不传 SortBy),
-    // sortOrder 空串 = Descending。startIndex=0 替换结果,>0 追加(分页);
-    // Limit 内部 +1 探针,多出的 1 条截断并置 model.hasMore 供"加载更多"。
+    // itemTypes/years/filters 空串不传。搜索结果由服务器固定按相关度排序
+    // (实测 4.9.5.0 忽略 SortBy/SortOrder),故无排序参数。
+    // startIndex=0 替换结果,>0 追加(分页);Limit 内部 +1 探针,多出的
+    // 1 条截断并置 model.hasMore 供"加载更多"。
     Q_INVOKABLE void search(const QString &serverUrl, const QString &token,
                             const QString &userId, const QString &term,
                             const QString &itemTypes = QString(),
                             const QString &years = QString(),
                             const QString &filters = QString(),
-                            const QString &sortBy = QString(),
-                            const QString &sortOrder = QString(),
                             int startIndex = 0,
                             int limit = MoePlayer::kSearchLimit);
     // 剧集分季列表(/Shows/{id}/Seasons),填充该服务器的 seasonsModel。
