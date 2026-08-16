@@ -76,6 +76,9 @@ public:
     Q_INVOKABLE QString addFolder(const QString &name, const QString &color = QString());
     // 删除文件夹:成员自动释放为未分组,账号本身不删。
     Q_INVOKABLE void removeFolder(const QString &id);
+    // 文件夹排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
+    // 顺序即管理页展示顺序,持久化于 accounts/folders。
+    Q_INVOKABLE void moveFolder(const QString &id, int toIndex);
     Q_INVOKABLE void renameFolder(const QString &id, const QString &name);
     // 修改文件夹颜色(hex "#RRGGBB",空值忽略)。
     Q_INVOKABLE void setFolderColor(const QString &id, const QString &color);
