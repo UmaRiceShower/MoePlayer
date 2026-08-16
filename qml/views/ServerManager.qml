@@ -47,6 +47,11 @@ Item {
     // (拖动中重建后 source 可能是已销毁的旧卡,访问即 internal error),
     // 统一走这里记录的值。
     property string pressCardId: ""
+    // 是否有卡在拖动中:拖动期间抑制其他卡 hover 放大。Qt Quick 的 hover
+    // 事件派发给鼠标下所有 hoverEnabled MouseArea(不因 z/覆盖抑制),
+    // 拖动卡(z=10)经过其他卡时其 onEntered 照常触发,不抑制会放大并
+    // 挤压邻居("拖动经过展开文件夹成员卡出现异常 hover")。
+    property bool dragActive: false
     property real pressStartX: 0
     property real pressStartY: 0
     // 拖动期间模型是否变化过(accountsChanged):拖放重排/重登/添加都会
@@ -295,20 +300,29 @@ Item {
         layoutTimer.restart()
     }
 
-    // 重建前保存各卡 hover 状态(见 cardHoverState 注释)。须在 Repeater
-    // 重建前调用:信号 handler 同步执行时旧 delegate 尚未销毁,可遍历
-    // 读取;Repeater 的 model 绑定惰性求值,重建发生在下一帧。
+    // 重建前保存各卡 hover 放大状态(见 cardHoverState 注释)。须在
+    // Repeater 重建前调用:信号 handler 同步执行时旧 delegate 尚未销毁,
+    // 可遍历读取;Repeater 的 model 绑定惰性求值,重建发生在下一帧。
+    // 只记 expanded(不记 hovered):恢复逻辑按状态放大,若把拖动经过时
+    // 仅 hovered 的卡记下,重建后会误恢复成放大且鼠标不在其上——残留
+    // 放大 + 邻居持续挤开。hovered 由重建后鼠标重新进入自然恢复。
     function saveCardHoverState() {
+        // 拖动中发生重建(异步重登/删除等)时,被拖卡随模型销毁、鼠标
+        // grab 释放,onReleased 永不执行,dragActive 会卡死 true,此后
+        // 所有 hover 放大失效。此处复位:正常 drop 路径此刻已被
+        // onReleased 置 false,重复置幂等;mid-drag 重建时拖拽已随卡
+        // 销毁终结,复位才是正确语义。
+        root.dragActive = false
         root.cardHoverState = {}
         for (let i = 0; i < folderRepeater.count; ++i) {
             const f = folderRepeater.itemAt(i)
             if (f)
-                root.cardHoverState[f.folderId] = f.expanded || f.hovered
+                root.cardHoverState[f.folderId] = f.expanded
         }
         for (let i = 0; i < cardRepeater.count; ++i) {
             const c = cardRepeater.itemAt(i)
             if (c)
-                root.cardHoverState[c.accountId] = c.expanded || c.hovered
+                root.cardHoverState[c.accountId] = c.expanded
         }
     }
 
@@ -1154,7 +1168,10 @@ Item {
                     }
                     onEntered: {
                         card.hovered = true
-                        hoverTimer.start()
+                        // 拖动进行中不放大:其他卡的 hover 事件不会被拖动
+                        // 卡遮挡抑制,不检查会让拖动路径上的卡放大挤压。
+                        if (!root.dragActive)
+                            hoverTimer.start()
                     }
                     onExited: {
                         card.hovered = false
@@ -1172,6 +1189,7 @@ Item {
                         root.pressCardId = card.accountId
                         root.pressStartX = card.x
                         root.pressStartY = card.y
+                        root.dragActive = true // 拖动期间抑制其他卡放大
                         root.dragDirty = false // 新一轮拖动,清模型变化标记
                     }
                     onClicked: (mouse) => {
@@ -1192,6 +1210,7 @@ Item {
                         // 不走 context,drop 后仍可安全读 r.dragDirty)与
                         // 归位目标;drop 后不再做任何 id 查找。
                         const r = root
+                        r.dragActive = false // 拖动结束(须在 drop 前,r 引用安全)
                         const sx = card.dragStartX
                         const sy = card.dragStartY
                         const act = card.Drag.drop()
@@ -1434,7 +1453,9 @@ Item {
                     acceptedButtons: Qt.LeftButton
                     onEntered: {
                         fcard.hovered = true
-                        fcardHoverTimer.start()
+                        // 拖动进行中不放大(同账号卡,见 root.dragActive 注释)。
+                        if (!root.dragActive)
+                            fcardHoverTimer.start()
                     }
                     onExited: {
                         fcard.hovered = false
