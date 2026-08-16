@@ -137,6 +137,14 @@ void MediaItemModel::setTotal(int total)
     emit totalCountChanged();
 }
 
+void MediaItemModel::setHasMore(bool hasMore)
+{
+    if (hasMore == m_hasMore)
+        return;
+    m_hasMore = hasMore;
+    emit hasMoreChanged();
+}
+
 void MediaItemModel::clear()
 {
     beginResetModel();

@@ -56,6 +56,7 @@ QtObject {
     readonly property int serverDragMs: 480
     readonly property int serverFadeMs: 320
     readonly property int searchDebounceMs: 300
+    readonly property int searchPageSize: 40 // 搜索每页条数(与 C++ kSearchLimit 一致)
     readonly property int episodePushDebounceMs: 500
     readonly property int wheelLogWindowMs: 350 // 滚轮速度记账窗口
     readonly property real scrollVelocityInitial: 800
