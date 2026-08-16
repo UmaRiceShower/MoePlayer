@@ -553,7 +553,8 @@ Item {
 
         // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
         // 高度 = hero 内容区(400)+ 延伸 160,背景图"漏出"到正文起始区,
-        // 底部经渐变遮罩(透明→bgTint)融入正文底色,自然沉入页面而非硬切。
+        // 底部经 ShaderEffect 渐隐(底 10% alpha 淡出)融入正文底色,
+        // 自然沉入页面而非硬切。
         Rectangle {
             id: heroBackdrop
             y: 0
@@ -561,6 +562,15 @@ Item {
             height: Constants.detailBackdropH
             visible: root.loaded
             z: 0
+            // 底部渐隐:整块背景(图+氛围层)离屏合成后,底 10%
+            // (y 0.90→1.0)alpha 1→0 淡出。取代原"透明→bgTint 盖色"
+            // 遮罩——图片细节保留到最后一刻再溶解入页面底色,无平板色带;
+            // 压暗职责由氛围层与页面底色(暗色)承担。
+            layer.enabled: true
+            layer.effect: ShaderEffect {
+                property real u_fadeBand: Constants.detailHeroFadeBand
+                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero-fade.frag.qsb"
+            }
             // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
             // 与海报同速,切换时氛围同步换新)。
             CrossfadeImage {
@@ -579,16 +589,6 @@ Item {
                     GradientStop { position: 0.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.30) }
                     GradientStop { position: 0.35; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.08) }
                     GradientStop { position: 0.65; color: "transparent" }
-                }
-            }
-            // 底部渐隐遮罩(官方 Gradient 标准做法):透明→bgTint 盖色渐入,
-            // 背景图在延伸区被涂成接近正文底色,自然沉入页面;同时压暗
-            // hero 底部保证标题/按钮文字可读。不引入 shader 离屏采样。
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.55; color: "transparent" }
-                    GradientStop { position: 1.0; color: root.bgTint }
                 }
             }
         }
