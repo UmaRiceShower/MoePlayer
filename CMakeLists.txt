@@ -80,6 +80,7 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     GLSL "100es,120,150"
     FILES shaders/crossfade.frag
           shaders/episode-fade.frag
+          shaders/hero-fade.frag
 )
 
 # 计数器 GIF:qt_add_resources 替代 AUTORCC + assets.qrc(官方推荐路径)。
