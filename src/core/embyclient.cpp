@@ -613,6 +613,8 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
             m.insert(QStringLiteral("runtimeSecs"), o.value(QLatin1String("RunTimeTicks")).toDouble(0) / MoePlayer::kTicksPerSecond);
             m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
+            // 类型标签(metaLine 显示);Fields 已请求 Genres,此前漏解析导致永不显示。
+            m.insert(QStringLiteral("genres"), o.value(QLatin1String("Genres")).toArray().toVariantList());
             // 继续观看:上次停止位置(100ns ticks),未看或已播完为 0。
             m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
             m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
