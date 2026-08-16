@@ -373,17 +373,23 @@ Item {
                         }
                         delegate: ItemDelegate {
                             required property var modelData
+                            // Qt 6 delegate 上下文经 required 属性注入:
+                            // 不声明则 index 不存在(旧式注入已移除)。
+                            required property int index
                             width: sortBox.width
                             height: 30
+                            // index 经 required 注入后,嵌套的 contentItem/
+                            // background 作用域仍不可见,顶层捕获为属性。
+                            readonly property bool _hl: sortBox.highlightedIndex === index
                             contentItem: AppText {
                                 text: modelData
-                                color: sortBox.highlightedIndex === index ? "white" : Theme.textPrimary
+                                color: parent._hl ? "white" : Theme.textPrimary
                                 font.pixelSize: 13
                                 leftPadding: 8
                                 verticalAlignment: Text.AlignVCenter
                             }
                             background: Rectangle {
-                                color: sortBox.highlightedIndex === index ? Theme.accent : "transparent"
+                                color: parent._hl ? Theme.accent : "transparent"
                             }
                         }
                         popup: Popup {
