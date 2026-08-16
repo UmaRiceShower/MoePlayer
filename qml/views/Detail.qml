@@ -58,9 +58,31 @@ Item {
     property color heroFrom: root._monet ? root._monet.heroFrom : Theme.surface
     // hero 文字水平对齐:LayoutMirroring 不镜像 Text 内容,文字区靠右时
     // 须显式右对齐(靠文字区起始侧),与靠左时对称。
-    readonly property int heroTextAlign: (ConfigManager.detailTextPos === "top-left"
-                                          || ConfigManager.detailTextPos === "bottom-left")
-                                         ? Text.AlignLeft : Text.AlignRight
+    readonly property int heroTextAlign: root.textSide() === "right" ? Text.AlignRight
+                                         : root.textSide() === "center" ? Text.AlignHCenter
+                                         : Text.AlignLeft
+    // 海报水平侧(left/center/right):posterPos 字符串推导。
+    function posterSide() {
+        const p = ConfigManager.detailPosterPos
+        if (p.endsWith("-right")) return "right"
+        if (p.endsWith("-center")) return "center"
+        return "left"
+    }
+    // 文字区水平侧:followPoster → 取海报侧;否则取 textPos 侧。
+    function textSide() {
+        const t = ConfigManager.detailTextPos
+        if (t === "followPoster") return root.posterSide()
+        if (t.endsWith("-right")) return "right"
+        if (t.endsWith("-center")) return "center"
+        return "left"
+    }
+    // 文字区垂直预设:top/middle/bottom(揭示列内容锚位;followPoster 沉底)。
+    function textSlotVertical() {
+        const t = ConfigManager.detailTextPos
+        if (t === "followPoster" || t.startsWith("bottom-")) return "bottom"
+        if (t.startsWith("top-")) return "top"
+        return "middle"
+    }
     // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
     property color accentColor: root._monet ? root._monet.accent : Theme.accent
     // 分裂互补辅助色(次要按钮/描边/焦点,30% 层)与极暗藏色(渐变暗部埋补色)。
@@ -642,69 +664,73 @@ Item {
                         id: heroItem
                         width: parent.width
                         height: Constants.detailHeroH
-                        // ===== 定位代理(slot):全部位置判断收敛于三个槽,
-                        // 内容控件(海报/文字/按钮)静态锚定到槽,不再各自
-                        // 计算坐标。新增配置维度时只改对应槽。=====
+                        // ===== 定位代理(slot):三个槽各自用 states +
+                        // AnchorChanges(官方推荐的条件锚切换机制,自动处理
+                        // 解锚/设锚顺序,免手动坐标计算)。poster/text 槽按
+                        // 9 宫格锚定,参考 heroItem 内容区(背景图 heroBackdrop
+                        // 在槽的祖父级,Qt 锚仅限兄弟/直接父项,故以 heroItem
+                        // 为参考——右侧位置天然避开选集栏);按钮槽按
+                        // poster/text/backdrop 三模式。=====
 
-                        // 海报槽:posterLeft 决定左右,垂直沉底。
+                        // 海报槽:posterPos 9 宫格(边距 32/24)。AnchorChanges
+                        // 只支持锚线(margin 属性不存在),边距走槽上的普通
+                        // 绑定——仅对应边被锚定时生效,其余态惰性。
                         Item {
                             id: posterSlot
-                            x: ConfigManager.detailPosterLeft ? 32 : parent.width - Constants.detailPosterW - 32
-                            y: parent.height - Constants.detailPosterH - 24
                             width: Constants.detailPosterW
                             height: Constants.detailPosterH
+                            anchors.leftMargin: 32
+                            anchors.rightMargin: 32
+                            anchors.topMargin: 24
+                            anchors.bottomMargin: 24
+                            state: ConfigManager.detailPosterPos
+                            states: [
+                                State { name: "top-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
+                                State { name: "top-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                                State { name: "top-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
+                                State { name: "middle-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "middle-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "middle-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "bottom-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
+                                State { name: "bottom-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
+                                State { name: "bottom-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } }
+                            ]
                         }
-                        // 文字槽:textPos 四角预设。
-                        // 水平:与海报同侧 → 海报内侧;异侧 → 贴对侧边缘。
-                        // 垂直:top → 贴顶(原"返回按钮下方"预留位已随按钮
-                        // 移除,收紧到 24);bottom → follow poster 且与海报
-                        // 同侧时避让播放按钮行(贴其上方),否则沉底与海报
-                        // 下缘对齐(异侧文字与按钮 x 错开,无需考虑按钮高)。
+                        // 文字槽:textPos 9 宫格(相对 heroItem,边距 32/24);
+                        // followPoster → 跟随海报:水平贴海报外侧(海报左/中 →
+                        // 右侧,海报右 → 左侧,边距 24),垂直底缘对齐海报底
+                        // (按钮组跟随海报时上缩 60 避让)。边距绑定实时算。
                         Item {
                             id: textSlot
                             width: ConfigManager.detailTextWidth
                             height: ConfigManager.detailTextHeight
-                            readonly property bool _left: ConfigManager.detailTextPos === "top-left"
-                                                          || ConfigManager.detailTextPos === "bottom-left"
-                            readonly property bool _top: ConfigManager.detailTextPos === "top-left"
-                                                         || ConfigManager.detailTextPos === "top-right"
-                            x: _left
-                                ? (ConfigManager.detailPosterLeft ? 32 + Constants.detailPosterW + 24 : 32)
-                                : (parent.width - width
-                                   - (ConfigManager.detailPosterLeft ? 32 : 32 + Constants.detailPosterW + 24))
-                            y: _top
-                                ? 24
-                                : ((ConfigManager.detailButtonsFollow === "poster"
-                                    && ConfigManager.detailPosterLeft === _left)
-                                       ? Math.max(24, parent.height - 44 - 24 - height - 16)
-                                       : Math.max(24, parent.height - height - 24))
+                            anchors.leftMargin: ConfigManager.detailTextPos === "followPoster"
+                                                 && root.textSide() !== "right" ? 24 : 32
+                            anchors.rightMargin: ConfigManager.detailTextPos === "followPoster"
+                                                  && root.textSide() === "right" ? 24 : 32
+                            anchors.topMargin: 24
+                            anchors.bottomMargin: ConfigManager.detailTextPos === "followPoster"
+                                                   && ConfigManager.detailButtonsPos === "poster" ? 60 : 24
+                            state: {
+                                const t = ConfigManager.detailTextPos
+                                if (t !== "followPoster")
+                                    return t
+                                return "follow-" + (root.posterSide() === "right" ? "right" : "left")
+                            }
+                            states: [
+                                State { name: "top-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
+                                State { name: "top-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                                State { name: "top-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
+                                State { name: "middle-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "middle-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "middle-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
+                                State { name: "bottom-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
+                                State { name: "bottom-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
+                                State { name: "bottom-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } },
+                                State { name: "follow-left"; AnchorChanges { target: textSlot; anchors.left: posterSlot.right; anchors.bottom: posterSlot.bottom } },
+                                State { name: "follow-right"; AnchorChanges { target: textSlot; anchors.right: posterSlot.left; anchors.bottom: posterSlot.bottom } }
+                            ]
                         }
-                        // 按钮槽:follow poster → 海报内侧(左右对称锚距 256,
-                        // 位置用按钮组实际宽回推);follow text → 标题文字外侧
-                        // (标题文字宽 = heroNewTitle.implicitWidth,非文字区
-                        // 边缘)。垂直:follow poster → 沉底;follow text → 与
-                        // 标题同高(文字区 y + 内容偏移 heroNewCol.y)。
-                        Item {
-                            id: buttonSlot
-                            readonly property bool _leftSide: ConfigManager.detailButtonsFollow === "poster"
-                                ? ConfigManager.detailPosterLeft : textSlot._left
-                            readonly property real _ref: ConfigManager.detailButtonsFollow === "poster"
-                                ? 32 + Constants.detailPosterW + 24
-                                : (textSlot._left
-                                       ? textSlot.x + heroNewTitle.implicitWidth + 24
-                                       : parent.width - (textSlot.x + textSlot.width - heroNewTitle.implicitWidth - 24))
-                            // 播放键弹性宽:锚距内放不下时压缩(海报右+follow
-                            // poster 时锚距 256 → 播放键 170,收藏/已看完整
-                            // 可见;下限 120 保可点区域)。左/右锚统一公式,
-                            // 不依赖按钮实际宽(避免绑定循环)。
-                            readonly property real _playW: Math.min(220, Math.max(120,
-                                parent.width - _ref - 16 - 44 - 44 - 20))
-                            x: _leftSide ? _ref : parent.width - _ref - btnRow.width
-                            y: ConfigManager.detailButtonsFollow === "poster"
-                                ? parent.height - 44 - 24
-                                : textSlot.y + heroNewCol.y
-                        }
-
                         // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
                             // 决定,内容不再计算坐标)。
                             Rectangle {
@@ -748,12 +774,13 @@ Item {
                                         // 列原点恒 0,裁剪落在列右半(左先消失)。
                                         anchors.right: heroOldTree.right
                                         width: heroTextArea.width
-                                        // 内容垂直:top 预设顶部对齐;bottom 预设
-                                        // 沉底——用户看的是简介文字底缘而非容器下缘,
-                                        // 沉底后简介底缘 = 容器底 = 海报下缘。
-                                        y: (ConfigManager.detailTextPos === "top-left"
-                                            || ConfigManager.detailTextPos === "top-right")
-                                            ? 0 : parent.height - implicitHeight
+                                        // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                        // bottom/followPoster 沉底——简介文字底缘
+                                        // 对齐文字槽底(槽底随锚定 = 海报下缘)。
+                                        y: root.textSlotVertical() === "top"
+                                            ? 0 : (root.textSlotVertical() === "middle"
+                                                   ? (parent.height - implicitHeight) / 2
+                                                   : parent.height - implicitHeight)
                                         spacing: 8
                                         Row {
                                             width: parent.width
@@ -803,11 +830,13 @@ Item {
                                     Column {
                                         id: heroNewCol
                                         width: heroTextArea.width
-                                        // 内容垂直:top 顶部对齐;bottom 沉底(简介
-                                        // 文字底缘 = 海报下缘,同 heroOldCol)。
-                                        y: (ConfigManager.detailTextPos === "top-left"
-                                            || ConfigManager.detailTextPos === "top-right")
-                                            ? 0 : parent.height - implicitHeight
+                                        // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                        // bottom/followPoster 沉底(简介文字底缘
+                                        // 对齐文字槽底,同 heroOldCol)。
+                                        y: root.textSlotVertical() === "top"
+                                            ? 0 : (root.textSlotVertical() === "middle"
+                                                   ? (parent.height - implicitHeight) / 2
+                                                   : parent.height - implicitHeight)
                                         spacing: 8
                                         Row {
                                             width: parent.width
@@ -847,29 +876,83 @@ Item {
                                     }
                                 }
                             }
-                            // 按钮行(播放/收藏/已看)作为整体独立锚定,
-                            // 水平锚由 btnLeft/btnMargin 驱动(见 root 属性)。
+                        Item {
+                            id: btnHolder
+                            // 按钮行锚定容器:锚点放这里(自身无 LayoutMirroring,
+                            // anchors 不反转);宽 = 行隐式宽(单向绑定,无环),
+                            // 右锚时整块从参考点向左展开。行在内部只做子项
+                            // 镜像(播放键贴参考端),不受锚点影响。
+                            width: btnRow.width
+                            height: btnRow.height
+                            anchors.leftMargin: ConfigManager.detailButtonsPos === "backdrop"
+                                                 ? (ConfigManager.detailSidebarLeft
+                                                        ? Constants.detailSidebarW + 32 : 32)
+                                                 : 24
+                            anchors.rightMargin: 24
+                            state: {
+                                const b = ConfigManager.detailButtonsPos
+                                if (b === "backdrop")
+                                    return "backdrop"
+                                if (b === "poster")
+                                    return "poster-" + (root.posterSide() === "right" ? "right" : "left")
+                                return "text-" + (root.textSide() === "right" ? "right" : "left")
+                            }
+                            states: [
+                                State { name: "poster-left"; AnchorChanges { target: btnHolder; anchors.left: posterSlot.right } },
+                                State { name: "poster-right"; AnchorChanges { target: btnHolder; anchors.right: posterSlot.left } },
+                                State { name: "text-left"; AnchorChanges { target: btnHolder; anchors.left: textSlot.right } },
+                                State { name: "text-right"; AnchorChanges { target: btnHolder; anchors.right: textSlot.left } },
+                                State { name: "backdrop"; AnchorChanges { target: btnHolder; anchors.left: heroItem.left } }
+                            ]
+                            // 左锚参考距(弹性播放键宽用):poster → 海报外侧
+                            // 256;text → 标题区外侧;backdrop → 左缘。
+                            readonly property real _ref: {
+                                const b = ConfigManager.detailButtonsPos
+                                if (b === "backdrop")
+                                    return ConfigManager.detailSidebarLeft ? Constants.detailSidebarW + 32 : 32
+                                if (b === "poster")
+                                    return 32 + Constants.detailPosterW + 24
+                                return root.textSide() === "right"
+                                       ? parent.width - textSlot.x + 24
+                                       : textSlot.x + textSlot.width + 24
+                            }
+                            readonly property bool _leftSide: {
+                                const b = ConfigManager.detailButtonsPos
+                                if (b === "backdrop")
+                                    return true
+                                if (b === "poster")
+                                    return root.posterSide() !== "right"
+                                return root.textSide() !== "right"
+                            }
+                            // 播放键弹性宽:锚距内放不下时压缩(下限 120 保可点)。
+                            readonly property real _playW: Math.min(220, Math.max(120,
+                                parent.width - _ref - 16 - 44 - 44 - 20))
+                            // 垂直:backdrop → 背景 16:9 底缘(背景高 = 宽*9/16,
+                            // 与 heroBackdrop 同式);poster → 海报底对齐;
+                            // text → 标题行顶(与标题对齐;标题在揭示树深处
+                            // 不可锚,故 y 用绑定,与水平锚不同轴不冲突)。
+                            y: ConfigManager.detailButtonsPos === "backdrop"
+                                ? root.width * 9 / 16 - 44 - 24
+                                : (ConfigManager.detailButtonsPos === "poster"
+                                       ? posterSlot.y + posterSlot.height - 44
+                                       : textSlot.y + heroNewCol.y)
 
                         Row {
                             id: btnRow
-                            // 按钮行:位置由 buttonSlot 决定(跟随海报内侧或
-                            // 标题文字外侧;垂直沉底或标题同高)。
-                            // 顺序:按钮组右缘锚定参考点(在参考左侧)时反转
-                            // 为 [已看][收藏][播放],主播放键仍贴参考;左缘
-                            // 锚定时保持 [播放][收藏][已看]。官方 Row
-                            // LayoutMirroring(不 childrenInherit,仅反转子项,
-                            // 按钮内容不镜像)。
-                            LayoutMirroring.enabled: !buttonSlot._leftSide
+                            // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
+                            // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
+                            // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
+                            // LayoutMirroring 只反转子项,按钮内容不镜像;
+                            // 自身无锚点,故不触发 anchors 反转。
+                            LayoutMirroring.enabled: !btnHolder._leftSide
                             spacing: 10
                             opacity: root.textFade
-                            x: buttonSlot.x
-                            y: buttonSlot.y
                             Button {
                                 id: playBtn
                                 text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
-                                // 弹性宽由 buttonSlot._playW 决定(锚距内放不
-                                // 下时压缩,下限 120 保可点区域)。
-                                width: buttonSlot._playW
+                                // 弹性宽由 _playW 决定(锚距内放不下时压缩,
+                                // 下限 120 保可点区域)。
+                                width: btnHolder._playW
                                 height: 44
                                 font.pixelSize: 16
                                 onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
@@ -961,6 +1044,7 @@ Item {
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
                                 }
+                            }
                             }
                         }                    }
 
