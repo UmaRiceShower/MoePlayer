@@ -82,29 +82,31 @@ Item {
     // 可浏览 = 有服务器且凭据有效。
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
 
-    // --- chip 样式(与搜索浮窗一致) ---
-    // 选中 chip 底色:accent 降饱和加深(大色块不用纯 accent)。
-    readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
-    // 选中 chip 悬停:同色相提亮一档。
-    readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
+    // --- 萌系粉白甜系配色(集中定义在 Constants,此处仅别名方便引用) ---
+    readonly property color moePink: Constants.moePink
+    readonly property color moePinkLight: Constants.moePinkLight
+    readonly property color moePinkDark: Constants.moePinkDark
+    readonly property color moePinkGlow: Constants.moePinkGlow
+    readonly property color moePinkText: Constants.moePinkText
+    readonly property color moeGold: Constants.moeGold
 
-    // --- 头部面包屑链配色(Material 暗色主题 branded surface 思想) ---
-    // 暗色表面不是纯灰,而是品牌色低透明度染色的"品牌色表面"
-    // (官方:surface + 8% primary → 染色表面):此处 = accent 青色相、
-    // 饱和度与 chipActive 统一(0.35),亮度随层级单调递增 0.11→0.18
-    // 表达 elevation(链尾=当前文件夹=最亮=当前位置)。整链同一青色相,
-    // 无跳色;hover 各提亮一档。服名段 = 链最暗端(0.11),同系。
-    readonly property color crumbServer: Qt.hsla(Theme.accent.hslHue, 0.35, 0.11, 1.0)
-    readonly property color crumbView: Qt.hsla(Theme.accent.hslHue, 0.35, 0.13, 1.0)
-    readonly property color crumbViewHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.16, 1.0)
-    readonly property color crumbFolder: Qt.hsla(Theme.accent.hslHue, 0.35, 0.15, 1.0)
-    readonly property color crumbFolderHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.18, 1.0)
-    readonly property color crumbFolderCurrent: Qt.hsla(Theme.accent.hslHue, 0.35, 0.18, 1.0)
-    readonly property color crumbFolderCurrentHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.21, 1.0)
+    // --- chip 样式 ---
+    // 选中 chip 底色:粉色降饱和,大色块不用纯 accent。
+    readonly property color chipActive: moePink
+    readonly property color chipActiveHover: moePinkLight
 
-    // --- 筛选下拉底色(中性灰阶,与导航链区分) ---
-    readonly property color crumb: Qt.hsla(Theme.surface.hslHue, 0.15, 0.17, 1.0)
-    readonly property color crumbHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.22, 1.0)
+    // --- 头部面包屑链配色(粉系 branded surface) ---
+    readonly property color crumbServer: Qt.hsla(340, 0.35, 0.13, 1.0)
+    readonly property color crumbView: Qt.hsla(340, 0.35, 0.16, 1.0)
+    readonly property color crumbViewHover: Qt.hsla(340, 0.35, 0.20, 1.0)
+    readonly property color crumbFolder: Qt.hsla(340, 0.35, 0.18, 1.0)
+    readonly property color crumbFolderHover: Qt.hsla(340, 0.35, 0.22, 1.0)
+    readonly property color crumbFolderCurrent: Qt.hsla(340, 0.35, 0.22, 1.0)
+    readonly property color crumbFolderCurrentHover: Qt.hsla(340, 0.35, 0.26, 1.0)
+
+    // --- 筛选下拉底色(粉灰阶,与导航链区分) ---
+    readonly property color crumb: Qt.hsla(340, 0.15, 0.17, 1.0)
+    readonly property color crumbHover: Qt.hsla(340, 0.15, 0.25, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
     readonly property int bcTip: 16
 
@@ -119,26 +121,38 @@ Item {
 
     // ===================== 内部组件与数据 =====================
 
-    // 分类筛选 chip(选中实心/未选描边,与搜索浮窗类型 chips 同风格)。
+    // 分类筛选 chip:萌系胶囊,选中带心形图标,激活态粉色渐变感。
     component FilterChip: Button {
         property string label: ""
         property bool active: false
 
-        height: 30
-        // RowLayout 会用 implicitHeight 覆盖显式 height(Button 默认约 45px),
-        // 声明 preferredHeight 让 Layout 容器按 30 布局;ListView 场景用显式 height。
-        Layout.preferredHeight: 30
-        padding: 14
+        height: 32
+        Layout.preferredHeight: 32
+        padding: 16
         background: Rectangle {
-            radius: 10
+            radius: 16
+            // 激活态用粉色,未激活态 hover 时微微提亮并加粉边框。
             color: parent.active
                    ? (parent.hovered ? root.chipActiveHover : root.chipActive)
                    : (parent.hovered ? Theme.surface : Theme.bg)
-            border.width: parent.active ? 0 : 1
-            border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
+            border.width: 1
+            border.color: parent.active
+                           ? root.moePinkDark
+                           : (parent.hovered ? root.moePink : Theme.textMuted)
+            // 萌系小阴影,让胶囊浮起来。
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -2
+                radius: 18
+                color: "transparent"
+                border.color: root.moePink
+                border.width: parent.active ? 2 : 0
+                opacity: 0.25
+            }
         }
         contentItem: AppText {
-            text: label
+            // 选中时前面加颗小爱心,强化萌系反馈。
+            text: (parent.active ? "♥ " : "") + label
             color: "white"
             font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter
@@ -151,14 +165,15 @@ Item {
     // hover accent 高亮/选中圆点)。model 统一为 ListModel(label/value)。
     component FilterCombo: ComboBox {
         id: fcombo
-        height: 30
-        // 同 FilterChip:RowLayout 覆盖显式 height,声明 preferredHeight 保持 30。
-        Layout.preferredHeight: 30
+        height: 32
+        // 同 FilterChip:RowLayout 覆盖显式 height,声明 preferredHeight 保持 32。
+        Layout.preferredHeight: 32
         padding: 0
         background: Rectangle {
-            radius: 6
+            radius: 16
             color: fcombo.hovered ? root.crumbHover : root.crumb
-            border.color: "transparent"
+            border.width: 1
+            border.color: fcombo.hovered ? root.moePink : Theme.textMuted
         }
         contentItem: Item {
             AppText {
@@ -198,7 +213,7 @@ Item {
             background: Rectangle {
                 color: Theme.surface
                 radius: 8
-                border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                border.color: root.moePink
                 border.width: 1
             }
             contentItem: ListView {
@@ -234,7 +249,7 @@ Item {
                     width: 6
                     height: 6
                     radius: 3
-                    color: Theme.accent
+                    color: root.moePink
                     visible: fcombo.currentIndex === parent.parent.index
                 }
             }
@@ -242,7 +257,7 @@ Item {
             background: Rectangle {
                 radius: 4
                 color: parent.highlighted || parent.hovered
-                    ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    ? Qt.rgba(root.moePink.r, root.moePink.g, root.moePink.b, 0.18)
                     : "transparent"
             }
         }
@@ -279,10 +294,10 @@ Item {
                 width: 6
                 height: 6
                 radius: 3
-                color: fopt.isOn ? Theme.accent : "transparent"
+                color: fopt.isOn ? root.moePink : "transparent"
                 border.width: 1
                 border.color: fopt.isOn
-                        ? Theme.accent
+                        ? root.moePink
                         : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g,
                                   Theme.textMuted.b, 0.6)
             }
@@ -290,7 +305,7 @@ Item {
         background: Rectangle {
             radius: 4
             color: fopt.hovered
-                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                ? Qt.rgba(root.moePink.r, root.moePink.g, root.moePink.b, 0.18)
                 : "transparent"
         }
     }
@@ -315,9 +330,9 @@ Item {
         property string labelText: activeCount > 0 ? "筛选 · " + activeCount : "筛选"
         Rectangle {
             anchors.fill: parent
-            radius: 6
+            radius: 16
             color: fpanelHover.containsMouse ? root.crumbHover : root.crumb
-            border.color: fpanel.activeCount > 0 ? Theme.accent : "transparent"
+            border.color: fpanel.activeCount > 0 ? root.moePink : Theme.textMuted
             border.width: 1
         }
         AppText {
@@ -375,7 +390,7 @@ Item {
             background: Rectangle {
                 color: Theme.surface
                 radius: 8
-                border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                border.color: root.moePink
                 border.width: 1
             }
             // 面板固定四节:类型/评分/状态(选项单选)+ 年份(输入区间)。
@@ -485,7 +500,7 @@ Item {
                         background: Rectangle {
                             radius: 6
                             color: root.crumb
-                            border.color: parent.activeFocus ? Theme.accent : "transparent"
+                            border.color: parent.activeFocus ? root.moePink : Theme.textMuted
                             border.width: 1
                         }
                         onEditingFinished: root.applyYearRange(text)
@@ -498,7 +513,7 @@ Item {
                         padding: 0
                         contentItem: AppText {
                             text: "清除筛选"
-                            color: Theme.accent
+                            color: root.moePink
                             font.pixelSize: 13
                             leftPadding: 10
                             verticalAlignment: Text.AlignVCenter
@@ -1188,9 +1203,7 @@ Item {
         }
 
         // 库内搜索栏(中):SearchTerm 与当前上下文(ParentId/筛选)正交,
-        // 防抖 300ms 后重查第一页;清空(空串不传)恢复完整列表。排序在
-        // 搜索激活时置灰(服务端固定相关度,忽略 SortBy)。x 经 clamp
-        // 尽量居中:宽窗严格居中,窄窗被链与筛选组夹住(筛选组优先)。
+        // 防抖 300ms 后重查第一页;清空(空串不传)恢复完整列表。
         TextField {
             id: searchBox
             y: (parent.height - height) / 2
@@ -1202,16 +1215,36 @@ Item {
             }
             width: root.width > 1400 ? 300 : (root.width > 1150 ? 260 : 220)
             height: 40
+            leftPadding: 34
+            rightPadding: 12
             placeholderText: "搜索当前媒体库…"
-            placeholderTextColor: Theme.textMuted
+            placeholderTextColor: Qt.lighter(Theme.textMuted, 1.2)
             color: "white"
             font.pixelSize: 14
-            padding: 12
             background: Rectangle {
-                radius: 8
+                radius: 20
                 color: root.crumb
-                border.color: searchBox.activeFocus ? Theme.accent : "transparent"
+                border.color: searchBox.activeFocus ? root.moePink : Theme.textMuted
                 border.width: 1
+                // 聚焦时粉色柔光外圈,萌系氛围。
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: -3
+                    radius: 23
+                    color: "transparent"
+                    border.color: root.moePink
+                    border.width: searchBox.activeFocus ? 2 : 0
+                    opacity: searchBox.activeFocus ? 0.35 : 0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
+            }
+            AppText {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "♥"
+                color: searchBox.activeFocus ? root.moePink : Theme.textMuted
+                font.pixelSize: 16
             }
             onTextChanged: searchDebounce.restart()
             // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
@@ -1333,6 +1366,9 @@ Item {
         cellHeight: root.cellH
         clip: true
         model: root.im
+        keyNavigationEnabled: true
+        activeFocusOnTab: true
+        highlightFollowsCurrentItem: false
 
         // 空库提示。
         AppText {
@@ -1384,6 +1420,8 @@ Item {
             // cell 内排前,盖不过兄弟 cell;必须提升 delegate 根(cell)的
             // z(兄弟间比较),放大溢出才能正确覆盖相邻卡。
             z: card.hovered ? 2 : 0
+            Keys.onReturnPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+            Keys.onEnterPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
             PosterCard {
                 id: card
                 anchors.centerIn: parent
@@ -1391,6 +1429,7 @@ Item {
                 height: root.cardH
                 model: parent.model
                 index: parent.index
+                current: GridView.isCurrentItem
                 onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
                 onFavoriteRequested: function (id, fav) {
                     const c = root.creds()

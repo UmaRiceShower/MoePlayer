@@ -93,6 +93,14 @@ QtObject {
     readonly property int searchPageSize: 40 // 搜索每页条数(与 C++ kSearchLimit 一致)
     readonly property int episodePushDebounceMs: 500
     readonly property int wheelLogWindowMs: 350 // 滚轮速度记账窗口
+
+    // ---- 萌系粉白甜系配色 ----
+    readonly property color moePink: Qt.rgba(1.0, 0.62, 0.74, 1.0)
+    readonly property color moePinkLight: Qt.rgba(1.0, 0.82, 0.88, 1.0)
+    readonly property color moePinkDark: Qt.rgba(0.86, 0.45, 0.63, 1.0)
+    readonly property color moePinkGlow: Qt.rgba(1.0, 0.62, 0.74, 0.35)
+    readonly property color moePinkText: Qt.rgba(1.0, 0.92, 0.95, 1.0)
+    readonly property color moeGold: Qt.rgba(1.0, 0.78, 0.42, 1.0)
     readonly property real scrollVelocityInitial: 800
     readonly property int scrollVelocityMin: 300
     readonly property int scrollVelocityMax: 3200
