@@ -28,6 +28,8 @@ Item {
     property string itemType: ""
     // 悬停快捷操作开关(搜索结果等轻量场景可关)。
     property bool showActions: true
+    // 键盘当前项(由 GridView 注入,delegate 当前项时为 true)。
+    property bool current: false
 
     // 海报莫奈取色:底部渐变氛围尾色与进度条强调色跟随海报。
     // 命令式更新 + colorReady(posterId) 信号:QML 绑定 colors 属性会在
@@ -50,7 +52,8 @@ Item {
             root.surfaceTint = c.surfaceTint
         } else {
             root.heroFrom = Theme.surface
-            root.accentColor = Theme.accent
+            // 萌系:默认进度条/强调色用粉色,不用 Theme.accent(青色)。
+            root.accentColor = Constants.moePink
             root.surfaceTint = Theme.surface
         }
     }
@@ -124,14 +127,27 @@ Item {
             duration: 200
         }
 
-        // 无主图或加载失败:类型占位图标,不显示空卡(对照上游 404 契约)。
-        AppText {
+        // 无主图或加载失败:萌系占位,不显示空卡(对照上游 404 契约)。
+        Column {
             visible: root.posterId === "" || posterImg.status === Image.Error
             anchors.centerIn: parent
-            text: root.itemType === "Series" ? "▦" : "▶"
-            color: Theme.textMuted
-            font.pixelSize: 40
-            opacity: 0.5
+            spacing: 4
+            opacity: 0.6
+
+            AppText {
+                text: root.itemType === "Series" ? "❀" : "♡"
+                color: Constants.moePink
+                font.pixelSize: 44
+                horizontalAlignment: Text.AlignHCenter
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            AppText {
+                text: root.itemType === "Series" ? "剧集" : "影像"
+                color: Theme.textMuted
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignHCenter
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
         }
 
         // 底部渐变遮罩,提升标题可读性;尾色跟随海报莫奈色(氛围统一)。
@@ -214,51 +230,58 @@ Item {
             }
         }
 
-        // 左上:评分角标(Emby 评分 0-10)。
+        // 左上:评分角标(Emby 评分 0-10)。萌系:缩小、金粉描边、半透明。
         Rectangle {
             visible: root.rating >= 0.5
             anchors.left: parent.left
             anchors.top: parent.top
-            anchors.margins: 8
-            height: 22
-            width: ratingRow.implicitWidth + 12
-            radius: 4
-            color: Theme.badgeBg
+            anchors.margins: 6
+            height: 18
+            width: ratingRow.implicitWidth + 10
+            radius: height / 2
+            color: Qt.rgba(0.08, 0.06, 0.05, 0.48)
+            border.width: 1
+            border.color: Constants.moeGold
             Row {
                 id: ratingRow
                 anchors.centerIn: parent
-                spacing: 3
+                spacing: 2
                 AppText {
                     text: "★"
-                    color: Theme.rating
-                    font.pixelSize: 12
+                    color: Constants.moeGold
+                    font.pixelSize: 10
                 }
                 AppText {
                     text: root.rating.toFixed(1)
-                    color: Theme.textPrimary
-                    font.pixelSize: 12
+                    color: Constants.moePinkText
+                    font.pixelSize: 10
                 }
             }
         }
 
         // 右上:状态角标(所有卡片常显,提供标记已看入口)。
-        // 已看 → 绿勾;剧集有未看集数 → 蓝标;其余未看 → 中性"未看"。
+        // 已看 → 绿勾;剧集有未看集数 → 粉色萌标;其余未看 → 中性"未看"。
         // showActions 时 hover 显示操作文案("标记未看/已看"),点击切换已看;
         // 轻量场景(搜索)保持纯状态展示。
         Rectangle {
             id: stateBadge
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 8
-            height: 22
-            width: stateRow.implicitWidth + 12
-            radius: 4
-            color: root.played ? Theme.success
-                 : (root.itemType === "Series" && root.unplayedCount > 0 ? Theme.info : Theme.info)
+            anchors.margins: 6
+            height: 18
+            width: stateRow.implicitWidth + 10
+            radius: height / 2
+            color: root.played
+                     ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.75)
+                     : (root.itemType === "Series" && root.unplayedCount > 0
+                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.75)
+                        : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.45))
+            border.width: root.played ? 0 : 1
+            border.color: root.played ? "transparent" : Constants.moePink
             Row {
                 id: stateRow
                 anchors.centerIn: parent
-                spacing: 3
+                spacing: 2
                 AppText {
                     // hover 文案由本角标内的 HoverHandler 驱动:
                     // hovered 只在鼠标位于 parent(角标)边界内时为 true,
@@ -270,10 +293,8 @@ Item {
                                 ? (root.unplayedCount >= 100 ? "99+ 未看"
                                    : root.unplayedCount + " 未看")
                                 : "未看"))
-                    color: root.played ? Theme.textOnBadge
-                         : (root.itemType === "Series" && root.unplayedCount > 0
-                            ? Theme.textOnBadge : Theme.textPrimary)
-                    font.pixelSize: 12
+                    color: root.played ? Theme.textOnBadge : Constants.moePinkText
+                    font.pixelSize: 10
                 }
             }
             // Pointer Handler 体系(与卡片 root 同机制,不依赖 MouseArea
@@ -293,6 +314,17 @@ Item {
                 onTapped: root.watchedRequested(root.itemId, !root.played)
             }
         }
+    }
+
+    // 萌系光晕边框:hover / 键盘焦点时泛出粉色轮廓。
+    Rectangle {
+        anchors.fill: parent
+        color: "transparent"
+        radius: 14
+        border.width: (cardHover.hovered || root.current) ? 2.5 : 0
+        border.color: Constants.moePink
+        opacity: (cardHover.hovered || root.current) ? 0.95 : 0
+        Behavior on opacity { NumberAnimation { duration: 120 } }
     }
 
     HoverHandler {
