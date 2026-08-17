@@ -110,6 +110,106 @@ Item {
         }
     }
 
+    // 分类筛选下拉(年份/评分/状态):暗色圆角底(crumb 系,同面包屑配色),
+    // hover 提亮;弹出层与面包屑下拉同款(暗色 surface/圆角/描边/
+    // hover accent 高亮/选中圆点)。model 统一为 ListModel(label/value)。
+    component FilterCombo: ComboBox {
+        id: fcombo
+        height: 30
+        padding: 0
+        background: Rectangle {
+            radius: 6
+            color: fcombo.hovered ? root.crumbHover : root.crumb
+            border.color: "transparent"
+        }
+        contentItem: Item {
+            AppText {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.right: fcomboArrow.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: fcombo.displayText
+                color: "white"
+                font.pixelSize: 13
+                elide: Text.ElideRight
+            }
+            AppText {
+                id: fcomboArrow
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: fcombo.popup.opened ? "▴" : "▾"
+                color: "white"
+                font.pixelSize: 10
+            }
+        }
+        indicator: null
+        popup: Popup {
+            id: fcomboPopup
+            y: fcombo.height + 4
+            width: fcombo.width
+            implicitHeight: contentItem.implicitHeight
+            padding: 6
+            enter: Transition {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+            }
+            background: Rectangle {
+                color: Theme.surface
+                radius: 8
+                border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                border.width: 1
+            }
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: fcombo.delegateModel
+                currentIndex: fcombo.highlightedIndex
+                highlightMoveDuration: 0
+            }
+        }
+        delegate: ItemDelegate {
+            // Qt6 delegate 上下文(Bound 模式):required 声明注入属性。
+            required property int index
+            required property var model
+            property string itemText: model[fcombo.textRole]
+            width: ListView.view.width
+            height: 30
+            padding: 0
+            contentItem: Item {
+                AppText {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: parent.parent.itemText
+                    color: "white"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 6
+                    height: 6
+                    radius: 3
+                    color: Theme.accent
+                    visible: fcombo.currentIndex === parent.parent.index
+                }
+            }
+            highlighted: fcombo.highlightedIndex === index
+            background: Rectangle {
+                radius: 4
+                color: parent.highlighted || parent.hovered
+                    ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    : "transparent"
+            }
+        }
+    }
+
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
     // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
     ListModel {
@@ -732,32 +832,35 @@ Item {
             }
         }
 
-        // 行3:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉。
-        Row {
+        // 行3:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉(左)
+        // + 排序(右):SortBy 下拉 + 升降序切换按钮(仅两态,无需下拉)。
+        RowLayout {
+            width: parent.width
             spacing: 12
             AppText {
-                anchors.verticalCenter: parent.verticalCenter
                 text: "年份"
                 color: "white"
                 font.pixelSize: 13
             }
-            ComboBox {
+            FilterCombo {
                 id: yearSelector
                 width: 130
-                model: root.yearOptions
+                model: ListModel {
+                    id: yearModel
+                    ListElement { label: "全部年份"; value: "" }
+                }
+                textRole: "label"
                 onActivated: function (index) {
-                    const v = root.yearOptions[index]
-                    root.currentYear = (v === "全部年份") ? "" : v
+                    root.currentYear = yearModel.get(index).value
                     root.refetch()
                 }
             }
             AppText {
-                anchors.verticalCenter: parent.verticalCenter
                 text: "评分"
                 color: "white"
                 font.pixelSize: 13
             }
-            ComboBox {
+            FilterCombo {
                 id: ratingSelector
                 width: 110
                 model: ListModel {
@@ -774,12 +877,11 @@ Item {
                 }
             }
             AppText {
-                anchors.verticalCenter: parent.verticalCenter
                 text: "状态"
                 color: "white"
                 font.pixelSize: 13
             }
-            ComboBox {
+            FilterCombo {
                 id: filterSelector
                 width: 110
                 model: ListModel {
@@ -794,17 +896,36 @@ Item {
                     root.refetch()
                 }
             }
-        }
-        ComboBox {
-            id: sortSelector
-            onActivated: function (index) {
-                root.changeSort(sortOptions.get(index).key)
+            // 弹性空隙:排序区靠右。
+            Item {
+                Layout.fillWidth: true
             }
-            width: 130
-            model: sortOptions
-            textRole: "label"
-            // 默认修改时间(与 fetchItems 默认一致),切换即服务端重查。
-            currentIndex: 1
+            AppText {
+                text: "排序"
+                color: "white"
+                font.pixelSize: 13
+            }
+            // SortBy:服务端排序键下拉(与 fetchItems 默认一致,切换即重查)。
+            FilterCombo {
+                id: sortSelector
+                width: 130
+                model: sortOptions
+                textRole: "label"
+                currentIndex: 1
+                onActivated: function (index) {
+                    root.changeSort(sortOptions.get(index).key)
+                }
+            }
+            // SortOrder:仅升/降两态,单按钮切换。
+            FilterChip {
+                label: root.currentSortOrder === "Ascending" ? "↑ 升序" : "↓ 降序"
+                active: true
+                onClicked: {
+                    root.currentSortOrder = (root.currentSortOrder === "Ascending")
+                            ? "Descending" : "Ascending"
+                    root.fetchPage(0)
+                }
+            }
         }
     }
 
@@ -938,9 +1059,25 @@ Item {
             }
             arr.sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
             root.yearOptions = ["全部年份"].concat(arr)
+            // 同步下拉模型(FilterCombo 用 ListModel)。
+            yearModel.clear()
+            yearModel.append({ label: "全部年份", value: "" })
+            for (const y of arr)
+                yearModel.append({ label: y, value: y })
             if (root.currentYear !== "" && arr.indexOf(root.currentYear) < 0) {
                 root.currentYear = ""
                 root.refetch()
+            }
+            // 模型 clear+append 会重置 currentIndex(-1)导致 displayText 为空,
+            // 显式恢复:未选年份回"全部年份",已选则定位回该年份。
+            if (root.currentYear === "") {
+                yearSelector.currentIndex = 0
+            } else {
+                for (let i = 1; i < yearModel.count; ++i)
+                    if (yearModel.get(i).value === root.currentYear) {
+                        yearSelector.currentIndex = i
+                        break
+                    }
             }
         }
         function onFoldersReceived(serverUrl) {
