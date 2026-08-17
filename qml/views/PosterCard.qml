@@ -60,6 +60,16 @@ Item {
     // 悬停操作:收藏/已看切换请求(useById 翻转)。
     signal favoriteRequested(string itemId, bool fav)
     signal watchedRequested(string itemId, bool played)
+
+    // hover 放大(hoverScale 手感同 ServerManager):等比例 scale(宽高
+    // 同倍),220ms OutCubic 无回弹,中心缩放(默认 transformOrigin)。
+    // 数值 1.06:卡两侧各留 gap/2=8,176 宽时水平溢出 5.3、垂直溢出
+    // 7.9(gap 16 内),几乎不碰邻居;z 提升由使用方 delegate 根负责
+    // (PosterCard 是 cell 子项,自身 z 盖不过兄弟 cell)。
+    // hovered 暴露给使用方 delegate 根做 z 提升。
+    property bool hovered: cardHover.hovered
+    scale: cardHover.hovered ? 1.06 : 1.0
+    Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
     onPosterIdChanged: {
         root.applyMonet()
         if (ConfigManager.monetEnabled)

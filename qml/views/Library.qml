@@ -1013,7 +1013,7 @@ Item {
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
-        anchors.bottomMargin: 24
+        // anchors.bottomMargin: 24
         cellWidth: root.cellW
         cellHeight: root.cellH
         clip: true
@@ -1065,7 +1065,12 @@ Item {
             // (左 24、右 40)。
             width: grid.cellWidth
             height: grid.cellHeight
+            // hover 放大卡置顶:PosterCard 是 cell 子项,自身 z 只在自己
+            // cell 内排前,盖不过兄弟 cell;必须提升 delegate 根(cell)的
+            // z(兄弟间比较),放大溢出才能正确覆盖相邻卡。
+            z: card.hovered ? 2 : 0
             PosterCard {
+                id: card
                 anchors.centerIn: parent
                 width: root.cardW
                 height: root.cardH

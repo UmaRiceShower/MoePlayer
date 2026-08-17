@@ -441,6 +441,9 @@ Item {
                     }
                     // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
                     delegate: PosterCard {
+                        // delegate 根即本卡,兄弟间 z 直接生效(放大浮起
+                        // 盖住相邻结果)。
+                        z: hovered ? 2 : 0
                         width: 152
                         height: 236
                         showActions: false
