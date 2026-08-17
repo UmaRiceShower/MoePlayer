@@ -68,8 +68,9 @@ Item {
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl)
     // viewId 为被点击的媒体库 id,serverUrl 为其所在服务器:媒体库页直接
-    // 按该服务器凭据浏览(无状态,无需切换会话)。
-    signal openLibrary(string viewId, string serverUrl)
+    // 按该服务器凭据浏览(无状态,无需切换会话)。viewName 为库名:首页
+    // 海报本就携带,传给媒体库页供面包屑立即显示(不等视图拉取)。
+    signal openLibrary(string viewId, string serverUrl, string viewName)
     // 打开服务器管理页(未登录提示条入口)。
     signal openServerManager()
 
@@ -351,7 +352,8 @@ Item {
         if (!row || !row.rowData)
             return
         if (root.focusCol === -1) {
-            root.openLibrary(row.rowData.viewId, row.rowData.serverUrl)
+            root.openLibrary(row.rowData.viewId, row.rowData.serverUrl,
+                             row.rowData.viewName)
             return
         }
         const items = row.rowData.items
@@ -703,7 +705,8 @@ Item {
                         cardW: Constants.rowLibraryW
                         cardH: Constants.rowHeight
                         selected: rowDelegate.rowIndex === root.focusRowIdx && root.focusCol === -1
-                        cardArea.onClicked: root.openLibrary(modelData.viewId, modelData.serverUrl)
+                        cardArea.onClicked: root.openLibrary(modelData.viewId, modelData.serverUrl,
+                                                             modelData.viewName)
                     }
                     // 该库最近条目:横向滚动列表,虚拟化渲染。
                     ListView {

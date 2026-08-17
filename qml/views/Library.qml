@@ -19,6 +19,9 @@ Item {
     // --- 浏览目标与恢复 ---
     // 进入页面时选中的媒体库 id(首页点某库海报时传入;空则默认第一个)。
     property string initialViewId: ""
+    // 进入页面时选中的媒体库名(首页海报携带,面包屑立即显示,不等视图
+    // 拉取;空则待 applyView 从模型取)。
+    property string initialViewName: ""
     // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
     property string serverUrl: ""
     // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
@@ -29,6 +32,9 @@ Item {
     // --- 当前浏览上下文 ---
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
+    // 当前视图显示名(面包屑媒体库段):初始 = 首页传入的 initialViewName,
+    // applyView 后与模型实际选中同步(initialViewId 未匹配回退第一库时校正)。
+    property string currentViewName: ""
     // 当前服务端排序(DateLastMediaAdded 在 4.9.5 条目级查询报错,不在档位内)。
     // 默认值来自用户配置(ConfigManager);restore 恢复时会覆盖。
     property string currentSortBy: ConfigManager.librarySortBy
@@ -280,6 +286,9 @@ Item {
     function fetchPage(startIndex) {
         if (!root.browseReady || root.currentViewId === "")
             return
+        // 置 busy:首屏加载期间不显示"暂无条目"空提示(空提示条件 !busy),
+        // 由 onItemsReceived/onErrorOccurred 清除。
+        root.busy = true
         const c = root.creds()
         EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentParentId(),
                               startIndex, Constants.pageSize,
@@ -358,6 +367,7 @@ Item {
         }
         viewSelector.currentIndex = idx
         root.currentViewId = root.vm.idAt(idx)
+        root.currentViewName = root.vm.nameAt(idx)
         root.folderPath = []
         root.resetFilters()
         root.reloadAll()
@@ -379,6 +389,8 @@ Item {
     // --- 生命周期 ---
     // 进入页面:有服务器则拉取;未指定时默认第一个有效账号;无账号则表单。
     Component.onCompleted: {
+        // 面包屑媒体库段立即显示首页传入的库名(视图拉取前的等待期)。
+        root.currentViewName = root.initialViewName
         if (root.serverUrl === "") {
             const accs = AccountManager.accounts
             for (const a of accs) {
@@ -395,6 +407,11 @@ Item {
             root.fm = EmbyClient.foldersModelFor(root.serverUrl)
             // 无状态化后视图不会预载,主动拉取(onViewsReceived 后应用目标库)。
             const c = root.creds()
+            // 置 busy:fetchViews 返回前视图未就绪、applyView 尚未执行,
+            // 此时 busy 若为 false,加载期间会误显"该媒体库暂无条目"空提示
+            // (空提示条件 !busy)。清除由 onViewsReceived → applyView →
+            // fetchPage(置 busy 保持)或 onErrorOccurred 负责。
+            root.busy = true
             EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
             if (root.restore && root.restore.viewId !== "") {
                 // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
@@ -529,7 +546,7 @@ Item {
                     anchors.right: viewTabArrow.left
                     anchors.rightMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
-                    text: viewSelector.displayText
+                    text: root.currentViewName
                     color: "white"
                     font.pixelSize: 13
                     horizontalAlignment: Text.AlignHCenter
@@ -1040,7 +1057,9 @@ Item {
                 return
             if (root.vm && root.vm.count > 0)
                 root.applyView(root.initialViewId)
-            root.busy = false
+            // 注意:此处不设 busy=false——applyView → reloadAll → fetchPage
+            // 已置 busy=true,由 onItemsReceived/onErrorOccurred 清除;
+            // 曾在此清空导致加载期间 busy=false 误显"暂无条目"。
         }
         function onItemsReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
@@ -1107,6 +1126,18 @@ Item {
         }
         function onErrorOccurred(serverUrl, message) {
             if (serverUrl !== root.serverUrl)
+                return
+            // 只处理本页请求的错误(message 以请求描述前缀开头)。首页聚合
+            // (获取服务器信息/获取首页行)等其它请求的错误会在本页停留期间
+            // 触发,显示会误导,且若落在 busy 等待窗口内会误清 busy 导致
+            // "暂无条目"闪现。fetchServerViews 与本页 fetchViews 同端点同
+            // 描述("获取媒体库视图"),失败同样说明视图拉取问题,予以保留。
+            const ours = message.startsWith("获取媒体库视图")
+                || message.startsWith("获取媒体库条目")
+                || message.startsWith("获取类型分类")
+                || message.startsWith("获取年份分类")
+                || message.startsWith("获取子文件夹")
+            if (!ours)
                 return
             root.busy = false
             statusText.text = "失败：" + message

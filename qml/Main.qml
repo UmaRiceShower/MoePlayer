@@ -80,11 +80,12 @@ ApplicationWindow {
         })
     }
     // 打开媒体库页:记录浏览服务器。
-    function pushLibrary(viewId, serverUrl) {
+    function pushLibrary(viewId, serverUrl, viewName) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
         stackView.push(libraryPage, {
             initialViewId: viewId || "",
+            initialViewName: viewName || "",
             serverUrl: serverUrl || root.currentServerUrl,
             restore: root.libraryState || null
         })
@@ -130,8 +131,8 @@ ApplicationWindow {
             onShowDetail: function (itemId, posterId, title, serverUrl) {
                 root.pushDetail(itemId, posterId, title, serverUrl)
             }
-            onOpenLibrary: function (viewId, serverUrl) {
-                root.pushLibrary(viewId, serverUrl)
+            onOpenLibrary: function (viewId, serverUrl, viewName) {
+                root.pushLibrary(viewId, serverUrl, viewName)
             }
             onOpenServerManager: stackView.push(serverManagerPage)
         }
