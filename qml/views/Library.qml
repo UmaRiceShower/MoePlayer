@@ -769,14 +769,6 @@ Item {
                 }
             }
         }
-
-        AppText {
-            id: statusText
-            // 错误态显式状态,不嗅探文案(原 indexOf("失败") 脆弱)。
-            property bool isError: false
-            text: ""
-            color: statusText.isError ? Theme.danger : Theme.textMuted
-        }
     }
 
     // --- 分类栏(已连接时):子文件夹下钻 + 类型/年份/评分/状态筛选 ---
@@ -921,6 +913,41 @@ Item {
         }
     }
 
+    // 状态/错误提示条(加载进度/请求失败):位于筛选行与网格之间,
+    // 贴近内容区(浏览/筛选操作的视线焦点);空状态隐藏、零空间占用。
+    // 样式:正常态透明底 textMuted 文字;错误态浅 danger 底 + 描边 + danger 文字。
+    Item {
+        id: statusBar
+        anchors.left: parent.left
+        anchors.leftMargin: 24
+        anchors.right: parent.right
+        anchors.rightMargin: 24
+        anchors.top: filterCol.bottom
+        height: statusText.text === "" ? 0 : 30
+        visible: statusText.text !== ""
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            color: statusText.isError
+                   ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.12)
+                   : "transparent"
+            border.color: statusText.isError
+                          ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.5)
+                          : "transparent"
+            border.width: 1
+        }
+        AppText {
+            id: statusText
+            anchors.left: parent.left
+            anchors.leftMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            // 错误态显式状态,不嗅探文案(原 indexOf("失败") 脆弱)。
+            property bool isError: false
+            text: ""
+            color: statusText.isError ? Theme.danger : Theme.textMuted
+        }
+    }
+
     // --- 主体:选中媒体库的条目网格(填充头部以下空间) ---
     GridView {
         id: grid
@@ -937,7 +964,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         // 与分类栏保持间距(视觉分组)。
-        anchors.top: filterCol.bottom
+        anchors.top: statusBar.bottom
         anchors.topMargin: 12
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
