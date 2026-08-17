@@ -68,8 +68,10 @@ public:
     // 获取视图条目(/Users/{id}/Items,分页),填充该服务器的 itemsModel。
     // startIndex=0 替换模型否则追加;TotalRecordCount 写入 totalCount。
     // genres/years/minRating/filters 为可选过滤(空串不传):Genres 单值、
-    // Years 单值、MinCommunityRating 评分下限、Filters 状态;配合 ParentId
-    // (视图或子文件夹 id)即库内多维筛选。
+    // Years 单值、MinCommunityRating 评分下限、Filters 状态;searchTerm
+    // 为库内搜索关键词(SearchTerm,空串不传);配合 ParentId(视图或子
+    // 文件夹 id)即库内多维筛选。注意:实测 4.9.5.0 带 SearchTerm 时
+    // 忽略 SortBy/SortOrder(固定相关度排序)。
     Q_INVOKABLE void fetchItems(const QString &serverUrl, const QString &token,
                                 const QString &userId, const QString &viewId,
                                 int startIndex, int limit,
@@ -78,7 +80,8 @@ public:
                                 const QString &genres = QString(),
                                 const QString &years = QString(),
                                 const QString &minRating = QString(),
-                                const QString &filters = QString());
+                                const QString &filters = QString(),
+                                const QString &searchTerm = QString());
     // 库内类型枚举(/Genres?ParentId=,Genre 为 BaseItemDto 带 Id/图),
     // 填充该服务器的 genresModel(名称即 Genres 过滤参数值)。
     Q_INVOKABLE void fetchGenres(const QString &serverUrl, const QString &token,
