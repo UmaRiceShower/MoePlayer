@@ -44,7 +44,8 @@ Item {
     // 状态过滤(Filters):""|IsUnplayed|IsPlayed|IsFavorite。
     property string currentFilter: ""
     // 子文件夹下钻路径(元素为文件夹 id;空数组 = 库根)。进文件夹 push,
-    // 上级 pop、根清空;查询 ParentId = 末元素或库视图 id。
+    // 下钻路径(元素 {id, name},按层序;空=库根)。头部面包屑逐段显示,
+    // 上级 pop、根清空;查询 ParentId = 末元素 id 或库视图 id。
     property var folderPath: []
     // 年份下拉选项(服务端 Years 列表过滤脏值后倒序,首项"全部年份")。
     property var yearOptions: ["全部年份"]
@@ -66,6 +67,11 @@ Item {
     readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
     // 选中 chip 悬停:同色相提亮一档。
     readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
+    // 文件夹面包屑段配色(surface 系渐进:上级暗 → 当前亮,均弱于媒体库 accent 段)。
+    readonly property color crumb: Qt.hsla(Theme.surface.hslHue, 0.15, 0.17, 1.0)
+    readonly property color crumbHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.22, 1.0)
+    readonly property color crumbCurrent: Qt.hsla(Theme.surface.hslHue, 0.15, 0.26, 1.0)
+    readonly property color crumbCurrentHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.31, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
     readonly property int bcTip: 14
 
@@ -165,7 +171,7 @@ Item {
     // 当前查询的 ParentId:下钻到子文件夹则用文件夹 id,否则库视图 id。
     function currentParentId() {
         return root.folderPath.length > 0
-               ? root.folderPath[root.folderPath.length - 1]
+               ? root.folderPath[root.folderPath.length - 1].id
                : root.currentViewId
     }
     // 统一条目请求(筛选/排序随页面状态;startIndex=0 替换模型,>0 分页追加)。
@@ -196,7 +202,7 @@ Item {
 
     // --- 筛选与下钻 ---
     // 重置全部筛选(切库/进文件夹时),下拉同步回"全部"档。
-    // 注意:不清 folderPath——下钻路径由 enterFolder/goUp/goRoot 各自
+    // 注意:不清 folderPath——下钻路径由 enterFolder/goToLevel 各自
     // 维护,仅切库(applyView/onActivated)显式清空。
     function resetFilters() {
         root.currentGenres = ""
@@ -208,28 +214,20 @@ Item {
         filterSelector.currentIndex = 0
     }
     // 进入子文件夹:下钻一层,重置筛选并按新 ParentId 重拉四件套。
-    function enterFolder(id) {
+    function enterFolder(id, name) {
         let p = root.folderPath.slice()
-        p.push(id)
+        p.push({ id: id, name: name })
         root.folderPath = p
         root.resetFilters()
         root.reloadAll()
     }
-    // 返回上一级(下钻中)。
-    function goUp() {
-        if (root.folderPath.length === 0)
+    // 跳回第 i 层(0-based;该段成为当前层,其后截断)。
+    // 头部面包屑点击任意上级段调用;i=-1 即回库根。
+    function goToLevel(i) {
+        if (i < -1 || i >= root.folderPath.length)
             return
-        let p = root.folderPath.slice()
-        p.pop()
+        let p = i < 0 ? [] : root.folderPath.slice(0, i + 1)
         root.folderPath = p
-        root.resetFilters()
-        root.reloadAll()
-    }
-    // 回到库根。
-    function goRoot() {
-        if (root.folderPath.length === 0)
-            return
-        root.folderPath = []
         root.resetFilters()
         root.reloadAll()
     }
@@ -346,6 +344,35 @@ Item {
 
     // ============================= 界面 =============================
 
+    // 文本宽度度量(popup 自适应宽度:垂直 ListView 不计算 contentWidth,
+    // 需按模型最长项文本宽计算)。
+    FontMetrics {
+        id: fmMetrics
+        font.pixelSize: 13
+    }
+    // 子文件夹模型最长名文本宽(popup 宽度下限,防长名被截断)。
+    function maxFolderTextWidth() {
+        const m = root.fm
+        let w = 0
+        for (let i = 0; m && i < m.count; ++i) {
+            const n = m.nameAt(i)
+            if (n)
+                w = Math.max(w, fmMetrics.advanceWidth(n))
+        }
+        return w
+    }
+    // 媒体库模型最长名文本宽(媒体库下拉同理)。
+    function maxViewTextWidth() {
+        const m = root.vm
+        let w = 0
+        for (let i = 0; m && i < m.count; ++i) {
+            const n = m.nameAt(i)
+            if (n)
+                w = Math.max(w, fmMetrics.advanceWidth(n))
+        }
+        return w
+    }
+
     // --- 头部:服名 + 媒体库选择 ---
     Column {
         id: headerCol
@@ -354,13 +381,13 @@ Item {
         anchors.top: parent.top
         spacing: 12
         padding: 24
-        // 媒体库选择(已连接时):面包屑链 [服名▸][媒体库▸]。
-        // 形状由容器 Canvas 绘制(尺寸显式可控),ComboBox 仅作透明交互层,
-        // 避免 QQC2 委托布局带来的不可控尺寸;两段 anchors 显式咬合。
-        Item {
+        // 头部面包屑链(已连接时):[服名▸][媒体库▸][文件夹₁▸]…[当前文件夹▸]。
+        // 各段自绘 Shape、显式尺寸,Row 负间距咬合(后段左缺口吞前段尖角,
+        // 2px 重叠防接缝);媒体库段/当前文件夹段为透明交互层+暗色下拉。
+        Row {
             visible: root.browseReady
-            width: serverTab.width + viewTab.width - root.bcTip + 2
             height: 34
+            spacing: -root.bcTip + 2
 
             // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
             Item {
@@ -384,15 +411,11 @@ Item {
                 }
             }
 
-            // 媒体库:左缺口右尖六边形,缺口深度 = 服名尖角长度,
-            // anchors 负边距使尖角嵌入缺口(2px 重叠防接缝)。
+            // 媒体库:左缺口右尖,点击弹下拉切库(选中态 accent 高亮)。
             // 宽度自适应:文字完整宽 + 左 16 + 间隔 6 + ▾ 宽 10 + ▾ 右距(尖角 14 + 4),
             // 最小 150 防初始空名/短名过窄;文字锚定到 ▾ 左侧,极端长名 elide 兜底。
             Item {
                 id: viewTab
-                anchors.left: serverTab.right
-                anchors.leftMargin: -root.bcTip + 2
-                anchors.top: serverTab.top
                 width: Math.max(150, viewTabText.implicitWidth + 50)
                 height: 34
 
@@ -484,7 +507,13 @@ Item {
                     popup: Popup {
                         id: viewPopup
                         y: viewSelector.height + 4
-                        width: viewSelector.width
+                        // 自适应宽度:max(段宽, 最长库名文本宽 + 32),上限防超窗口。
+                        // opened 依赖:JS 函数体内访问的模型内容不建立绑定依赖,
+                        // 每次打开时按当前层最长名重算(下钻后 fm 已更新)。
+                        width: opened
+                               ? Math.min(root.width - 48,
+                                          Math.max(viewSelector.width, root.maxViewTextWidth() + 32))
+                               : viewSelector.width
                         implicitHeight: contentItem.implicitHeight
                         padding: 6
                         enter: Transition {
@@ -517,6 +546,136 @@ Item {
                     }
                 }
             }
+
+            // 文件夹层级段(Repeater,model = 库根段 + folderPath 各层):
+            // 库根段("全部")常驻链首——未下钻时是当前段(弹顶层子文件夹),
+            // 下钻后变为回根入口;上级段点击跳回该层(goToLevel),
+            // 当前段点击弹该层子文件夹下拉。段数随层级动态增减。
+            Repeater {
+                model: [{ id: root.currentViewId, name: "全部" }]
+                       .concat(root.folderPath)
+                delegate: Item {
+                    // Qt6 delegate 上下文(Bound 模式):required 声明注入属性。
+                    required property var modelData
+                    required property int index
+                    // model 下标比 folderPath 下标多 1(链首为库根段)。
+                    property bool isCurrent: index === root.folderPath.length
+                    width: isCurrent
+                           ? Math.max(120, crumbText.implicitWidth + 50)
+                           : crumbText.implicitWidth + 16 + root.bcTip + 8
+                    height: 34
+
+                    BreadcrumbShape {
+                        anchors.fill: parent
+                        leftNotch: true
+                        fillColor: crumbBtn.hovered
+                            ? (parent.isCurrent ? root.crumbCurrentHover : root.crumbHover)
+                            : (parent.isCurrent ? root.crumbCurrent : root.crumb)
+                        borderColor: "transparent"
+                    }
+                    AppText {
+                        id: crumbText
+                        anchors.left: parent.left
+                        anchors.leftMargin: 16
+                        anchors.right: parent.isCurrent ? crumbArrow.left : parent.right
+                        anchors.rightMargin: parent.isCurrent ? 6 : 12
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: modelData.name
+                        color: "white"
+                        font.pixelSize: 13
+                        horizontalAlignment: Text.AlignHCenter
+                        elide: Text.ElideMiddle
+                    }
+                    AppText {
+                        id: crumbArrow
+                        visible: parent.isCurrent
+                        anchors.right: parent.right
+                        anchors.rightMargin: root.bcTip + 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: crumbPopup.opened ? "▴" : "▾"
+                        color: "white"
+                        font.pixelSize: 10
+                    }
+                    // 透明交互层:上级段点击跳回(库根段=回根),当前段点击弹子文件夹下拉。
+                    MouseArea {
+                        id: crumbBtn
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (parent.isCurrent) {
+                                if (crumbPopup.opened)
+                                    crumbPopup.close()
+                                else
+                                    crumbPopup.open()
+                            } else if (index === 0) {
+                                root.goToLevel(-1)
+                            } else {
+                                root.goToLevel(index - 1)
+                            }
+                        }
+                    }
+                    // 当前段弹出:该层子文件夹列表(与媒体库下拉同样式)。
+                    Popup {
+                        id: crumbPopup
+                        y: parent.height + 4
+                        // 自适应宽度:max(段宽, 最长子文件夹名文本宽 + 32),上限防超窗口。
+                        // opened 依赖:每次打开时按当前层重算(见 viewPopup 注释)。
+                        width: opened
+                               ? Math.min(root.width - 48,
+                                          Math.max(parent.width, root.maxFolderTextWidth() + 32))
+                               : parent.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 6
+                        enter: Transition {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+                        }
+                        exit: Transition {
+                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                        }
+                        background: Rectangle {
+                            color: Theme.surface
+                            radius: 8
+                            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                            border.width: 1
+                        }
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: root.fm
+                            delegate: ItemDelegate {
+                                required property int index
+                                required property var model
+                                property string itemText: model.name
+                                width: ListView.view.width
+                                height: 32
+                                padding: 0
+                                contentItem: Item {
+                                    AppText {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 10
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: parent.parent.itemText
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                highlighted: ListView.view.currentIndex === index
+                                background: Rectangle {
+                                    radius: 4
+                                    color: parent.highlighted || parent.hovered
+                                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                                        : "transparent"
+                                }
+                                onClicked: {
+                                    root.enterFolder(model.id, model.name)
+                                    crumbPopup.close()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         AppText {
@@ -539,42 +698,7 @@ Item {
         anchors.rightMargin: 24
         spacing: 8
 
-        // 行1:子文件夹分组入口(当前层顶层文件夹,横向滚动;
-        // 仅存在子文件夹或已下钻时显示,下钻后"根/上级"可回退)。
-        RowLayout {
-            width: parent.width
-            spacing: 8
-            visible: root.folderPath.length > 0
-                     || (root.fm && root.fm.count > 0)
-            FilterChip {
-                label: "根目录"
-                active: root.folderPath.length === 0
-                onClicked: root.goRoot()
-            }
-            FilterChip {
-                label: "上级"
-                visible: root.folderPath.length > 0
-                onClicked: root.goUp()
-            }
-            ListView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 30
-                orientation: ListView.Horizontal
-                spacing: 8
-                clip: true
-                model: root.fm
-                delegate: FilterChip {
-                    required property string name
-                    required property string id
-                    label: name
-                    active: root.folderPath.length > 0
-                            && root.folderPath[root.folderPath.length - 1] === id
-                    onClicked: root.enterFolder(id)
-                }
-            }
-        }
-
-        // 行2:类型分类(Genres,横向滚动,单选;"全部类型"清选)。
+        // 行1:类型分类(Genres,横向滚动,单选;"全部类型"清选)。
         RowLayout {
             width: parent.width
             spacing: 8
@@ -822,7 +946,7 @@ Item {
         function onFoldersReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
-            // 子文件夹 chips 自动随模型刷新,无额外动作。
+            // 当前段下拉的子文件夹列表随 fm 模型自动刷新,无额外动作。
         }
         function onErrorOccurred(serverUrl, message) {
             if (serverUrl !== root.serverUrl)
