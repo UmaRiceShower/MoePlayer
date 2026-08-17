@@ -8,7 +8,7 @@ import MoePlayer.Core
 //! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
 //! 浏览无状态化:serverUrl 为目标服务器,所有请求经
 //! AccountManager.credsForServer 取凭据按服务器路由,不依赖任何会话;
-//! 无账号/凭据失效时显示连接表单(直连登录 = 添加账号)。
+//! 无账号/凭据失效时页面不可浏览,账号由主界面(ServerManager)管理。
 //! 顶部一行选择媒体库(下拉),主体为条目网格;播放/详情经信号交给主窗口。
 //! 结构遵循 Qt QML Coding Conventions:属性 → 信号 → 函数 → 子对象。
 Item {
@@ -47,8 +47,6 @@ Item {
     // 下钻路径(元素 {id, name},按层序;空=库根)。头部面包屑逐段显示,
     // 上级 pop、根清空;查询 ParentId = 末元素 id 或库视图 id。
     property var folderPath: []
-    // 年份下拉选项(服务端 Years 列表过滤脏值后倒序,首项"全部年份")。
-    property var yearOptions: ["全部年份"]
 
     // --- 模型引用(浏览绑定,页面生命周期内一次性取引用) ---
     property var vm: null
@@ -60,7 +58,6 @@ Item {
     property bool busy: false
     // 可浏览 = 有服务器且凭据有效。
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
-    readonly property bool showForm: !root.browseReady
 
     // --- chip 样式(与搜索浮窗一致) ---
     // 选中 chip 底色:accent 降饱和加深(大色块不用纯 accent)。
@@ -373,16 +370,6 @@ Item {
         root.pendingRestoreY = grid.contentY
         root.fetchPage(0)
     }
-    // 表单直连:登录成功即由 AccountManager 保存为账号,此后按该服务器浏览。
-    function connectServer() {
-        const started = AccountManager.addAccount("", serverField.text, userField.text,
-                                                  passField.text, true)
-        root.busy = started
-        if (started) {
-            statusText.text = "正在登录…"
-            statusText.isError = false
-        }
-    }
 
     // --- 生命周期 ---
     // 进入页面:有服务器则拉取;未指定时默认第一个有效账号;无账号则表单。
@@ -427,8 +414,8 @@ Item {
                 }
             }
         } else {
-            // 无账号/凭据失效:显示直连表单(serverField 声明式绑定
-            // SettingsStore.serverUrl 已预填,无需命令式赋值)。
+            // 无账号/凭据失效:页面不可浏览,账号由主界面(ServerManager)管理,
+            // 此处无直连表单(旧框架残留已移除)。
         }
     }
     // 离开页面(pop 销毁)前保存浏览状态:视图/排序/滚动位置。
@@ -1058,7 +1045,6 @@ Item {
                     arr.push(String(y))
             }
             arr.sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
-            root.yearOptions = ["全部年份"].concat(arr)
             // 同步下拉模型(FilterCombo 用 ListModel)。
             yearModel.clear()
             yearModel.append({ label: "全部年份", value: "" })
@@ -1091,32 +1077,6 @@ Item {
             root.busy = false
             statusText.text = "失败：" + message
             statusText.isError = true
-        }
-    }
-
-    // 表单直连(添加账号)结果:成功即切换到该服务器浏览。
-    Connections {
-        target: AccountManager
-        function onAccountLoginFinished(ok, message) {
-            if (ok) {
-                // QML 字符串是 JS String,无 trimmed()(运行时抛 TypeError),
-                // 等价方法为 trim()。qmllint 的 missing-property 暴露此问题。
-                if (root.serverUrl !== serverField.text.trim())
-                    root.serverUrl = serverField.text.trim()
-                if (root.browseReady && root.vm === null) {
-                    root.vm = EmbyClient.viewsModelFor(root.serverUrl)
-                    root.im = EmbyClient.itemsModelFor(root.serverUrl)
-                    root.gm = EmbyClient.genresModelFor(root.serverUrl)
-                    root.fm = EmbyClient.foldersModelFor(root.serverUrl)
-                    const c = root.creds()
-                    EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
-                }
-                root.busy = false
-            } else {
-                root.busy = false
-                statusText.text = "登录失败：" + message
-                statusText.isError = true
-            }
         }
     }
 }
