@@ -29,6 +29,19 @@ Item {
     // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
     property real pendingRestoreY: 0
 
+    // --- 网格尺寸(弹性列数) ---
+    // 可用宽 = 网格宽(anchors 左右各 24 margin)。卡宽随窗口在
+    // [cellMinW, cellMaxW] 区间伸缩填满整行(见 Constants.gridCardW)。
+    // cell = 卡宽 + cellGap(GridView 无 gap 语义,delegate 取卡宽在 cell
+    // 内留右/下缘 → 卡间距 = cellGap);cellW 已含 1e-6 下偏,保证
+    // GridView 内部列数截断恰为 n,整行铺满无右侧空白(见 gridCellW)。
+    readonly property real cardW: Constants.gridCardW(Math.max(1, root.width - 48))
+    readonly property int cardH: Constants.gridCardH(root.cardW)
+    readonly property real cellW: Constants.gridCellW(Math.max(1, root.width - 48))
+    // gridCellH 参数是**卡宽**(内部按 2:3 转卡高再 +gap);传卡高会把
+    // cell 高算成 cardH×1.5+gap → 行间距 ≈ 半卡高(上下间距过大)。
+    readonly property int cellH: Constants.gridCellH(root.cardW)
+
     // --- 当前浏览上下文 ---
     // 当前浏览的视图 id(分页加载用)。
     property string currentViewId: ""
@@ -987,8 +1000,8 @@ Item {
         anchors.leftMargin: 24
         anchors.rightMargin: 24
         anchors.bottomMargin: 24
-        cellWidth: Constants.cellW
-        cellHeight: Constants.cellH
+        cellWidth: root.cellW
+        cellHeight: root.cellH
         clip: true
         model: root.im
 
@@ -1004,12 +1017,14 @@ Item {
         Flow {
             visible: root.busy && root.im && root.im.count === 0
             anchors.fill: parent
-            spacing: 16
+            // 首卡与真实网格对齐:delegate 卡居中于 cell,首卡 x = gap/2。
+            leftPadding: Constants.cellGap / 2
+            spacing: Constants.cellGap
             Repeater {
                 model: 24
                 Rectangle {
-                    width: Constants.cardW
-                    height: Constants.cardH
+                    width: root.cardW
+                    height: root.cardH
                     radius: 8
                     color: Theme.surface
                 }
@@ -1019,31 +1034,52 @@ Item {
             anchors.centerIn: parent
             running: root.busy && grid.visible
         }
-        delegate: PosterCard {
-            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
-            onFavoriteRequested: function (id, fav) {
-                const c = root.creds()
-                EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)
-                root.im.setFavoriteById(id, fav)
+        delegate: Item {
+            // 视图只注入 delegate **根** 的 model/index 上下文;根声明
+            // required 让 qmllint 静态识别(官方 delegate 写法)。
+            // PosterCard 是嵌套子项,其 required model/index 须经 parent
+            // 引用根注入值——不能写 `model: model`:PosterCard 自身有
+            // 同名 required 属性,绑定右值解析到自身(undefined)→
+            // TypeError: Cannot read property 'id' of undefined。
+            required property var model
+            required property int index
+            // GridView 按 cell 定位但不改 delegate 尺寸(官方文档示例
+            // delegate 显式 width: grid.cellWidth; height: grid.cellHeight):
+            // 根须铺满 cell,否则隐式 0×0。PosterCard 在 cell 内居中:
+            // 卡两侧各留 gap/2 → 卡间距 = cellGap、行首尾留白对称
+            // (左 24+8 = 右 24+8);直接左对齐会让行尾 gap 全留在右侧
+            // (左 24、右 40)。
+            width: grid.cellWidth
+            height: grid.cellHeight
+            PosterCard {
+                anchors.centerIn: parent
+                width: root.cardW
+                height: root.cardH
+                model: parent.model
+                index: parent.index
+                onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                onFavoriteRequested: function (id, fav) {
+                    const c = root.creds()
+                    EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)
+                    root.im.setFavoriteById(id, fav)
+                }
+                onWatchedRequested: function (id, played) {
+                    const c = root.creds()
+                    EmbyClient.setWatched(root.serverUrl, c.token, c.userId, id, played)
+                    root.im.setPlayedById(id, played)
+                }
+                itemId: model.id
+                posterId: model.posterId
+                title: model.name
+                year: model.year
+                rating: model.rating
+                played: model.played
+                favorite: model.favorite
+                positionTicks: model.positionTicks
+                runtimeTicks: model.runtimeTicks
+                unplayedCount: model.unplayedCount
+                itemType: model.type
             }
-            onWatchedRequested: function (id, played) {
-                const c = root.creds()
-                EmbyClient.setWatched(root.serverUrl, c.token, c.userId, id, played)
-                root.im.setPlayedById(id, played)
-            }
-            width: Constants.cardW
-            height: Constants.cardH
-            itemId: model.id
-            posterId: model.posterId
-            title: model.name
-            year: model.year
-            rating: model.rating
-            played: model.played
-            favorite: model.favorite
-            positionTicks: model.positionTicks
-            runtimeTicks: model.runtimeTicks
-            unplayedCount: model.unplayedCount
-            itemType: model.type
         }
     }
 
