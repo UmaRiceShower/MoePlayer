@@ -83,11 +83,24 @@ Item {
     readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
     // 选中 chip 悬停:同色相提亮一档。
     readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
-    // 文件夹面包屑段配色(surface 系渐进:上级暗 → 当前亮,均弱于媒体库 accent 段)。
+
+    // --- 头部面包屑链配色(Material 暗色主题 branded surface 思想) ---
+    // 暗色表面不是纯灰,而是品牌色低透明度染色的"品牌色表面"
+    // (官方:surface + 8% primary → 染色表面):此处 = accent 青色相、
+    // 饱和度与 chipActive 统一(0.35),亮度随层级单调递增 0.11→0.18
+    // 表达 elevation(链尾=当前文件夹=最亮=当前位置)。整链同一青色相,
+    // 无跳色;hover 各提亮一档。服名段 = 链最暗端(0.11),同系。
+    readonly property color crumbServer: Qt.hsla(Theme.accent.hslHue, 0.35, 0.11, 1.0)
+    readonly property color crumbView: Qt.hsla(Theme.accent.hslHue, 0.35, 0.13, 1.0)
+    readonly property color crumbViewHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.16, 1.0)
+    readonly property color crumbFolder: Qt.hsla(Theme.accent.hslHue, 0.35, 0.15, 1.0)
+    readonly property color crumbFolderHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.18, 1.0)
+    readonly property color crumbFolderCurrent: Qt.hsla(Theme.accent.hslHue, 0.35, 0.18, 1.0)
+    readonly property color crumbFolderCurrentHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.21, 1.0)
+
+    // --- 筛选下拉底色(中性灰阶,与导航链区分) ---
     readonly property color crumb: Qt.hsla(Theme.surface.hslHue, 0.15, 0.17, 1.0)
     readonly property color crumbHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.22, 1.0)
-    readonly property color crumbCurrent: Qt.hsla(Theme.surface.hslHue, 0.15, 0.26, 1.0)
-    readonly property color crumbCurrentHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.31, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
     readonly property int bcTip: 14
 
@@ -495,21 +508,19 @@ Item {
         return w
     }
 
-    // --- 头部:服名 + 媒体库选择 ---
-    Column {
-        id: headerCol
+    // --- 头部:面包屑链[服名▸媒体库▸文件夹…](原为"服名+媒体库选择"两行
+    // 容器 Column,合并成单行链后 Column 冗余:spacing 无子项间距可用,
+    // padding 转 Row 的 anchors margins) ---
+    Row {
+        id: headerRow
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        spacing: 12
-        padding: 24
-        // 头部面包屑链(已连接时):[服名▸][媒体库▸][文件夹₁▸]…[当前文件夹▸]。
-        // 各段自绘 Shape、显式尺寸,Row 负间距咬合(后段左缺口吞前段尖角,
-        // 2px 重叠防接缝);媒体库段/当前文件夹段为透明交互层+暗色下拉。
-        Row {
-            visible: root.browseReady
-            height: 34
-            spacing: -root.bcTip + 2
+        anchors.leftMargin: 24
+        anchors.topMargin: 24
+        height: 34
+        spacing: -root.bcTip + 2
+        visible: root.browseReady
 
             // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
             Item {
@@ -518,7 +529,8 @@ Item {
                 height: 34
                 BreadcrumbShape {
                     anchors.fill: parent
-                    fillColor: Theme.surface
+                    // 服名段 = 链最暗端(品牌色染色表面最底层),与全链同色相。
+                    fillColor: root.crumbServer
                     borderColor: "transparent"
                 }
                 AppText {
@@ -546,7 +558,7 @@ Item {
                     anchors.fill: parent
                     leftNotch: true
                     // Shape 属性绑定自动重绘,hover 提亮无需手动触发。
-                    fillColor: viewSelector.hovered ? root.chipActiveHover : root.chipActive
+                    fillColor: viewSelector.hovered ? root.crumbViewHover : root.crumbView
                     borderColor: "transparent"
                 }
                 // 媒体库名:anchors.left+right 提供显式宽度(AlignHCenter 生效,
@@ -691,8 +703,8 @@ Item {
                         anchors.fill: parent
                         leftNotch: true
                         fillColor: crumbBtn.hovered
-                            ? (parent.isCurrent ? root.crumbCurrentHover : root.crumbHover)
-                            : (parent.isCurrent ? root.crumbCurrent : root.crumb)
+                            ? (parent.isCurrent ? root.crumbFolderCurrentHover : root.crumbFolderHover)
+                            : (parent.isCurrent ? root.crumbFolderCurrent : root.crumbFolder)
                         borderColor: "transparent"
                     }
                     AppText {
@@ -798,7 +810,6 @@ Item {
                     }
                 }
             }
-        }
     }
 
     // --- 分类栏(已连接时):子文件夹下钻 + 类型/年份/评分/状态筛选 ---
@@ -807,9 +818,10 @@ Item {
         visible: root.browseReady
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.top: headerCol.bottom
+        anchors.top: headerRow.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
+        anchors.topMargin: 8
         spacing: 8
 
         // 类型分类(Genres,横向滚动,单选;"全部类型"清选)。
@@ -969,7 +981,7 @@ Item {
         AppText {
             id: statusText
             anchors.left: parent.left
-            anchors.leftMargin: 10
+            anchors.leftMargin: 0
             anchors.verticalCenter: parent.verticalCenter
             // 错误态显式状态,不嗅探文案(原 indexOf("失败") 脆弱)。
             property bool isError: false
