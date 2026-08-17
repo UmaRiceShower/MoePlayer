@@ -112,6 +112,7 @@ ApplicationWindow {
         anchors.fill: parent
         visible: false
         serverUrl: root.currentServerUrl
+        backgroundSource: stackView
         onShowDetail: function (itemId, posterId, title, serverUrl) {
             searchOverlay.close()
             root.pushDetail(itemId, posterId, title, serverUrl)

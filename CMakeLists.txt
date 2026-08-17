@@ -61,6 +61,7 @@ qt_add_qml_module(MoePlayer
         qml/theme/AppText.qml
         qml/theme/CrossfadeImage.qml
         qml/theme/MoeBackground.qml
+        qml/theme/GlassPanel.qml
         qml/views/Home.qml
         qml/views/Library.qml
         qml/views/Detail.qml

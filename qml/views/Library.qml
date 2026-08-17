@@ -3,6 +3,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Shapes
+import QtQuick.Window
 import MoePlayer.Core
 
 //! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
@@ -202,7 +203,9 @@ Item {
         indicator: null
         popup: Popup {
             id: fcomboPopup
-            y: fcombo.height + 4
+            parent: Overlay.overlay
+            x: fcombo.mapToGlobal(0, 0).x - (fcombo.Window.window ? fcombo.Window.window.x : 0)
+            y: fcombo.mapToGlobal(0, 0).y + fcombo.height + 4 - (fcombo.Window.window ? fcombo.Window.window.y : 0)
             width: fcombo.width
             implicitHeight: contentItem.implicitHeight
             padding: 6
@@ -212,11 +215,13 @@ Item {
             exit: Transition {
                 NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
             }
-            background: Rectangle {
-                color: Theme.surface
+            background: GlassPanel {
+                blurRect: Qt.rect(parent.x, parent.y, parent.width, parent.height)
+                fullSource: false
+                blurRadius: 24
+                glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
                 radius: 8
-                border.color: root.moePink
-                border.width: 1
             }
             contentItem: ListView {
                 clip: true
@@ -371,9 +376,10 @@ Item {
         }
         Popup {
             id: fpanelPopup
-            parent: fpanel
-            popupType: Popup.Item
-            y: fpanel.height + 4
+            parent: Overlay.overlay
+            popupType: Popup.Window
+            x: fpanel.mapToGlobal(0, 0).x - (fpanel.Window.window ? fpanel.Window.window.x : 0)
+            y: fpanel.mapToGlobal(0, 0).y + fpanel.height + 4 - (fpanel.Window.window ? fpanel.Window.window.y : 0)
             // 打开前刷新 sections(current 最新)与宽度(最长文本 + 32,
             // 上限防超窗);JS 赋值不建绑定依赖,每次打开重算。
             onAboutToShow: {
@@ -389,11 +395,13 @@ Item {
             exit: Transition {
                 NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
             }
-            background: Rectangle {
-                color: Theme.surface
+            background: GlassPanel {
+                blurRect: Qt.rect(parent.x, parent.y, parent.width, parent.height)
+                fullSource: false
+                blurRadius: 28
+                glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
                 radius: 8
-                border.color: root.moePink
-                border.width: 1
             }
             // 面板固定四节:类型/评分/状态(选项单选)+ 年份(输入区间)。
             // 宽度引用 popup id(组件内 id 无时序问题;ListView.view attached
@@ -1017,9 +1025,10 @@ Item {
                     // Popup.Item 作为场景内 overlay item,宽度同帧生效无闪烁。
                     popup: Popup {
                         id: viewPopup
-                        parent: viewSelector
-                        popupType: Popup.Item
-                        y: viewSelector.height + 4
+                        parent: Overlay.overlay
+                        popupType: Popup.Window
+                        x: viewSelector.mapToGlobal(0, 0).x - (viewSelector.Window.window ? viewSelector.Window.window.x : 0)
+                        y: viewSelector.mapToGlobal(0, 0).y + viewSelector.height + 4 - (viewSelector.Window.window ? viewSelector.Window.window.y : 0)
                         // 自适应宽度:max(段宽, 最长库名文本宽 + 32),上限防超窗口。
                         // 不能在 opened 三元绑定里算——绑定求值晚于弹窗首帧渲染,
                         // 会先以段宽显示再变宽(先窄后宽)。onAboutToShow 在显示前
@@ -1038,11 +1047,13 @@ Item {
                         exit: Transition {
                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
                         }
-                        background: Rectangle {
-                            color: Theme.surface
+                        background: GlassPanel {
+                            blurRect: Qt.rect(parent.x, parent.y, parent.width, parent.height)
+                            fullSource: false
+                            blurRadius: 24
+                            glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
                             radius: 8
-                            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
-                            border.width: 1
                         }
                         contentItem: ListView {
                             clip: true

@@ -45,6 +45,9 @@ Item {
     // 点击结果进详情(携带所在服务器)。
     signal showDetail(string itemId, string posterId, string title, string serverUrl)
 
+    // 需要模糊的背景内容(主窗口传入 StackView,避免把浮层自身也模糊)。
+    property Item backgroundSource: null
+
     onServerUrlChanged: {
         if (root.serverUrl !== "")
             root.sm = EmbyClient.searchModelFor(root.serverUrl)
@@ -127,7 +130,7 @@ Item {
         if (root.canSearch) {
             const c = root.creds()
             EmbyClient.search(root.serverUrl, c.token, c.userId, "",
-                              "", "", "", "", "", 0, Constants.searchPageSize)
+                              "", "", "", 0, Constants.searchPageSize)
         }
         searchField.forceActiveFocus()
     }
@@ -150,9 +153,14 @@ Item {
         }
     }
 
-    Rectangle {
+    // 毛玻璃暗遮罩:模糊背景 + 半透明压暗,点击关闭。
+    GlassPanel {
         anchors.fill: parent
-        color: Qt.rgba(0, 0, 0, 0.55)
+        blurSource: root.backgroundSource
+        fullSource: true
+        blurRadius: 64
+        glassColor: Qt.rgba(0.04, 0.05, 0.07, 0.55)
+        border.width: 0
         MouseArea {
             anchors.fill: parent
             onClicked: root.close()
@@ -165,8 +173,20 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         width: parent.width*0.8
         height: parent.height - 96
-        radius: 12
-        color: Theme.surface
+        radius: 16
+        color: "transparent"
+        border.width: 0
+
+        // 毛玻璃面板底色。
+        GlassPanel {
+            anchors.fill: parent
+            blurSource: root.backgroundSource
+            fullSource: true
+            blurRadius: 48
+            glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.72)
+            borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.35)
+            radius: parent.radius
+        }
 
         // 吞掉面板内空白处的点击,防止穿透到遮罩 MouseArea 误关闭;
         // z:-1 置于所有内容之下,GridView/按钮/输入框交互不受影响。
