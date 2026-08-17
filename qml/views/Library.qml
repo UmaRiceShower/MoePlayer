@@ -89,6 +89,9 @@ Item {
         property bool active: false
 
         height: 30
+        // RowLayout 会用 implicitHeight 覆盖显式 height(Button 默认约 45px),
+        // 声明 preferredHeight 让 Layout 容器按 30 布局;ListView 场景用显式 height。
+        Layout.preferredHeight: 30
         padding: 14
         background: Rectangle {
             radius: 10
@@ -113,6 +116,8 @@ Item {
     component FilterCombo: ComboBox {
         id: fcombo
         height: 30
+        // 同 FilterChip:RowLayout 覆盖显式 height,声明 preferredHeight 保持 30。
+        Layout.preferredHeight: 30
         padding: 0
         background: Rectangle {
             radius: 6
@@ -785,7 +790,7 @@ Item {
         anchors.rightMargin: 24
         spacing: 8
 
-        // 行1:类型分类(Genres,横向滚动,单选;"全部类型"清选)。
+        // 类型分类(Genres,横向滚动,单选;"全部类型"清选)。
         RowLayout {
             width: parent.width
             spacing: 8
@@ -819,7 +824,7 @@ Item {
             }
         }
 
-        // 行3:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉(左)
+        // 筛选行:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉(左)
         // + 排序(右):SortBy 下拉 + 升降序切换按钮(仅两态,无需下拉)。
         RowLayout {
             width: parent.width
@@ -931,7 +936,9 @@ Item {
         visible: root.browseReady
         anchors.left: parent.left
         anchors.right: parent.right
+        // 与分类栏保持间距(视觉分组)。
         anchors.top: filterCol.bottom
+        anchors.topMargin: 12
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
