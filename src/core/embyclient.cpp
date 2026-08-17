@@ -424,7 +424,8 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
                             const QString &viewId, int startIndex, int limit,
                             const QString &sortBy, const QString &sortOrder,
                             const QString &genres, const QString &years,
-                            const QString &minRating, const QString &filters)
+                            const QString &minRating, const QString &filters,
+                            const QString &searchTerm)
 {
     const QString key = serverUrl.trimmed();
     QUrlQuery q;
@@ -449,6 +450,10 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
         q.addQueryItem(QStringLiteral("MinCommunityRating"), minRating);
     if (!filters.isEmpty())
         q.addQueryItem(QStringLiteral("Filters"), filters);
+    // 库内搜索:SearchTerm 与 ParentId/筛选正交(实测 4.9.5.0 带词时
+    // 忽略 SortBy/SortOrder,固定相关度排序)。
+    if (!searchTerm.isEmpty())
+        q.addQueryItem(QStringLiteral("SearchTerm"), searchTerm);
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize))); // Emby 单页上限 200
     const int seq = ++m_itemsSeq[key]; // 序号按服务器隔离,并行浏览不互相丢弃

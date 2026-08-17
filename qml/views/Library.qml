@@ -62,6 +62,9 @@ Item {
     property string currentMinRating: ""
     // 状态过滤(Filters):""|IsUnplayed|IsPlayed|IsFavorite。
     property string currentFilter: ""
+    // 库内搜索关键词(SearchTerm,空 = 不传)。与 ParentId/筛选/排序/分页
+    // 正交;带词时服务端固定相关度排序(SortBy 忽略),UI 置灰排序控件。
+    property string currentSearchTerm: ""
     // 子文件夹下钻路径(元素为文件夹 id;空数组 = 库根)。进文件夹 push,
     // 下钻路径(元素 {id, name},按层序;空=库根)。头部面包屑逐段显示,
     // 上级 pop、根清空;查询 ParentId = 末元素 id 或库视图 id。
@@ -320,7 +323,8 @@ Item {
                               startIndex, Constants.pageSize,
                               root.currentSortBy, root.currentSortOrder,
                               root.currentGenres, root.currentYear,
-                              root.currentMinRating, root.currentFilter)
+                              root.currentMinRating, root.currentFilter,
+                              root.currentSearchTerm)
     }
     // 重拉条目 + 分类(类型/年份/子文件夹):切库与下钻时调用。
     function reloadAll() {
@@ -510,16 +514,55 @@ Item {
 
     // --- 头部:面包屑链[服名▸媒体库▸文件夹…](原为"服名+媒体库选择"两行
     // 容器 Column,合并成单行链后 Column 冗余:spacing 无子项间距可用,
-    // padding 转 Row 的 anchors margins) ---
+    // padding 转 Row 的 anchors margins)。链右端截止到搜索框左侧(超长
+    // clip 裁掉,不盖搜索框);右上角为库内搜索框。 ---
+    // 库内搜索框:SearchTerm 与当前上下文(ParentId/筛选)正交,防抖
+    // 300ms 后重查第一页;清空(空串不传)恢复完整列表。排序在搜索
+    // 激活时置灰(服务端固定相关度,忽略 SortBy)。
+    TextField {
+        id: searchBox
+        anchors.right: parent.right
+        anchors.rightMargin: 24
+        anchors.top: parent.top
+        anchors.topMargin: 24
+        width: 280
+        height: 40
+        placeholderText: "搜索当前媒体库…"
+        placeholderTextColor: Theme.textMuted
+        color: "white"
+        font.pixelSize: 14
+        padding: 12
+        background: Rectangle {
+            radius: 8
+            color: root.crumb
+            border.color: searchBox.activeFocus ? Theme.accent : "transparent"
+            border.width: 1
+        }
+        onTextChanged: searchDebounce.restart()
+        // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
+        Timer {
+            id: searchDebounce
+            interval: Constants.searchDebounceMs
+            onTriggered: {
+                const t = searchBox.text.trim()
+                if (t === root.currentSearchTerm)
+                    return
+                root.currentSearchTerm = t
+                root.fetchPage(0)
+            }
+        }
+    }
     Row {
         id: headerRow
         anchors.left: parent.left
-        anchors.right: parent.right
+        anchors.right: searchBox.left
+        anchors.rightMargin: 12
         anchors.top: parent.top
         anchors.leftMargin: 24
         anchors.topMargin: 24
         height: 42
         spacing: -root.bcTip + 2
+        clip: true
         visible: root.browseReady
 
             // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
@@ -934,12 +977,16 @@ Item {
                 font.pixelSize: 13
             }
             // SortBy:服务端排序键下拉(与 fetchItems 默认一致,切换即重查)。
+            // 搜索激活(有词)时服务端固定相关度排序,置灰禁用避免"选了
+            // 不生效"的困惑。
             FilterCombo {
                 id: sortSelector
                 width: 130
                 model: sortOptions
                 textRole: "label"
                 currentIndex: 1
+                enabled: root.currentSearchTerm === ""
+                opacity: root.currentSearchTerm === "" ? 1 : 0.5
                 onActivated: function (index) {
                     root.changeSort(sortOptions.get(index).key)
                 }
@@ -948,6 +995,8 @@ Item {
             FilterChip {
                 label: root.currentSortOrder === "Ascending" ? "↑ 升序" : "↓ 降序"
                 active: true
+                enabled: root.currentSearchTerm === ""
+                opacity: root.currentSearchTerm === "" ? 1 : 0.5
                 onClicked: {
                     root.currentSortOrder = (root.currentSortOrder === "Ascending")
                             ? "Descending" : "Ascending"
