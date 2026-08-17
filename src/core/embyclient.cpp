@@ -429,8 +429,12 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
     const QString key = serverUrl.trimmed();
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
-    // 不限制类型、不递归:返回库的顶层条目(Movies→Movie,TV Shows→Series,
-    // Home Videos/Music Videos→Movie),分页与 TotalRecordCount 仍适用。
+    // 媒体库默认请求:递归平铺 + 仅电影/剧集。Recursive=true 把库/子文件夹
+    // 子树内全部 Movie/Series 纳入(与 Emby web 默认一致,实测动漫库 653→1034
+    // 条);IncludeItemTypes 排除 Folder 等非播放条目。下钻文件夹时同规则平铺
+    // 该子树,层级浏览仍由 fetchFolders 负责。
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Series"));
     // UserData 携带已看/进度/未看集数/收藏,评分/年份供卡片角标,零额外请求。
     q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
     q.addQueryItem(QStringLiteral("SortBy"), sortBy);
