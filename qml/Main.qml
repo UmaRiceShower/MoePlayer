@@ -91,9 +91,7 @@ ApplicationWindow {
         })
     }
 
-    background: Rectangle {
-        color: Theme.bg
-    }
+    background: MoeBackground {}
 
     Timer {
         id: quitTimer

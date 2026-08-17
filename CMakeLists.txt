@@ -60,6 +60,7 @@ qt_add_qml_module(MoePlayer
         qml/theme/Constants.qml
         qml/theme/AppText.qml
         qml/theme/CrossfadeImage.qml
+        qml/theme/MoeBackground.qml
         qml/views/Home.qml
         qml/views/Library.qml
         qml/views/Detail.qml
@@ -78,7 +79,8 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     # uniform block,与 ShaderEffect 绑定模型不兼容(本应用 RHI 后端为
     # OpenGL)。
     GLSL "100es,120,150"
-    FILES shaders/crossfade.frag
+    FILES shaders/aurora.frag
+          shaders/crossfade.frag
           shaders/episode-fade.frag
           shaders/hero-fade.frag
 )

@@ -95,18 +95,20 @@ Item {
     readonly property color chipActive: moePink
     readonly property color chipActiveHover: moePinkLight
 
-    // --- 头部面包屑链配色(粉系 branded surface) ---
-    readonly property color crumbServer: Qt.hsla(340, 0.35, 0.13, 1.0)
-    readonly property color crumbView: Qt.hsla(340, 0.35, 0.16, 1.0)
-    readonly property color crumbViewHover: Qt.hsla(340, 0.35, 0.20, 1.0)
-    readonly property color crumbFolder: Qt.hsla(340, 0.35, 0.18, 1.0)
-    readonly property color crumbFolderHover: Qt.hsla(340, 0.35, 0.22, 1.0)
-    readonly property color crumbFolderCurrent: Qt.hsla(340, 0.35, 0.22, 1.0)
-    readonly property color crumbFolderCurrentHover: Qt.hsla(340, 0.35, 0.26, 1.0)
+    // --- 头部面包屑链配色:深冷灰底 + 粉色高亮,避免棕红感 ---
+    readonly property color crumbServer: Qt.rgba(0.06, 0.07, 0.10, 1.0)
+    readonly property color crumbView: Qt.rgba(0.08, 0.09, 0.12, 1.0)
+    readonly property color crumbViewHover: Qt.rgba(0.20, 0.10, 0.16, 1.0)
+    readonly property color crumbFolder: Qt.rgba(0.09, 0.10, 0.13, 1.0)
+    readonly property color crumbFolderHover: Qt.rgba(0.22, 0.12, 0.18, 1.0)
+    readonly property color crumbFolderCurrent: Constants.moePinkDark
+    readonly property color crumbFolderCurrentHover: Constants.moePink
+    readonly property color crumbBorder: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.30)
+    readonly property color crumbBorderCurrent: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.65)
 
-    // --- 筛选下拉底色(粉灰阶,与导航链区分) ---
-    readonly property color crumb: Qt.hsla(340, 0.15, 0.17, 1.0)
-    readonly property color crumbHover: Qt.hsla(340, 0.15, 0.25, 1.0)
+    // --- 筛选下拉底色(与面包屑链同风格) ---
+    readonly property color crumb: Qt.rgba(0.10, 0.11, 0.14, 1.0)
+    readonly property color crumbHover: Qt.rgba(0.20, 0.12, 0.17, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
     readonly property int bcTip: 16
 
@@ -901,9 +903,9 @@ Item {
                 height: 42
                 BreadcrumbShape {
                     anchors.fill: parent
-                    // 服名段 = 链最暗端(品牌色染色表面最底层),与全链同色相。
+                    // 服名段 = 链最暗端,深冷灰底 + 粉描边,避免棕红。
                     fillColor: root.crumbServer
-                    borderColor: "transparent"
+                    borderColor: root.crumbBorder
                 }
                 AppText {
                     id: serverTabLabel
@@ -931,7 +933,7 @@ Item {
                     leftNotch: true
                     // Shape 属性绑定自动重绘,hover 提亮无需手动触发。
                     fillColor: viewSelector.hovered ? root.crumbViewHover : root.crumbView
-                    borderColor: "transparent"
+                    borderColor: root.crumbBorder
                 }
                 // 媒体库名:anchors.left+right 提供显式宽度(AlignHCenter 生效,
                 // elide 生效);垂直用 anchors.verticalCenter 而非 fill——
@@ -996,7 +998,7 @@ Item {
                                 width: 6
                                 height: 6
                                 radius: 3
-                                color: Theme.accent
+                                color: root.moePink
                                 visible: viewSelector.currentIndex === parent.parent.index
                             }
                         }
@@ -1085,7 +1087,7 @@ Item {
                         fillColor: crumbBtn.hovered
                             ? (parent.isCurrent ? root.crumbFolderCurrentHover : root.crumbFolderHover)
                             : (parent.isCurrent ? root.crumbFolderCurrent : root.crumbFolder)
-                        borderColor: "transparent"
+                        borderColor: parent.isCurrent ? root.crumbBorderCurrent : root.crumbBorder
                     }
                     AppText {
                         id: crumbText
