@@ -102,7 +102,7 @@ Item {
     readonly property color crumb: Qt.hsla(Theme.surface.hslHue, 0.15, 0.17, 1.0)
     readonly property color crumbHover: Qt.hsla(Theme.surface.hslHue, 0.15, 0.22, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
-    readonly property int bcTip: 14
+    readonly property int bcTip: 16
 
     // ============================= 信号 =============================
 
@@ -483,7 +483,7 @@ Item {
     // 需按模型最长项文本宽计算)。
     FontMetrics {
         id: fmMetrics
-        font.pixelSize: 13
+        font.pixelSize: 16
     }
     // 子文件夹模型最长名文本宽(popup 宽度下限,防长名被截断)。
     function maxFolderTextWidth() {
@@ -518,15 +518,15 @@ Item {
         anchors.top: parent.top
         anchors.leftMargin: 24
         anchors.topMargin: 24
-        height: 34
+        height: 42
         spacing: -root.bcTip + 2
         visible: root.browseReady
 
             // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
             Item {
                 id: serverTab
-                width: serverTabLabel.implicitWidth + 16 + root.bcTip
-                height: 34
+                width: serverTabLabel.implicitWidth + 18 + root.bcTip
+                height: 42
                 BreadcrumbShape {
                     anchors.fill: parent
                     // 服名段 = 链最暗端(品牌色染色表面最底层),与全链同色相。
@@ -536,22 +536,22 @@ Item {
                 AppText {
                     id: serverTabLabel
                     anchors.left: parent.left
-                    anchors.leftMargin: 14
+                    anchors.leftMargin: 17
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.serverLabel()
                     color: "white"
-                    font.pixelSize: 13
+                    font.pixelSize: 16
                     elide: Text.ElideMiddle
                 }
             }
 
             // 媒体库:左缺口右尖,点击弹下拉切库(选中态 accent 高亮)。
-            // 宽度自适应:文字完整宽 + 左 16 + 间隔 6 + ▾ 宽 10 + ▾ 右距(尖角 14 + 4),
-            // 最小 150 防初始空名/短名过窄;文字锚定到 ▾ 左侧,极端长名 elide 兜底。
+            // 宽度自适应:文字完整宽 + 左 18 + 间隔 8 + ▾ 宽 12 + ▾ 右距(尖角 16 + 4),
+            // 最小 160 防初始空名/短名过窄;文字锚定到 ▾ 左侧,极端长名 elide 兜底。
             Item {
                 id: viewTab
-                width: Math.max(150, viewTabText.implicitWidth + 50)
-                height: 34
+                width: Math.max(160, viewTabText.implicitWidth + 58)
+                height: 42
 
                 BreadcrumbShape {
                     id: viewTabShape
@@ -567,13 +567,13 @@ Item {
                 AppText {
                     id: viewTabText
                     anchors.left: parent.left
-                    anchors.leftMargin: 16
+                    anchors.leftMargin: 18
                     anchors.right: viewTabArrow.left
-                    anchors.rightMargin: 6
+                    anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.currentViewName
                     color: "white"
-                    font.pixelSize: 13
+                    font.pixelSize: 16
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                 }
@@ -584,7 +584,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: viewSelector.popup.opened ? "▴" : "▾"
                     color: "white"
-                    font.pixelSize: 10
+                    font.pixelSize: 12
                 }
                 // 透明交互层:整块可点击弹出下拉,hover 驱动形状提亮。
                 ComboBox {
@@ -596,7 +596,7 @@ Item {
                     indicator: null
                     model: root.vm
                     textRole: "name"
-                    // 弹出列表项:与面包屑两段同文字风格(白字 13px),
+                    // 弹出列表项:与面包屑两段同风格(白字 15px,略小于链身 16px),
                     // 悬停半透明 accent 高亮,当前选中项右侧 accent 圆点。
                     delegate: ItemDelegate {
                         // Qt6 delegate 上下文(Bound 模式):index 与 model 均须
@@ -605,7 +605,7 @@ Item {
                         required property var model
                         property string itemText: model[viewSelector.textRole]
                         width: ListView.view.width
-                        height: 32
+                        height: 36
                         padding: 0
                         contentItem: Item {
                             AppText {
@@ -614,7 +614,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: parent.parent.itemText
                                 color: "white"
-                                font.pixelSize: 13
+                                font.pixelSize: 15
                                 elide: Text.ElideRight
                             }
                             Rectangle {
@@ -638,16 +638,24 @@ Item {
                     }
                     // 弹出层:暗色 surface 底 + 描边,与服名框同底色同描边语言,
                     // 替换 QQC2 默认浅色弹出列表。
+                    // Item 模式(非独立窗口):Qt6.8+ 默认 Popup.Window(顶级窗口),
+                    // 打开时 width 绑定跳变经窗口系统异步 resize,先显旧宽再调宽;
+                    // Popup.Item 作为场景内 overlay item,宽度同帧生效无闪烁。
                     popup: Popup {
                         id: viewPopup
+                        parent: viewSelector
+                        popupType: Popup.Item
                         y: viewSelector.height + 4
                         // 自适应宽度:max(段宽, 最长库名文本宽 + 32),上限防超窗口。
-                        // opened 依赖:JS 函数体内访问的模型内容不建立绑定依赖,
-                        // 每次打开时按当前层最长名重算(下钻后 fm 已更新)。
-                        width: opened
-                               ? Math.min(root.width - 48,
-                                          Math.max(viewSelector.width, root.maxViewTextWidth() + 32))
-                               : viewSelector.width
+                        // 不能在 opened 三元绑定里算——绑定求值晚于弹窗首帧渲染,
+                        // 会先以段宽显示再变宽(先窄后宽)。onAboutToShow 在显示前
+                        // 同步发射,此处赋值使首帧即带正确宽度;每次打开重算
+                        // (JS 函数访问模型不建绑定依赖,下钻后 fm 已更新)。
+                        width: viewSelector.width
+                        onAboutToShow: {
+                            width = Math.min(root.width - 48,
+                                             Math.max(viewSelector.width, root.maxViewTextWidth() + 32))
+                        }
                         implicitHeight: contentItem.implicitHeight
                         padding: 6
                         enter: Transition {
@@ -695,9 +703,9 @@ Item {
                     // model 下标比 folderPath 下标多 1(链首为库根段)。
                     property bool isCurrent: index === root.folderPath.length
                     width: isCurrent
-                           ? Math.max(120, crumbText.implicitWidth + 50)
-                           : crumbText.implicitWidth + 16 + root.bcTip + 8
-                    height: 34
+                           ? Math.max(140, crumbText.implicitWidth + 58)
+                           : crumbText.implicitWidth + 18 + root.bcTip + 8
+                    height: 42
 
                     BreadcrumbShape {
                         anchors.fill: parent
@@ -710,13 +718,13 @@ Item {
                     AppText {
                         id: crumbText
                         anchors.left: parent.left
-                        anchors.leftMargin: 16
+                        anchors.leftMargin: 18
                         anchors.right: parent.isCurrent ? crumbArrow.left : parent.right
-                        anchors.rightMargin: parent.isCurrent ? 6 : 12
+                        anchors.rightMargin: parent.isCurrent ? 8 : 14
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.name
                         color: "white"
-                        font.pixelSize: 13
+                        font.pixelSize: 16
                         horizontalAlignment: Text.AlignHCenter
                         elide: Text.ElideMiddle
                     }
@@ -728,7 +736,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: crumbPopup.opened ? "▴" : "▾"
                         color: "white"
-                        font.pixelSize: 10
+                        font.pixelSize: 12
                     }
                     // 透明交互层:上级段点击跳回(库根段=回根),当前段点击弹子文件夹下拉。
                     MouseArea {
@@ -749,15 +757,25 @@ Item {
                         }
                     }
                     // 当前段弹出:该层子文件夹列表(与媒体库下拉同样式)。
+                    // 同 viewPopup:Popup.Item 模式避免独立窗口异步 resize 闪烁。
                     Popup {
                         id: crumbPopup
+                        parent: crumbBtn
+                        popupType: Popup.Item
                         y: parent.height + 4
+                        // closePolicy 用 PressOutsideParent:点击本段(crumbBtn,
+                        // popup 的 parent)不触发 overlay 关闭,事件到达 MouseArea
+                        // onClicked 正常 toggle;若用默认 CloseOnPressOutside,
+                        // overlay 先关 popup、事件再传播到 onClicked 又会 open()——
+                        // 每次点击 close+open 死循环(箭头翻两次、popup 关不掉)。
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
                         // 自适应宽度:max(段宽, 最长子文件夹名文本宽 + 32),上限防超窗口。
-                        // opened 依赖:每次打开时按当前层重算(见 viewPopup 注释)。
-                        width: opened
-                               ? Math.min(root.width - 48,
-                                          Math.max(parent.width, root.maxFolderTextWidth() + 32))
-                               : parent.width
+                        // 同 viewPopup:onAboutToShow 显示前赋值,避免首帧先窄后宽。
+                        width: parent.width
+                        onAboutToShow: {
+                            width = Math.min(root.width - 48,
+                                             Math.max(parent.width, root.maxFolderTextWidth() + 32))
+                        }
                         implicitHeight: contentItem.implicitHeight
                         padding: 6
                         enter: Transition {
@@ -781,7 +799,7 @@ Item {
                                 required property var model
                                 property string itemText: model.name
                                 width: ListView.view.width
-                                height: 32
+                                height: 36
                                 padding: 0
                                 contentItem: Item {
                                     AppText {
@@ -790,7 +808,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: parent.parent.itemText
                                         color: "white"
-                                        font.pixelSize: 13
+                                        font.pixelSize: 15
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -821,48 +839,32 @@ Item {
         anchors.top: headerRow.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
-        anchors.topMargin: 8
+        anchors.topMargin: 20
         spacing: 8
 
-        // 类型分类(Genres,横向滚动,单选;"全部类型"清选)。
-        RowLayout {
-            width: parent.width
-            spacing: 8
-            FilterChip {
-                label: "全部类型"
-                active: root.currentGenres === ""
-                onClicked: {
-                    if (root.currentGenres !== "") {
-                        root.currentGenres = ""
-                        root.refetch()
-                    }
-                }
-            }
-            ListView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 30
-                orientation: ListView.Horizontal
-                spacing: 8
-                clip: true
-                model: root.gm
-                delegate: FilterChip {
-                    required property string name
-                    required property string id
-                    label: name
-                    active: root.currentGenres === name
-                    onClicked: {
-                        root.currentGenres = (root.currentGenres === name ? "" : name)
-                        root.refetch()
-                    }
-                }
-            }
-        }
-
-        // 筛选行:年份(服务端 Years 枚举)/评分下限/状态过滤 下拉(左)
+        // 筛选行:类型(Genres 枚举)/年份/评分下限/状态过滤 下拉(左)
         // + 排序(右):SortBy 下拉 + 升降序切换按钮(仅两态,无需下拉)。
         RowLayout {
             width: parent.width
             spacing: 12
+            AppText {
+                text: "类型"
+                color: "white"
+                font.pixelSize: 13
+            }
+            FilterCombo {
+                id: genreSelector
+                width: 130
+                model: ListModel {
+                    id: genreFilterModel
+                    ListElement { label: "全部类型"; value: "" }
+                }
+                textRole: "label"
+                onActivated: function (index) {
+                    root.currentGenres = genreFilterModel.get(index).value
+                    root.refetch()
+                }
+            }
             AppText {
                 text: "年份"
                 color: "white"
@@ -1128,11 +1130,28 @@ Item {
         function onGenresReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
-            // 类型 chips 自动随模型刷新;当前选中的类型不在新库/新文件夹
-            // 分类中时清选(如切换媒体库)。
+            // 同步类型下拉模型(FilterCombo 用 ListModel;"全部类型"为首项)。
+            genreFilterModel.clear()
+            genreFilterModel.append({ label: "全部类型", value: "" })
+            for (let i = 0; root.gm && i < root.gm.count; ++i)
+                genreFilterModel.append({ label: root.gm.nameAt(i), value: root.gm.nameAt(i) })
+            // 当前选中的类型不在新库/新文件夹分类中时清选(如切换媒体库)。
             if (root.currentGenres !== "" && root.gm
                     && root.gm.count > 0 && !root.gmContains(root.currentGenres)) {
                 root.currentGenres = ""
+            }
+            // 模型 clear+append 会重置 currentIndex(-1)导致 displayText 为空,
+            // 显式恢复:未选类型回"全部类型",已选则定位回该类型;找不到回 0
+            // (gm 未就绪/拉取失败时避免显示空白)。
+            if (root.currentGenres === "") {
+                genreSelector.currentIndex = 0
+            } else {
+                genreSelector.currentIndex = 0
+                for (let i = 1; i < genreFilterModel.count; ++i)
+                    if (genreFilterModel.get(i).value === root.currentGenres) {
+                        genreSelector.currentIndex = i
+                        break
+                    }
             }
         }
         function onYearsReceived(serverUrl, names) {
