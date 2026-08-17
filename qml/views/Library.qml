@@ -56,8 +56,9 @@ Item {
     // --- 库内筛选状态(直接映射 API 查询参数,空 = 不传) ---
     // 类型单选(Genres 多值实测为 AND 语义,单选安全):Genre 名称。
     property string currentGenres: ""
-    // 年份单选(Years 单值):年份字符串;空 = 全部年份。
-    property string currentYear: ""
+    // 年份区间(Years 多值 OR 语义 = 区间):"1999,2000,2001,2002" 逗号
+    // 列表;由输入框 "起始-终止" 解析生成;空 = 全部年份。
+    property string currentYears: ""
     // 评分下限(MinCommunityRating):"6".."9";空 = 不限。
     property string currentMinRating: ""
     // 状态过滤(Filters):""|IsUnplayed|IsPlayed|IsFavorite。
@@ -247,6 +248,278 @@ Item {
         }
     }
 
+    // 筛选面板选项行(单选):文本 + 右侧选中圆点。isOn 由调用方绑定
+    // root 的 QML 属性(可追踪,点击后即时刷新);onClicked 调用方直接写。
+    component FilterOption: ItemDelegate {
+        id: fopt
+        required property string itemLabel
+        required property string itemValue
+        property bool isOn: false
+        property int optionWidth: 200
+        width: optionWidth
+        height: 30
+        padding: 0
+        contentItem: Item {
+            AppText {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.right: mark.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: fopt.itemLabel
+                color: "white"
+                font.pixelSize: 13
+                elide: Text.ElideRight
+            }
+            Rectangle {
+                id: mark
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                width: 6
+                height: 6
+                radius: 3
+                color: fopt.isOn ? Theme.accent : "transparent"
+                border.width: 1
+                border.color: fopt.isOn
+                        ? Theme.accent
+                        : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g,
+                                  Theme.textMuted.b, 0.6)
+            }
+        }
+        background: Rectangle {
+            radius: 4
+            color: fopt.hovered
+                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                : "transparent"
+        }
+    }
+
+    // 聚合筛选入口:类型/评分/状态/年份做进一个控件,面板内分面小节
+    // 分组,激活计数显示在按钮上。面板固定四节直接渲染——全部引用
+    // root 的 QML 对象(ListModel/属性/函数),不用 JS 数组作 model:
+    // 数组元素经模型系统包装后函数属性丢失(实测 inputText 非函数)。
+    // 选项节单选,点击即应用并保持面板打开(便于连续调整多节);年份
+    // = 输入区间节(枚举年份传服务端)。激活时 accent 描边 + "筛选 · N",
+    // 底部"清除筛选"一键归零;Esc/点外部关闭。
+    // 外壳用 Item + MouseArea + Popup:Button 无普通 popup 属性(attached
+    // Button.popup 语义不同),ComboBox 语义不合(强制 currentIndex/
+    // delegateModel)。
+    component FilterPanel: Item {
+        id: fpanel
+        height: 30
+        // 宽度由标签文本驱动(文本 + 左右内边距 + ▾ 箭头 + 间距),最小
+        // 78 保证可点击区域。
+        width: Math.max(78, fpanelLabel.implicitWidth + 36)
+        property int activeCount: 0
+        property string labelText: activeCount > 0 ? "筛选 · " + activeCount : "筛选"
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            color: fpanelHover.containsMouse ? root.crumbHover : root.crumb
+            border.color: fpanel.activeCount > 0 ? Theme.accent : "transparent"
+            border.width: 1
+        }
+        AppText {
+            id: fpanelLabel
+            anchors.left: parent.left
+            anchors.leftMargin: 10
+            anchors.right: fpanelArrow.left
+            anchors.rightMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            text: fpanel.labelText
+            color: "white"
+            font.pixelSize: 13
+            elide: Text.ElideRight
+        }
+        AppText {
+            id: fpanelArrow
+            anchors.right: parent.right
+            anchors.rightMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            text: fpanelPopup.opened ? "▴" : "▾"
+            color: "white"
+            font.pixelSize: 10
+        }
+        MouseArea {
+            id: fpanelHover
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: {
+                if (fpanelPopup.opened)
+                    fpanelPopup.close()
+                else
+                    fpanelPopup.open()
+            }
+        }
+        Popup {
+            id: fpanelPopup
+            parent: fpanel
+            popupType: Popup.Item
+            y: fpanel.height + 4
+            // 打开前刷新 sections(current 最新)与宽度(最长文本 + 32,
+            // 上限防超窗);JS 赋值不建绑定依赖,每次打开重算。
+            onAboutToShow: {
+                width = Math.min(root.width - 48,
+                                 Math.max(fpanel.width, root.maxFilterTextWidth() + 32))
+            }
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+            implicitHeight: contentItem.implicitHeight
+            padding: 6
+            enter: Transition {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+            }
+            background: Rectangle {
+                color: Theme.surface
+                radius: 8
+                border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                border.width: 1
+            }
+            // 面板固定四节:类型/评分/状态(选项单选)+ 年份(输入区间)。
+            // 宽度引用 popup id(组件内 id 无时序问题;ListView.view attached
+            // 只注入 ListView 直接 delegate,parent 构造期可能 null)。
+            contentItem: Flickable {
+                id: fpanelFlick
+                clip: true
+                contentHeight: fpanelCol.implicitHeight
+                // 面板整体滚动(类型分面可上百项),上限半窗高。
+                implicitHeight: Math.min(contentHeight, Math.max(240, root.height * 0.5))
+                Column {
+                    id: fpanelCol
+                    width: fpanelPopup.width - 12
+                    // --- 类型(单选,分面动态) ---
+                    AppText {
+                        text: "类型"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                        topPadding: 8
+                        bottomPadding: 2
+                        leftPadding: 10
+                    }
+                    Repeater {
+                        model: genreFilterModel
+                        delegate: FilterOption {
+                            required property int index
+                            required property var model
+                            itemLabel: model.label
+                            itemValue: model.value
+                            optionWidth: fpanelPopup.width - 12
+                            isOn: root.currentGenres === itemValue
+                            onClicked: {
+                                root.currentGenres = itemValue
+                                root.refetch()
+                            }
+                        }
+                    }
+                    // --- 评分(单选,固定档位,大的在前) ---
+                    AppText {
+                        text: "评分"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                        topPadding: 8
+                        bottomPadding: 2
+                        leftPadding: 10
+                    }
+                    Repeater {
+                        model: ratingFilterModel
+                        delegate: FilterOption {
+                            required property int index
+                            required property var model
+                            itemLabel: model.label
+                            itemValue: model.value
+                            optionWidth: fpanelPopup.width - 12
+                            isOn: root.currentMinRating === itemValue
+                            onClicked: {
+                                root.currentMinRating = itemValue
+                                root.refetch()
+                            }
+                        }
+                    }
+                    // --- 状态(单选,固定档位) ---
+                    AppText {
+                        text: "状态"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                        topPadding: 8
+                        bottomPadding: 2
+                        leftPadding: 10
+                    }
+                    Repeater {
+                        model: statusFilterModel
+                        delegate: FilterOption {
+                            required property int index
+                            required property var model
+                            itemLabel: model.label
+                            itemValue: model.value
+                            optionWidth: fpanelPopup.width - 12
+                            isOn: root.currentFilter === itemValue
+                            onClicked: {
+                                root.currentFilter = itemValue
+                                root.refetch()
+                            }
+                        }
+                    }
+                    // --- 年份(输入区间,放最后):"起始-终止",回车/失焦提交,
+                    // 客户端枚举区间年份为逗号列表(Years 多值 OR 语义) ---
+                    AppText {
+                        text: "年份"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
+                        topPadding: 8
+                        bottomPadding: 2
+                        leftPadding: 10
+                    }
+                    TextField {
+                        x: 6
+                        width: fpanelPopup.width - 24
+                        height: 30
+                        text: root.yearInputText()
+                        placeholderText: "如 1999-2002"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 13
+                        padding: 8
+                        background: Rectangle {
+                            radius: 6
+                            color: root.crumb
+                            border.color: parent.activeFocus ? Theme.accent : "transparent"
+                            border.width: 1
+                        }
+                        onEditingFinished: root.applyYearRange(text)
+                    }
+                    // --- 底部:一键清除全部筛选(仅激活时显示) ---
+                    ItemDelegate {
+                        visible: fpanel.activeCount > 0
+                        width: fpanelPopup.width - 12
+                        height: 30
+                        padding: 0
+                        contentItem: AppText {
+                            text: "清除筛选"
+                            color: Theme.accent
+                            font.pixelSize: 13
+                            leftPadding: 10
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        background: Rectangle {
+                            radius: 4
+                            color: parent.hovered
+                                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                                : "transparent"
+                        }
+                        onClicked: {
+                            root.resetFilters()
+                            root.refetch()
+                            fpanelPopup.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // 排序档位:label 展示,key 为 Emby SortBy 值(服务端排序,切了即重查)。
     // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
     ListModel {
@@ -322,7 +595,7 @@ Item {
         EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentParentId(),
                               startIndex, Constants.pageSize,
                               root.currentSortBy, root.currentSortOrder,
-                              root.currentGenres, root.currentYear,
+                              root.currentGenres, root.currentYears,
                               root.currentMinRating, root.currentFilter,
                               root.currentSearchTerm)
     }
@@ -342,17 +615,14 @@ Item {
     }
 
     // --- 筛选与下钻 ---
-    // 重置全部筛选(切库/进文件夹时),下拉同步回"全部"档。
+    // 重置全部筛选(切库/进文件夹时),筛选面板计数自动归零。
     // 注意:不清 folderPath——下钻路径由 enterFolder/goToLevel 各自
     // 维护,仅切库(applyView/onActivated)显式清空。
     function resetFilters() {
         root.currentGenres = ""
-        root.currentYear = ""
+        root.currentYears = ""
         root.currentMinRating = ""
         root.currentFilter = ""
-        yearSelector.currentIndex = 0
-        ratingSelector.currentIndex = 0
-        filterSelector.currentIndex = 0
     }
     // 进入子文件夹:下钻一层,重置筛选并按新 ParentId 重拉四件套。
     function enterFolder(id, name) {
@@ -512,58 +782,102 @@ Item {
         return w
     }
 
-    // --- 头部:面包屑链[服名▸媒体库▸文件夹…](原为"服名+媒体库选择"两行
-    // 容器 Column,合并成单行链后 Column 冗余:spacing 无子项间距可用,
-    // padding 转 Row 的 anchors margins)。链右端截止到搜索框左侧(超长
-    // clip 裁掉,不盖搜索框);右上角为库内搜索框。 ---
-    // 库内搜索框:SearchTerm 与当前上下文(ParentId/筛选)正交,防抖
-    // 300ms 后重查第一页;清空(空串不传)恢复完整列表。排序在搜索
-    // 激活时置灰(服务端固定相关度,忽略 SortBy)。
-    TextField {
-        id: searchBox
-        anchors.right: parent.right
-        anchors.rightMargin: 24
-        anchors.top: parent.top
-        anchors.topMargin: 24
-        width: 280
-        height: 40
-        placeholderText: "搜索当前媒体库…"
-        placeholderTextColor: Theme.textMuted
-        color: "white"
-        font.pixelSize: 14
-        padding: 12
-        background: Rectangle {
-            radius: 8
-            color: root.crumb
-            border.color: searchBox.activeFocus ? Theme.accent : "transparent"
-            border.width: 1
+    // --- 聚合筛选面板(FilterPanel)数据 ---
+    // 已激活筛选维度数(按钮计数徽标:"筛选 · N")。
+    property int filterCount: (root.currentGenres !== "" ? 1 : 0)
+                              + (root.currentYears !== "" ? 1 : 0)
+                              + (root.currentMinRating !== "" ? 1 : 0)
+                              + (root.currentFilter !== "" ? 1 : 0)
+    // 评分下限档(MinCommunityRating 服务端参数值,固定档位;
+    // 大的在前,常用高门槛优先)。
+    ListModel {
+        id: ratingFilterModel
+        ListElement { label: "不限"; value: "" }
+        ListElement { label: "≥ 9"; value: "9" }
+        ListElement { label: "≥ 8"; value: "8" }
+        ListElement { label: "≥ 7"; value: "7" }
+        ListElement { label: "≥ 6"; value: "6" }
+    }
+    // 观看状态过滤(Filters 服务端参数值)。
+    ListModel {
+        id: statusFilterModel
+        ListElement { label: "全部"; value: "" }
+        ListElement { label: "未看"; value: "IsUnplayed" }
+        ListElement { label: "已看"; value: "IsPlayed" }
+        ListElement { label: "收藏"; value: "IsFavorite" }
+    }
+    // 类型分面模型(动态,onGenresReceived 填充;"全部类型"首项)。
+    ListModel {
+        id: genreFilterModel
+        ListElement { label: "全部类型"; value: "" }
+    }
+    // 面板四节固定渲染(见 FilterPanel contentItem):类型/评分/状态
+    // 选项单选,年份输入区间。选中态绑定 root 的 QML 属性,天然可追踪。
+    // 年份区间展示:currentYears(逗号列表) ↔ "起始-终止" 输入串。
+    function yearInputText() {
+        if (root.currentYears === "")
+            return ""
+        const ys = root.currentYears.split(",").map((s) => parseInt(s, 10))
+        return Math.min(...ys) + "-" + Math.max(...ys)
+    }
+    // 解析 "1999-2002" → currentYears = "1999,2000,2001,2002"(枚举区间
+    // 内所有年份,逗号拼接;Years 多值 OR 语义 = 区间,与预期一致)。
+    // 空串 = 清空(恢复全部年份);非法输入(非年份/起>止/越界)忽略。
+    function applyYearRange(text) {
+        if (/^\s*$/.test(text)) {
+            root.currentYears = ""
+            root.refetch()
+            return
         }
-        onTextChanged: searchDebounce.restart()
-        // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
-        Timer {
-            id: searchDebounce
-            interval: Constants.searchDebounceMs
-            onTriggered: {
-                const t = searchBox.text.trim()
-                if (t === root.currentSearchTerm)
-                    return
-                root.currentSearchTerm = t
-                root.fetchPage(0)
+        const m = /^\s*(\d{4})\s*[-–—]+\s*(\d{4})\s*$/.exec(text)
+        if (!m)
+            return
+        const a = parseInt(m[1], 10)
+        const b = parseInt(m[2], 10)
+        if (a < 1900 || b > 2100 || a > b)
+            return
+        const list = []
+        for (let y = a; y <= b; ++y)
+            list.push(String(y))
+        root.currentYears = list.join(",")
+        root.refetch()
+    }
+    // 面板内最长文本宽(popup 宽度下限;垂直 Flickable 不计算 contentWidth)。
+    function maxFilterTextWidth() {
+        let w = 0
+        for (const m of [genreFilterModel, ratingFilterModel, statusFilterModel]) {
+            for (let i = 0; m && i < m.count; ++i) {
+                const l = m.get(i).label
+                if (l)
+                    w = Math.max(w, fmMetrics.advanceWidth(l))
             }
         }
+        return w
     }
-    Row {
+
+    // --- 头部单行:面包屑链(左)+ 搜索栏(中)+ 筛选控件(右) ---
+    // 搜索栏 x 经 clamp 居中:宽窗严格居中;窄窗被两侧内容夹住(右侧
+    // 筛选组优先,链随窗截断)。链宽 = 搜索栏左缘,超长 clip 截断。
+    Item {
         id: headerRow
         anchors.left: parent.left
-        anchors.right: searchBox.left
-        anchors.rightMargin: 12
+        anchors.right: parent.right
         anchors.top: parent.top
         anchors.leftMargin: 24
+        anchors.rightMargin: 24
         anchors.topMargin: 24
         height: 42
-        spacing: -root.bcTip + 2
-        clip: true
         visible: root.browseReady
+
+        // 面包屑链:服名▸媒体库▸文件夹…,负间距咬合不变(段间尖角重叠)。
+        Row {
+            id: crumbChain
+            anchors.left: parent.left
+            anchors.right: searchBox.left
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: -root.bcTip + 2
+            clip: true
 
             // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
             Item {
@@ -871,117 +1185,68 @@ Item {
                     }
                 }
             }
-    }
+        }
 
-    // --- 分类栏(已连接时):子文件夹下钻 + 类型/年份/评分/状态筛选 ---
-    Column {
-        id: filterCol
-        visible: root.browseReady
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: headerRow.bottom
-        anchors.leftMargin: 24
-        anchors.rightMargin: 24
-        anchors.topMargin: 20
-        spacing: 8
+        // 库内搜索栏(中):SearchTerm 与当前上下文(ParentId/筛选)正交,
+        // 防抖 300ms 后重查第一页;清空(空串不传)恢复完整列表。排序在
+        // 搜索激活时置灰(服务端固定相关度,忽略 SortBy)。x 经 clamp
+        // 尽量居中:宽窗严格居中,窄窗被链与筛选组夹住(筛选组优先)。
+        TextField {
+            id: searchBox
+            y: (parent.height - height) / 2
+            x: {
+                const cx = (parent.width - width) / 2
+                const lo = 160 + 12          // 左限:链最小可视区 + 间距
+                const hi = parent.width - 12 - filterRow.width - width
+                return Math.max(lo, Math.min(cx, hi))
+            }
+            width: root.width > 1400 ? 300 : (root.width > 1150 ? 260 : 220)
+            height: 40
+            placeholderText: "搜索当前媒体库…"
+            placeholderTextColor: Theme.textMuted
+            color: "white"
+            font.pixelSize: 14
+            padding: 12
+            background: Rectangle {
+                radius: 8
+                color: root.crumb
+                border.color: searchBox.activeFocus ? Theme.accent : "transparent"
+                border.width: 1
+            }
+            onTextChanged: searchDebounce.restart()
+            // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
+            Timer {
+                id: searchDebounce
+                interval: Constants.searchDebounceMs
+                onTriggered: {
+                    const t = searchBox.text.trim()
+                    if (t === root.currentSearchTerm)
+                        return
+                    root.currentSearchTerm = t
+                    root.fetchPage(0)
+                }
+            }
+        }
 
-        // 筛选行:类型(Genres 枚举)/年份/评分下限/状态过滤 下拉(左)
-        // + 排序(右):SortBy 下拉 + 升降序切换按钮(仅两态,无需下拉)。
-        RowLayout {
-            width: parent.width
-            spacing: 12
-            AppText {
-                text: "类型"
-                color: "white"
-                font.pixelSize: 13
-            }
-            FilterCombo {
-                id: genreSelector
-                width: 130
-                model: ListModel {
-                    id: genreFilterModel
-                    ListElement { label: "全部类型"; value: "" }
-                }
-                textRole: "label"
-                onActivated: function (index) {
-                    root.currentGenres = genreFilterModel.get(index).value
-                    root.refetch()
-                }
-            }
-            AppText {
-                text: "年份"
-                color: "white"
-                font.pixelSize: 13
-            }
-            FilterCombo {
-                id: yearSelector
-                width: 130
-                model: ListModel {
-                    id: yearModel
-                    ListElement { label: "全部年份"; value: "" }
-                }
-                textRole: "label"
-                onActivated: function (index) {
-                    root.currentYear = yearModel.get(index).value
-                    root.refetch()
-                }
-            }
-            AppText {
-                text: "评分"
-                color: "white"
-                font.pixelSize: 13
-            }
-            FilterCombo {
-                id: ratingSelector
-                width: 110
-                model: ListModel {
-                    ListElement { label: "不限"; value: "" }
-                    ListElement { label: "≥ 6"; value: "6" }
-                    ListElement { label: "≥ 7"; value: "7" }
-                    ListElement { label: "≥ 8"; value: "8" }
-                    ListElement { label: "≥ 9"; value: "9" }
-                }
-                textRole: "label"
-                onActivated: function (index) {
-                    root.currentMinRating = ratingSelector.model.get(index).value
-                    root.refetch()
-                }
-            }
-            AppText {
-                text: "状态"
-                color: "white"
-                font.pixelSize: 13
-            }
-            FilterCombo {
-                id: filterSelector
-                width: 110
-                model: ListModel {
-                    ListElement { label: "全部"; value: "" }
-                    ListElement { label: "未看"; value: "IsUnplayed" }
-                    ListElement { label: "已看"; value: "IsPlayed" }
-                    ListElement { label: "收藏"; value: "IsFavorite" }
-                }
-                textRole: "label"
-                onActivated: function (index) {
-                    root.currentFilter = filterSelector.model.get(index).value
-                    root.refetch()
-                }
-            }
-            // 弹性空隙:排序区靠右。
-            Item {
-                Layout.fillWidth: true
-            }
-            AppText {
-                text: "排序"
-                color: "white"
-                font.pixelSize: 13
+        // 筛选控件组(右):聚合筛选面板 + 排序 + 升降序(类型/年份/评分/
+        // 状态做进一个控件,激活计数徽标);搜索激活时排序组置灰(服务端
+        // 固定相关度排序)。
+        Row {
+            id: filterRow
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 10
+
+            // 筛选:四维单选聚合入口(面板内分面小节,onAboutToShow 刷新)。
+            FilterPanel {
+                activeCount: root.filterCount
             }
             // SortBy:服务端排序键下拉(与 fetchItems 默认一致,切换即重查)。
             // 搜索激活(有词)时服务端固定相关度排序,置灰禁用避免"选了
             // 不生效"的困惑。
             FilterCombo {
                 id: sortSelector
-                width: 130
+                width: 110
                 model: sortOptions
                 textRole: "label"
                 currentIndex: 1
@@ -1006,7 +1271,7 @@ Item {
         }
     }
 
-    // 状态/错误提示条(加载进度/请求失败):位于筛选行与网格之间,
+    // 状态/错误提示条(加载进度/请求失败):位于头部单行与网格之间,
     // 贴近内容区(浏览/筛选操作的视线焦点);空状态隐藏、零空间占用。
     // 样式:正常态透明底 textMuted 文字;错误态浅 danger 底 + 描边 + danger 文字。
     Item {
@@ -1015,7 +1280,8 @@ Item {
         anchors.leftMargin: 24
         anchors.right: parent.right
         anchors.rightMargin: 24
-        anchors.top: filterCol.bottom
+        anchors.top: headerRow.bottom
+        anchors.topMargin: 16
         height: statusText.text === "" ? 0 : 30
         visible: statusText.text !== ""
         Rectangle {
@@ -1184,7 +1450,7 @@ Item {
         function onGenresReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
-            // 同步类型下拉模型(FilterCombo 用 ListModel;"全部类型"为首项)。
+            // 同步类型分面模型(FilterPanel 用 ListModel;"全部类型"为首项)。
             genreFilterModel.clear()
             genreFilterModel.append({ label: "全部类型", value: "" })
             for (let i = 0; root.gm && i < root.gm.count; ++i)
@@ -1194,50 +1460,24 @@ Item {
                     && root.gm.count > 0 && !root.gmContains(root.currentGenres)) {
                 root.currentGenres = ""
             }
-            // 模型 clear+append 会重置 currentIndex(-1)导致 displayText 为空,
-            // 显式恢复:未选类型回"全部类型",已选则定位回该类型;找不到回 0
-            // (gm 未就绪/拉取失败时避免显示空白)。
-            if (root.currentGenres === "") {
-                genreSelector.currentIndex = 0
-            } else {
-                genreSelector.currentIndex = 0
-                for (let i = 1; i < genreFilterModel.count; ++i)
-                    if (genreFilterModel.get(i).value === root.currentGenres) {
-                        genreSelector.currentIndex = i
-                        break
-                    }
-            }
         }
         function onYearsReceived(serverUrl, names) {
             if (serverUrl !== root.serverUrl)
                 return
-            // 过滤脏年份(实测 nayo 返回 "1"),倒序展示;选中项失效则重置。
-            let arr = []
+            // 过滤脏年份(实测 nayo 返回 "1"),只用于区间有效性校验。
+            const set = new Set()
             for (const n of names) {
                 const y = parseInt(n, 10)
                 if (y >= 1900 && y <= 2100)
-                    arr.push(String(y))
+                    set.add(String(y))
             }
-            arr.sort((a, b) => parseInt(b, 10) - parseInt(a, 10))
-            // 同步下拉模型(FilterCombo 用 ListModel)。
-            yearModel.clear()
-            yearModel.append({ label: "全部年份", value: "" })
-            for (const y of arr)
-                yearModel.append({ label: y, value: y })
-            if (root.currentYear !== "" && arr.indexOf(root.currentYear) < 0) {
-                root.currentYear = ""
-                root.refetch()
-            }
-            // 模型 clear+append 会重置 currentIndex(-1)导致 displayText 为空,
-            // 显式恢复:未选年份回"全部年份",已选则定位回该年份。
-            if (root.currentYear === "") {
-                yearSelector.currentIndex = 0
-            } else {
-                for (let i = 1; i < yearModel.count; ++i)
-                    if (yearModel.get(i).value === root.currentYear) {
-                        yearSelector.currentIndex = i
-                        break
-                    }
+            // 已选区间与库年份分面无交集时清选(切库/下钻后旧区间失效)。
+            if (root.currentYears !== "") {
+                const sel = root.currentYears.split(",")
+                if (!sel.some((y) => set.has(y))) {
+                    root.currentYears = ""
+                    root.refetch()
+                }
             }
         }
         function onFoldersReceived(serverUrl) {
