@@ -3,7 +3,8 @@ import QtQuick.Controls
 import MoePlayer.Core
 
 //! 通用海报卡片(媒体库网格/搜索浮层共用):海报 + 评分/已看/未看集数角标
-//! + 观看进度条 + 悬停收藏/已看快捷操作。点击进详情;操作经信号上抛,
+//! + 观看进度条。右上角标 hover 显示"标记未看/已看"、点击切换已看;
+//! 右下收藏按钮(已收藏常显,未收藏悬停浮现)。点击进详情;操作经信号上抛,
 //! 由使用方调模型翻转(不依赖行号)。
 Item {
     id: root
@@ -136,13 +137,14 @@ Item {
         }
 
         // 标题 + 年份(第二行小字,避免长标题截断年份)。
+        // 右侧锚到收藏按钮左侧,右下角按钮(常显/悬停浮现)不遮标题。
         Column {
             anchors.bottom: parent.bottom
             anchors.left: parent.left
-            anchors.right: parent.right
+            anchors.right: favBtn.left
             anchors.bottomMargin: 6
             anchors.leftMargin: 8
-            anchors.rightMargin: 8
+            anchors.rightMargin: 4
             spacing: 1
             AppText {
                 width: parent.width
@@ -178,6 +180,30 @@ Item {
             }
         }
 
+        // 收藏:右下角圆形按钮,浮于标题/进度条之上(同父内最后声明,顶层)。
+        // 已收藏常显;未收藏悬停卡片时浮现。点击翻转收藏(useById)。
+        // 必须与标题 Column 同父(anchors 只允许父/兄弟目标)。
+        Button {
+            id: favBtn
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 8
+            anchors.bottomMargin: 8
+            width: 30
+            height: 30
+            padding: 0
+            visible: root.showActions && (root.favorite || cardHover.hovered)
+            onClicked: root.favoriteRequested(root.itemId, !root.favorite)
+            background: Rectangle { radius: 15; color: Theme.overlayBg }
+            contentItem: AppText {
+                text: root.favorite ? "♥" : "♡"
+                color: root.favorite ? Theme.favorite : Theme.textOnBadge
+                font.pixelSize: 16
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+
         // 左上:评分角标(Emby 评分 0-10)。
         Rectangle {
             visible: root.rating >= 0.5
@@ -205,27 +231,56 @@ Item {
             }
         }
 
-        // 右上:已看绿勾 / 剧集未看集数蓝标。
+        // 右上:状态角标(所有卡片常显,提供标记已看入口)。
+        // 已看 → 绿勾;剧集有未看集数 → 蓝标;其余未看 → 中性"未看"。
+        // showActions 时 hover 显示操作文案("标记未看/已看"),点击切换已看;
+        // 轻量场景(搜索)保持纯状态展示。
         Rectangle {
-            visible: root.played || (root.itemType === "Series" && root.unplayedCount > 0)
+            id: stateBadge
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: 8
             height: 22
             width: stateRow.implicitWidth + 12
             radius: 4
-            color: root.played ? Theme.success : Theme.info
+            color: root.played ? Theme.success
+                 : (root.itemType === "Series" && root.unplayedCount > 0 ? Theme.info : Theme.info)
             Row {
                 id: stateRow
                 anchors.centerIn: parent
                 spacing: 3
                 AppText {
-                    text: root.played ? "✓ 已看"
-                         : (root.unplayedCount >= 100 ? "99+ 未看"
-                            : root.unplayedCount + " 未看")
-                    color: Theme.textOnBadge
+                    // hover 文案由本角标内的 HoverHandler 驱动:
+                    // hovered 只在鼠标位于 parent(角标)边界内时为 true,
+                    // 精确命中角标区域(cardHover 是整卡范围,已弃用)。
+                    text: stateBadgeHover.hovered && root.showActions
+                          ? (root.played ? "标记未看" : "标记已看")
+                          : (root.played ? "✓ 已看"
+                             : (root.itemType === "Series" && root.unplayedCount > 0
+                                ? (root.unplayedCount >= 100 ? "99+ 未看"
+                                   : root.unplayedCount + " 未看")
+                                : "未看"))
+                    color: root.played ? Theme.textOnBadge
+                         : (root.itemType === "Series" && root.unplayedCount > 0
+                            ? Theme.textOnBadge : Theme.textPrimary)
                     font.pixelSize: 12
                 }
+            }
+            // Pointer Handler 体系(与卡片 root 同机制,不依赖 MouseArea
+            // hover 事件):HoverHandler 精确命中角标区域(边界内)驱动文案
+            // 与手型;TapHandler 用 ReleaseWithinBounds(按下即 exclusive
+            // grab),阻止卡片 root 的 TapHandler(进详情)同时触发。
+            // enabled 门控 showActions:轻量场景(搜索)禁用后不参与命中,
+            // 点击正常落到卡片进详情,角标保持纯展示。
+            HoverHandler {
+                id: stateBadgeHover
+                enabled: root.showActions
+                cursorShape: root.showActions ? Qt.PointingHandCursor : Qt.ArrowCursor
+            }
+            TapHandler {
+                enabled: root.showActions
+                gesturePolicy: TapHandler.ReleaseWithinBounds
+                onTapped: root.watchedRequested(root.itemId, !root.played)
             }
         }
     }
@@ -238,43 +293,5 @@ Item {
     // 官方推荐替代 MouseArea 做点击检测)。
     TapHandler {
         onTapped: root.clicked()
-    }
-
-    // 悬停快捷操作:♥ 收藏 / ✓ 已看切换,置于最上层(MouseArea 之后声明)。
-    Row {
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: 36
-        anchors.rightMargin: 8
-        visible: root.showActions && cardHover.hovered
-        spacing: 6
-        Button {
-            width: 30
-            height: 30
-            padding: 0
-            onClicked: root.favoriteRequested(root.itemId, !root.favorite)
-            background: Rectangle { radius: 15; color: Theme.overlayBg }
-            contentItem: AppText {
-                text: root.favorite ? "♥" : "♡"
-                color: root.favorite ? Theme.favorite : Theme.textOnBadge
-                font.pixelSize: 16
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-        }
-        Button {
-            width: 30
-            height: 30
-            padding: 0
-            onClicked: root.watchedRequested(root.itemId, !root.played)
-            background: Rectangle { radius: 15; color: root.played ? Theme.success : Theme.overlayBg }
-            contentItem: AppText {
-                text: "✓"
-                color: "#ffffff"
-                font.pixelSize: 15
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-            }
-        }
     }
 }
