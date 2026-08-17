@@ -386,12 +386,14 @@ Item {
 
             // 媒体库:左缺口右尖六边形,缺口深度 = 服名尖角长度,
             // anchors 负边距使尖角嵌入缺口(2px 重叠防接缝)。
+            // 宽度自适应:文字完整宽 + 左 16 + 间隔 6 + ▾ 宽 10 + ▾ 右距(尖角 14 + 4),
+            // 最小 150 防初始空名/短名过窄;文字锚定到 ▾ 左侧,极端长名 elide 兜底。
             Item {
                 id: viewTab
                 anchors.left: serverTab.right
                 anchors.leftMargin: -root.bcTip + 2
                 anchors.top: serverTab.top
-                width: viewTabText.implicitWidth + 16 + root.bcTip + 18
+                width: Math.max(150, viewTabText.implicitWidth + 50)
                 height: 34
 
                 BreadcrumbShape {
@@ -402,21 +404,28 @@ Item {
                     fillColor: viewSelector.hovered ? root.chipActiveHover : root.chipActive
                     borderColor: "transparent"
                 }
+                // 媒体库名:anchors.left+right 提供显式宽度(AlignHCenter 生效,
+                // elide 生效);垂直用 anchors.verticalCenter 而非 fill——
+                // Text 默认 AlignTop,fill 到容器会以顶部为基线导致文字偏下。
                 AppText {
                     id: viewTabText
                     anchors.left: parent.left
                     anchors.leftMargin: 16
+                    anchors.right: viewTabArrow.left
+                    anchors.rightMargin: 6
                     anchors.verticalCenter: parent.verticalCenter
                     text: viewSelector.displayText
                     color: "white"
                     font.pixelSize: 13
+                    horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
                 }
                 AppText {
+                    id: viewTabArrow
                     anchors.right: parent.right
                     anchors.rightMargin: root.bcTip + 4
                     anchors.verticalCenter: parent.verticalCenter
-                    text: "▾"
+                    text: viewSelector.popup.opened ? "▴" : "▾"
                     color: "white"
                     font.pixelSize: 10
                 }
@@ -430,6 +439,74 @@ Item {
                     indicator: null
                     model: root.vm
                     textRole: "name"
+                    // 弹出列表项:与面包屑两段同文字风格(白字 13px),
+                    // 悬停半透明 accent 高亮,当前选中项右侧 accent 圆点。
+                    delegate: ItemDelegate {
+                        // Qt6 delegate 上下文(Bound 模式):index 与 model 均须
+                        // required 声明;contentItem 委托作用域独立,经根属性转发。
+                        required property int index
+                        required property var model
+                        property string itemText: model[viewSelector.textRole]
+                        width: ListView.view.width
+                        height: 32
+                        padding: 0
+                        contentItem: Item {
+                            AppText {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: parent.parent.itemText
+                                color: "white"
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 10
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: Theme.accent
+                                visible: viewSelector.currentIndex === parent.parent.index
+                            }
+                        }
+                        highlighted: viewSelector.highlightedIndex === index
+                        background: Rectangle {
+                            radius: 4
+                            color: parent.highlighted || parent.hovered
+                                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                                : "transparent"
+                        }
+                    }
+                    // 弹出层:暗色 surface 底 + 描边,与服名框同底色同描边语言,
+                    // 替换 QQC2 默认浅色弹出列表。
+                    popup: Popup {
+                        id: viewPopup
+                        y: viewSelector.height + 4
+                        width: viewSelector.width
+                        implicitHeight: contentItem.implicitHeight
+                        padding: 6
+                        enter: Transition {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+                        }
+                        exit: Transition {
+                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                        }
+                        background: Rectangle {
+                            color: Theme.surface
+                            radius: 8
+                            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.4)
+                            border.width: 1
+                        }
+                        contentItem: ListView {
+                            clip: true
+                            implicitHeight: contentHeight
+                            model: viewSelector.delegateModel
+                            currentIndex: viewSelector.highlightedIndex
+                            highlightMoveDuration: 0
+                        }
+                    }
                     onActivated: function (index) {
                         if (root.currentViewId === root.vm.idAt(index))
                             return
