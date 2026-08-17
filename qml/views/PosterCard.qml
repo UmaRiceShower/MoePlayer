@@ -100,7 +100,7 @@ Item {
         height: parent.height + 20
         radius: 20
         color: "transparent"
-        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.06
+        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.03
 
         gradient: RadialGradient {
             centerX: 0.5

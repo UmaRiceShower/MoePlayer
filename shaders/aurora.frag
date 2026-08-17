@@ -15,9 +15,9 @@ void main() {
 
     // 主深色底,与 Theme.bg (#0d1117) 对齐。
     vec3 bg = vec3(0.051, 0.067, 0.090);
-    // 萌系粉 / 淡紫,只在低透明度下混入。
+    // 萌系粉 / 暖粉,避免偏紫;只在低透明度下混入。
     vec3 pink = vec3(1.0, 0.62, 0.74);
-    vec3 purple = vec3(0.65, 0.42, 0.72);
+    vec3 warmPink = vec3(0.88, 0.52, 0.68);
 
     float t = u_time * 0.05;
 
@@ -35,8 +35,8 @@ void main() {
     float b3 = smoothstep(0.45, 0.0, d3);
 
     vec3 col = bg;
-    col = mix(col, pink,   b1 * 0.30);
-    col = mix(col, purple, b2 * 0.22);
+    col = mix(col, pink,     b1 * 0.30);
+    col = mix(col, warmPink, b2 * 0.18);
     col = mix(col, pink * 0.85, b3 * 0.18);
 
     // 顶部略暗,底部微微提亮,增加纵深感;整体仍保持暗色保证可读性。
