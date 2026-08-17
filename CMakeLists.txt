@@ -62,6 +62,7 @@ qt_add_qml_module(MoePlayer
         qml/theme/CrossfadeImage.qml
         qml/theme/MoeBackground.qml
         qml/theme/GlassPanel.qml
+        qml/theme/BokehOrb.qml
         qml/views/Home.qml
         qml/views/Library.qml
         qml/views/Detail.qml

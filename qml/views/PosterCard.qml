@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Shapes
 import MoePlayer.Core
 
 //! 通用海报卡片(媒体库网格/搜索浮层共用):海报 + 评分/已看/未看集数角标
@@ -89,6 +90,28 @@ Item {
             if (posterId === root.posterId)
                 root.applyMonet()
         }
+    }
+
+    // 萌系柔焦光晕:卡片背后一层粉紫光,hover / 焦点时增强,呼应背景。
+    Rectangle {
+        id: glowShadow
+        anchors.centerIn: parent
+        width: parent.width + 20
+        height: parent.height + 20
+        radius: 20
+        color: "transparent"
+        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.06
+
+        gradient: RadialGradient {
+            centerX: 0.5
+            centerY: 0.5
+            centerRadius: 0.5
+            GradientStop { position: 0.0; color: Constants.moePink }
+            GradientStop { position: 0.65; color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.25) }
+            GradientStop { position: 1.0; color: "transparent" }
+        }
+
+        Behavior on opacity { NumberAnimation { duration: 180 } }
     }
 
     Rectangle {
