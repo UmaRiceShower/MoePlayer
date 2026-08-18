@@ -101,8 +101,8 @@ Item {
     readonly property color crumbViewHover: Qt.rgba(0.20, 0.10, 0.16, 1.0)
     readonly property color crumbFolder: Qt.rgba(0.09, 0.10, 0.13, 1.0)
     readonly property color crumbFolderHover: Qt.rgba(0.22, 0.12, 0.18, 1.0)
-    readonly property color crumbFolderCurrent: Constants.moePinkDark
-    readonly property color crumbFolderCurrentHover: Constants.moePink
+    readonly property color crumbFolderCurrent: Qt.rgba(0.78, 0.55, 0.66, 1.0)
+    readonly property color crumbFolderCurrentHover: Qt.rgba(0.85, 0.60, 0.70, 1.0)
     readonly property color crumbBorder: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.30)
     readonly property color crumbBorderCurrent: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.65)
 
@@ -110,7 +110,7 @@ Item {
     readonly property color crumb: Qt.rgba(0.10, 0.11, 0.14, 1.0)
     readonly property color crumbHover: Qt.rgba(0.20, 0.12, 0.17, 1.0)
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
-    readonly property int bcTip: 16
+    readonly property int bcTip: 20
 
     // ============================= 信号 =============================
 
@@ -1517,5 +1517,15 @@ Item {
             statusText.text = "失败：" + message
             statusText.isError = true
         }
+    }
+
+    // 点击非输入区时搜索框失焦(Qt Quick 点击不自动转移键盘焦点):
+    // 透明垫底层,z:-1 只接收未被上层控件消费的点击(网格空白/卡片
+    // 间隙/头部空隙);仅搜索框聚焦时启用,不干扰其它交互。
+    MouseArea {
+        anchors.fill: parent
+        z: -1
+        enabled: searchBox.activeFocus
+        onClicked: searchBox.focus = false
     }
 }
