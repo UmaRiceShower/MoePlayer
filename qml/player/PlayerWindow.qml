@@ -45,7 +45,16 @@ Window {
 
     // 自定义 UI 显隐。
     property bool controlsVisible: true
+    property bool showSettings: false
     readonly property bool isFullScreen: root.visibility === Window.FullScreen
+
+    // 版本/音轨/字幕信息(来自 EmbyClient.fetchPlaybackInfo 返回的 meta)。
+    property var mediaSources: []
+    property var audioStreams: []
+    property var subtitleStreams: []
+    property int currentAudioIndex: -1
+    property int currentSubtitleIndex: -1
+    property bool switchingVersion: false
 
     // 窗口关闭完成(Main 据此从播放窗口列表移除)。
     signal windowClosed()
@@ -60,7 +69,24 @@ Window {
         root.meta = meta || {}
         root.loading = false
         root.loadError = ""
+
+        // 保存版本/音轨/字幕信息。
+        root.mediaSources = root.meta.mediaSources || []
+        root.audioStreams = root.meta.audioStreams || []
+        root.subtitleStreams = root.meta.subtitleStreams || []
+        // 默认选中 Emby 返回的默认轨(通过 isDefault 标记)。
+        root.currentAudioIndex = root.defaultStreamIndex(root.audioStreams)
+        root.currentSubtitleIndex = root.defaultStreamIndex(root.subtitleStreams)
+
         mpv.load(url, root.headers)
+    }
+    // 返回默认轨索引;无默认则取第一个。
+    function defaultStreamIndex(streams) {
+        for (let i = 0; i < streams.length; ++i) {
+            if (streams[i].isDefault)
+                return i
+        }
+        return streams.length > 0 ? 0 : -1
     }
     // 协商失败:显示错误态,由用户关闭(或直接点窗口 X)。
     function showLoadError(message) {
@@ -177,6 +203,31 @@ Window {
                                                    root.meta.userId, root.meta.playSessionId)
     }
 
+    // 版本切换:重新拉取 PlaybackInfo 后加载新 URL。
+    Connections {
+        target: EmbyClient
+        function onPlaybackReady(serverUrl, url, headers, meta) {
+            if (!root.switchingVersion)
+                return
+            root.switchingVersion = false
+            if (serverUrl !== root.meta.serverUrl || meta.itemId !== root.meta.itemId)
+                return
+            const savedPos = root.lastPosition
+            root.stoppedReported = false
+            root.meta = Object.assign({}, meta)
+            root.source = url
+            root.headers = headers || []
+            root.mediaSources = meta.mediaSources || []
+            root.audioStreams = meta.audioStreams || []
+            root.subtitleStreams = meta.subtitleStreams || []
+            root.currentAudioIndex = root.defaultStreamIndex(root.audioStreams)
+            root.currentSubtitleIndex = root.defaultStreamIndex(root.subtitleStreams)
+            mpv.load(url, root.headers)
+            if (savedPos > 0)
+                mpv.seek(savedPos)
+        }
+    }
+
     // ---------- 自绘播放 UI ----------
     function toggleFullscreen() {
         root.visibility = root.isFullScreen ? Window.Windowed : Window.FullScreen
@@ -203,6 +254,56 @@ Window {
         const mm = m < 10 ? "0" + m : m
         const ss = sec < 10 ? "0" + sec : sec
         return h > 0 ? h + ":" + mm + ":" + ss : mm + ":" + ss
+    }
+    function streamLabel(stream) {
+        if (!stream)
+            return ""
+        if (stream.displayTitle)
+            return stream.displayTitle
+        const parts = []
+        if (stream.title)
+            parts.push(stream.title)
+        if (stream.displayLanguage)
+            parts.push(stream.displayLanguage)
+        else if (stream.language)
+            parts.push(stream.language)
+        if (stream.codec)
+            parts.push(stream.codec.toUpperCase())
+        return parts.length > 0 ? parts.join(" · ") : "未知"
+    }
+    function setAudioStream(index) {
+        root.currentAudioIndex = index
+        const s = root.audioStreams[index]
+        if (s)
+            mpv.command(["set", "aid", String(s.index)])
+    }
+    function setSubtitleStream(index) {
+        root.currentSubtitleIndex = index
+        if (index < 0 || !root.subtitleStreams[index]) {
+            mpv.command(["set", "sid", "no"])
+            return
+        }
+        const s = root.subtitleStreams[index]
+        if (s.isExternal && s.deliveryUrl) {
+            // 外挂字幕先加载再选择:补全前缀并附带 api_key(与主视频流
+            // withApiKey 同法,字幕接口同样需要认证;mpv 命令无头可带)。
+            let u = root.meta.serverUrl
+                     + (s.deliveryUrl.startsWith("/") ? s.deliveryUrl : "/" + s.deliveryUrl)
+            if (root.meta.token && u.indexOf("api_key=") < 0)
+                u += (u.indexOf("?") >= 0 ? "&" : "?") + "api_key=" + root.meta.token
+            mpv.command(["sub-add", u])
+        }
+        mpv.command(["set", "sid", String(s.index)])
+    }
+    function switchVersion(mediaSourceId) {
+        if (!mediaSourceId || mediaSourceId === root.meta.mediaSourceId || root.switchingVersion)
+            return
+        root.switchingVersion = true
+        const pos = mpv.position
+        root.lastPosition = pos
+        EmbyClient.fetchPlaybackInfo(root.meta.serverUrl, root.meta.token,
+                                     root.meta.userId, root.meta.itemId,
+                                     mediaSourceId)
     }
 
     // 自动隐藏控制栏。
@@ -440,6 +541,25 @@ Window {
                 }
             }
 
+            // 播放设置(版本/音轨/字幕)。
+            Button {
+                id: settingsBtn
+                width: 44
+                height: 44
+                onClicked: root.showSettings = true
+                background: Rectangle {
+                    radius: height / 2
+                    color: settingsBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⚙"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             // 全屏。
             Button {
                 id: fsBtn
@@ -456,6 +576,225 @@ Window {
                     font.pixelSize: 18
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+    }
+
+    // 播放设置弹窗（版本/音轨/字幕）。
+    Rectangle {
+        anchors.fill: parent
+        visible: root.showSettings
+        color: Qt.rgba(0, 0, 0, 0.55)
+        z: 20
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.showSettings = false
+        }
+        Rectangle {
+            anchors.centerIn: parent
+            width: 360
+            height: settingsCol.implicitHeight + 48
+            radius: 12
+            color: Theme.surface
+            border.width: 1
+            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+            MouseArea {
+                anchors.fill: parent
+            }
+            Column {
+                id: settingsCol
+                anchors.top: parent.top
+                anchors.topMargin: 24
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width - 48
+                spacing: 20
+
+                Row {
+                    spacing: 8
+                    AppText {
+                        text: "♥"
+                        color: Constants.moePink
+                        font.pixelSize: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    AppText {
+                        text: "播放设置"
+                        color: Theme.textPrimary
+                        font.pixelSize: 20
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
+                // 版本
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.mediaSources.length > 1
+                    AppText {
+                        text: "版本"
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        Repeater {
+                            model: root.mediaSources
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                width: parent.width
+                                height: 34
+                                radius: 17
+                                color: root.meta.mediaSourceId === modelData.id
+                                       ? Constants.moePink : (verHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
+                                border.width: 1
+                                border.color: root.meta.mediaSourceId === modelData.id ? Constants.moePink : Theme.textMuted
+                                AppText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 14
+                                    text: modelData.name || "默认版本"
+                                    color: root.meta.mediaSourceId === modelData.id ? "white" : Theme.textPrimary
+                                    font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    id: verHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        root.switchVersion(modelData.id)
+                                        root.showSettings = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 音轨
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.audioStreams.length > 0
+                    AppText {
+                        text: "音轨"
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        Repeater {
+                            model: root.audioStreams
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                width: parent.width
+                                height: 34
+                                radius: 17
+                                color: root.currentAudioIndex === index
+                                       ? Constants.moePink : (audioHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
+                                border.width: 1
+                                border.color: root.currentAudioIndex === index ? Constants.moePink : Theme.textMuted
+                                AppText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 14
+                                    text: root.streamLabel(modelData)
+                                    color: root.currentAudioIndex === index ? "white" : Theme.textPrimary
+                                    font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    id: audioHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        root.setAudioStream(index)
+                                        root.showSettings = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // 字幕
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    visible: root.subtitleStreams.length > 0
+                    AppText {
+                        text: "字幕"
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                    Column {
+                        width: parent.width
+                        spacing: 4
+                        Rectangle {
+                            width: parent.width
+                            height: 34
+                            radius: 17
+                            color: root.currentSubtitleIndex < 0
+                                   ? Constants.moePink : (subOffHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
+                            border.width: 1
+                            border.color: root.currentSubtitleIndex < 0 ? Constants.moePink : Theme.textMuted
+                            AppText {
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.left: parent.left
+                                anchors.leftMargin: 14
+                                text: "关闭字幕"
+                                color: root.currentSubtitleIndex < 0 ? "white" : Theme.textPrimary
+                                font.pixelSize: 13
+                            }
+                            MouseArea {
+                                id: subOffHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    root.setSubtitleStream(-1)
+                                    root.showSettings = false
+                                }
+                            }
+                        }
+                        Repeater {
+                            model: root.subtitleStreams
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                width: parent.width
+                                height: 34
+                                radius: 17
+                                color: root.currentSubtitleIndex === index
+                                       ? Constants.moePink : (subHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
+                                border.width: 1
+                                border.color: root.currentSubtitleIndex === index ? Constants.moePink : Theme.textMuted
+                                AppText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 14
+                                    text: root.streamLabel(modelData)
+                                    color: root.currentSubtitleIndex === index ? "white" : Theme.textPrimary
+                                    font.pixelSize: 13
+                                }
+                                MouseArea {
+                                    id: subHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    onClicked: {
+                                        root.setSubtitleStream(index)
+                                        root.showSettings = false
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

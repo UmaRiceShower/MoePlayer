@@ -862,7 +862,8 @@ void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &token
 
 
 void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &token,
-                                   const QString &userId, const QString &itemId)
+                                   const QString &userId, const QString &itemId,
+                                   const QString &mediaSourceId)
 {
     const QString key = serverUrl.trimmed();
     QJsonObject dp;
@@ -898,9 +899,12 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     body.insert(QStringLiteral("EnableDirectPlay"), true);
     body.insert(QStringLiteral("EnableDirectStream"), true);
     body.insert(QStringLiteral("EnableTranscoding"), true);
+    if (!mediaSourceId.isEmpty())
+        body.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
 
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
-             [this, key, token, userId, itemId](const QJsonDocument &doc) {                 const QJsonObject o = doc.object();
+             [this, key, token, userId, itemId, mediaSourceId](const QJsonDocument &doc) {
+                 const QJsonObject o = doc.object();
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
                      const QString msg = QStringLiteral("PlaybackInfo 未返回可用媒体源");
@@ -908,13 +912,63 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      emit playbackFailed(key, itemId, msg);
                      return;
                  }
-                 const QJsonObject src = sources.first().toObject();
-                 const QString mediaSourceId = src.value(QLatin1String("Id")).toString();
+                 // 构建版本列表供 UI 选择。
+                 QVariantList mediaSources;
+                 for (const QJsonValue &v : sources) {
+                     const QJsonObject s = v.toObject();
+                     QVariantMap m;
+                     m.insert(QStringLiteral("id"), s.value(QLatin1String("Id")).toString());
+                     m.insert(QStringLiteral("name"), s.value(QLatin1String("Name")).toString());
+                     mediaSources.append(m);
+                 }
+                 // 选择目标媒体源:显式指定 > 第一个。
+                 QJsonObject src;
+                 if (!mediaSourceId.isEmpty()) {
+                     for (const QJsonValue &v : sources) {
+                         const QJsonObject s = v.toObject();
+                         if (s.value(QLatin1String("Id")).toString() == mediaSourceId) {
+                             src = s;
+                             break;
+                         }
+                     }
+                 }
+                 if (src.isEmpty())
+                     src = sources.first().toObject();
+
+                 const QString selectedMediaSourceId = src.value(QLatin1String("Id")).toString();
                  // 服务器生成的会话 id,播放回传三件套共用(缺省则本地兜底)。
                  QString playSessionId = o.value(QLatin1String("PlaySessionId")).toString();
                  if (playSessionId.isEmpty())
                      playSessionId = QStringLiteral("%1-%2").arg(userId, itemId);
                  const QStringList headers = requiredHeaders(src);
+
+                 // 解析音轨/字幕轨。
+                 QVariantList audioStreams;
+                 QVariantList subtitleStreams;
+                 const QJsonArray streams = src.value(QLatin1String("MediaStreams")).toArray();
+                 for (const QJsonValue &v : streams) {
+                     const QJsonObject s = v.toObject();
+                     const QString type = s.value(QLatin1String("Type")).toString();
+                     QVariantMap m;
+                     m.insert(QStringLiteral("index"), s.value(QLatin1String("Index")).toInt());
+                     m.insert(QStringLiteral("title"), s.value(QLatin1String("Title")).toString());
+                     m.insert(QStringLiteral("displayTitle"), s.value(QLatin1String("DisplayTitle")).toString());
+                     m.insert(QStringLiteral("language"), s.value(QLatin1String("Language")).toString());
+                     m.insert(QStringLiteral("displayLanguage"), s.value(QLatin1String("DisplayLanguage")).toString());
+                     m.insert(QStringLiteral("codec"), s.value(QLatin1String("Codec")).toString());
+                     m.insert(QStringLiteral("isDefault"), s.value(QLatin1String("IsDefault")).toBool());
+                     m.insert(QStringLiteral("isForced"), s.value(QLatin1String("IsForced")).toBool());
+                     if (type == QLatin1String("Audio")) {
+                         m.insert(QStringLiteral("channels"), s.value(QLatin1String("Channels")).toInt());
+                         m.insert(QStringLiteral("channelLayout"), s.value(QLatin1String("ChannelLayout")).toString());
+                         audioStreams.append(m);
+                     } else if (type == QLatin1String("Subtitle")) {
+                         m.insert(QStringLiteral("isExternal"), s.value(QLatin1String("IsExternal")).toBool());
+                         m.insert(QStringLiteral("deliveryUrl"), s.value(QLatin1String("DeliveryUrl")).toString());
+                         m.insert(QStringLiteral("isTextSubtitleStream"), s.value(QLatin1String("IsTextSubtitleStream")).toBool());
+                         subtitleStreams.append(m);
+                     }
+                 }
 
                  // 补全 server 前缀,并在 URL 中附带 api_key,使 mpv 拉流无需自定义请求头。
                  const auto absUrl = [key](QString p) -> QString {
@@ -946,7 +1000,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      playMethod = QStringLiteral("Transcode");
                  } else if (directPlay) {
                      url = key + QStringLiteral("/Videos/%1/stream?static=true&MediaSourceId=%2")
-                                      .arg(itemId, mediaSourceId);
+                                      .arg(itemId, selectedMediaSourceId);
                      probeRange = true;
                  } else {
                      const QString msg = QStringLiteral("该条目无可用直连/转码方案");
@@ -958,13 +1012,17 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
 
                  QVariantMap meta;
                  meta.insert(QStringLiteral("itemId"), itemId);
-                 meta.insert(QStringLiteral("mediaSourceId"), mediaSourceId);
+                 meta.insert(QStringLiteral("mediaSourceId"), selectedMediaSourceId);
                  meta.insert(QStringLiteral("playSessionId"), playSessionId);
                  meta.insert(QStringLiteral("playMethod"), playMethod);
                  // 回传按源路由:凭据随 meta 携带,播放窗口直接使用。
                  meta.insert(QStringLiteral("serverUrl"), key);
                  meta.insert(QStringLiteral("token"), token);
                  meta.insert(QStringLiteral("userId"), userId);
+                 // 版本/音轨/字幕信息,供播放窗口切换。
+                 meta.insert(QStringLiteral("mediaSources"), mediaSources);
+                 meta.insert(QStringLiteral("audioStreams"), audioStreams);
+                 meta.insert(QStringLiteral("subtitleStreams"), subtitleStreams);
 
                  const auto emitReady = [this, key, headers, meta](const QString &finalUrl) {
                      qInfo() << "Emby: playback url =" << finalUrl << "method =" << meta.value("playMethod").toString();
