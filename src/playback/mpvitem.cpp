@@ -104,12 +104,9 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_set_option_string(m_mpv, "sub-auto", "fuzzy");
     mpv_set_option_string(m_mpv, "idle", "yes");
     mpv_set_option_string(m_mpv, "volume", "100");
-    // 官方 OSC(进度条/按钮/时间)由 mpv 绘制进画面;render API 下注入的输入事件
-    // 不会触发 OSC 自动显示,故固定为常显。
-    mpv_set_option_string(m_mpv, "osc", "yes");
-    mpv_set_option_string(m_mpv, "script-opts", "osc-visibility=always");
-    // libmpv 默认关闭默认按键绑定,此处开启以支持转发空格/方向键等控制。
-    mpv_set_option_string(m_mpv, "input-default-bindings", "yes");
+    // 关闭 mpv 官方 OSC 与默认按键绑定;QML 层自绘 UI 并直接调用 MpvItem。
+    mpv_set_option_string(m_mpv, "osc", "no");
+    mpv_set_option_string(m_mpv, "input-default-bindings", "no");
 
     if (mpv_initialize(m_mpv) < 0) {
         mpv_terminate_destroy(m_mpv);
