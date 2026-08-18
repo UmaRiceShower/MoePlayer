@@ -1211,8 +1211,12 @@ Item {
                 const hi = parent.width - 12 - filterRow.width - width
                 return Math.max(lo, Math.min(cx, hi))
             }
-            width: root.width > 1400 ? 300 : (root.width > 1150 ? 260 : 220)
+            // 基础宽度缩短,聚焦时通过宽度变化来强化视觉反馈。
+            width: searchBox.activeFocus
+                   ? (root.width > 1400 ? 420 : (root.width > 1150 ? 360 : 280))
+                   : (root.width > 1400 ? 320 : (root.width > 1150 ? 260 : 200))
             height: 40
+            Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.InOutQuad } }
             leftPadding: 34
             rightPadding: 12
             placeholderText: "搜索当前媒体库…"
@@ -1232,7 +1236,7 @@ Item {
                     color: "transparent"
                     border.color: root.moePink
                     border.width: searchBox.activeFocus ? 2 : 0
-                    opacity: searchBox.activeFocus ? 0.35 : 0
+                    opacity: searchBox.activeFocus ? 0.45 : 0
                     Behavior on opacity { NumberAnimation { duration: 120 } }
                 }
             }
