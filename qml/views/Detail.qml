@@ -736,150 +736,150 @@ Item {
                             ]
                         }
                         // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
-                            // 决定,内容不再计算坐标)。
-                            Rectangle {
-                                width: Constants.detailPosterW
-                                height: Constants.detailPosterH
-                                color: root.surfaceTint
-                                radius: 18
-                                clip: true
-                                anchors.fill: posterSlot
-                                CrossfadeImage {
-                                    id: posterFx
-                                    anchors.fill: parent
-                                    // 圆角在绘制层裁切(Item::clip 只裁矩形)。
-                                    cornerRadius: 18
-                                    source: root.heroPosterSource()
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    duration: 800
-                                }
+                        // 决定,内容不再计算坐标)。
+                        Rectangle {
+                            width: Constants.detailPosterW
+                            height: Constants.detailPosterH
+                            color: root.surfaceTint
+                            radius: 18
+                            clip: true
+                            anchors.fill: posterSlot
+                            CrossfadeImage {
+                                id: posterFx
+                                anchors.fill: parent
+                                // 圆角在绘制层裁切(Item::clip 只裁矩形)。
+                                cornerRadius: 18
+                                source: root.heroPosterSource()
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                duration: 800
                             }
+                        }
 
-                            // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
-                            // 全部由 textSlot 决定(静态锚定,判断在槽内)。
+                        // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
+                        // 全部由 textSlot 决定(静态锚定,判断在槽内)。
+                        Item {
+                            id: heroTextArea
+                            anchors.fill: textSlot
+
                             Item {
-                                id: heroTextArea
-                                anchors.fill: textSlot
-
-                                Item {
-                                    id: heroOldTree
-                                    anchors.right: heroTextArea.right
-                                    width: heroTextArea.width * root.textReveal
-                                    // Item 的 implicitHeight 默认 0(不随子项传播),
-                                    // 显式取列高,否则 clip 后文字被裁没。
-                                    height: heroTextArea.height
-                                    clip: true
-                                    opacity: root.oldTextOpacity
-                                    visible: root.oldTextOpacity > 0
-                                    Column {
-                                        id: heroOldCol
-                                        // 右缘贴容器右缘:容器右缘固定、宽度收缩时
-                                        // 列原点恒 0,裁剪落在列右半(左先消失)。
-                                        anchors.right: heroOldTree.right
-                                        width: heroTextArea.width
-                                        // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                        // bottom/followPoster 沉底——简介文字底缘
-                                        // 对齐文字槽底(槽底随锚定 = 海报下缘)。
-                                        y: root.textSlotVertical() === "top"
-                                            ? 0 : (root.textSlotVertical() === "middle"
-                                                   ? (parent.height - implicitHeight) / 2
-                                                   : parent.height - implicitHeight)
-                                        spacing: 8
-                                        Row {
-                                            width: parent.width
-                                            spacing: 12
-                                            AppText {
-                                                text: root.heroOldTitle
-                                                color: Theme.textPrimary
-                                                font.pixelSize: 30
-                                                font.bold: true
-                                                elide: Text.ElideRight
-                                                width: parent.width
-                                                horizontalAlignment: root.heroTextAlign
-                                            }
-                                        }
+                                id: heroOldTree
+                                anchors.right: heroTextArea.right
+                                width: heroTextArea.width * root.textReveal
+                                // Item 的 implicitHeight 默认 0(不随子项传播),
+                                // 显式取列高,否则 clip 后文字被裁没。
+                                height: heroTextArea.height
+                                clip: true
+                                opacity: root.oldTextOpacity
+                                visible: root.oldTextOpacity > 0
+                                Column {
+                                    id: heroOldCol
+                                    // 右缘贴容器右缘:容器右缘固定、宽度收缩时
+                                    // 列原点恒 0,裁剪落在列右半(左先消失)。
+                                    anchors.right: heroOldTree.right
+                                    width: heroTextArea.width
+                                    // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                    // bottom/followPoster 沉底——简介文字底缘
+                                    // 对齐文字槽底(槽底随锚定 = 海报下缘)。
+                                    y: root.textSlotVertical() === "top"
+                                        ? 0 : (root.textSlotVertical() === "middle"
+                                                ? (parent.height - implicitHeight) / 2
+                                                : parent.height - implicitHeight)
+                                    spacing: 8
+                                    Row {
+                                        width: parent.width
+                                        spacing: 12
                                         AppText {
-                                            text: root.heroOldMeta
-                                            color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                            font.pixelSize: 14
-                                            // 显式宽 + 对齐跟随:文字区靠右时评分/
-                                            // 时间行右对齐(隐式宽下对齐无效)。
-                                            width: parent.width
-                                            horizontalAlignment: root.heroTextAlign
-                                            opacity: text !== "" ? 1 : 0
-                                            Behavior on opacity { NumberAnimation { duration: 200 } }
-                                        }
-                                        AppText {
-                                            text: root.heroOldOverview
-                                            color: Theme.textMuted
-                                            font.pixelSize: 13
-                                            wrapMode: Text.Wrap
+                                            text: root.heroOldTitle
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 30
+                                            font.bold: true
                                             elide: Text.ElideRight
-                                            maximumLineCount: 2
                                             width: parent.width
                                             horizontalAlignment: root.heroTextAlign
-                                            opacity: text !== "" ? 1 : 0
-                                            Behavior on opacity { NumberAnimation { duration: 200 } }
                                         }
                                     }
-                                }
-                                Item {
-                                    id: heroNewTree
-                                    anchors.left: heroTextArea.left
-                                    width: heroTextArea.width * (1 - root.textReveal)
-                                    height: heroTextArea.height
-                                    clip: true
-                                    opacity: root.newTextOpacity
-                                    Column {
-                                        id: heroNewCol
-                                        width: heroTextArea.width
-                                        // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                        // bottom/followPoster 沉底(简介文字底缘
-                                        // 对齐文字槽底,同 heroOldCol)。
-                                        y: root.textSlotVertical() === "top"
-                                            ? 0 : (root.textSlotVertical() === "middle"
-                                                   ? (parent.height - implicitHeight) / 2
-                                                   : parent.height - implicitHeight)
-                                        spacing: 8
-                                        Row {
-                                            width: parent.width
-                                            spacing: 12
-                                            AppText {
-                                                id: heroNewTitle
-                                                text: root.heroTitle()
-                                                color: Theme.textPrimary
-                                                font.pixelSize: 30
-                                                font.bold: true
-                                                elide: Text.ElideRight
-                                                width: parent.width
-                                                horizontalAlignment: root.heroTextAlign
-                                            }
-                                        }
-                                        AppText {
-                                            text: root.metaLine()
-                                            color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                            font.pixelSize: 14
-                                            width: parent.width
-                                            horizontalAlignment: root.heroTextAlign
-                                            opacity: text !== "" ? 1 : 0
-                                            Behavior on opacity { NumberAnimation { duration: 200 } }
-                                        }
-                                        AppText {
-                                            text: root.detail.overview || ""
-                                            color: Theme.textMuted
-                                            font.pixelSize: 13
-                                            wrapMode: Text.Wrap
-                                            elide: Text.ElideRight
-                                            maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
-                                            width: parent.width
-                                            horizontalAlignment: root.heroTextAlign
-                                            opacity: text !== "" ? 1 : 0
-                                            Behavior on opacity { NumberAnimation { duration: 200 } }
-                                        }
+                                    AppText {
+                                        text: root.heroOldMeta
+                                        color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                        font.pixelSize: 14
+                                        // 显式宽 + 对齐跟随:文字区靠右时评分/
+                                        // 时间行右对齐(隐式宽下对齐无效)。
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        opacity: text !== "" ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                                    }
+                                    AppText {
+                                        text: root.heroOldOverview
+                                        color: Theme.textMuted
+                                        font.pixelSize: 13
+                                        wrapMode: Text.Wrap
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 2
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        opacity: text !== "" ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 200 } }
                                     }
                                 }
                             }
+                            Item {
+                                id: heroNewTree
+                                anchors.left: heroTextArea.left
+                                width: heroTextArea.width * (1 - root.textReveal)
+                                height: heroTextArea.height
+                                clip: true
+                                opacity: root.newTextOpacity
+                                Column {
+                                    id: heroNewCol
+                                    width: heroTextArea.width
+                                    // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                    // bottom/followPoster 沉底(简介文字底缘
+                                    // 对齐文字槽底,同 heroOldCol)。
+                                    y: root.textSlotVertical() === "top"
+                                        ? 0 : (root.textSlotVertical() === "middle"
+                                                ? (parent.height - implicitHeight) / 2
+                                                : parent.height - implicitHeight)
+                                    spacing: 8
+                                    Row {
+                                        width: parent.width
+                                        spacing: 12
+                                        AppText {
+                                            id: heroNewTitle
+                                            text: root.heroTitle()
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 30
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                            width: parent.width
+                                            horizontalAlignment: root.heroTextAlign
+                                        }
+                                    }
+                                    AppText {
+                                        text: root.metaLine()
+                                        color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                        font.pixelSize: 14
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        opacity: text !== "" ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                                    }
+                                    AppText {
+                                        text: root.detail.overview || ""
+                                        color: Theme.textMuted
+                                        font.pixelSize: 13
+                                        wrapMode: Text.Wrap
+                                        elide: Text.ElideRight
+                                        maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        opacity: text !== "" ? 1 : 0
+                                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                                    }
+                                }
+                            }
+                        }
                         Item {
                             id: btnHolder
                             // 按钮行锚定容器:锚点放这里(自身无 LayoutMirroring,
@@ -941,116 +941,144 @@ Item {
                                        ? posterSlot.y + posterSlot.height - 44
                                        : textSlot.y + heroNewCol.y)
 
-                        Row {
-                            id: btnRow
-                            // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
-                            // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
-                            // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
-                            // LayoutMirroring 只反转子项,按钮内容不镜像;
-                            // 自身无锚点,故不触发 anchors 反转。
-                            LayoutMirroring.enabled: !btnHolder._leftSide
-                            spacing: 10
-                            opacity: root.textFade
-                            Button {
-                                id: playBtn
-                                text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
-                                // 弹性宽由 _playW 决定(锚距内放不下时压缩,
-                                // 下限 120 保可点区域)。
-                                width: btnHolder._playW
-                                height: 44
-                                font.pixelSize: 16
-                                onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
-                                background: Rectangle {
-                                    radius: 10
-                                    // 强调色半透明(75%):透出莫奈背景,不显实色块。
-                                    color: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                  root.accentColor.b, 0.75)
-                                    Behavior on color { ColorAnimation { duration: Constants.animMaxMs } }
-                                }
-                                contentItem: AppText {
-                                    text: playBtn.text
-                                    color: "white"
+                            Row {
+                                id: btnRow
+                                // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
+                                // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
+                                // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
+                                // LayoutMirroring 只反转子项,按钮内容不镜像;
+                                // 自身无锚点,故不触发 anchors 反转。
+                                LayoutMirroring.enabled: !btnHolder._leftSide
+                                spacing: 10
+                                opacity: root.textFade
+                                Button {
+                                    id: playBtn
+                                    text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
+                                    // 弹性宽由 _playW 决定(锚距内放不下时压缩,
+                                    // 下限 120 保可点区域)。
+                                    width: btnHolder._playW
+                                    height: 44
                                     font.pixelSize: 16
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
+                                    onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
+                                    background: Rectangle {
+                                        radius: height / 2
+                                        color: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                    root.accentColor.b, 0.85)
+                                    }
+                                    contentItem: AppText {
+                                        text: playBtn.text
+                                        color: "white"
+                                        font.pixelSize: 16
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
                                 }
-                            }
-                            // 收藏:爱心图标。未收藏藏白实心,已收藏红(粉)实心。
-                            Button {
-                                width: 44
-                                height: 44
-                                onClicked: root.toggleFavorite()
-                                background: Rectangle {
-                                    radius: 10
-                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                  root.complementColor.b, 0.28)
-                                    border.width: 1
-                                    border.color: root.complementColor
-                                }
-                                contentItem: AppText {
-                                    text: "♥"
-                                    color: root.isFavorite ? Theme.favorite : root.iconWhite
-                                    font.pixelSize: 24
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                    Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
-                                }
-                            }
-                            // 已看/未看:圆圈 + 勾。已看绿色,未看藏白。
-                            Button {
-                                width: 44
-                                height: 44
-                                onClicked: root.toggleWatched()
-                                background: Rectangle {
-                                    radius: 10
-                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                  root.complementColor.b, 0.28)
-                                    border.width: 1
-                                    border.color: root.complementColor
-                                }
-                                contentItem: Item {
-                                    // 圈:声明式边框,随已看状态变色。
-                                    Rectangle {
+                                // 收藏:Canvas 绘制爱心。未收藏藏白实心,已收藏粉实心。
+                                Button {
+                                    id: favBtn
+                                    width: 44
+                                    height: 44
+                                    onClicked: root.toggleFavorite()
+                                    background: Rectangle {
+                                        radius: height / 2
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                    root.complementColor.b, 0.28)
+                                        border.width: 1
+                                        border.color: root.complementColor
+                                    }
+                                    contentItem: Item {
                                         anchors.fill: parent
-                                        anchors.margins: 8
-                                        radius: width / 2
-                                        color: "transparent"
-                                        border.width: 2.5
-                                        border.color: root.detail.played ? Theme.success : root.iconWhite
+                                        Canvas {
+                                            anchors.centerIn: parent
+                                            width: 22
+                                            height: 22
+                                            property color fillColor: root.isFavorite ? Constants.moePink : root.iconWhite
+                                            onFillColorChanged: requestPaint()
+                                            onPaint: {
+                                                const ctx = getContext("2d")
+                                                ctx.clearRect(0, 0, width, height)
+                                                ctx.beginPath()
+                                                ctx.moveTo(11, 19)
+                                                ctx.bezierCurveTo(11, 19, 3, 13, 3, 8)
+                                                ctx.bezierCurveTo(3, 5, 6, 3, 9, 5)
+                                                ctx.bezierCurveTo(10, 5, 11, 6, 11, 7)
+                                                ctx.bezierCurveTo(11, 6, 12, 5, 13, 5)
+                                                ctx.bezierCurveTo(16, 3, 19, 5, 19, 8)
+                                                ctx.bezierCurveTo(19, 13, 11, 19, 11, 19)
+                                                ctx.closePath()
+                                                ctx.fillStyle = fillColor
+                                                ctx.fill()
+                                            }
+                                        }
                                     }
-                                    // 勾:字符叠加在圈上(与爱心同机制,渲染可靠)。
-                                    AppText {
-                                        text: "✓"
-                                        color: root.detail.played ? Theme.success : root.iconWhite
-                                        font.pixelSize: 13
-                                        font.bold: true
-                                        anchors.centerIn: parent
+                                }
+                                // 已看/未看:Canvas 绘制圆圈 + 勾。已看绿色,未看藏白。
+                                Button {
+                                    id: watchedBtn
+                                    width: 44
+                                    height: 44
+                                    onClicked: root.toggleWatched()
+                                    background: Rectangle {
+                                        radius: height / 2
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                    root.complementColor.b, 0.28)
+                                        border.width: 1
+                                        border.color: root.complementColor
+                                    }
+                                    contentItem: Item {
+                                        anchors.fill: parent
+                                        Canvas {
+                                            anchors.centerIn: parent
+                                            width: 22
+                                            height: 22
+                                            property color strokeColor: root.detail.played ? Theme.success : root.iconWhite
+                                            onStrokeColorChanged: requestPaint()
+                                            onPaint: {
+                                                const ctx = getContext("2d")
+                                                ctx.clearRect(0, 0, width, height)
+                                                ctx.lineCap = "round"
+                                                ctx.lineJoin = "round"
+                                                ctx.lineWidth = 2.5
+                                                ctx.strokeStyle = strokeColor
+                                                // 圆圈
+                                                ctx.beginPath()
+                                                ctx.arc(width / 2, height / 2, 8, 0, Math.PI * 2)
+                                                ctx.stroke()
+                                                // 勾
+                                                ctx.beginPath()
+                                                ctx.moveTo(7, 11)
+                                                ctx.lineTo(10, 14)
+                                                ctx.lineTo(15, 8)
+                                                ctx.stroke()
+                                            }
+                                        }
+                                    }
+                                }
+                                Button {
+                                    id: replayBtn
+                                    text: "从头播放"
+                                    visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
+                                    width: 110
+                                    height: 44
+                                    onClicked: root.startPlayback(false)
+                                    background: Rectangle {
+                                        radius: height / 2
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                    root.complementColor.b, 0.28)
+                                        border.width: 1
+                                        border.color: root.complementColor
+                                    }
+                                    contentItem: AppText {
+                                        text: replayBtn.text
+                                        color: "white"
+                                        font.pixelSize: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
                                     }
                                 }
                             }
-                            Button {
-                                id: replayBtn
-                                text: "从头播放"
-                                visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
-                                height: 44
-                                onClicked: root.startPlayback(false)
-                                // 辅助色(分裂互补)半透明底:30% 层,与强调按钮拉开层级。
-                                background: Rectangle {
-                                    radius: 10
-                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                  root.complementColor.b, 0.28)
-                                    border.width: 1
-                                    border.color: root.complementColor
-                                }
-                                contentItem: AppText {
-                                    text: replayBtn.text
-                                    font.pixelSize: 14
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-                            }
-                        }                    }
+                        }                    
+                    }
 
                     // ================= 演职人员 =================
                     Column {
@@ -1085,32 +1113,53 @@ Item {
                                         required property var modelData
                                         width: 72
                                         height: 100
+                                        property bool hovered: false
+                                        HoverHandler {
+                                            onHoveredChanged: peopleCard.hovered = hovered
+                                        }
                                         Column {
                                             anchors.horizontalCenter: parent.horizontalCenter
+                                            anchors.top: parent.top
+                                            anchors.topMargin: 6
                                             spacing: 4
-                                            Rectangle {
+                                            Item {
                                                 width: 60
                                                 height: 60
-                                                radius: 30
-                                                clip: true
-                                                color: root.surfaceTint
                                                 anchors.horizontalCenter: parent.horizontalCenter
-                                                CrossfadeImage {
+                                                Rectangle {
                                                     anchors.fill: parent
-                                                    // 60x60 卡:半径=短边一半,呈圆形。
-                                                    cornerRadius: 30
-                                                    source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
-                                                    fillMode: Image.PreserveAspectCrop
-                                                    asynchronous: true
-                                                    duration: 500
-                                                    cache: true
+                                                    radius: 30
+                                                    clip: true
+                                                    color: root.surfaceTint
+                                                    CrossfadeImage {
+                                                        anchors.fill: parent
+                                                        // 60x60 卡:半径=短边一半,呈圆形。
+                                                        cornerRadius: 30
+                                                        source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
+                                                        fillMode: Image.PreserveAspectCrop
+                                                        asynchronous: true
+                                                        duration: 500
+                                                        cache: true
+                                                    }
+                                                    AppText {
+                                                        anchors.centerIn: parent
+                                                        text: peopleCard.modelData.name ? peopleCard.modelData.name.charAt(0) : ""
+                                                        color: Theme.textMuted
+                                                        font.pixelSize: 20
+                                                        visible: !(peopleCard.modelData.posterId)
+                                                    }
                                                 }
-                                                AppText {
+                                                // hover 粉色细环。
+                                                Rectangle {
                                                     anchors.centerIn: parent
-                                                    text: peopleCard.modelData.name ? peopleCard.modelData.name.charAt(0) : ""
-                                                    color: Theme.textMuted
-                                                    font.pixelSize: 20
-                                                    visible: !(peopleCard.modelData.posterId)
+                                                    width: 66
+                                                    height: 66
+                                                    radius: 33
+                                                    color: "transparent"
+                                                    border.width: peopleCard.hovered ? 2 : 0
+                                                    border.color: Constants.moePink
+                                                    opacity: peopleCard.hovered ? 1 : 0
+                                                    Behavior on opacity { NumberAnimation { duration: 160 } }
                                                 }
                                             }
                                             AppText {
@@ -1159,23 +1208,114 @@ Item {
                                 // 同 people delegate:required 声明让 qmllint 识别 modelData。
                                 required property var modelData
                                 width: parent.width
-                                spacing: 2
-                                AppText {
-                                    text: (mediaSourceItem.modelData.name || "版本") + " · "
-                                            + (mediaSourceItem.modelData.container ? mediaSourceItem.modelData.container.toUpperCase() + " · " : "")
-                                            + root.formatSize(mediaSourceItem.modelData.sizeBytes)
-                                            + (mediaSourceItem.modelData.bitrate > 0 ? " · " + root.formatBitrate(mediaSourceItem.modelData.bitrate) : "")
-                                            + (mediaSourceItem.modelData.runTimeTicks > 0 ? " · " + root.formatTime(mediaSourceItem.modelData.runTimeTicks / Constants.ticksPerSecond) : "")
-                                    color: Theme.textPrimary
-                                    font.pixelSize: 14
+                                spacing: 8
+                                // 汇总信息 chip 行。
+                                Flow {
+                                    width: parent.width
+                                    spacing: 6
+                                    Rectangle {
+                                        visible: mediaSourceItem.modelData.name
+                                        height: 22
+                                        width: nameChipText.implicitWidth + 16
+                                        radius: 11
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                        border.width: 1
+                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                        AppText {
+                                            id: nameChipText
+                                            anchors.centerIn: parent
+                                            text: mediaSourceItem.modelData.name || ""
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: mediaSourceItem.modelData.container
+                                        height: 22
+                                        width: containerChipText.implicitWidth + 16
+                                        radius: 11
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                        border.width: 1
+                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                        AppText {
+                                            id: containerChipText
+                                            anchors.centerIn: parent
+                                            text: mediaSourceItem.modelData.container ? mediaSourceItem.modelData.container.toUpperCase() : ""
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: mediaSourceItem.modelData.sizeBytes > 0
+                                        height: 22
+                                        width: sizeChipText.implicitWidth + 16
+                                        radius: 11
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                        border.width: 1
+                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                        AppText {
+                                            id: sizeChipText
+                                            anchors.centerIn: parent
+                                            text: root.formatSize(mediaSourceItem.modelData.sizeBytes)
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: mediaSourceItem.modelData.bitrate > 0
+                                        height: 22
+                                        width: bitrateChipText.implicitWidth + 16
+                                        radius: 11
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                        border.width: 1
+                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                        AppText {
+                                            id: bitrateChipText
+                                            anchors.centerIn: parent
+                                            text: root.formatBitrate(mediaSourceItem.modelData.bitrate)
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                        }
+                                    }
+                                    Rectangle {
+                                        visible: mediaSourceItem.modelData.runTimeTicks > 0
+                                        height: 22
+                                        width: runtimeChipText.implicitWidth + 16
+                                        radius: 11
+                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                        border.width: 1
+                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                        AppText {
+                                            id: runtimeChipText
+                                            anchors.centerIn: parent
+                                            text: root.formatTime(mediaSourceItem.modelData.runTimeTicks / Constants.ticksPerSecond)
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                        }
+                                    }
                                 }
-                                Repeater {
-                                    model: mediaSourceItem.modelData.streams
-                                    delegate: AppText {
-                                        required property var modelData
-                                        text: root.streamLabel(modelData)
-                                        color: Theme.textMuted
-                                        font.pixelSize: 13
+                                // 轨道 chip 行。
+                                Flow {
+                                    width: parent.width
+                                    spacing: 6
+                                    Repeater {
+                                        model: mediaSourceItem.modelData.streams
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            height: 22
+                                            width: streamChipText.implicitWidth + 16
+                                            radius: 11
+                                            color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.10)
+                                            border.width: 1
+                                            border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.25)
+                                            AppText {
+                                                id: streamChipText
+                                                anchors.centerIn: parent
+                                                text: root.streamLabel(modelData)
+                                                color: Theme.textMuted
+                                                font.pixelSize: 12
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1210,8 +1350,13 @@ Item {
                                 // 同上:required 声明让 qmllint 识别 C++ 模型的 model 角色访问。
                                 required property var model
                                 width: Constants.detailCardW
-                                height: Constants.detailCardH
+                                // 上下各留 20px 边距,hover 放大时不被 ListView 裁剪。
+                                height: Constants.detailCardH + 40
+                                property bool hovered: false
+                                scale: hovered ? 1.05 : 1.0
+                                Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                                 Rectangle {
+                                    anchors.centerIn: parent
                                     width: Constants.detailCardW
                                     height: Constants.detailCardH
                                     color: root.surfaceTint
@@ -1237,6 +1382,9 @@ Item {
                                         font.pixelSize: 12
                                         elide: Text.ElideRight
                                     }
+                                }
+                                HoverHandler {
+                                    onHoveredChanged: similarCard.hovered = hovered
                                 }
                                 // 点击进详情:TapHandler(替代 MouseArea)。
                                 TapHandler {
@@ -1270,7 +1418,7 @@ Item {
                     property bool stripHovered: seasonMa.containsMouse
                     width: parent.width
                     height: 96
-                    radius: 10
+                    radius: 0
                     color: "transparent"
                     border.width: 0
                     clip: true
@@ -1279,12 +1427,13 @@ Item {
                     // 往数字牌靠近且随其位置跟随,不再贴条边缘。
                     AppText {
                         text: "第"
-                        color: Theme.textPrimary
+                        color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
                         font.pixelSize: 14
                         anchors.right: digitCol.left
                         anchors.rightMargin: 8
                         anchors.top: parent.top
                         anchors.topMargin: 42
+                        Behavior on color { ColorAnimation { duration: 160 } }
                     }
                     // 数字区:行高固定(上 16 + 候选牌 62 + 下 16),每行内容
                     // 垂直居中 → 候选牌原位缩放,不上下移动;上下邻季行
@@ -1356,12 +1505,13 @@ Item {
                     // "季" 同样锚定数字牌(左缘贴牌边 8px)。
                     AppText {
                         text: "季"
-                        color: Theme.textPrimary
+                        color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
                         font.pixelSize: 14
                         anchors.left: digitCol.right
                         anchors.leftMargin: 8
                         anchors.top: parent.top
                         anchors.topMargin: 42
+                        Behavior on color { ColorAnimation { duration: 160 } }
                     }
                     MouseArea {
                         id: seasonMa
@@ -1440,14 +1590,26 @@ Item {
                                     duration: 500
                                     cache: true
                                 }
-                                // 无海报且无父级背景(都拿不到图)或加载失败回退:播放图标
-                                AppText {
+                                // 无海报且无父级背景(都拿不到图)或加载失败回退:Canvas 播放图标。
+                                Canvas {
                                     anchors.centerIn: parent
-                                    text: "▶"
-                                    color: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
-                                    font.pixelSize: 22
+                                    width: 28
+                                    height: 28
+                                    property color iconColor: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
+                                    onIconColorChanged: requestPaint()
                                     visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
-                                             || thumb.status === Image.Error
+                                              || thumb.status === Image.Error
+                                    onPaint: {
+                                        const ctx = getContext("2d")
+                                        ctx.clearRect(0, 0, width, height)
+                                        ctx.fillStyle = iconColor
+                                        ctx.beginPath()
+                                        ctx.moveTo(8, 5)
+                                        ctx.lineTo(22, 14)
+                                        ctx.lineTo(8, 23)
+                                        ctx.closePath()
+                                        ctx.fill()
+                                    }
                                 }
                                 // 已看徽标:缩略图右上角实心圆(莫奈强调色),中央镂空
                                 // 透明勾(Canvas destination-out 擦成洞,透出缩略图)。
