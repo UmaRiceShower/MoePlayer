@@ -1,11 +1,11 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
 
-//! 播放窗口:MpvItem 播放视频,官方 OSC(进度条/按钮/时间)由 mpv 直接绘制。
-//! 无自绘控件,鼠标/键盘事件转发给 mpv 以驱动 OSC 交互。
-//! 携带播放元数据(meta)时执行 Emby 播放状态回传:
-//! 起播 reportStart,播放中每 10s reportProgress,结束/关窗 reportStopped,每 10 分钟 Ping。
+//! 播放窗口:MpvItem 渲染视频,UI 控件由 QML 自绘(播放/暂停/进度/音量/全屏)。
+//! 鼠标/键盘事件不再转发给 mpv,由 QML 层直接调用 MpvItem API。
+//! 保留 Emby 播放状态回传:起播、10s 进度、暂停、停止、每 10 分钟 Ping。
 Window {
     id: root
     width: 960
@@ -21,7 +21,7 @@ Window {
     // 播放元数据:{itemId, mediaSourceId, playSessionId, playMethod}。
     property var meta: ({})
 
-    // 协商中(窗口已建、播放地址未到):显示加载态,startPlayback 后关闭。
+    // 协商中(窗口已建、播放地址未到):显示加载态,startPlayback 后隐藏。
     property bool loading: false
     // 协商失败文案:非空显示失败态(错误信息 + 关闭按钮)。
     property string loadError: ""
@@ -34,6 +34,23 @@ Window {
     property double lastDuration: 0
     // 续播位置(100ns ticks,来自详情页继续观看),起播后跳转。
     readonly property double resumeTicks: (meta && meta.resumePositionTicks) || 0
+
+    // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
+    // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
+    // 持有的是实例引用,不经过运行时 id 查找。
+    readonly property var owner: root
+
+    // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
+    property bool stoppedReported: false
+
+    // 自定义 UI 显隐。
+    property bool controlsVisible: true
+    readonly property bool isFullScreen: root.visibility === Window.FullScreen
+
+    // 窗口关闭完成(Main 据此从播放窗口列表移除)。
+    signal windowClosed()
+    // 正常播完(错误退出不发):主窗口据此重拉当前页已看/进度。
+    signal playbackFinished()
 
     // 播放地址协商完成:设置元数据并起播(先开窗后台协商模式下,
     // 窗口创建时无 source,起播统一经此入口)。
@@ -50,19 +67,6 @@ Window {
         root.loading = false
         root.loadError = message || ""
     }
-
-    // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
-    // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
-    // 持有的是实例引用,不经过运行时 id 查找。
-    readonly property var owner: root
-
-    // 停止回传已发出(stop 触发的 playbackEnded 不再重复上报)。
-    property bool stoppedReported: false
-
-    // 窗口关闭完成(Main 据此从播放窗口列表移除)。
-    signal windowClosed()
-    // 正常播完(错误退出不发):主窗口据此重拉当前页已看/进度。
-    signal playbackFinished()
 
     // 关窗时上报最终位置(用缓存值,mpv 已停止读取不到)并停止播放:
     // Window.close() 只隐藏窗口,对象与 mpv 继续存活、音频照播。
@@ -173,54 +177,313 @@ Window {
                                                    root.meta.userId, root.meta.playSessionId)
     }
 
-    // 鼠标转发:mpv `mouse <x> <y> <button> [mode]`(button -1=移动,0/1/2=左/中/右键);
-    // 坐标为整数(mpv 的 mouse 命令不接受浮点),滚轮经 keypress WHEEL_UP|WHEEL_DOWN 转发。
+    // ---------- 自绘播放 UI ----------
+    function toggleFullscreen() {
+        root.visibility = root.isFullScreen ? Window.Windowed : Window.FullScreen
+    }
+    function playPause() {
+        if (mpv.state === "playing")
+            mpv.setPause(true)
+        else if (mpv.state === "paused")
+            mpv.setPause(false)
+    }
+    function seekRelative(seconds) {
+        const pos = mpv.position + seconds
+        mpv.seek(Math.max(0, Math.min(pos, mpv.duration || pos)))
+    }
+    function seekTo(ratio) {
+        const pos = (mpv.duration || 0) * Math.max(0, Math.min(1, ratio))
+        mpv.seek(pos)
+    }
+    function formatTime(seconds) {
+        const s = Math.max(0, Math.round(seconds || 0))
+        const h = Math.floor(s / 3600)
+        const m = Math.floor((s % 3600) / 60)
+        const sec = s % 60
+        const mm = m < 10 ? "0" + m : m
+        const ss = sec < 10 ? "0" + sec : sec
+        return h > 0 ? h + ":" + mm + ":" + ss : mm + ":" + ss
+    }
+
+    // 自动隐藏控制栏。
+    Timer {
+        id: hideControlsTimer
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            if (!controlBarArea.containsMouse)
+                root.controlsVisible = false
+        }
+    }
+    function showControls() {
+        root.controlsVisible = true
+        hideControlsTimer.restart()
+    }
+
+    // 视频区域鼠标交互:移动显示控件,点击播放/暂停,双击全屏,滚轮音量。
     MouseArea {
+        id: overlayMouse
         anchors.fill: parent
         hoverEnabled: true
-        onPositionChanged: mpv.command(["mouse", Math.round(x), Math.round(y), -1])
-        onPressed: function (mouse) {
-            const btn = mouse.button === Qt.LeftButton ? 0
-                      : mouse.button === Qt.MiddleButton ? 1 : 2
-            mpv.command(["mouse", Math.round(mouse.x), Math.round(mouse.y), btn, "single"])
+        onPositionChanged: root.showControls()
+        onPressed: {
+            root.showControls()
+            // 点击非控件区域切换播放/暂停。
+            if (!controlBarArea.containsMouse)
+                root.playPause()
         }
+        onDoubleClicked: root.toggleFullscreen()
         onWheel: function (wheel) {
-            if (wheel.angleDelta.y > 0)
-                mpv.command(["keypress", "WHEEL_UP"])
-            else if (wheel.angleDelta.y < 0)
-                mpv.command(["keypress", "WHEEL_DOWN"])
+            root.showControls()
+            const delta = wheel.angleDelta.y / 120
+            mpv.volume = Math.max(0, Math.min(100, mpv.volume + delta * 5))
         }
     }
 
-    // 键盘转发:Qt 键码映射到 mpv 键名,经 keypress 下发(MpvItem 已开启默认绑定)。
+    // 顶部信息栏。
+    Rectangle {
+        id: topBar
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 48
+        color: Qt.rgba(0, 0, 0, 0.35)
+        opacity: root.controlsVisible ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+
+        AppText {
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 16
+            text: root.title
+            color: "white"
+            font.pixelSize: 14
+            elide: Text.ElideRight
+            width: parent.width - 120
+        }
+        Button {
+            id: closeBtn
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            width: 80
+            height: 30
+            text: "关闭"
+            onClicked: root.close()
+            background: Rectangle {
+                radius: height / 2
+                color: closeBtn.hovered ? Constants.moePinkDark : Constants.moePink
+            }
+            contentItem: AppText {
+                text: closeBtn.text
+                color: "white"
+                font.pixelSize: 13
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
+    }
+
+    // 暂停/播放大图标（居中提示）。
+    AppText {
+        anchors.centerIn: parent
+        text: mpv.state === "paused" ? "⏸" : "▶"
+        color: "white"
+        font.pixelSize: 64
+        opacity: mpv.state === "paused" ? 0.75 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+    }
+
+    // 底部控制栏。
+    Rectangle {
+        id: controlBar
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 68
+        color: Qt.rgba(0, 0, 0, 0.55)
+        opacity: root.controlsVisible ? 1 : 0
+        visible: opacity > 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+
+        MouseArea {
+            id: controlBarArea
+            anchors.fill: parent
+            hoverEnabled: true
+            onPositionChanged: root.showControls()
+        }
+
+        Row {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
+
+            // 播放/暂停。
+            Button {
+                id: ppBtn
+                width: 44
+                height: 44
+                onClicked: root.playPause()
+                background: Rectangle {
+                    radius: height / 2
+                    color: ppBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                }
+                contentItem: AppText {
+                    text: mpv.state === "playing" ? "⏸" : "▶"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            // 时间。
+            AppText {
+                id: timeLabel
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.formatTime(mpv.position) + " / " + root.formatTime(mpv.duration)
+                color: "white"
+                font.pixelSize: 13
+            }
+
+            // 进度条。
+            Item {
+                id: seekBar
+                anchors.verticalCenter: parent.verticalCenter
+                height: 24
+                width: parent.width - 320
+                property real progress: mpv.duration > 0 ? mpv.position / mpv.duration : 0
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width
+                    height: 4
+                    radius: 2
+                    color: Qt.rgba(1, 1, 1, 0.25)
+                }
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width * seekBar.progress
+                    height: 4
+                    radius: 2
+                    color: Constants.moePink
+                }
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: parent.width * seekBar.progress - 6
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: "white"
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onPressed: root.seekTo(mouse.x / seekBar.width)
+                    onPositionChanged: if (pressed) root.seekTo(mouse.x / seekBar.width)
+                }
+            }
+
+            // 音量按钮。
+            Button {
+                id: volBtn
+                width: 44
+                height: 44
+                onClicked: mpv.volume = mpv.volume > 0 ? 0 : 100
+                background: Rectangle {
+                    radius: height / 2
+                    color: volBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: mpv.volume > 0 ? "🔊" : "🔇"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            // 音量滑条。
+            Item {
+                id: volBar
+                anchors.verticalCenter: parent.verticalCenter
+                width: 80
+                height: 16
+                property real ratio: mpv.volume / 100
+
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width
+                    height: 4
+                    radius: 2
+                    color: Qt.rgba(1, 1, 1, 0.25)
+                }
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width * volBar.ratio
+                    height: 4
+                    radius: 2
+                    color: Constants.moePink
+                }
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: parent.width * volBar.ratio - 5
+                    width: 10
+                    height: 10
+                    radius: 5
+                    color: "white"
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    onPressed: mpv.volume = Math.max(0, Math.min(100, (mouse.x / volBar.width) * 100))
+                    onPositionChanged: if (pressed) mpv.volume = Math.max(0, Math.min(100, (mouse.x / volBar.width) * 100))
+                }
+            }
+
+            // 全屏。
+            Button {
+                id: fsBtn
+                width: 44
+                height: 44
+                onClicked: root.toggleFullscreen()
+                background: Rectangle {
+                    radius: height / 2
+                    color: fsBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: root.isFullScreen ? "⛶" : "⛶"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+    }
+
+    // 键盘处理。
     Item {
         id: keyCatcher
         anchors.fill: parent
         focus: true
-
         Keys.onPressed: function (event) {
-            const map = {
-                [Qt.Key_Space]: "SPACE",
-                [Qt.Key_Left]: "LEFT",
-                [Qt.Key_Right]: "RIGHT",
-                [Qt.Key_Up]: "UP",
-                [Qt.Key_Down]: "DOWN",
-                [Qt.Key_Escape]: "ESC",
-                [Qt.Key_P]: "p",
-                [Qt.Key_M]: "m",
-                [Qt.Key_F]: "f",
-                [Qt.Key_Return]: "ENTER",
-                [Qt.Key_Enter]: "ENTER",
-                [Qt.Key_Slash]: "/",
-                [Qt.Key_Asterisk]: "*",
-                [Qt.Key_9]: "9",
-                [Qt.Key_0]: "0"
+            const key = event.key
+            if (key === Qt.Key_Space) { root.playPause(); event.accepted = true }
+            else if (key === Qt.Key_Left) { root.seekRelative(-5); event.accepted = true }
+            else if (key === Qt.Key_Right) { root.seekRelative(5); event.accepted = true }
+            else if (key === Qt.Key_Up) { mpv.volume = Math.min(100, mpv.volume + 5); event.accepted = true }
+            else if (key === Qt.Key_Down) { mpv.volume = Math.max(0, mpv.volume - 5); event.accepted = true }
+            else if (key === Qt.Key_F) { root.toggleFullscreen(); event.accepted = true }
+            else if (key === Qt.Key_M) { mpv.volume = mpv.volume > 0 ? 0 : 100; event.accepted = true }
+            else if (key === Qt.Key_Escape) {
+                if (root.isFullScreen) { root.visibility = Window.Windowed; event.accepted = true }
             }
-            const name = map[event.key]
-            if (name) {
-                mpv.command(["keypress", name])
+            else if (key >= Qt.Key_0 && key <= Qt.Key_9) {
+                const pct = (key - Qt.Key_0) / 10
+                if (mpv.duration > 0) mpv.seek(mpv.duration * pct)
                 event.accepted = true
             }
+            root.showControls()
         }
     }
 
@@ -239,6 +502,7 @@ Window {
             spacing: 20
             // 粉圈转圈:Canvas 画 270° 圆弧 + 旋转动画。
             BusyIndicator {
+                anchors.horizontalCenter: parent.horizontalCenter
                 visible: root.loading
                 running: root.loading
                 implicitWidth: 44
@@ -282,7 +546,7 @@ Window {
                 horizontalAlignment: Text.AlignHCenter
             }
             Button {
-                id: closeBtn
+                id: errCloseBtn
                 visible: root.loadError !== ""
                 anchors.horizontalCenter: parent.horizontalCenter
                 width: 120
@@ -291,10 +555,10 @@ Window {
                 onClicked: root.close()
                 background: Rectangle {
                     radius: height / 2
-                    color: closeBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                    color: errCloseBtn.hovered ? Constants.moePinkDark : Constants.moePink
                 }
                 contentItem: AppText {
-                    text: closeBtn.text
+                    text: errCloseBtn.text
                     color: "white"
                     font.pixelSize: 14
                     horizontalAlignment: Text.AlignHCenter
