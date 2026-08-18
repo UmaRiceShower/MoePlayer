@@ -135,11 +135,12 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
 
 void EmbyClient::postJson(const QString &serverUrl, const QString &token, const QString &userId,
                           const QString &path, const QJsonObject &body,
-                          std::function<void(const QJsonDocument &)> onOk, const QString &what)
+                          std::function<void(const QJsonDocument &)> onOk, const QString &what,
+                          std::function<void()> onFail)
 {
     QNetworkReply *reply = m_nam.post(makeRequest(serverUrl, token, userId, path, true),
                                       QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, what]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -147,6 +148,8 @@ void EmbyClient::postJson(const QString &serverUrl, const QString &token, const 
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
+            if (onFail)
+                onFail();
             return;
         }
         onOk(QJsonDocument::fromJson(reply->readAll()));
@@ -897,11 +900,12 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     body.insert(QStringLiteral("EnableTranscoding"), true);
 
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
-             [this, key, token, userId, itemId](const QJsonDocument &doc) {
-                 const QJsonObject o = doc.object();
+             [this, key, token, userId, itemId](const QJsonDocument &doc) {                 const QJsonObject o = doc.object();
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
-                     emit errorOccurred(key, QStringLiteral("PlaybackInfo 未返回可用媒体源"));
+                     const QString msg = QStringLiteral("PlaybackInfo 未返回可用媒体源");
+                     emit errorOccurred(key, msg);
+                     emit playbackFailed(key, itemId, msg);
                      return;
                  }
                  const QJsonObject src = sources.first().toObject();
@@ -945,7 +949,9 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                                       .arg(itemId, mediaSourceId);
                      probeRange = true;
                  } else {
-                     emit errorOccurred(key, QStringLiteral("该条目无可用直连/转码方案"));
+                     const QString msg = QStringLiteral("该条目无可用直连/转码方案");
+                     emit errorOccurred(key, msg);
+                     emit playbackFailed(key, itemId, msg);
                      return;
                  }
                  url = withApiKey(url);
@@ -971,7 +977,10 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  } else {
                      emitReady(url);
                  }
-             }, QStringLiteral("播放协商"));
+             }, QStringLiteral("播放协商"),
+             [this, key, itemId] {
+                 emit playbackFailed(key, itemId, QStringLiteral("播放协商请求失败"));
+             });
 }
 
 void EmbyClient::setWatched(const QString &serverUrl, const QString &token, const QString &userId,

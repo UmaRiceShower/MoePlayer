@@ -14,6 +14,9 @@ ApplicationWindow {
     // niri/常规窗口管理器下关闭快捷键作用于焦点窗口,焦点常在主窗口,
     // 若不处理则播放窗口会残留继续播放、应用也不退出。
     property var playerWindows: []
+    // 协商中窗口(itemId → 窗口):先开窗后协商模式下,播放地址就绪后
+    // 经 deliverPlayback 交付;窗口被用户先行关闭时对应项随之移除。
+    property var pendingPlaybackWindows: ({})
 
     // 媒体库页离开时的状态(viewId/排序/滚动位置),再次进入时恢复。
     property var libraryState: null
@@ -39,12 +42,33 @@ ApplicationWindow {
     // 在独立顶层窗口中播放,可多次调用实现多窗口并发。
     // meta 为播放元数据({itemId, mediaSourceId, playSessionId, playMethod}),驱动回传。
     function openPlayerWindow(url, headers, meta) {
-        const w = playerWindowComponent.createObject(null, {
-            source: url,
-            headers: headers || [],
-            meta: meta || {},
-            visible: true
-        })
+        const w = root.createPlayerWindow({ source: url, headers: headers || [], meta: meta || {} })
+        return w
+    }
+    // 先开窗后协商:立即创建播放窗口(加载态),播放地址由
+    // deliverPlayback 在协商完成后交付;meta 仅需 serverUrl/itemId。
+    function openPlayerWindowPending(meta) {
+        const w = root.createPlayerWindow({ visible: true, loading: true })
+        if (meta && meta.itemId)
+            root.pendingPlaybackWindows[meta.itemId] = w
+        return w
+    }
+    // 协商完成:把播放地址交付给等待中的窗口并起播。
+    function deliverPlayback(url, headers, meta) {
+        const w = root.pendingPlaybackWindows[meta.itemId]
+        delete root.pendingPlaybackWindows[meta.itemId]
+        if (w)
+            w.startPlayback(url, headers, meta)
+    }
+    // 协商失败:对应窗口切换为失败态(显示错误信息,由用户关闭)。
+    function deliverPlaybackFailed(itemId, message) {
+        const w = root.pendingPlaybackWindows[itemId]
+        delete root.pendingPlaybackWindows[itemId]
+        if (w)
+            w.showLoadError(message)
+    }
+    function createPlayerWindow(props) {
+        const w = playerWindowComponent.createObject(null, props)
         root.playerWindows.push(w)
         // 播放结束(播完或关窗):重拉当前页面已看/进度——等效替代 WS
         // UserDataChanged 推送(该事件唯一真实触发点即本客户端播放,
@@ -53,6 +77,11 @@ ApplicationWindow {
         w.playbackFinished.connect(refreshCur)
         w.windowClosed.connect(function () {
             root.playerWindows = root.playerWindows.filter(function (x) { return x !== w })
+            // 协商中窗口被用户关闭:移除待交付项,交付/失败回调不再命中。
+            for (const k of Object.keys(root.pendingPlaybackWindows)) {
+                if (root.pendingPlaybackWindows[k] === w)
+                    delete root.pendingPlaybackWindows[k]
+            }
             refreshCur()
         })
         return w
@@ -161,8 +190,14 @@ ApplicationWindow {
     Component {
         id: detailPage
         Detail {
-            onPlayRequested: function (url, headers, meta) {
-                root.openPlayerWindow(url, headers, meta)
+            onPlayWindowRequested: function (meta) {
+                root.openPlayerWindowPending(meta)
+            }
+            onPlaybackDelivered: function (url, headers, meta) {
+                root.deliverPlayback(url, headers, meta)
+            }
+            onPlaybackFailed: function (itemId, message) {
+                root.deliverPlaybackFailed(itemId, message)
             }
             // 返回键:详情内导航(相似推荐/换集/历史)已在 Detail 内原地完成,
             // 仅历史空时 pop 回上层页。
