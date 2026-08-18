@@ -874,6 +874,12 @@ Item {
         spacing: 12
         AppText {
             anchors.verticalCenter: parent.verticalCenter
+            text: "♥"
+            color: Constants.moePink
+            font.pixelSize: 24
+        }
+        AppText {
+            anchors.verticalCenter: parent.verticalCenter
             text: "服务器管理（Ctrl+O）"
             color: Theme.textPrimary
             font.pixelSize: 24
@@ -933,7 +939,36 @@ Item {
             onClicked: (mouse) => blankMenu.popup(blankArea, mouse.x, mouse.y)
         }
 
-        // 添加服务器占位卡(具体添加 UI 后续设计,先占位)。
+        // 空状态提示:没有服务器时居中显示萌系文案。
+        Column {
+            anchors.centerIn: parent
+            visible: AccountManager.accountCount === 0
+            spacing: 12
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 200 } }
+
+            AppText {
+                text: "♥"
+                color: Constants.moePink
+                font.pixelSize: 48
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            AppText {
+                text: "还没有服务器哦~"
+                color: Theme.textPrimary
+                font.pixelSize: 18
+                font.bold: true
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+            AppText {
+                text: "点击左上角的“+”卡片添加服务器吧"
+                color: Theme.textMuted
+                font.pixelSize: 14
+                anchors.horizontalCenter: parent.horizontalCenter
+            }
+        }
+
+        // 添加服务器占位卡:萌系虚线边框 + hover 粉色发光。
         Rectangle {
             id: plusCard
             width: root.cardW
@@ -941,9 +976,18 @@ Item {
             radius: 12
             color: "transparent"
             border.width: 2
-            border.color: plusHover.containsMouse
-                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.8)
-                          : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+            border.color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+            // hover 时粉色柔光外圈。
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -3
+                radius: 15
+                color: "transparent"
+                border.width: plusHover.containsMouse ? 2 : 0
+                border.color: Constants.moePink
+                opacity: plusHover.containsMouse ? 0.35 : 0
+                Behavior on opacity { NumberAnimation { duration: 120 } }
+            }
             // 被同行放大卡挤压时同样让位/复位(经 animateTo 驱动)。
             // 位移动画进行中瞬移到目标位(同账号卡 settle,见其注释)。
             function settle() {
@@ -1013,9 +1057,10 @@ Item {
             Canvas {
                 id: plusIcon
                 anchors.centerIn: parent
+                anchors.verticalCenterOffset: -10
                 width: 44
                 height: 44
-                property color lineColor: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                property color lineColor: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
                 onLineColorChanged: requestPaint()
                 onPaint: {
                     const ctx = getContext("2d")
@@ -1038,8 +1083,9 @@ Item {
                 anchors.topMargin: 8
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "添加服务器"
-                color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
+                color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
                 font.pixelSize: 14
+                Behavior on color { ColorAnimation { duration: 120 } }
             }
 
             // 点击打开添加浮窗。
@@ -1094,7 +1140,20 @@ Item {
                 border.width: card.modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
                 border.color: card.modelData.tokenValid === false ? Theme.danger
                               : (card.dropTarget ? Theme.accent
-                              : (card.hovered ? root.hoverBorder : Theme.bg))
+                              : (card.hovered ? Constants.moePink : Theme.bg))
+                // 常驻阴影 + hover 粉色柔光外圈。
+                Rectangle {
+                    z: -1
+                    anchors.centerIn: parent
+                    width: parent.width
+                    height: parent.height
+                    radius: parent.radius
+                    color: "transparent"
+                    border.width: card.hovered ? 3 : 0
+                    border.color: Constants.moePink
+                    opacity: card.hovered ? 0.35 : 0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
                 property bool hovered: false
                 property bool dropTarget: false
                 property bool expanded: false
@@ -1273,7 +1332,7 @@ Item {
                     anchors.topMargin: 14
                     anchors.left: parent.left
                     anchors.leftMargin: 14
-                    color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
                     ServerIcon {
                         anchors.fill: parent
                         customIcon: card.modelData.icon
@@ -1434,12 +1493,24 @@ Item {
                 property string folderId: fcard.modelData.id
                 // 展开状态(绑定 root.expandedFolders,切换即刷新)。
                 property bool isOpen: root.isFolderExpanded(fcard.folderId)
-                // 拖放落点高亮 / hover 边框;展开态边框用强调色淡描边,
-                // 一眼区分"打开中"的文件夹。
+                // 拖放落点高亮 / hover 边框;展开态边框用粉色淡描边。
                 border.width: fcard.dropTarget ? 2 : 1
-                border.color: fcard.dropTarget ? Theme.accent
-                              : (fcard.isOpen ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.4)
-                              : (fcard.hovered ? root.hoverBorder : Theme.bg))
+                border.color: fcard.dropTarget ? Constants.moePink
+                              : (fcard.isOpen ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                              : (fcard.hovered ? Constants.moePink : Theme.bg))
+                // hover 粉色柔光外圈。
+                Rectangle {
+                    z: -1
+                    anchors.centerIn: parent
+                    width: parent.width
+                    height: parent.height
+                    radius: parent.radius
+                    color: "transparent"
+                    border.width: fcard.hovered ? 3 : 0
+                    border.color: Constants.moePink
+                    opacity: fcard.hovered ? 0.35 : 0
+                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                }
                 property bool hovered: false
                 property bool dropTarget: false
                 property bool expanded: false
@@ -1587,7 +1658,7 @@ Item {
                     onTriggered: fcard.expanded = true
                 }
 
-                // 图标区:两页交叠的文件夹图形(描边),hover 变强调色。
+                // 图标区:粉色爱心文件夹图标,hover 高亮。
                 Rectangle {
                     width: root.iconSize
                     height: root.iconSize
@@ -1596,20 +1667,32 @@ Item {
                     anchors.topMargin: 14
                     anchors.left: parent.left
                     anchors.leftMargin: 14
-                    color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                    color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
                     Canvas {
-                        id: folderGlyph
-                        anchors.fill: parent
-                        property color lineColor: farea.containsMouse ? Theme.accent : Theme.textMuted
+                        anchors.centerIn: parent
+                        width: 28
+                        height: 28
+                        property color lineColor: farea.containsMouse ? Constants.moePink : Theme.textMuted
                         onLineColorChanged: requestPaint()
                         onPaint: {
                             const ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.lineWidth = 2.5
                             ctx.strokeStyle = lineColor
-                            ctx.lineWidth = 2
-                            // 后页 + 前页错位,构成文件夹感。
-                            ctx.strokeRect(width * 0.22, height * 0.30, width * 0.56, height * 0.42)
-                            ctx.strokeRect(width * 0.14, height * 0.42, width * 0.66, height * 0.38)
+                            ctx.beginPath()
+                            // 文件夹主体 + 顶部标签页
+                            ctx.moveTo(5, 11)
+                            ctx.lineTo(10, 11)
+                            ctx.lineTo(13, 7)
+                            ctx.lineTo(23, 7)
+                            ctx.lineTo(23, 11)
+                            ctx.moveTo(5, 11)
+                            ctx.lineTo(5, 23)
+                            ctx.lineTo(23, 23)
+                            ctx.lineTo(23, 11)
+                            ctx.stroke()
                         }
                     }
                 }
@@ -1774,11 +1857,21 @@ Item {
                 width: parent.width - 48
                 spacing: 14
 
-                AppText {
-                    text: "添加服务器"
-                    color: Theme.textPrimary
-                    font.pixelSize: 20
-                    font.bold: true
+                Row {
+                    spacing: 8
+                    AppText {
+                        text: "♥"
+                        color: Constants.moePink
+                        font.pixelSize: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    AppText {
+                        text: "添加服务器"
+                        color: Theme.textPrimary
+                        font.pixelSize: 20
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
 
                 // 名称(可选)。
@@ -1793,7 +1886,19 @@ Item {
                     TextField {
                         id: nameField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
                         placeholderText: "留空则使用服务器端名称"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: nameField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: urlField.forceActiveFocus()
                     }
                 }
@@ -1809,7 +1914,19 @@ Item {
                     TextField {
                         id: urlField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
                         placeholderText: "http://192.168.1.100:8096"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: urlField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: userField.forceActiveFocus()
                     }
                 }
@@ -1825,6 +1942,19 @@ Item {
                     TextField {
                         id: userField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
+                        placeholderText: "请输入用户名"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: userField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: passField.forceActiveFocus()
                     }
                 }
@@ -1840,7 +1970,20 @@ Item {
                     TextField {
                         id: passField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
+                        placeholderText: "留空则不保存密码"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
                         echoMode: TextInput.Password
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: passField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: root.submitAdd()
                     }
                 }
@@ -1849,9 +1992,22 @@ Item {
                     id: addBtn
                     anchors.horizontalCenter: parent.horizontalCenter
                     width: 160
+                    height: 36
                     text: root.adding ? "登录中…" : "添加"
                     enabled: !root.adding
                     onClicked: root.submitAdd()
+                    background: Rectangle {
+                        radius: 18
+                        color: addBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                        border.width: 0
+                    }
+                    contentItem: AppText {
+                        text: addBtn.text
+                        color: "white"
+                        font.pixelSize: 14
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
 
                 // 失败提示(按钮下方):红色"失败" + 详细错误(网络/HTTP 状态)。
@@ -1914,11 +2070,21 @@ Item {
                 width: parent.width - 48
                 spacing: 14
 
-                AppText {
-                    text: "服务器图标"
-                    color: Theme.textPrimary
-                    font.pixelSize: 20
-                    font.bold: true
+                Row {
+                    spacing: 8
+                    AppText {
+                        text: "♥"
+                        color: Constants.moePink
+                        font.pixelSize: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    AppText {
+                        text: "服务器图标"
+                        color: Theme.textPrimary
+                        font.pixelSize: 20
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
 
                 // 预览:自定义 URL 生效即显示,否则走服务器默认图标链
@@ -1956,7 +2122,19 @@ Item {
                 TextField {
                     id: iconUrlField
                     width: parent.width
+                    height: 36
+                    leftPadding: 14
+                    rightPadding: 14
                     placeholderText: "https://example.com/logo.png"
+                    placeholderTextColor: Theme.textMuted
+                    color: "white"
+                    font.pixelSize: 14
+                    background: Rectangle {
+                        radius: 18
+                        color: Theme.bg
+                        border.width: 1
+                        border.color: iconUrlField.activeFocus ? Constants.moePink : Theme.textMuted
+                    }
                     onAccepted: root.saveIcon()
                 }
 
@@ -1964,20 +2142,64 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
                     Button {
+                        id: iconSaveBtn
                         width: 110
+                        height: 36
                         text: "保存"
                         onClicked: root.saveIcon()
+                        background: Rectangle {
+                            radius: 18
+                            color: iconSaveBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                            border.width: 0
+                        }
+                        contentItem: AppText {
+                            text: iconSaveBtn.text
+                            color: "white"
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
+                        id: iconClearBtn
                         width: 110
+                        height: 36
                         text: "清除"
                         enabled: iconUrlField.text.trim() !== ""
                         onClicked: root.clearIcon()
+                        background: Rectangle {
+                            radius: 18
+                            color: iconClearBtn.enabled && iconClearBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
+                            border.width: 1
+                            border.color: iconClearBtn.enabled ? (iconClearBtn.hovered ? Constants.moePink : Theme.textMuted) : Theme.textMuted
+                        }
+                        contentItem: AppText {
+                            text: iconClearBtn.text
+                            color: iconClearBtn.enabled ? (iconClearBtn.hovered ? Constants.moePink : Theme.textPrimary) : Theme.textMuted
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
+                        id: iconCancelBtn
                         width: 110
+                        height: 36
                         text: "取消"
                         onClicked: root.closeIconDialog()
+                        background: Rectangle {
+                            radius: 18
+                            color: iconCancelBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
+                            border.width: 1
+                            border.color: iconCancelBtn.hovered ? Constants.moePink : Theme.textMuted
+                        }
+                        contentItem: AppText {
+                            text: iconCancelBtn.text
+                            color: iconCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
             }
@@ -2020,11 +2242,21 @@ Item {
                 width: parent.width - 48
                 spacing: 14
 
-                AppText {
-                    text: root.folderEditId === "" ? "新建文件夹" : "重命名文件夹"
-                    color: Theme.textPrimary
-                    font.pixelSize: 20
-                    font.bold: true
+                Row {
+                    spacing: 8
+                    AppText {
+                        text: "♥"
+                        color: Constants.moePink
+                        font.pixelSize: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    AppText {
+                        text: root.folderEditId === "" ? "新建文件夹" : "重命名文件夹"
+                        color: Theme.textPrimary
+                        font.pixelSize: 20
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
                 AppText {
                     text: root.folderEditId === ""
@@ -2037,7 +2269,19 @@ Item {
                 TextField {
                     id: folderNameField
                     width: parent.width
+                    height: 36
+                    leftPadding: 14
+                    rightPadding: 14
                     placeholderText: "文件夹名称(留空自动命名)"
+                    placeholderTextColor: Theme.textMuted
+                    color: "white"
+                    font.pixelSize: 14
+                    background: Rectangle {
+                        radius: 18
+                        color: Theme.bg
+                        border.width: 1
+                        border.color: folderNameField.activeFocus ? Constants.moePink : Theme.textMuted
+                    }
                     onAccepted: root.saveFolder()
                 }
 
@@ -2056,9 +2300,9 @@ Item {
                             height: 24
                             radius: 12
                             color: modelData
-                            // 选中指示:白边 + 外圈(与背景色区分)。
+                            // 选中指示:粉边 + 外圈(与背景色区分)。
                             border.width: root.folderSelectedColor === modelData ? 3 : 0
-                            border.color: Theme.textPrimary
+                            border.color: Constants.moePink
                             scale: root.folderSelectedColor === modelData ? 1.15 : 1.0
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                             MouseArea {
@@ -2073,22 +2317,53 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
                     Button {
+                        id: folderOkBtn
                         width: 120
+                        height: 36
                         text: "确定"
                         onClicked: root.saveFolder()
+                        background: Rectangle {
+                            radius: 18
+                            color: folderOkBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                            border.width: 0
+                        }
+                        contentItem: AppText {
+                            text: folderOkBtn.text
+                            color: "white"
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
+                        id: folderCancelBtn
                         width: 120
+                        height: 36
                         text: "取消"
                         onClicked: root.closeFolderDialog()
+                        background: Rectangle {
+                            radius: 18
+                            color: folderCancelBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
+                            border.width: 1
+                            border.color: folderCancelBtn.hovered ? Constants.moePink : Theme.textMuted
+                        }
+                        contentItem: AppText {
+                            text: folderCancelBtn.text
+                            color: folderCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
 
                 // 删除文件夹(仅重命名场景):成员自动释放回未分组,账号不删。
                 Button {
+                    id: folderDeleteBtn
                     visible: root.folderEditId !== ""
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 120
+                    width: 160
+                    height: 36
                     text: "删除文件夹"
                     // 删除前抓快照:其余卡水波让位,成员卡回到未分组区。
                     onClicked: {
@@ -2096,10 +2371,18 @@ Item {
                         AccountManager.removeFolder(root.folderEditId)
                         root.closeFolderDialog()
                     }
+                    background: Rectangle {
+                        radius: 18
+                        color: folderDeleteBtn.hovered ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.15) : "transparent"
+                        border.width: 1
+                        border.color: folderDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.5)
+                    }
                     contentItem: AppText {
-                        text: "删除文件夹"
-                        color: Theme.danger
+                        text: folderDeleteBtn.text
+                        color: folderDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.85)
                         font.pixelSize: 14
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }
@@ -2143,11 +2426,21 @@ Item {
                 width: parent.width - 48
                 spacing: 14
 
-                AppText {
-                    text: "修改服务器"
-                    color: Theme.textPrimary
-                    font.pixelSize: 20
-                    font.bold: true
+                Row {
+                    spacing: 8
+                    AppText {
+                        text: "♥"
+                        color: Constants.moePink
+                        font.pixelSize: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    AppText {
+                        text: "修改服务器"
+                        color: Theme.textPrimary
+                        font.pixelSize: 20
+                        font.bold: true
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
                 }
 
                 // 名称(可选)。
@@ -2162,6 +2455,19 @@ Item {
                     TextField {
                         id: editNameField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
+                        placeholderText: "留空则使用服务器端名称"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: editNameField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: editUrlField.forceActiveFocus()
                     }
                 }
@@ -2177,6 +2483,19 @@ Item {
                     TextField {
                         id: editUrlField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
+                        placeholderText: "http://192.168.1.100:8096"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: editUrlField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: editUserField.forceActiveFocus()
                     }
                 }
@@ -2192,6 +2511,19 @@ Item {
                     TextField {
                         id: editUserField
                         width: parent.width
+                        height: 36
+                        leftPadding: 14
+                        rightPadding: 14
+                        placeholderText: "请输入用户名"
+                        placeholderTextColor: Theme.textMuted
+                        color: "white"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            radius: 18
+                            color: Theme.bg
+                            border.width: 1
+                            border.color: editUserField.activeFocus ? Constants.moePink : Theme.textMuted
+                        }
                         onAccepted: root.submitEdit()
                     }
                 }
@@ -2200,19 +2532,63 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
                     Button {
+                        id: editSaveBtn
                         width: 120
+                        height: 36
                         text: "保存"
                         onClicked: root.submitEdit()
+                        background: Rectangle {
+                            radius: 18
+                            color: editSaveBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                            border.width: 0
+                        }
+                        contentItem: AppText {
+                            text: editSaveBtn.text
+                            color: "white"
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
+                        id: editIconBtn
                         width: 120
+                        height: 36
                         text: "设置图标…"
                         onClicked: root.openEditIconDialog()
+                        background: Rectangle {
+                            radius: 18
+                            color: "transparent"
+                            border.width: 1
+                            border.color: editIconBtn.hovered ? Constants.moePink : Theme.textMuted
+                        }
+                        contentItem: AppText {
+                            text: editIconBtn.text
+                            color: editIconBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                     Button {
+                        id: editCancelBtn
                         width: 120
+                        height: 36
                         text: "取消"
                         onClicked: root.closeEditDialog()
+                        background: Rectangle {
+                            radius: 18
+                            color: "transparent"
+                            border.width: 1
+                            border.color: editCancelBtn.hovered ? Constants.moePink : Theme.textMuted
+                        }
+                        contentItem: AppText {
+                            text: editCancelBtn.text
+                            color: editCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
 
@@ -2238,14 +2614,24 @@ Item {
 
                 // 删除(危险操作):登出 + 删本地数据,账号卡自动补位。
                 Button {
+                    id: editDeleteBtn
                     anchors.horizontalCenter: parent.horizontalCenter
-                    width: 120
+                    width: 160
+                    height: 36
                     text: "删除服务器"
                     onClicked: root.deleteEditAccount()
+                    background: Rectangle {
+                        radius: 18
+                        color: editDeleteBtn.hovered ? Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.15) : "transparent"
+                        border.width: 1
+                        border.color: editDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.5)
+                    }
                     contentItem: AppText {
-                        text: "删除服务器"
-                        color: Theme.danger
+                        text: editDeleteBtn.text
+                        color: editDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.85)
                         font.pixelSize: 14
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
                     }
                 }
             }
