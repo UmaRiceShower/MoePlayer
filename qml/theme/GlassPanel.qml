@@ -29,6 +29,10 @@ Rectangle {
                                 root.blurSource ? root.blurSource.width : 0,
                                 root.blurSource ? root.blurSource.height : 0)
                       : root.blurRect
+        // 降低采样分辨率,让高斯模糊更明显、性能更好。
+        textureSize: Qt.size(
+            root.blurSource ? Math.max(1, root.blurSource.width / 2) : 1,
+            root.blurSource ? Math.max(1, root.blurSource.height / 2) : 1)
         live: true
         hideSource: false
     }
@@ -36,6 +40,7 @@ Rectangle {
     MultiEffect {
         anchors.fill: parent
         source: bgSource
+        autoPaddingEnabled: false
         blurEnabled: true
         blur: 1.0
         blurMax: root.blurRadius
