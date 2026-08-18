@@ -202,6 +202,10 @@ signals:
     // serverUrl/token/userId(播放回传按源路由用)。
     void playbackReady(const QString &serverUrl, const QString &url,
                        const QVariantList &headers, const QVariantMap &meta);
+    // 播放协商失败(HTTP/网络错误、无可用媒体源或直连/转码方案):
+    // 与 errorOccurred 成对发出,供调用方精确复位防抖并通知播放窗口。
+    void playbackFailed(const QString &serverUrl, const QString &itemId,
+                        const QString &message);
     // 请求错误(按服务器;失败同时发 serverRequestFailed 供账号状态处理)。
     void errorOccurred(const QString &serverUrl, const QString &message);
 
@@ -222,9 +226,12 @@ private:
                   std::function<void(const QJsonDocument &)> onOk,
                   std::function<void()> onFail, const QString &what);
     // POST JSON 请求,失败同上。
+    // POST JSON(带认证):失败发 serverRequestFailed + errorOccurred 并调用
+    // onFail(可为空;播放协商失败精确复位用)。
     void postJson(const QString &serverUrl, const QString &token, const QString &userId,
                   const QString &path, const QJsonObject &body,
-                  std::function<void(const QJsonDocument &)> onOk, const QString &what);
+                  std::function<void(const QJsonDocument &)> onOk, const QString &what,
+                  std::function<void()> onFail = nullptr);
     // DELETE 请求(无请求体),失败同上。
     void del(const QString &serverUrl, const QString &token, const QString &userId,
              const QString &path, std::function<void(const QJsonDocument &)> onOk,

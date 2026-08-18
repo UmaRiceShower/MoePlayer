@@ -111,7 +111,9 @@ Item {
     property bool playbackPending: false
     property bool _ready: false
 
-    signal playRequested(string url, var headers, var meta)
+    signal playWindowRequested(var meta)
+    signal playbackDelivered(string url, var headers, var meta)
+    signal playbackFailed(string itemId, string message)
     signal backRequested()
     onItemIdChanged: {
         // 首次进入由 onCompleted 处理;之后(itemId 原地替换)在此重拉。
@@ -140,6 +142,8 @@ Item {
         root.playbackPending = true
         root.pendingPlayItemId = itemId
         root.resumeTicks = resume
+        // 先开窗(加载态),播放地址后台协商,避免网络延迟期间无反馈。
+        root.playWindowRequested({ serverUrl: root.serverUrl, itemId: itemId })
         const c = root.creds()
         EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId)
     }
@@ -1762,14 +1766,16 @@ Item {
             if (serverUrl === root.serverUrl && meta.itemId === root.pendingPlayItemId) {
                 const m = Object.assign({}, meta)
                 m.resumePositionTicks = root.resumeTicks || 0
-                root.playRequested(url, headers, m)
+                root.playbackDelivered(url, headers, m)
             }
         }
-        // 播放协商失败时复位防抖,允许重试。
-        function onErrorOccurred(serverUrl, message) {
+        // 播放协商失败(精确信号,仅播放请求触发):复位防抖并通知
+        // 主窗口关闭加载态窗口(显示失败信息)。
+        function onPlaybackFailed(serverUrl, itemId, message) {
             if (serverUrl !== root.serverUrl)
                 return
             root.playbackPending = false
+            root.playbackFailed(itemId, message)
         }
     }
 

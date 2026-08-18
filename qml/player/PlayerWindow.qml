@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import MoePlayer.Core
 
 //! 播放窗口:MpvItem 播放视频,官方 OSC(进度条/按钮/时间)由 mpv 直接绘制。
@@ -10,13 +11,20 @@ Window {
     width: 960
     height: 540
     visible: true
-    title: source.length ? Qt.application.name + " · " + source.split("/").pop() : Qt.application.name
+    title: root.loading ? Qt.application.name + " · 正在获取播放地址…"
+          : source.length ? Qt.application.name + " · " + source.split("/").pop()
+          : Qt.application.name
     color: "black"
 
     property string source: ""
     property var headers: []
     // 播放元数据:{itemId, mediaSourceId, playSessionId, playMethod}。
     property var meta: ({})
+
+    // 协商中(窗口已建、播放地址未到):显示加载态,startPlayback 后关闭。
+    property bool loading: false
+    // 协商失败文案:非空显示失败态(错误信息 + 关闭按钮)。
+    property string loadError: ""
 
     readonly property bool reporting: meta && meta.playSessionId !== undefined && meta.playSessionId !== ""
     property double lastProgressReport: 0
@@ -26,6 +34,22 @@ Window {
     property double lastDuration: 0
     // 续播位置(100ns ticks,来自详情页继续观看),起播后跳转。
     readonly property double resumeTicks: (meta && meta.resumePositionTicks) || 0
+
+    // 播放地址协商完成:设置元数据并起播(先开窗后台协商模式下,
+    // 窗口创建时无 source,起播统一经此入口)。
+    function startPlayback(url, headers, meta) {
+        root.source = url
+        root.headers = headers || []
+        root.meta = meta || {}
+        root.loading = false
+        root.loadError = ""
+        mpv.load(url, root.headers)
+    }
+    // 协商失败:显示错误态,由用户关闭(或直接点窗口 X)。
+    function showLoadError(message) {
+        root.loading = false
+        root.loadError = message || ""
+    }
 
     // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
     // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
@@ -65,7 +89,10 @@ Window {
         Component.onCompleted: {
             // 播放流代理:配置层已限 HTTP(https 目标走 CONNECT 隧道)。
             mpv.httpProxy = ConfigManager.proxy
-            load(root.source, root.headers)
+            // 先开窗后协商模式:创建时 source 为空,起播统一经
+            // root.startPlayback;仅在调用方直接携带 url 创建时立即加载。
+            if (root.source !== "")
+                load(root.source, root.headers)
         }
     }
 
@@ -193,6 +220,86 @@ Window {
             if (name) {
                 mpv.command(["keypress", name])
                 event.accepted = true
+            }
+        }
+    }
+
+    // 协商加载/失败覆盖层:窗口创建即显示加载态,startPlayback 后隐藏;
+    // 协商失败显示错误文案 + 关闭按钮(不自动关,用户可查错误信息)。
+    Item {
+        anchors.fill: parent
+        visible: root.loading || root.loadError !== ""
+        z: 10
+        Rectangle {
+            anchors.fill: parent
+            color: Qt.rgba(0.07, 0.05, 0.09, 0.9)
+        }
+        Column {
+            anchors.centerIn: parent
+            spacing: 20
+            // 粉圈转圈:Canvas 画 270° 圆弧 + 旋转动画。
+            BusyIndicator {
+                visible: root.loading
+                running: root.loading
+                implicitWidth: 44
+                implicitHeight: 44
+                contentItem: Canvas {
+                    id: spinCanvas
+                    width: 44
+                    height: 44
+                    onPaint: {
+                        const ctx = getContext("2d")
+                        ctx.reset()
+                        ctx.strokeStyle = Constants.moePink
+                        ctx.lineWidth = 4
+                        ctx.lineCap = "round"
+                        ctx.beginPath()
+                        ctx.arc(width / 2, height / 2, width / 2 - 6,
+                                -Math.PI / 2, Math.PI * 1.4)
+                        ctx.stroke()
+                    }
+                    RotationAnimator on rotation {
+                        from: 0; to: 360
+                        duration: 900
+                        loops: Animation.Infinite
+                    }
+                }
+            }
+            AppText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: root.loading ? "正在获取播放地址…" : "获取播放地址失败"
+                color: root.loading ? Theme.textPrimary : Theme.danger
+                font.pixelSize: 18
+            }
+            AppText {
+                visible: root.loadError !== ""
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: root.loadError
+                color: Theme.textMuted
+                font.pixelSize: 13
+                wrapMode: Text.Wrap
+                width: Math.min(root.width - 120, 480)
+                horizontalAlignment: Text.AlignHCenter
+            }
+            Button {
+                id: closeBtn
+                visible: root.loadError !== ""
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 120
+                height: 38
+                text: "关闭"
+                onClicked: root.close()
+                background: Rectangle {
+                    radius: height / 2
+                    color: closeBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                }
+                contentItem: AppText {
+                    text: closeBtn.text
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
     }
