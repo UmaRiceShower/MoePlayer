@@ -123,45 +123,6 @@ Item {
 
     // ===================== 内部组件与数据 =====================
 
-    // 分类筛选 chip:萌系胶囊,选中带心形图标,激活态粉色渐变感。
-    component FilterChip: Button {
-        property string label: ""
-        property bool active: false
-
-        height: 32
-        Layout.preferredHeight: 32
-        padding: 16
-        background: Rectangle {
-            radius: 16
-            // 激活态用粉色,未激活态 hover 时微微提亮并加粉边框。
-            color: parent.active
-                   ? (parent.hovered ? root.chipActiveHover : root.chipActive)
-                   : (parent.hovered ? Theme.surface : Theme.bg)
-            border.width: 1
-            border.color: parent.active
-                           ? root.moePinkDark
-                           : (parent.hovered ? root.moePink : Theme.textMuted)
-            // 萌系小阴影,让胶囊浮起来。
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: -2
-                radius: 18
-                color: "transparent"
-                border.color: root.moePink
-                border.width: parent.active ? 2 : 0
-                opacity: 0.25
-            }
-        }
-        contentItem: AppText {
-            // 选中时前面加颗小爱心,强化萌系反馈。
-            text: (parent.active ? "♥ " : "") + label
-            color: "white"
-            font.pixelSize: 13
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
     // 分类筛选下拉(年份/评分/状态):暗色圆角底(crumb 系,同面包屑配色),
     // hover 提亮;弹出层与面包屑下拉同款(暗色 surface/圆角/描边/
     // hover accent 高亮/选中圆点)。model 统一为 ListModel(label/value)。
@@ -820,6 +781,7 @@ Item {
         ListElement { label: "未看"; value: "IsUnplayed" }
         ListElement { label: "已看"; value: "IsPlayed" }
         ListElement { label: "收藏"; value: "IsFavorite" }
+        ListElement { label: "继续观看"; value: "IsResumable" }
     }
     // 类型分面模型(动态,onGenresReceived 填充;"全部类型"首项)。
     ListModel {

@@ -17,6 +17,7 @@ Item {
     // 该服务器的搜索结果模型(serverUrl 就绪后一次性取引用)。
     property var sm: null
     readonly property bool canSearch: root.serverUrl !== "" && root.creds().token !== ""
+    readonly property int searchFilterCount: (root.yearFrom > 0 || root.yearTo > 0 ? 1 : 0) + root.activeFilters.length
 
     // ---- 过滤状态(直接映射 API 查询参数) ----
     // 类型多选(IncludeItemTypes):Movie/Series/Episode/Season/Video/BoxSet;
@@ -202,236 +203,329 @@ Item {
             anchors.margins: 16
             spacing: 10
 
+            // 标题行:强化浮层身份,增加萌系粉色爱心。
+            Row {
+                Layout.fillWidth: true
+                spacing: 8
+                AppText {
+                    text: "♥"
+                    color: Constants.moePink
+                    font.pixelSize: 20
+                }
+                AppText {
+                    text: "全局搜索"
+                    color: "white"
+                    font.pixelSize: 18
+                    font.bold: true
+                }
+                Item { Layout.fillWidth: true }
+            }
+
             TextField {
                 id: searchField
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
-                placeholderText: root.canSearch ? "搜索...(Esc 关闭)"
+                leftPadding: 34
+                rightPadding: 12
+                placeholderText: root.canSearch ? "搜索…(Esc 关闭)"
                                                 : "先在首页打开一个媒体库再搜索(Esc 关闭)"
-                placeholderTextColor: "white"
+                placeholderTextColor: Theme.textMuted
                 color: "white"
                 enabled: root.canSearch
                 font.pixelSize: 15
                 // 输入防抖:停止输入 300ms 后才发服务端搜索(过滤区即时触发)。
                 onTextChanged: searchDebounce.restart()
                 background: Rectangle {
-                    radius: 8
+                    radius: 20
                     color: Theme.bg
                     border.width: 1
-                    border.color: Theme.textMuted
-                }
-            }
-
-            // 行1:类型过滤(IncludeItemTypes,多选,默认电影+剧集)。Flow
-            // 是 Positioner,自动布局/换行 Repeater 的 delegates(RowLayout
-            // 不布局);宽度按文字自适应。类型集合为服务器实测可过滤的
-            // 影视/媒体类型(排除 trailer;排除未知类型——服务器对未知
-            // IncludeItemTypes 忽略参数返回全量,加入会污染结果)。
-            Flow {
-                Layout.fillWidth: true
-                spacing: 8
-                Repeater {
-                    model: [
-                        { label: "电影", value: "Movie" },
-                        { label: "剧集", value: "Series" },
-                        { label: "单集", value: "Episode" },
-                        { label: "季", value: "Season" },
-                        { label: "视频", value: "Video" },
-                        { label: "合集", value: "BoxSet" },
-                    ]
-                    delegate: Button {
-                        required property var modelData
-                        height: 30
-                        padding: 14
-                        enabled: root.canSearch
-                        onClicked: {
-                            // 原地 splice/push 不触发 var 属性通知,
-                            // 重新赋值整数组让选中态绑定重算。
-                            const idx = root.activeTypes.indexOf(modelData.value)
-                            let a = root.activeTypes.slice()
-                            if (idx >= 0)
-                                a.splice(idx, 1)
-                            else
-                                a.push(modelData.value)
-                            root.activeTypes = a
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 10
-                            color: root.activeTypes.indexOf(modelData.value) >= 0
-                                   ? (parent.hovered ? root.chipActiveHover : root.chipActive)
-                                   : (parent.hovered ? Theme.surface : Theme.bg)
-                            border.width: root.activeTypes.indexOf(modelData.value) >= 0
-                                          ? 0 : 1
-                            border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: modelData.label
-                            color: "white"
-                            font.pixelSize: 13
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
+                    border.color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                    // 聚焦时粉色柔光外圈。
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: -3
+                        radius: 23
+                        color: "transparent"
+                        border.color: Constants.moePink
+                        border.width: searchField.activeFocus ? 2 : 0
+                        opacity: searchField.activeFocus ? 0.35 : 0
+                        Behavior on opacity { NumberAnimation { duration: 120 } }
                     }
                 }
+                AppText {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "♥"
+                    color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                    font.pixelSize: 16
+                }
             }
 
-            // 行2:年份范围 + 已看状态(多选)。
+            // 筛选栏:左侧类型 chips,右侧年份 + 状态。
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 14
 
-                // 年份范围(Years):单端 = 精确单年,双端 = 区间展开;
-                // 空 = 不限。服务器不支持范围语法(实测 500),展开逗号列表。
-                RowLayout {
-                    spacing: 4
-                    AppText {
-                        text: "年份"
-                        color: "white"
-                        font.pixelSize: 13
-                    }
-                    TextField {
-                        id: yearFromField
-                        Layout.preferredWidth: 60
-                        Layout.preferredHeight: 30
-                        placeholderText: "起"
-                        placeholderTextColor: "white"
-                        color: "white"
-                        enabled: root.canSearch
-                        font.pixelSize: 13
-                        validator: IntValidator { bottom: 1900; top: 2100 }
-                        // 回车 / 失焦提交;非法文本回退 0(不限)。
-                        onEditingFinished: {
-                            root.yearFrom = yearFromField.text.length > 0 ? parseInt(yearFromField.text) : 0
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: Theme.textMuted
-                        }
-                    }
-                    AppText {
-                        text: "至"
-                        color: "white"
-                        font.pixelSize: 13
-                    }
-                    TextField {
-                        id: yearToField
-                        Layout.preferredWidth: 60
-                        Layout.preferredHeight: 30
-                        placeholderText: "止"
-                        placeholderTextColor: "white"
-                        color: "white"
-                        enabled: root.canSearch
-                        font.pixelSize: 13
-                        validator: IntValidator { bottom: 1900; top: 2100 }
-                        onEditingFinished: {
-                            root.yearTo = yearToField.text.length > 0 ? parseInt(yearToField.text) : 0
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: Theme.bg
-                            border.width: 1
-                            border.color: Theme.textMuted
-                        }
-                    }
-                    Button {
-                        Layout.preferredWidth: 24
-                        Layout.preferredHeight: 30
-                        visible: yearFromField.text.length > 0 || yearToField.text.length > 0
-                        enabled: root.canSearch
-                        text: "✕"
-                        onClicked: {
-                            yearFromField.text = ""
-                            yearToField.text = ""
-                            root.yearFrom = 0
-                            root.yearTo = 0
-                            root.searchNow(true)
-                        }
-                        background: Rectangle {
-                            radius: 6
-                            color: parent.hovered ? Theme.surface : Theme.bg
-                        }
-                        contentItem: AppText {
-                            text: parent.text
-                            color: "white"
-                            font.pixelSize: 12
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                }
-
-                // 已看/未看/收藏(Filters,多选)。
-                Row {
+                // 类型过滤(IncludeItemTypes,多选,默认电影+剧集)。
+                Flow {
+                    Layout.fillWidth: true
                     spacing: 8
                     Repeater {
                         model: [
-                            { label: "已看", filter: "IsPlayed" },
-                            { label: "未看", filter: "IsUnplayed" },
-                            { label: "进行中", filter: "IsResumable" },
-                            { label: "收藏", filter: "IsFavorite" },
+                            { label: "电影", value: "Movie" },
+                            { label: "剧集", value: "Series" },
+                            { label: "单集", value: "Episode" },
+                            { label: "季", value: "Season" },
+                            { label: "视频", value: "Video" },
+                            { label: "合集", value: "BoxSet" },
                         ]
-                        delegate: Button {
+                        delegate: FilterChip {
                             required property var modelData
-                            width: 52
-                            height: 30
+                            label: modelData.label
+                            active: root.activeTypes.indexOf(modelData.value) >= 0
                             enabled: root.canSearch
                             onClicked: {
                                 // 原地 splice/push 不触发 var 属性通知,
                                 // 重新赋值整数组让选中态绑定重算。
-                                const idx = root.activeFilters.indexOf(modelData.filter)
-                                let a = root.activeFilters.slice()
+                                const idx = root.activeTypes.indexOf(modelData.value)
+                                let a = root.activeTypes.slice()
                                 if (idx >= 0)
                                     a.splice(idx, 1)
                                 else
-                                    a.push(modelData.filter)
-                                root.activeFilters = a
+                                    a.push(modelData.value)
+                                root.activeTypes = a
                                 root.searchNow(true)
-                            }
-                            background: Rectangle {
-                                radius: 10
-                                color: root.activeFilters.indexOf(modelData.filter) >= 0
-                                       ? (parent.hovered ? root.chipActiveHover : root.chipActive)
-                                       : (parent.hovered ? Theme.surface : Theme.bg)
-                                border.width: root.activeFilters.indexOf(modelData.filter) >= 0
-                                              ? 0 : 1
-                                border.color: parent.hovered ? Theme.textPrimary : Theme.textMuted
-                            }
-                            contentItem: AppText {
-                                text: modelData.label
-                                color: "white"
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
                             }
                         }
                     }
                 }
 
+                // 右侧筛选入口:点击弹出面板,内含年份范围和状态筛选。
+                // 与 Library 的 FilterPanel 风格保持一致。
+                FilterChip {
+                    id: filterPanelChip
+                    label: root.searchFilterCount > 0 ? "筛选 · " + root.searchFilterCount : "筛选 ▾"
+                    active: root.searchFilterCount > 0
+                    enabled: root.canSearch
+                    onClicked: filterPopup.open()
+
+                    Popup {
+                        id: filterPopup
+                        parent: filterPanelChip
+                        y: filterPanelChip.height + 4
+                        x: -width + filterPanelChip.width
+                        width: 200
+                        padding: 10
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        enter: Transition {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+                        }
+                        exit: Transition {
+                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                        }
+                        background: Rectangle {
+                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            radius: 8
+                            border.width: 1
+                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                        }
+                        contentItem: Column {
+                            width: parent.width - 20
+                            spacing: 12
+
+                            // 状态筛选:单选,默认全部。
+                            Column {
+                                width: parent.width
+                                spacing: 6
+                                AppText {
+                                    text: "状态"
+                                    color: Theme.textMuted
+                                    font.pixelSize: 11
+                                }
+                                Column {
+                                    width: parent.width
+                                    spacing: 2
+                                    Repeater {
+                                        model: [
+                                            { label: "全部", filter: "" },
+                                            { label: "已看", filter: "IsPlayed" },
+                                            { label: "未看", filter: "IsUnplayed" },
+                                            { label: "收藏", filter: "IsFavorite" },
+                                            { label: "继续观看", filter: "IsResumable" },
+                                        ]
+                                        delegate: ItemDelegate {
+                                            required property var modelData
+                                            required property int index
+                                            property bool isOn: modelData.filter === ""
+                                                                  ? root.activeFilters.length === 0
+                                                                  : (root.activeFilters.length === 1 && root.activeFilters[0] === modelData.filter)
+                                            width: parent.width
+                                            height: 30
+                                            padding: 0
+                                            contentItem: Item {
+                                                AppText {
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: modelData.label
+                                                    color: "white"
+                                                    font.pixelSize: 13
+                                                }
+                                                Rectangle {
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 4
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 6
+                                                    height: 6
+                                                    radius: 3
+                                                    color: Constants.moePink
+                                                    visible: parent.parent.isOn
+                                                }
+                                            }
+                                            background: Rectangle {
+                                                radius: 4
+                                                color: parent.hovered
+                                                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                                    : "transparent"
+                                            }
+                                            onClicked: {
+                                                if (modelData.filter === "")
+                                                    root.activeFilters = []
+                                                else
+                                                    root.activeFilters = [modelData.filter]
+                                                root.searchNow(true)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 年份范围
+                            Column {
+                                width: parent.width
+                                spacing: 6
+                                AppText {
+                                    text: "年份"
+                                    color: Theme.textMuted
+                                    font.pixelSize: 11
+                                }
+                                Row {
+                                    spacing: 6
+                                    TextField {
+                                        id: yearFromField
+                                        width: 60
+                                        height: 30
+                                        placeholderText: "起"
+                                        placeholderTextColor: Theme.textMuted
+                                        color: "white"
+                                        enabled: root.canSearch
+                                        font.pixelSize: 13
+                                        validator: IntValidator { bottom: 1900; top: 2100 }
+                                        onEditingFinished: {
+                                            root.yearFrom = yearFromField.text.length > 0 ? parseInt(yearFromField.text) : 0
+                                            root.searchNow(true)
+                                        }
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: Theme.bg
+                                            border.width: 1
+                                            border.color: Theme.textMuted
+                                        }
+                                    }
+                                    AppText {
+                                        text: "至"
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    TextField {
+                                        id: yearToField
+                                        width: 60
+                                        height: 30
+                                        placeholderText: "止"
+                                        placeholderTextColor: Theme.textMuted
+                                        color: "white"
+                                        enabled: root.canSearch
+                                        font.pixelSize: 13
+                                        validator: IntValidator { bottom: 1900; top: 2100 }
+                                        onEditingFinished: {
+                                            root.yearTo = yearToField.text.length > 0 ? parseInt(yearToField.text) : 0
+                                            root.searchNow(true)
+                                        }
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: Theme.bg
+                                            border.width: 1
+                                            border.color: Theme.textMuted
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 清除筛选
+                            ItemDelegate {
+                                visible: root.searchFilterCount > 0
+                                width: parent.width
+                                height: 30
+                                padding: 0
+                                contentItem: AppText {
+                                    text: "清除筛选"
+                                    color: Constants.moePink
+                                    font.pixelSize: 13
+                                    leftPadding: 4
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    radius: 4
+                                    color: parent.hovered
+                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        : "transparent"
+                                }
+                                onClicked: {
+                                    yearFromField.text = ""
+                                    yearToField.text = ""
+                                    root.yearFrom = 0
+                                    root.yearTo = 0
+                                    root.activeFilters = []
+                                    root.searchNow(true)
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // 状态行:搜索中 / 无结果 / 已加载计数。
-            AppText {
-                id: statusLine
+            Row {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 16
-                font.pixelSize: 12
-                color: "white"
-                text: {
-                    if (!root.canSearch)
-                        return ""
-                    if (searchField.text.length === 0)
-                        return "输入关键词,搜索当前服务器的全部媒体库"
-                    if (root.searching && (!root.sm || root.sm.count === 0))
-                        return "搜索中…"
-                    if (!root.sm || root.sm.count === 0)
-                        return "无匹配结果"
-                    return "已加载 " + root.sm.count + " 条"
-                           + (root.sm.hasMore ? " · 上滑加载更多" : "")
+                spacing: 6
+                visible: statusText.text !== ""
+                AppText {
+                    text: "♥"
+                    color: Constants.moePink
+                    font.pixelSize: 12
+                    opacity: 0.75
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                AppText {
+                    id: statusText
+                    color: searchField.text.length === 0 ? Theme.textMuted : "white"
+                    font.pixelSize: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: {
+                        if (!root.canSearch)
+                            return ""
+                        if (searchField.text.length === 0)
+                            return "输入关键词,搜索当前服务器的全部媒体库"
+                        if (root.searching && (!root.sm || root.sm.count === 0))
+                            return "搜索中…"
+                        if (!root.sm || root.sm.count === 0)
+                            return "无匹配结果"
+                        return "已加载 " + root.sm.count + " 条"
+                               + (root.sm.hasMore ? " · 上滑加载更多" : "")
+                    }
                 }
             }
 
@@ -454,6 +548,11 @@ Item {
                     cellWidth: Constants.cellW
                     cellHeight: Constants.cellH
                     model: root.sm
+                    // 结果项入场动画:淡入 + 轻微缩放,萌系轻盈感。
+                    add: Transition {
+                        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }
+                        NumberAnimation { property: "scale"; from: 0.92; to: 1.0; duration: 180; easing.type: Easing.OutQuad }
+                    }
                     // 滚动到底自动加载下一页(内容不满一屏时持续加载直到填满或到底)。
                     onAtYEndChanged: {
                         if (atYEnd)

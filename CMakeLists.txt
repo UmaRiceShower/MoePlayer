@@ -71,6 +71,7 @@ qt_add_qml_module(MoePlayer
         qml/views/SearchOverlay.qml
         qml/views/PosterCard.qml
         qml/views/ServerIcon.qml
+        qml/views/FilterChip.qml
 )
 
 # ShaderEffect 用 qsb 编译的 shader(官方路径):资源嵌入 qrc:
