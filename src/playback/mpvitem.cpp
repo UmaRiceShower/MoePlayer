@@ -128,6 +128,8 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_observe_property(m_mpv, 12, "demuxer-cache-duration", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 13, "cache-speed", MPV_FORMAT_INT64);
     mpv_observe_property(m_mpv, 14, "mute", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 15, "speed", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 16, "playlist", MPV_FORMAT_NODE);
 }
 
 MpvItem::~MpvItem()
@@ -292,6 +294,7 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
     bool muteChangedFlag = false, mediaTitleChangedFlag = false, chapterListChangedFlag = false;
     bool chapterChangedFlag = false, playlistPosChangedFlag = false, playlistCountChangedFlag = false;
     bool pausedForCacheChangedFlag = false, demuxerCacheDurationChangedFlag = false, cacheSpeedChangedFlag = false;
+    bool speedChangedFlag = false, playlistChangedFlag = false;
 
     switch (observeId) {
     case 1: // time-pos
@@ -428,6 +431,26 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
             }
         }
         break;
+    case 15: // speed
+        if (prop->format == MPV_FORMAT_DOUBLE) {
+            const double v = *static_cast<double *>(prop->data);
+            if (v != m_speed) {
+                m_speed = v;
+                speedChangedFlag = true;
+            }
+        }
+        break;
+    case 16: { // playlist
+        if (prop->format == MPV_FORMAT_NODE) {
+            const mpv_node *node = static_cast<mpv_node *>(prop->data);
+            const QVariantList v = nodeToVariant(node).toList();
+            if (v != m_playlist) {
+                m_playlist = v;
+                playlistChangedFlag = true;
+            }
+        }
+        break;
+    }
     }
 
     if (posChanged)
@@ -456,4 +479,8 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
         emit demuxerCacheDurationChanged();
     if (cacheSpeedChangedFlag)
         emit cacheSpeedChanged();
+    if (speedChangedFlag)
+        emit speedChanged();
+    if (playlistChangedFlag)
+        emit playlistChanged();
 }
