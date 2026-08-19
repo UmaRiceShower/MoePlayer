@@ -14,12 +14,18 @@ Window {
     title: root.loading ? Qt.application.name + " · 正在获取播放地址…" : Qt.application.name
     color: "black"
 
+    function mediaDisplayName() {
+        if (root.meta && root.meta.displayName && root.meta.displayName.length > 0)
+            return root.meta.displayName
+        return mpv.mediaTitle || (source.length ? source.split("/").pop() : "")
+    }
+
     function syncTitle() {
         if (root.loading) {
             root.title = Qt.application.name + " · 正在获取播放地址…"
             return
         }
-        const mt = mpv.mediaTitle || (source.length ? source.split("/").pop() : "")
+        const mt = root.mediaDisplayName()
         let t = mt
         if (mpv.playlistCount > 1)
             t = "[" + (mpv.playlistPos + 1) + "/" + mpv.playlistCount + "] " + mt
@@ -59,14 +65,13 @@ Window {
 
     // 自定义 UI 显隐。
     property bool controlsVisible: true
-    property bool showSettings: false
     readonly property bool isFullScreen: root.visibility === Window.FullScreen
 
     // 官方 tc_left/tc_right 点击交互:毫秒显示 / 总时长-剩余切换。
     property bool tcMs: false
     property bool tcTotal: false
     // 控制栏标题文本(官方 title;seekbar 悬停章节时替换为 "Chapter: 名称")。
-    property string oscTitleText: root.title
+    property string oscTitleText: root.mediaDisplayName()
 
     // 版本/音轨/字幕信息(来自 EmbyClient.fetchPlaybackInfo 返回的 meta)。
     property var mediaSources: []
@@ -75,6 +80,21 @@ Window {
     property int currentAudioIndex: -1
     property int currentSubtitleIndex: -1
     property bool switchingVersion: false
+
+    // 剧集分集列表(仅 Emby 剧集,按季/集排序),供上一集/下一集切换。
+    property var episodePlaylist: []
+    readonly property bool hasEpisodePlaylist: root.episodePlaylist.length > 0
+    // 播放列表预载:分集协商完成后 append 进 mpv,对齐 mpv playlist 顺序。
+    property bool playlistReady: false
+    // mpv 播放列表索引 → episodePlaylist 索引(失败项跳过导致错位时映射)。
+    property var mpvToEp: []
+    // 预载协商结果缓存(itemId → {url, headers, meta}),mpv 切集时应用。
+    property var pendingMeta: ({})
+    property bool precacheActive: false
+    property var precacheQueue: []
+    property int precacheInFlight: 0
+    property int precacheDone: 0
+    property int precacheTotal: 0
 
     // 窗口关闭完成(Main 据此从播放窗口列表移除)。
     signal windowClosed()
@@ -97,6 +117,13 @@ Window {
         // 默认选中 Emby 返回的默认轨(通过 isDefault 标记)。
         root.currentAudioIndex = root.defaultStreamIndex(root.audioStreams)
         root.currentSubtitleIndex = root.defaultStreamIndex(root.subtitleStreams)
+
+        // 属于某剧集时拉取全部分集,供上一集/下一集切换。
+        root.episodePlaylist = []
+        if (root.meta.seriesId) {
+            EmbyClient.fetchAllEpisodes(root.meta.serverUrl, root.meta.token,
+                                        root.meta.userId, root.meta.seriesId)
+        }
 
         root.syncTitle()
         mpv.load(url, root.headers)
@@ -147,11 +174,14 @@ Window {
         }
     }
 
-    // 标题随 mpv 媒体标题/播放列表变化同步。
+    // 标题随 mpv 媒体标题/播放列表变化同步;播放列表就绪后切集应用协商 meta。
     Connections {
         target: mpv
         function onMediaTitleChanged() { root.syncTitle() }
-        function onPlaylistPosChanged() { root.syncTitle() }
+        function onPlaylistPosChanged() {
+            root.syncTitle()
+            root.applyPlaylistMeta()
+        }
         function onPlaylistCountChanged() { root.syncTitle() }
     }
 
@@ -232,10 +262,27 @@ Window {
                                                    root.meta.userId, root.meta.playSessionId)
     }
 
-    // 版本切换:重新拉取 PlaybackInfo 后加载新 URL。
+    // 播放协商回调:预载 append / 版本切换两路。
     Connections {
         target: EmbyClient
         function onPlaybackReady(serverUrl, url, headers, meta) {
+            // 预载:播放列表其余集协商完成 → 缓存 + 推进队列;全部完成 → 对齐 mpv 列表。
+            // 多窗口并存时另一窗口的响应也会广播到此:按 serverUrl + 本剧集
+            // itemId 归属过滤,防止串扰推进计数导致列表缺集。
+            if (root.precacheActive
+                    && serverUrl === root.meta.serverUrl
+                    && root.episodePlaylist.some(function (e) { return e.id === meta.itemId })) {
+                root.pendingMeta[meta.itemId] = { url: url, headers: headers || [], meta: meta }
+                root.precacheInFlight = Math.max(0, root.precacheInFlight - 1)
+                root.precacheDone++
+                if (root.precacheDone >= root.precacheTotal) {
+                    root.precacheActive = false
+                    root.finalizePlaylist()
+                } else {
+                    root.pumpPrecache()
+                }
+                return
+            }
             if (!root.switchingVersion)
                 return
             root.switchingVersion = false
@@ -254,6 +301,159 @@ Window {
             mpv.load(url, root.headers)
             if (savedPos > 0)
                 mpv.seek(savedPos)
+        }
+    }
+
+    // 剧集全部分集到达:构建分集播放列表(按季号/集号排序)。
+    Connections {
+        target: EmbyClient
+        function onAllEpisodesReady(serverUrl) {
+            if (!root.meta.seriesId || serverUrl !== root.meta.serverUrl)
+                return
+            const model = EmbyClient.allEpisodesModelFor(serverUrl)
+            const list = []
+            for (let i = 0; i < model.count; ++i) {
+                const it = model.itemAt(i)
+                if (!it || !it.id)
+                    continue
+                const no = (it.seasonNo > 0 && it.episodeNo > 0)
+                           ? "S" + it.seasonNo + "E" + it.episodeNo + " "
+                           : ""
+                list.push({
+                    id: it.id,
+                    title: (no + (it.name || "未知")).trim(),
+                    seasonNo: it.seasonNo || 0,
+                    episodeNo: it.episodeNo || 0
+                })
+            }
+            list.sort(function (a, b) {
+                if (a.seasonNo !== b.seasonNo)
+                    return a.seasonNo - b.seasonNo
+                return a.episodeNo - b.episodeNo
+            })
+            root.episodePlaylist = list
+            root.startPrecache()
+        }
+    }
+
+    // 播放列表预载:起播后协商其余全部分集 URL(受限并发 4,按距当前集
+    // 距离排序:先下一集/上一集,再逐步外扩),全部就绪后按集序 append
+    // 进 mpv 并重排当前集位置,使 mpv 原生 playlist-prev/next、媒体键、
+    // > / <、Shift+Home/End 全部生效,且顺序正确。
+    function startPrecache() {
+        if (root.precacheActive || root.playlistReady)
+            return
+        const cur = root.findEpisodeIndex()
+        if (cur < 0 || root.episodePlaylist.length <= 1)
+            return
+        const q = []
+        for (let d = 1; d < root.episodePlaylist.length; ++d) {
+            if (cur + d < root.episodePlaylist.length)
+                q.push(cur + d)
+            if (cur - d >= 0)
+                q.push(cur - d)
+        }
+        root.precacheQueue = q
+        root.precacheTotal = q.length
+        root.precacheDone = 0
+        root.precacheInFlight = 0
+        root.precacheActive = true
+        root.pumpPrecache()
+    }
+    function pumpPrecache() {
+        while (root.precacheInFlight < 4 && root.precacheQueue.length > 0) {
+            const idx = root.precacheQueue.shift()
+            const ep = root.episodePlaylist[idx]
+            root.precacheInFlight++
+            EmbyClient.fetchPlaybackInfo(root.meta.serverUrl, root.meta.token,
+                                         root.meta.userId, ep.id, "",
+                                         root.meta.seriesId)
+        }
+    }
+    // 全部就绪:按集序 append(跳过协商失败项),move 当前集到正确位置,
+    // 构建 mpv 索引 → 集索引映射。
+    function finalizePlaylist() {
+        const curIdx = root.findEpisodeIndex()
+        if (curIdx < 0) {
+            root.playlistReady = true
+            return
+        }
+        const succeeded = []
+        for (let i = 0; i < root.episodePlaylist.length; ++i) {
+            if (i !== curIdx && root.pendingMeta[root.episodePlaylist[i].id])
+                succeeded.push(i)
+        }
+        // mpv 命令按队列顺序执行,append 顺序即集序(当前集已在 index 0)。
+        for (const i of succeeded)
+            mpv.command(["loadfile", root.pendingMeta[root.episodePlaylist[i].id].url, "append"])
+        // 当前集移到位置 t(它前面成功项的个数):playlist-move 0 → t+1。
+        const t = succeeded.filter(function (i) { return i < curIdx }).length
+        if (t > 0)
+            mpv.command(["playlist-move", "0", String(t + 1)])
+        // 索引映射:mpv pos → episodePlaylist index(有失败项时防止错位)。
+        const mpvToEp = []
+        for (const i of succeeded) if (i < curIdx) mpvToEp.push(i)
+        mpvToEp.push(curIdx)
+        for (const i of succeeded) if (i > curIdx) mpvToEp.push(i)
+        root.mpvToEp = mpvToEp
+        root.playlistReady = true
+        root.oscTitleText = root.mediaDisplayName()
+    }
+    // mpv 原生切集(playlist-prev/next、媒体键、> / <、播完自动连播)后:
+    // 应用该集的协商 meta(回传会话/轨道),外挂字幕自动加载。
+    function applyPlaylistMeta() {
+        if (!root.playlistReady)
+            return
+        const pos = mpv.playlistPos
+        if (pos < 0 || pos >= root.mpvToEp.length)
+            return
+        const ep = root.episodePlaylist[root.mpvToEp[pos]]
+        if (!ep || ep.id === root.meta.itemId)
+            return
+        const pm = root.pendingMeta[ep.id]
+        if (!pm)
+            return
+        // 手动切集(playlist-prev/next/菜单)不经过 end-file:先上报旧会话停止,
+        // 避免服务器会话残留与进度串集。
+        if (root.reporting && !root.stoppedReported) {
+            root.stoppedReported = true
+            EmbyClient.reportPlaybackStopped(root.meta.serverUrl, root.meta.token,
+                                             root.meta.userId, root.meta.itemId,
+                                             root.meta.mediaSourceId, root.meta.playSessionId,
+                                             root.lastPosition)
+        }
+        root.meta = Object.assign({}, pm.meta)
+        root.mediaSources = pm.meta.mediaSources || []
+        root.audioStreams = pm.meta.audioStreams || []
+        root.subtitleStreams = pm.meta.subtitleStreams || []
+        root.currentAudioIndex = root.defaultStreamIndex(root.audioStreams)
+        root.currentSubtitleIndex = root.defaultStreamIndex(root.subtitleStreams)
+        root.lastPosition = 0
+        root.stoppedReported = false
+        root.lastProgressReport = 0
+        // 默认音轨交给 mpv(新文件自动选);外挂字幕 mpv 不会自动加载,需 sub-add。
+        if (root.subtitleStreams.length > 0)
+            root.setSubtitleStream(root.currentSubtitleIndex)
+        else
+            mpv.command(["set", "sid", "no"])
+        root.syncTitle()
+    }
+    // 预载项协商失败:跳过该项(推进计数,不阻塞其余)。
+    Connections {
+        target: EmbyClient
+        function onPlaybackFailed(serverUrl, itemId, message) {
+            if (!root.precacheActive || serverUrl !== root.meta.serverUrl)
+                return
+            if (!root.episodePlaylist.some(function (e) { return e.id === itemId }))
+                return
+            root.precacheInFlight = Math.max(0, root.precacheInFlight - 1)
+            root.precacheDone++
+            if (root.precacheDone >= root.precacheTotal) {
+                root.precacheActive = false
+                root.finalizePlaylist()
+            } else {
+                root.pumpPrecache()
+            }
         }
     }
 
@@ -336,8 +536,17 @@ Window {
         root.width = Math.round(960 * scale)
         root.height = Math.round(540 * scale)
     }
-    // 官方 F8:播放列表文本。
+    // 官方 F8:播放列表文本(剧集用分集列表,电影回退 mpv 播放列表)。
     function playlistSummary() {
+        if (root.episodePlaylist.length > 0) {
+            const cur = root.findEpisodeIndex()
+            const lines = []
+            for (let i = 0; i < root.episodePlaylist.length; ++i) {
+                const mark = i === cur ? "▶ " : "  "
+                lines.push(mark + (i + 1) + ". " + root.episodePlaylist[i].title)
+            }
+            return "播放列表:\n" + lines.join("\n")
+        }
         if (mpv.playlistCount <= 0)
             return "播放列表: 空"
         const lines = []
@@ -386,6 +595,23 @@ Window {
         const pct = Math.max(0, Math.min(100, ratio * 100))
         mpv.command(["seek", String(pct), "absolute-percent"])
     }
+    // 官方 seekbar 右键:跳到最近章节。
+    function seekToNearestChapter(ratio) {
+        if (mpv.chapterList.length === 0 || mpv.duration <= 0)
+            return
+        const targetSec = ratio * mpv.duration
+        let nearest = null
+        let minDist = Infinity
+        for (const c of mpv.chapterList) {
+            const d = Math.abs(c.time - targetSec)
+            if (d < minDist) {
+                minDist = d
+                nearest = c
+            }
+        }
+        if (nearest)
+            mpv.seek(nearest.time)
+    }
     // 官方 cache 元素文本:"Cache: 1m30s"(无缓存返回空,隐藏)。
     function cacheLabel() {
         const s = mpv.demuxerCacheDuration
@@ -429,6 +655,92 @@ Window {
         const i = f.lastIndexOf("/")
         return i >= 0 ? f.substring(i + 1) : f
     }
+    // 生成指定类型的轨道菜单项(audio/sub)。
+    function trackMenuItems(type) {
+        return mpv.trackList.filter(t => t.type === type).map(t => {
+            let label = t.title || t.lang || "未知"
+            if (t.codec) label += " · " + t.codec.toUpperCase()
+            if (t.lang) label += " · " + t.lang
+            if (t.external) label += " · 外挂"
+            if (t.default) label += " · 默认"
+            if (t.forced) label += " · 强制"
+            return { id: t.id, title: label }
+        })
+    }
+    function currentTrackId(type) {
+        for (const t of mpv.trackList) {
+            if (t.type === type && t.selected)
+                return t.id
+        }
+        return undefined
+    }
+    function openTrackMenu(type) {
+        const items = root.trackMenuItems(type)
+        selectMenu.title = type === "audio" ? "音轨" : "字幕"
+        selectMenu.model = items
+        selectMenu.currentId = root.currentTrackId(type)
+        selectMenu.onSelect = function(id) {
+            mpv.command(["set", type === "audio" ? "aid" : "sid", String(id)])
+        }
+        selectMenu.open()
+    }
+    function openAudioTrackMenu() {
+        selectMenu.anchorItem = oscAudio
+        root.openTrackMenu("audio")
+    }
+    function openSubtitleTrackMenu() {
+        selectMenu.anchorItem = oscSub
+        root.openTrackMenu("sub")
+    }
+    function openAudioDeviceMenu() {
+        selectMenu.title = "音频设备"
+        selectMenu.model = mpv.audioDeviceList.map(d => ({ id: d.name, title: d.description || d.name }))
+        selectMenu.currentId = undefined
+        selectMenu.anchorItem = oscVol
+        selectMenu.onSelect = function(id) {
+            mpv.command(["set", "audio-device", id])
+        }
+        selectMenu.open()
+    }
+    function openVersionMenu() {
+        const items = root.mediaSources.map(s => ({ id: s.id, title: s.name || "默认版本" }))
+        selectMenu.title = "版本"
+        selectMenu.model = items
+        selectMenu.currentId = root.meta.mediaSourceId
+        selectMenu.anchorItem = oscVersion
+        selectMenu.onSelect = function(id) {
+            if (id && id !== root.meta.mediaSourceId)
+                root.switchVersion(id)
+        }
+        selectMenu.open()
+    }
+    // 播放列表菜单(官方 menu ≡ / select/select-playlist):列出分集,点击跳转。
+    function openPlaylistMenu() {
+        if (root.episodePlaylist.length === 0) {
+            root.osd("无播放列表")
+            return
+        }
+        const items = []
+        for (let i = 0; i < root.episodePlaylist.length; ++i)
+            items.push({ id: root.episodePlaylist[i].id, title: (i + 1) + ". " + root.episodePlaylist[i].title })
+        selectMenu.anchorItem = menuBtn
+        selectMenu.title = "播放列表"
+        selectMenu.model = items
+        selectMenu.currentId = root.meta.itemId
+        selectMenu.onSelect = function (id) {
+            // mpv 列表对齐后经映射定位切换;预载未完成时忽略(稍后重试)。
+            if (!root.playlistReady)
+                return
+            let epIdx = -1
+            for (let i = 0; i < root.episodePlaylist.length; ++i) {
+                if (root.episodePlaylist[i].id === id) { epIdx = i; break }
+            }
+            const mpvIdx = root.mpvToEp.indexOf(epIdx)
+            if (mpvIdx >= 0)
+                mpv.command(["set", "playlist-pos", String(mpvIdx)])
+        }
+        selectMenu.open()
+    }
     function setAudioStream(index) {
         root.currentAudioIndex = index
         const s = root.audioStreams[index]
@@ -461,8 +773,20 @@ Window {
         root.lastPosition = pos
         EmbyClient.fetchPlaybackInfo(root.meta.serverUrl, root.meta.token,
                                      root.meta.userId, root.meta.itemId,
-                                     mediaSourceId)
+                                     mediaSourceId, root.meta.seriesId || "")
     }
+
+    // 分集切换:当前集在分集列表中的索引。
+    function findEpisodeIndex() {
+        for (let i = 0; i < root.episodePlaylist.length; ++i) {
+            if (root.episodePlaylist[i].id === root.meta.itemId)
+                return i
+        }
+        return -1
+    }
+    // 分集切换:mpv 播放列表已预载对齐,上一项/下一项即上一集/下一集。
+    function playPrevEpisode() { mpv.command(["playlist-prev"]) }
+    function playNextEpisode() { mpv.command(["playlist-next"]) }
 
     // 自动隐藏控制栏。
     Timer {
@@ -509,11 +833,11 @@ Window {
             // 右键 = 上下文菜单(官方 MBTN_RIGHT script-binding select/context-menu
             // → 本项目的设置弹窗);侧键 = 播放列表切换;左键点击非控件区暂停。
             if (mouse.button === Qt.RightButton) {
-                root.showSettings = true
+                root.openPlaylistMenu()
             } else if (mouse.button === Qt.BackButton) {
-                mpv.command(["playlist-prev"])
+                root.playPrevEpisode()
             } else if (mouse.button === Qt.ForwardButton) {
-                mpv.command(["playlist-next"])
+                root.playNextEpisode()
             } else if (!controlBarArea.containsMouse) {
                 root.playPause()
             }
@@ -535,67 +859,6 @@ Window {
             }
             // 官方 WHEEL_UP/DOWN:音量 ±2。
             root.adjustVolume(wheel.angleDelta.y / 120 * 2)
-        }
-    }
-
-    // 顶部窗口控制条(官方 osc window-controls):30px 黑底条,左窗口标题,
-    // 右最小化/最大化/关闭三按钮(25px 宽、间距 5,官方偏移 5/30/55)。
-    Rectangle {
-        id: topBar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 30
-        color: Qt.rgba(0, 0, 0, 0.69) // 官方 boxalpha=80
-        opacity: root.controlsVisible ? 1 : 0
-        visible: opacity > 0
-        Behavior on opacity { NumberAnimation { duration: 220 } }
-
-        AppText {
-            id: topTitle
-            anchors.verticalCenter: parent.verticalCenter
-            anchors.left: parent.left
-            anchors.leftMargin: 8
-            anchors.right: topControls.left
-            anchors.rightMargin: 8
-            text: root.title
-            color: "white"
-            font.pixelSize: 13
-            elide: Text.ElideRight
-        }
-
-        Row {
-            id: topControls
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.right: parent.right
-            spacing: 5
-            rightPadding: 5
-
-            OscButton {
-                id: minimizeBtn
-                width: 25
-                height: 30
-                iconScale: 0.6
-                oscIcon: "minimize"
-                onClicked: root.showMinimized()
-            }
-            OscButton {
-                id: maximizeBtn
-                width: 25
-                height: 30
-                iconScale: 0.6
-                oscIcon: root.isMaximized ? "unmaximize" : "maximize"
-                onClicked: root.toggleMaximize()
-            }
-            OscButton {
-                id: closeBtn
-                width: 25
-                height: 30
-                iconScale: 0.6
-                oscIcon: "close"
-                onClicked: root.close()
-            }
         }
     }
 
@@ -636,26 +899,7 @@ Window {
                 height: 27
                 iconScale: 0.8
                 oscIcon: "menu"
-                onClicked: root.showSettings = true
-            }
-            // 播放列表上一/下一项(官方 playlist_prev/next)。
-            OscButton {
-                id: oscPlaylistPrev
-                width: 18
-                height: 27
-                iconScale: 0.8
-                oscIcon: "prev"
-                visible: mpv.playlistCount > 1
-                onClicked: mpv.playlistPrev()
-            }
-            OscButton {
-                id: oscPlaylistNext
-                width: 18
-                height: 27
-                iconScale: 0.8
-                oscIcon: "next"
-                visible: mpv.playlistCount > 1
-                onClicked: mpv.playlistNext()
+                onClicked: root.openPlaylistMenu()
             }
             // 标题(官方 title:${playlist-pos}/${count} ${media-title};
             // seekbar 悬停到章节时显示 "Chapter: 名称")。
@@ -692,6 +936,15 @@ Window {
             leftPadding: 9
             spacing: 9
 
+            // 播放列表上一项(官方 playlist_prev,仅多于一集时显示)。
+            OscButton {
+                id: oscPlaylistPrev
+                width: 27
+                height: 29
+                oscIcon: "prev"
+                visible: root.hasEpisodePlaylist || mpv.playlistCount > 1
+                onClicked: root.playPrevEpisode()
+            }
             // 播放/暂停(官方 play_pause;缓冲中显示时钟图标)。
             OscButton {
                 id: ppBtn
@@ -701,22 +954,14 @@ Window {
                         : (mpv.state === "paused" ? "play" : "pause")
                 onClicked: root.playPause()
             }
-            // 上一/下一章节(官方 chapter_prev/next,无章节隐藏)。
+            // 播放列表下一项(官方 playlist_next,仅多于一集时显示)。
             OscButton {
-                id: oscChapterPrev
+                id: oscPlaylistNext
                 width: 27
                 height: 29
-                oscIcon: "chapter_prev"
-                visible: mpv.chapterList.length > 0
-                onClicked: mpv.chapterPrev()
-            }
-            OscButton {
-                id: oscChapterNext
-                width: 27
-                height: 29
-                oscIcon: "chapter_next"
-                visible: mpv.chapterList.length > 0
-                onClicked: mpv.chapterNext()
+                oscIcon: "next"
+                visible: root.hasEpisodePlaylist || mpv.playlistCount > 1
+                onClicked: root.playNextEpisode()
             }
             // 左时间码(官方 tc_left:当前时间,点击切毫秒)。
             AppText {
@@ -806,9 +1051,17 @@ Window {
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
-                    onPressed: root.seekToExact(mouse.x / seekBar.width)
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onPressed: function (mouse) {
+                        if (mouse.button === Qt.RightButton) {
+                            root.seekToNearestChapter(mouse.x / seekBar.width)
+                            return
+                        }
+                        root.seekToExact(mouse.x / seekBar.width)
+                    }
                     onPositionChanged: {
-                        if (pressed) root.seekToExact(mouse.x / seekBar.width)
+                        if (pressed && (mouse.buttons & Qt.LeftButton))
+                            root.seekToExact(mouse.x / seekBar.width)
                         seekBar.hoverX = mouse.x
                         seekBar.hoverRatio = Math.max(0, Math.min(1, mouse.x / seekBar.width))
                         // 官方:悬停位置有章节时标题栏显示 "Chapter: 名称"。
@@ -819,13 +1072,13 @@ Window {
                                 if (c.time <= sec) ch = c
                                 else break
                             }
-                            root.oscTitleText = ch && ch.title ? "Chapter: " + ch.title : root.title
+                            root.oscTitleText = ch && ch.title ? "Chapter: " + ch.title : root.mediaDisplayName()
                         }
                     }
                     onEntered: seekBar.hoverActive = true
                     onExited: {
                         seekBar.hoverActive = false
-                        root.oscTitleText = root.title
+                        root.oscTitleText = root.mediaDisplayName()
                     }
                     // 官方 scrollcontrols:seekbar 悬停滚轮 seek ±10。
                     onWheel: mpv.seek(mpv.position + (wheel.angleDelta.y > 0 ? 10 : -10))
@@ -858,7 +1111,13 @@ Window {
                           + "/" + root.audioStreams.length
                         : ""
                 onClicked: mpv.command(["cycle", "audio"])
-                onSecondaryClicked: root.showSettings = true
+                onSecondaryClicked: root.openAudioTrackMenu()
+                WheelHandler {
+                    acceptedModifiers: Qt.NoModifier
+                    onWheel: function (event) {
+                        mpv.command(event.angleDelta.y > 0 ? ["cycle", "audio", "up"] : ["cycle", "audio"])
+                    }
+                }
             }
             // 字幕按钮(官方 sub_track)。
             OscButton {
@@ -871,15 +1130,32 @@ Window {
                           + "/" + root.subtitleStreams.length
                         : ""
                 onClicked: mpv.command(["cycle", "sub"])
-                onSecondaryClicked: root.showSettings = true
+                onSecondaryClicked: root.openSubtitleTrackMenu()
+                WheelHandler {
+                    acceptedModifiers: Qt.NoModifier
+                    onWheel: function (event) {
+                        mpv.command(event.angleDelta.y > 0 ? ["cycle", "sub", "up"] : ["cycle", "sub"])
+                    }
+                }
             }
-            // 音量(官方 volume:点击静音,悬停滚轮 ±5,图标四档)。
+            // 版本切换(Emby 多版本影片特有,mpv 原生无此概念)。
+            OscButton {
+                id: oscVersion
+                width: 70
+                height: 29
+                oscIcon: ""
+                inlineText: "版本"
+                visible: root.mediaSources.length > 1
+                onClicked: root.openVersionMenu()
+            }
+            // 音量(官方 volume:点击静音,悬停滚轮 ±5,图标四档;右键音频设备)。
             OscButton {
                 id: oscVol
                 width: 27
                 height: 29
                 oscIcon: root.volIcon()
                 onClicked: mpv.toggleMute()
+                onSecondaryClicked: root.openAudioDeviceMenu()
                 WheelHandler {
                     acceptedModifiers: Qt.NoModifier
                     onWheel: function (event) {
@@ -887,381 +1163,20 @@ Window {
                     }
                 }
             }
-            // 全屏(官方 fullscreen,图标随状态切换)。
-            OscButton {
-                id: oscFs
-                width: 27
-                height: 29
-                oscIcon: root.isFullScreen ? "exit_fullscreen" : "fullscreen"
-                onClicked: root.toggleFullscreen()
-            }
         }
     }
 
-    // 播放设置弹窗（版本/音轨/字幕）。
-    Rectangle {
+    // 右键 select 菜单(音轨 / 字幕 / 音频设备)。
+    SelectMenu {
+        id: selectMenu
+        visible: false
+        z: 30
+    }
+    MouseArea {
         anchors.fill: parent
-        visible: root.showSettings
-        color: Qt.rgba(0, 0, 0, 0.55)
-        z: 20
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.showSettings = false
-        }
-        Rectangle {
-            anchors.centerIn: parent
-            width: 360
-            height: settingsCol.implicitHeight + 48
-            radius: 12
-            color: Theme.surface
-            border.width: 1
-            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
-            MouseArea {
-                anchors.fill: parent
-            }
-            Column {
-                id: settingsCol
-                anchors.top: parent.top
-                anchors.topMargin: 24
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: parent.width - 48
-                spacing: 20
-
-                Row {
-                    spacing: 8
-                    AppText {
-                        text: "♥"
-                        color: Constants.moePink
-                        font.pixelSize: 24
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    AppText {
-                        text: "播放设置"
-                        color: Theme.textPrimary
-                        font.pixelSize: 20
-                        font.bold: true
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-
-                // 版本
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: root.mediaSources.length > 1
-                    AppText {
-                        text: "版本"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Repeater {
-                            model: root.mediaSources
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: parent.width
-                                height: 34
-                                radius: 17
-                                color: root.meta.mediaSourceId === modelData.id
-                                       ? Constants.moePink : (verHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: root.meta.mediaSourceId === modelData.id ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    text: modelData.name || "默认版本"
-                                    color: root.meta.mediaSourceId === modelData.id ? "white" : Theme.textPrimary
-                                    font.pixelSize: 13
-                                }
-                                MouseArea {
-                                    id: verHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        root.switchVersion(modelData.id)
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 音轨
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: root.audioStreams.length > 0
-                    AppText {
-                        text: "音轨"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Repeater {
-                            model: root.audioStreams
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: parent.width
-                                height: 34
-                                radius: 17
-                                color: root.currentAudioIndex === index
-                                       ? Constants.moePink : (audioHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: root.currentAudioIndex === index ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    text: root.streamLabel(modelData)
-                                    color: root.currentAudioIndex === index ? "white" : Theme.textPrimary
-                                    font.pixelSize: 13
-                                }
-                                MouseArea {
-                                    id: audioHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        root.setAudioStream(index)
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 字幕
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: root.subtitleStreams.length > 0
-                    AppText {
-                        text: "字幕"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Rectangle {
-                            width: parent.width
-                            height: 34
-                            radius: 17
-                            color: root.currentSubtitleIndex < 0
-                                   ? Constants.moePink : (subOffHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                            border.width: 1
-                            border.color: root.currentSubtitleIndex < 0 ? Constants.moePink : Theme.textMuted
-                            AppText {
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.left: parent.left
-                                anchors.leftMargin: 14
-                                text: "关闭字幕"
-                                color: root.currentSubtitleIndex < 0 ? "white" : Theme.textPrimary
-                                font.pixelSize: 13
-                            }
-                            MouseArea {
-                                id: subOffHover
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    root.setSubtitleStream(-1)
-                                    root.showSettings = false
-                                }
-                            }
-                        }
-                        Repeater {
-                            model: root.subtitleStreams
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: parent.width
-                                height: 34
-                                radius: 17
-                                color: root.currentSubtitleIndex === index
-                                       ? Constants.moePink : (subHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: root.currentSubtitleIndex === index ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    text: root.streamLabel(modelData)
-                                    color: root.currentSubtitleIndex === index ? "white" : Theme.textPrimary
-                                    font.pixelSize: 13
-                                }
-                                MouseArea {
-                                    id: subHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        root.setSubtitleStream(index)
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 倍速(对齐官方 osc 菜单速度项;mpv.speed 异步推送,
-                // 高亮按最近档位显示)。
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: mpv.duration > 0
-                    AppText {
-                        text: "倍速"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Row {
-                        spacing: 6
-                        Repeater {
-                            model: ["0.5", "0.75", "1.0", "1.25", "1.5", "2.0"]
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: 48
-                                height: 30
-                                radius: 15
-                                property bool active: Math.abs(mpv.speed - parseFloat(modelData)) < 0.01
-                                color: active ? Constants.moePink : (spHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: active ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.centerIn: parent
-                                    text: modelData + "×"
-                                    color: parent.active ? "white" : Theme.textPrimary
-                                    font.pixelSize: 12
-                                }
-                                MouseArea {
-                                    id: spHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        root.changeSpeed(parseFloat(modelData), true)
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 章节列表(对齐官方 osc 章节菜单)。
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: mpv.chapterList.length > 0
-                    AppText {
-                        text: "章节"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Repeater {
-                            model: mpv.chapterList
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: parent.width
-                                height: 34
-                                radius: 17
-                                color: index === mpv.chapter
-                                       ? Constants.moePink : (chHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: index === mpv.chapter ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    text: (modelData.title || ("章节 " + (index + 1)))
-                                          + " · " + root.formatTime(modelData.time)
-                                    color: index === mpv.chapter ? "white" : Theme.textPrimary
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                    width: parent.width - 28
-                                }
-                                MouseArea {
-                                    id: chHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        mpv.seek(modelData.time)
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 播放列表(对齐官方 osc 播放列表菜单)。
-                Column {
-                    width: parent.width
-                    spacing: 6
-                    visible: mpv.playlistCount > 1
-                    AppText {
-                        text: "播放列表"
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
-                    Column {
-                        width: parent.width
-                        spacing: 4
-                        Repeater {
-                            model: mpv.playlist
-                            delegate: Rectangle {
-                                required property var modelData
-                                required property int index
-                                width: parent.width
-                                height: 34
-                                radius: 17
-                                color: index === mpv.playlistPos
-                                       ? Constants.moePink : (plHover.hovered ? Theme.bg : Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.5))
-                                border.width: 1
-                                border.color: index === mpv.playlistPos ? Constants.moePink : Theme.textMuted
-                                AppText {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 14
-                                    text: (index + 1) + ". " + root.playlistLabel(modelData)
-                                    color: index === mpv.playlistPos ? "white" : Theme.textPrimary
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                    width: parent.width - 28
-                                }
-                                MouseArea {
-                                    id: plHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        mpv.command(["set", "playlist-pos", String(index)])
-                                        root.showSettings = false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        visible: selectMenu.visible
+        onClicked: selectMenu.close()
+        z: 29
     }
 
     // 键盘处理:完整对齐 mpv 官方 etc/input.conf 默认绑定(逐条核对,含
@@ -1283,7 +1198,7 @@ Window {
 
             // 菜单(官方 ctrl+p select/menu、MENU、Shift+F10 context-menu → 设置弹窗)
             if ((ctrl && key === Qt.Key_P) || key === Qt.Key_Menu
-                    || (shift && key === Qt.Key_F10)) { root.showSettings = true; event.accepted = true }
+                    || (shift && key === Qt.Key_F10)) { root.openPlaylistMenu(); event.accepted = true }
             // 播放控制
             else if (key === Qt.Key_Space || (key === Qt.Key_P && !shift)) { root.playPause(); event.accepted = true }
             else if (key === Qt.Key_Q) { root.close(); event.accepted = true }
@@ -1331,8 +1246,8 @@ Window {
             }
             else if (key === Qt.Key_Period) { mpv.command(["frame-step"]); event.accepted = true }
             else if (key === Qt.Key_Comma) { mpv.command(["frame-back-step"]); event.accepted = true }
-            else if (key === Qt.Key_Greater || key === Qt.Key_Return || key === Qt.Key_Enter) { mpv.command(["playlist-next"]); event.accepted = true }
-            else if (key === Qt.Key_Less) { mpv.command(["playlist-prev"]); event.accepted = true }
+            else if (key === Qt.Key_Greater || key === Qt.Key_Return || key === Qt.Key_Enter) { root.playNextEpisode(); event.accepted = true }
+            else if (key === Qt.Key_Less) { root.playPrevEpisode(); event.accepted = true }
 
             // 窗口缩放(官方 Alt+0/1/2;须在画质/音量分支前)
             else if (alt && key === Qt.Key_0) { root.setWindowScale(0.5); event.accepted = true }

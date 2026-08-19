@@ -863,7 +863,7 @@ void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &token
 
 void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &token,
                                    const QString &userId, const QString &itemId,
-                                   const QString &mediaSourceId)
+                                   const QString &mediaSourceId, const QString &seriesId)
 {
     const QString key = serverUrl.trimmed();
     QJsonObject dp;
@@ -903,7 +903,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     // 若带 MediaSourceId,响应 MediaSources 会被过滤,版本列表将只剩一项。
 
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
-             [this, key, token, userId, itemId, mediaSourceId](const QJsonDocument &doc) {
+             [this, key, token, userId, itemId, mediaSourceId, seriesId](const QJsonDocument &doc) {
                  const QJsonObject o = doc.object();
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
@@ -1019,6 +1019,8 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  meta.insert(QStringLiteral("serverUrl"), key);
                  meta.insert(QStringLiteral("token"), token);
                  meta.insert(QStringLiteral("userId"), userId);
+                 // 剧集信息,供播放窗口切集。
+                 meta.insert(QStringLiteral("seriesId"), seriesId);
                  // 版本/音轨/字幕信息,供播放窗口切换。
                  meta.insert(QStringLiteral("mediaSources"), mediaSources);
                  meta.insert(QStringLiteral("audioStreams"), audioStreams);

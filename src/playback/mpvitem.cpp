@@ -130,6 +130,8 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_observe_property(m_mpv, 14, "mute", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 15, "speed", MPV_FORMAT_DOUBLE);
     mpv_observe_property(m_mpv, 16, "playlist", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 17, "track-list", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 18, "audio-device-list", MPV_FORMAT_NODE);
 }
 
 MpvItem::~MpvItem()
@@ -295,6 +297,7 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
     bool chapterChangedFlag = false, playlistPosChangedFlag = false, playlistCountChangedFlag = false;
     bool pausedForCacheChangedFlag = false, demuxerCacheDurationChangedFlag = false, cacheSpeedChangedFlag = false;
     bool speedChangedFlag = false, playlistChangedFlag = false;
+    bool trackListChangedFlag = false, audioDeviceListChangedFlag = false;
 
     switch (observeId) {
     case 1: // time-pos
@@ -451,6 +454,28 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
         }
         break;
     }
+    case 17: { // track-list
+        if (prop->format == MPV_FORMAT_NODE) {
+            const mpv_node *node = static_cast<mpv_node *>(prop->data);
+            const QVariantList v = nodeToVariant(node).toList();
+            if (v != m_trackList) {
+                m_trackList = v;
+                trackListChangedFlag = true;
+            }
+        }
+        break;
+    }
+    case 18: { // audio-device-list
+        if (prop->format == MPV_FORMAT_NODE) {
+            const mpv_node *node = static_cast<mpv_node *>(prop->data);
+            const QVariantList v = nodeToVariant(node).toList();
+            if (v != m_audioDeviceList) {
+                m_audioDeviceList = v;
+                audioDeviceListChangedFlag = true;
+            }
+        }
+        break;
+    }
     }
 
     if (posChanged)
@@ -483,4 +508,8 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
         emit speedChanged();
     if (playlistChangedFlag)
         emit playlistChanged();
+    if (trackListChangedFlag)
+        emit trackListChanged();
+    if (audioDeviceListChangedFlag)
+        emit audioDeviceListChanged();
 }
