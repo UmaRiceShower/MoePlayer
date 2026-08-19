@@ -32,6 +32,8 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(qint64 cacheSpeed READ cacheSpeed NOTIFY cacheSpeedChanged)
     Q_PROPERTY(double speed READ speed NOTIFY speedChanged)
     Q_PROPERTY(QVariantList playlist READ playlist NOTIFY playlistChanged)
+    Q_PROPERTY(QVariantList trackList READ trackList NOTIFY trackListChanged)
+    Q_PROPERTY(QVariantList audioDeviceList READ audioDeviceList NOTIFY audioDeviceListChanged)
     // 播放流 HTTP 代理(ConfigManager.proxy;mpv/ffmpeg 仅支持 HTTP 代理,
     // https 目标走 CONNECT 隧道;空 = 直连)。
     Q_PROPERTY(QString httpProxy READ httpProxy WRITE setHttpProxy)
@@ -61,6 +63,8 @@ public:
     qint64 cacheSpeed() const { return m_cacheSpeed; }
     double speed() const { return m_speed; }
     QVariantList playlist() const { return m_playlist; }
+    QVariantList trackList() const { return m_trackList; }
+    QVariantList audioDeviceList() const { return m_audioDeviceList; }
     // 当前播放流 HTTP 代理串(空 = 直连)。
     QString httpProxy() const { return m_httpProxy; }
     // 设置播放流 HTTP 代理(空串/非 http(s) 忽略 = 直连)。
@@ -91,6 +95,8 @@ signals:
     void cacheSpeedChanged();
     void speedChanged();
     void playlistChanged();
+    void trackListChanged();
+    void audioDeviceListChanged();
     // 首次获得有效时长时发出,表示媒体已开始解码。
     void playbackStarted();
     // 文件加载完成事件。loadfile 是异步命令,外挂字幕必须等此事件后才能挂载。
@@ -133,5 +139,7 @@ private:
     qint64 m_cacheSpeed = 0;
     double m_speed = 1.0;
     QVariantList m_playlist;
+    QVariantList m_trackList;
+    QVariantList m_audioDeviceList;
     QString m_httpProxy;
 };

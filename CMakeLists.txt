@@ -58,6 +58,7 @@ qt_add_qml_module(MoePlayer
         qml/player/PlayerWindow.qml
         qml/player/OscIcon.qml
         qml/player/OscButton.qml
+        qml/player/SelectMenu.qml
         qml/theme/Theme.qml
         qml/theme/Constants.qml
         qml/theme/AppText.qml

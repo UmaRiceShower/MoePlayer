@@ -128,10 +128,12 @@ public:
     Q_INVOKABLE void loginFor(const QString &serverUrl, const QString &username,
                               const QString &password);
     // 播放协商(/Items/{id}/PlaybackInfo),解析可播放地址后发 playbackReady。
-    // mediaSourceId 非空时请求指定版本(版本切换)。
+    // mediaSourceId 非空时请求指定版本(版本切换);seriesId 用于写入 meta,
+    // 供播放窗口切换同一剧集的其他分集。
     Q_INVOKABLE void fetchPlaybackInfo(const QString &serverUrl, const QString &token,
                                        const QString &userId, const QString &itemId,
-                                       const QString &mediaSourceId = QString());
+                                       const QString &mediaSourceId = QString(),
+                                       const QString &seriesId = QString());
     // 条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
     Q_INVOKABLE void fetchItemDetail(const QString &serverUrl, const QString &token,
                                      const QString &userId, const QString &itemId);

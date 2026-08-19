@@ -17,8 +17,9 @@ ApplicationWindow {
     // 协商中窗口(itemId → 窗口):先开窗后协商模式下,播放地址就绪后
     // 经 deliverPlayback 交付;窗口被用户先行关闭时对应项随之移除。
     property var pendingPlaybackWindows: ({})
-
-    // 媒体库页离开时的状态(viewId/排序/滚动位置),再次进入时恢复。
+    // 协商中窗口的初始 meta(displayName/seriesId/seriesName 等),交付时与
+    // C++ 返回的 meta 合并,再传给 PlayerWindow.startPlayback。
+    property var pendingPlaybackMeta: ({})
     property var libraryState: null
     // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
     property string currentServerUrl: ""
@@ -46,24 +47,33 @@ ApplicationWindow {
         return w
     }
     // 先开窗后协商:立即创建播放窗口(加载态),播放地址由
-    // deliverPlayback 在协商完成后交付;meta 仅需 serverUrl/itemId。
+    // deliverPlayback 在协商完成后交付;meta 需 serverUrl/itemId,并可选
+    // 携带 displayName/seriesId/seriesName 供播放窗口使用。
     function openPlayerWindowPending(meta) {
         const w = root.createPlayerWindow({ visible: true, loading: true })
-        if (meta && meta.itemId)
+        if (meta && meta.itemId) {
             root.pendingPlaybackWindows[meta.itemId] = w
+            root.pendingPlaybackMeta[meta.itemId] = meta
+        }
         return w
     }
     // 协商完成:把播放地址交付给等待中的窗口并起播。
     function deliverPlayback(url, headers, meta) {
         const w = root.pendingPlaybackWindows[meta.itemId]
+        const pendingMeta = root.pendingPlaybackMeta[meta.itemId] || {}
         delete root.pendingPlaybackWindows[meta.itemId]
-        if (w)
-            w.startPlayback(url, headers, meta)
+        delete root.pendingPlaybackMeta[meta.itemId]
+        if (w) {
+            // C++ meta 与开窗时传入的 meta 合并,保留 displayName/seriesId 等。
+            const merged = Object.assign({}, meta, pendingMeta)
+            w.startPlayback(url, headers, merged)
+        }
     }
     // 协商失败:对应窗口切换为失败态(显示错误信息,由用户关闭)。
     function deliverPlaybackFailed(itemId, message) {
         const w = root.pendingPlaybackWindows[itemId]
         delete root.pendingPlaybackWindows[itemId]
+        delete root.pendingPlaybackMeta[itemId]
         if (w)
             w.showLoadError(message)
     }
@@ -79,8 +89,10 @@ ApplicationWindow {
             root.playerWindows = root.playerWindows.filter(function (x) { return x !== w })
             // 协商中窗口被用户关闭:移除待交付项,交付/失败回调不再命中。
             for (const k of Object.keys(root.pendingPlaybackWindows)) {
-                if (root.pendingPlaybackWindows[k] === w)
+                if (root.pendingPlaybackWindows[k] === w) {
                     delete root.pendingPlaybackWindows[k]
+                    delete root.pendingPlaybackMeta[k]
+                }
             }
             refreshCur()
         })

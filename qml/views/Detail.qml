@@ -143,9 +143,18 @@ Item {
         root.pendingPlayItemId = itemId
         root.resumeTicks = resume
         // 先开窗(加载态),播放地址后台协商,避免网络延迟期间无反馈。
-        root.playWindowRequested({ serverUrl: root.serverUrl, itemId: itemId })
+        const isSeries = root.detail.type === "Series"
+        const seriesId = isSeries ? root.detail.id : (root.detail.seriesId || "")
+        const seriesName = isSeries ? root.detail.name : (root.detail.seriesName || "")
+        root.playWindowRequested({
+            serverUrl: root.serverUrl,
+            itemId: itemId,
+            displayName: root.heroTitle(),
+            seriesId: seriesId,
+            seriesName: seriesName
+        })
         const c = root.creds()
-        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId)
+        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId, "", seriesId)
     }
     // 播放当前详情条目:resume 为 true 时从上次位置续播。
     function startPlayback(resume) {
