@@ -21,6 +21,15 @@ class MpvItem : public QQuickFramebufferObject
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
     Q_PROPERTY(QString state READ state NOTIFY stateChanged) // "idle" | "paused" | "playing"
     Q_PROPERTY(int volume READ volume WRITE setVolume NOTIFY volumeChanged)
+    Q_PROPERTY(bool mute READ mute NOTIFY muteChanged)
+    Q_PROPERTY(QString mediaTitle READ mediaTitle NOTIFY mediaTitleChanged)
+    Q_PROPERTY(QVariantList chapterList READ chapterList NOTIFY chapterListChanged)
+    Q_PROPERTY(int chapter READ chapter NOTIFY chapterChanged)
+    Q_PROPERTY(int playlistPos READ playlistPos NOTIFY playlistPosChanged)
+    Q_PROPERTY(int playlistCount READ playlistCount NOTIFY playlistCountChanged)
+    Q_PROPERTY(bool pausedForCache READ pausedForCache NOTIFY pausedForCacheChanged)
+    Q_PROPERTY(double demuxerCacheDuration READ demuxerCacheDuration NOTIFY demuxerCacheDurationChanged)
+    Q_PROPERTY(qint64 cacheSpeed READ cacheSpeed NOTIFY cacheSpeedChanged)
     // 播放流 HTTP 代理(ConfigManager.proxy;mpv/ffmpeg 仅支持 HTTP 代理,
     // https 目标走 CONNECT 隧道;空 = 直连)。
     Q_PROPERTY(QString httpProxy READ httpProxy WRITE setHttpProxy)
@@ -39,6 +48,15 @@ public:
     // 音量(0-100),写属性同时下发到 mpv。
     int volume() const { return m_volume; }
     void setVolume(int v);
+    bool mute() const { return m_mute; }
+    QString mediaTitle() const { return m_mediaTitle; }
+    QVariantList chapterList() const { return m_chapterList; }
+    int chapter() const { return m_chapter; }
+    int playlistPos() const { return m_playlistPos; }
+    int playlistCount() const { return m_playlistCount; }
+    bool pausedForCache() const { return m_pausedForCache; }
+    double demuxerCacheDuration() const { return m_demuxerCacheDuration; }
+    qint64 cacheSpeed() const { return m_cacheSpeed; }
     // 当前播放流 HTTP 代理串(空 = 直连)。
     QString httpProxy() const { return m_httpProxy; }
     // 设置播放流 HTTP 代理(空串/非 http(s) 忽略 = 直连)。
@@ -58,12 +76,28 @@ signals:
     void durationChanged();
     void stateChanged();
     void volumeChanged();
+    void muteChanged();
+    void mediaTitleChanged();
+    void chapterListChanged();
+    void chapterChanged();
+    void playlistPosChanged();
+    void playlistCountChanged();
+    void pausedForCacheChanged();
+    void demuxerCacheDurationChanged();
+    void cacheSpeedChanged();
     // 首次获得有效时长时发出,表示媒体已开始解码。
     void playbackStarted();
     // 文件加载完成事件。loadfile 是异步命令,外挂字幕必须等此事件后才能挂载。
     void fileLoaded();
     // 播放结束事件:error 为 true 表示出错退出,false 表示正常播完。
     void playbackEnded(bool error);
+
+public slots:
+    void toggleMute() { command({ QStringLiteral("cycle"), QStringLiteral("mute") }); }
+    void chapterPrev() { command({ QStringLiteral("add"), QStringLiteral("chapter"), QStringLiteral("-1") }); }
+    void chapterNext() { command({ QStringLiteral("add"), QStringLiteral("chapter"), QStringLiteral("1") }); }
+    void playlistPrev() { command({ QStringLiteral("playlist-prev") }); }
+    void playlistNext() { command({ QStringLiteral("playlist-next") }); }
 
 private slots:
     // GUI 线程排空 mpv 事件队列,更新属性并转发信号。
@@ -82,5 +116,14 @@ private:
     bool m_paused = false;
     bool m_idle = true;
     int m_volume = 100;
+    bool m_mute = false;
+    QString m_mediaTitle;
+    QVariantList m_chapterList;
+    int m_chapter = -1;
+    int m_playlistPos = -1;
+    int m_playlistCount = 0;
+    bool m_pausedForCache = false;
+    double m_demuxerCacheDuration = 0.0;
+    qint64 m_cacheSpeed = 0;
     QString m_httpProxy;
 };

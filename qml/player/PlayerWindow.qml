@@ -11,10 +11,22 @@ Window {
     width: 960
     height: 540
     visible: true
-    title: root.loading ? Qt.application.name + " · 正在获取播放地址…"
-          : source.length ? Qt.application.name + " · " + source.split("/").pop()
-          : Qt.application.name
+    title: root.loading ? Qt.application.name + " · 正在获取播放地址…" : Qt.application.name
     color: "black"
+
+    function syncTitle() {
+        if (root.loading) {
+            root.title = Qt.application.name + " · 正在获取播放地址…"
+            return
+        }
+        const mt = mpv.mediaTitle || (source.length ? source.split("/").pop() : "")
+        let t = mt
+        if (mpv.playlistCount > 1)
+            t = "[" + (mpv.playlistPos + 1) + "/" + mpv.playlistCount + "] " + mt
+        root.title = t ? Qt.application.name + " · " + t : Qt.application.name
+    }
+
+    onLoadingChanged: root.syncTitle()
 
     property string source: ""
     property var headers: []
@@ -34,6 +46,8 @@ Window {
     property double lastDuration: 0
     // 续播位置(100ns ticks,来自详情页继续观看),起播后跳转。
     readonly property double resumeTicks: (meta && meta.resumePositionTicks) || 0
+
+    readonly property bool isMaximized: root.visibility === Window.Maximized
 
     // 供 Connections 处理器引用:Qt 6.11 中信号处理器函数内的 id 解析
     // 在部分实例上会得到 null(运行时报 TypeError),绑定求值于创建时,
@@ -78,6 +92,7 @@ Window {
         root.currentAudioIndex = root.defaultStreamIndex(root.audioStreams)
         root.currentSubtitleIndex = root.defaultStreamIndex(root.subtitleStreams)
 
+        root.syncTitle()
         mpv.load(url, root.headers)
     }
     // 返回默认轨索引;无默认则取第一个。
@@ -124,6 +139,14 @@ Window {
             if (root.source !== "")
                 load(root.source, root.headers)
         }
+    }
+
+    // 标题随 mpv 媒体标题/播放列表变化同步。
+    Connections {
+        target: mpv
+        function onMediaTitleChanged() { root.syncTitle() }
+        function onPlaylistPosChanged() { root.syncTitle() }
+        function onPlaylistCountChanged() { root.syncTitle() }
     }
 
     // 代理热重载:新开的流用新代理(进行中的流不受影响)。
@@ -231,6 +254,14 @@ Window {
     // ---------- 自绘播放 UI ----------
     function toggleFullscreen() {
         root.visibility = root.isFullScreen ? Window.Windowed : Window.FullScreen
+    }
+    function toggleMaximize() {
+        if (root.isFullScreen)
+            root.visibility = Window.Windowed
+        else if (root.isMaximized)
+            root.visibility = Window.Windowed
+        else
+            root.visibility = Window.Maximized
     }
     function playPause() {
         if (mpv.state === "playing")
@@ -354,34 +385,111 @@ Window {
         Behavior on opacity { NumberAnimation { duration: 220 } }
 
         AppText {
+            id: topTitle
             anchors.verticalCenter: parent.verticalCenter
             anchors.left: parent.left
             anchors.leftMargin: 16
+            anchors.right: topControls.left
+            anchors.rightMargin: 12
             text: root.title
             color: "white"
             font.pixelSize: 14
             elide: Text.ElideRight
-            width: parent.width - 120
         }
-        Button {
-            id: closeBtn
+
+        Row {
+            id: topControls
             anchors.verticalCenter: parent.verticalCenter
             anchors.right: parent.right
             anchors.rightMargin: 12
-            width: 80
-            height: 30
-            text: "关闭"
-            onClicked: root.close()
-            background: Rectangle {
-                radius: height / 2
-                color: closeBtn.hovered ? Constants.moePinkDark : Constants.moePink
+            spacing: 8
+
+            Button {
+                id: playlistPrevBtn
+                width: 32
+                height: 32
+                visible: mpv.playlistCount > 1
+                onClicked: mpv.playlistPrev()
+                background: Rectangle {
+                    radius: height / 2
+                    color: playlistPrevBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏴"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
-            contentItem: AppText {
-                text: closeBtn.text
-                color: "white"
-                font.pixelSize: 13
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
+            Button {
+                id: playlistNextBtn
+                width: 32
+                height: 32
+                visible: mpv.playlistCount > 1
+                onClicked: mpv.playlistNext()
+                background: Rectangle {
+                    radius: height / 2
+                    color: playlistNextBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏵"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            Button {
+                id: minimizeBtn
+                width: 32
+                height: 32
+                onClicked: root.showMinimized()
+                background: Rectangle {
+                    radius: height / 2
+                    color: minimizeBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "−"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            Button {
+                id: maximizeBtn
+                width: 32
+                height: 32
+                onClicked: root.toggleMaximize()
+                background: Rectangle {
+                    radius: height / 2
+                    color: maximizeBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: root.isMaximized ? "⛶" : "□"
+                    color: "white"
+                    font.pixelSize: 16
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            Button {
+                id: closeBtn
+                width: 32
+                height: 32
+                onClicked: root.close()
+                background: Rectangle {
+                    radius: height / 2
+                    color: closeBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                }
+                contentItem: AppText {
+                    text: "×"
+                    color: "white"
+                    font.pixelSize: 18
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
         }
     }
@@ -393,8 +501,49 @@ Window {
         color: "white"
         font.pixelSize: 64
         opacity: mpv.state === "paused" ? 0.75 : 0
-        visible: opacity > 0
+        visible: opacity > 0 && !mpv.pausedForCache
         Behavior on opacity { NumberAnimation { duration: 220 } }
+    }
+
+    // 缓冲提示。
+    Column {
+        anchors.centerIn: parent
+        spacing: 12
+        visible: mpv.pausedForCache && mpv.state !== "idle"
+        opacity: visible ? 0.9 : 0
+        Behavior on opacity { NumberAnimation { duration: 220 } }
+        BusyIndicator {
+            anchors.horizontalCenter: parent.horizontalCenter
+            running: parent.visible
+            implicitWidth: 40
+            implicitHeight: 40
+            contentItem: Canvas {
+                width: 40
+                height: 40
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.reset()
+                    ctx.strokeStyle = Constants.moePink
+                    ctx.lineWidth = 4
+                    ctx.lineCap = "round"
+                    ctx.beginPath()
+                    ctx.arc(width / 2, height / 2, width / 2 - 6,
+                            -Math.PI / 2, Math.PI * 1.4)
+                    ctx.stroke()
+                }
+                RotationAnimator on rotation {
+                    from: 0; to: 360
+                    duration: 900
+                    loops: Animation.Infinite
+                }
+            }
+        }
+        AppText {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "缓冲中…"
+            color: "white"
+            font.pixelSize: 14
+        }
     }
 
     // 底部控制栏。
@@ -421,11 +570,52 @@ Window {
             anchors.margins: 12
             spacing: 12
 
+            // 快退 5s。
+            Button {
+                id: skipBackwardBtn
+                width: 34
+                height: 34
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.seekRelative(-5)
+                background: Rectangle {
+                    radius: height / 2
+                    color: skipBackwardBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏪"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            // 上一章节。
+            Button {
+                id: chapterPrevBtn
+                width: 34
+                height: 34
+                anchors.verticalCenter: parent.verticalCenter
+                visible: mpv.chapterList.length > 0
+                onClicked: mpv.chapterPrev()
+                background: Rectangle {
+                    radius: height / 2
+                    color: chapterPrevBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏮"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             // 播放/暂停。
             Button {
                 id: ppBtn
                 width: 44
                 height: 44
+                anchors.verticalCenter: parent.verticalCenter
                 onClicked: root.playPause()
                 background: Rectangle {
                     radius: height / 2
@@ -440,6 +630,46 @@ Window {
                 }
             }
 
+            // 下一章节。
+            Button {
+                id: chapterNextBtn
+                width: 34
+                height: 34
+                anchors.verticalCenter: parent.verticalCenter
+                visible: mpv.chapterList.length > 0
+                onClicked: mpv.chapterNext()
+                background: Rectangle {
+                    radius: height / 2
+                    color: chapterNextBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏭"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            // 快进 5s。
+            Button {
+                id: skipForwardBtn
+                width: 34
+                height: 34
+                anchors.verticalCenter: parent.verticalCenter
+                onClicked: root.seekRelative(5)
+                background: Rectangle {
+                    radius: height / 2
+                    color: skipForwardBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
+                }
+                contentItem: AppText {
+                    text: "⏩"
+                    color: "white"
+                    font.pixelSize: 14
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             // 时间。
             AppText {
                 id: timeLabel
@@ -447,22 +677,42 @@ Window {
                 text: root.formatTime(mpv.position) + " / " + root.formatTime(mpv.duration)
                 color: "white"
                 font.pixelSize: 13
+                // 固定宽(小时级时长最坏 17 字符),供 seekBar 宽度公式抵扣。
+                width: 110
+                elide: Text.ElideRight
+                horizontalAlignment: Text.AlignLeft
             }
 
-            // 进度条。
+            // 进度条。宽度 = 控制栏剩余(固定按钮组总宽 502 + 11 项间距 120
+            // = 622;可见性变化使按钮组变窄时尾部留白,不挤压 seekBar)。
             Item {
                 id: seekBar
                 anchors.verticalCenter: parent.verticalCenter
                 height: 24
-                width: parent.width - 320
+                width: Math.max(120, parent.width - 622)
                 property real progress: mpv.duration > 0 ? mpv.position / mpv.duration : 0
+                property real hoverX: 0
+                property real hoverRatio: 0
+                property bool hoverActive: false
 
                 Rectangle {
+                    id: seekTrack
                     anchors.verticalCenter: parent.verticalCenter
                     width: parent.width
                     height: 4
                     radius: 2
                     color: Qt.rgba(1, 1, 1, 0.25)
+                }
+                // 缓存范围覆盖在当前位置之后。
+                Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    x: parent.width * seekBar.progress
+                    width: Math.max(0, Math.min(parent.width - x,
+                                                  parent.width * (mpv.demuxerCacheDuration / mpv.duration)))
+                    height: 4
+                    radius: 2
+                    color: Qt.rgba(1, 1, 1, 0.35)
+                    visible: mpv.demuxerCacheDuration > 0 && mpv.duration > 0
                 }
                 Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
@@ -470,6 +720,22 @@ Window {
                     height: 4
                     radius: 2
                     color: Constants.moePink
+                }
+                // 章节标记。
+                Repeater {
+                    model: mpv.chapterList
+                    delegate: Rectangle {
+                        required property var modelData
+                        anchors.verticalCenter: parent.verticalCenter
+                        visible: mpv.duration > 0
+                        x: (modelData.time / mpv.duration) * parent.width - 1
+                        y: -4
+                        width: 2
+                        height: 12
+                        radius: 1
+                        color: "white"
+                        opacity: 0.7
+                    }
                 }
                 Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
@@ -479,10 +745,37 @@ Window {
                     radius: 6
                     color: "white"
                 }
+                // 悬停时间提示。
+                Rectangle {
+                    id: seekTooltip
+                    x: Math.max(0, Math.min(parent.width - width, seekBar.hoverX - width / 2))
+                    y: -28
+                    width: seekTooltipText.implicitWidth + 12
+                    height: 22
+                    radius: 11
+                    color: Qt.rgba(0, 0, 0, 0.75)
+                    border.width: 1
+                    border.color: Qt.rgba(1, 1, 1, 0.3)
+                    visible: seekBar.hoverActive && mpv.duration > 0
+                    AppText {
+                        id: seekTooltipText
+                        anchors.centerIn: parent
+                        text: root.formatTime(seekBar.hoverRatio * mpv.duration)
+                        color: "white"
+                        font.pixelSize: 11
+                    }
+                }
                 MouseArea {
                     anchors.fill: parent
+                    hoverEnabled: true
                     onPressed: root.seekTo(mouse.x / seekBar.width)
-                    onPositionChanged: if (pressed) root.seekTo(mouse.x / seekBar.width)
+                    onPositionChanged: {
+                        if (pressed) root.seekTo(mouse.x / seekBar.width)
+                        seekBar.hoverX = mouse.x
+                        seekBar.hoverRatio = Math.max(0, Math.min(1, mouse.x / seekBar.width))
+                    }
+                    onEntered: seekBar.hoverActive = true
+                    onExited: seekBar.hoverActive = false
                 }
             }
 
@@ -491,13 +784,13 @@ Window {
                 id: volBtn
                 width: 44
                 height: 44
-                onClicked: mpv.volume = mpv.volume > 0 ? 0 : 100
+                onClicked: mpv.toggleMute()
                 background: Rectangle {
                     radius: height / 2
                     color: volBtn.hovered ? Qt.rgba(1, 1, 1, 0.15) : "transparent"
                 }
                 contentItem: AppText {
-                    text: mpv.volume > 0 ? "🔊" : "🔇"
+                    text: mpv.mute || mpv.volume === 0 ? "🔇" : "🔊"
                     color: "white"
                     font.pixelSize: 18
                     horizontalAlignment: Text.AlignHCenter
@@ -813,7 +1106,7 @@ Window {
             else if (key === Qt.Key_Up) { mpv.volume = Math.min(100, mpv.volume + 5); event.accepted = true }
             else if (key === Qt.Key_Down) { mpv.volume = Math.max(0, mpv.volume - 5); event.accepted = true }
             else if (key === Qt.Key_F) { root.toggleFullscreen(); event.accepted = true }
-            else if (key === Qt.Key_M) { mpv.volume = mpv.volume > 0 ? 0 : 100; event.accepted = true }
+            else if (key === Qt.Key_M) { mpv.toggleMute(); event.accepted = true }
             else if (key === Qt.Key_Escape) {
                 if (root.isFullScreen) { root.visibility = Window.Windowed; event.accepted = true }
             }
