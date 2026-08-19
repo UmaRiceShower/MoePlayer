@@ -119,6 +119,15 @@ MpvItem::MpvItem(QQuickItem *parent)
     mpv_observe_property(m_mpv, 3, "pause", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 4, "core-idle", MPV_FORMAT_FLAG);
     mpv_observe_property(m_mpv, 5, "volume", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 6, "media-title", MPV_FORMAT_STRING);
+    mpv_observe_property(m_mpv, 7, "chapter-list", MPV_FORMAT_NODE);
+    mpv_observe_property(m_mpv, 8, "chapter", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 9, "playlist-pos", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 10, "playlist-count", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 11, "paused-for-cache", MPV_FORMAT_FLAG);
+    mpv_observe_property(m_mpv, 12, "demuxer-cache-duration", MPV_FORMAT_DOUBLE);
+    mpv_observe_property(m_mpv, 13, "cache-speed", MPV_FORMAT_INT64);
+    mpv_observe_property(m_mpv, 14, "mute", MPV_FORMAT_FLAG);
 }
 
 MpvItem::~MpvItem()
@@ -216,6 +225,44 @@ void MpvItem::command(const QVariantList &params)
     mpv_command_node(m_mpv, &root, nullptr);
 }
 
+// 将 mpv_node 递归转换为 QVariant,用于解析 chapter-list 等节点属性。
+static QVariant nodeToVariant(const mpv_node *node)
+{
+    if (!node)
+        return QVariant();
+
+    switch (node->format) {
+    case MPV_FORMAT_STRING:
+        return QString::fromUtf8(node->u.string);
+    case MPV_FORMAT_FLAG:
+        return node->u.flag != 0;
+    case MPV_FORMAT_INT64:
+        return qint64(node->u.int64);
+    case MPV_FORMAT_DOUBLE:
+        return node->u.double_;
+    case MPV_FORMAT_NODE_ARRAY: {
+        QVariantList list;
+        if (node->u.list) {
+            for (int i = 0; i < node->u.list->num; ++i)
+                list.append(nodeToVariant(&node->u.list->values[i]));
+        }
+        return list;
+    }
+    case MPV_FORMAT_NODE_MAP: {
+        QVariantMap map;
+        if (node->u.list) {
+            for (int i = 0; i < node->u.list->num; ++i) {
+                const QString key = QString::fromUtf8(node->u.list->keys[i]);
+                map.insert(key, nodeToVariant(&node->u.list->values[i]));
+            }
+        }
+        return map;
+    }
+    default:
+        return QVariant();
+    }
+}
+
 void MpvItem::onMpvEvents()
 {
     if (!m_mpv)
@@ -242,6 +289,9 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
         return;
 
     bool posChanged = false, durChanged = false, stChanged = false, volChanged = false;
+    bool muteChangedFlag = false, mediaTitleChangedFlag = false, chapterListChangedFlag = false;
+    bool chapterChangedFlag = false, playlistPosChangedFlag = false, playlistCountChangedFlag = false;
+    bool pausedForCacheChangedFlag = false, demuxerCacheDurationChangedFlag = false, cacheSpeedChangedFlag = false;
 
     switch (observeId) {
     case 1: // time-pos
@@ -294,6 +344,90 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
             }
         }
         break;
+    case 6: // media-title
+        if (prop->format == MPV_FORMAT_STRING) {
+            const char *str = *static_cast<char **>(prop->data);
+            const QString v = QString::fromUtf8(str ? str : "");
+            if (v != m_mediaTitle) {
+                m_mediaTitle = v;
+                mediaTitleChangedFlag = true;
+            }
+        }
+        break;
+    case 7: { // chapter-list
+        if (prop->format == MPV_FORMAT_NODE) {
+            const mpv_node *node = static_cast<mpv_node *>(prop->data);
+            const QVariantList v = nodeToVariant(node).toList();
+            if (v != m_chapterList) {
+                m_chapterList = v;
+                chapterListChangedFlag = true;
+            }
+        }
+        break;
+    }
+    case 8: // chapter
+        if (prop->format == MPV_FORMAT_INT64) {
+            const int v = static_cast<int>(*static_cast<int64_t *>(prop->data));
+            if (v != m_chapter) {
+                m_chapter = v;
+                chapterChangedFlag = true;
+            }
+        }
+        break;
+    case 9: // playlist-pos
+        if (prop->format == MPV_FORMAT_INT64) {
+            const int v = static_cast<int>(*static_cast<int64_t *>(prop->data));
+            if (v != m_playlistPos) {
+                m_playlistPos = v;
+                playlistPosChangedFlag = true;
+            }
+        }
+        break;
+    case 10: // playlist-count
+        if (prop->format == MPV_FORMAT_INT64) {
+            const int v = static_cast<int>(*static_cast<int64_t *>(prop->data));
+            if (v != m_playlistCount) {
+                m_playlistCount = v;
+                playlistCountChangedFlag = true;
+            }
+        }
+        break;
+    case 11: // paused-for-cache
+        if (prop->format == MPV_FORMAT_FLAG) {
+            const bool v = *static_cast<int *>(prop->data) != 0;
+            if (v != m_pausedForCache) {
+                m_pausedForCache = v;
+                pausedForCacheChangedFlag = true;
+            }
+        }
+        break;
+    case 12: // demuxer-cache-duration
+        if (prop->format == MPV_FORMAT_DOUBLE) {
+            const double v = *static_cast<double *>(prop->data);
+            if (v != m_demuxerCacheDuration) {
+                m_demuxerCacheDuration = v;
+                demuxerCacheDurationChangedFlag = true;
+            }
+        }
+        break;
+    case 13: // cache-speed
+        if (prop->format == MPV_FORMAT_INT64) {
+            const qint64 v = *static_cast<int64_t *>(prop->data);
+            if (v != m_cacheSpeed) {
+                m_cacheSpeed = v;
+                cacheSpeedChangedFlag = true;
+            }
+        }
+        break;
+    case 14: // mute
+        if (prop->format == MPV_FORMAT_FLAG) {
+            const bool v = *static_cast<int *>(prop->data) != 0;
+            if (v != m_mute) {
+                m_mute = v;
+                muteChangedFlag = true;
+            }
+        }
+        break;
     }
 
     if (posChanged)
@@ -304,4 +438,22 @@ void MpvItem::handlePropertyChange(uint64_t observeId, mpv_event_property *prop)
         emit stateChanged();
     if (volChanged)
         emit volumeChanged();
+    if (muteChangedFlag)
+        emit muteChanged();
+    if (mediaTitleChangedFlag)
+        emit mediaTitleChanged();
+    if (chapterListChangedFlag)
+        emit chapterListChanged();
+    if (chapterChangedFlag)
+        emit chapterChanged();
+    if (playlistPosChangedFlag)
+        emit playlistPosChanged();
+    if (playlistCountChangedFlag)
+        emit playlistCountChanged();
+    if (pausedForCacheChangedFlag)
+        emit pausedForCacheChanged();
+    if (demuxerCacheDurationChangedFlag)
+        emit demuxerCacheDurationChanged();
+    if (cacheSpeedChangedFlag)
+        emit cacheSpeedChanged();
 }

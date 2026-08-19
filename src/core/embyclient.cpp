@@ -899,8 +899,8 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     body.insert(QStringLiteral("EnableDirectPlay"), true);
     body.insert(QStringLiteral("EnableDirectStream"), true);
     body.insert(QStringLiteral("EnableTranscoding"), true);
-    if (!mediaSourceId.isEmpty())
-        body.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
+    // 不请求 MediaSourceId,让服务器返回所有可用版本;客户端按目标 id 挑选。
+    // 若带 MediaSourceId,响应 MediaSources 会被过滤,版本列表将只剩一项。
 
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
              [this, key, token, userId, itemId, mediaSourceId](const QJsonDocument &doc) {
