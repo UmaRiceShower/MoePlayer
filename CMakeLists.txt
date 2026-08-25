@@ -20,14 +20,14 @@ qt_standard_project_setup(REQUIRES 6.8)
 # 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
 # (默认输出 build/MoePlayer/Core 会占用 build/MoePlayer 目录名)。
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
+# 官方 osc.lua:拷贝到构建目录,运行时经 <appdir>/osc.lua 加载。
+# 开发时构建目录在项目根下(applicationDirPath),可直接找到。
+configure_file(third_party/osc.lua "${CMAKE_BINARY_DIR}/osc.lua" COPYONLY)
 
 # pragma Singleton 文件须显式声明,qmldir 才会生成 singleton 条目
 # (qmlls/LSP 才能识别 Theme/Constants 为单例并解析 Theme.bg 等成员)。
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/theme/Constants.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
-
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(MPV REQUIRED IMPORTED_TARGET mpv)
 
 # QML 模块:所有 QML 文件 + C++ 类型统一归入 URI MoePlayer.Core,
 # 替代旧的 qml.qrc + 运行时 qmlRegister 布局。qt_add_qml_module 生成
@@ -43,7 +43,7 @@ qt_add_executable(MoePlayer
     src/models/colorprovider.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
-    src/playback/mpvitem.cpp
+    src/playback/mpvclient.cpp
 )
 
 qt_add_qml_module(MoePlayer
@@ -56,10 +56,6 @@ qt_add_qml_module(MoePlayer
     IMPORT_PATH "${CMAKE_BINARY_DIR}/qml"
     QML_FILES
         qml/Main.qml
-        qml/player/PlayerWindow.qml
-        qml/player/OscIcon.qml
-        qml/player/OscButton.qml
-        qml/player/SelectMenu.qml
         qml/theme/Theme.qml
         qml/theme/Constants.qml
         qml/theme/AppText.qml
@@ -119,4 +115,4 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${PROJECT_VERSION}"
     MOEPLAYER_NAME="${PROJECT_NAME}")
-target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus PkgConfig::MPV)
+target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus)
