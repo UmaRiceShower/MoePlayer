@@ -12,7 +12,23 @@ Window {
     height: 540
     visible: true
     title: root.loading ? Qt.application.name + " · 正在获取播放地址…" : Qt.application.name
-    color: "black"
+    // 窗口关闭兜底释放待机抑制:playing 时 Connections 断开不再触发
+    // stateChanged,必须在此释放,否则多窗口计数残留致系统持续被抑制。
+    Component.onDestruction: root._setInhibit(false)
+
+    // 待机抑制的幂等开关:每个窗口持有一个"正在播放"计数,仅首次置 true
+    // 才 acquire、最后一次置 false 才 release,避免暂停窗/关闭窗重复释放
+    // 把其他窗口的持有减去,导致播放中系统过早入睡。
+    property bool _inhibitHeld: false
+    function _setInhibit(playing) {
+        if (playing === root._inhibitHeld)
+            return
+        root._inhibitHeld = playing
+        if (playing)
+            ScreenInhibit.acquire()
+        else
+            ScreenInhibit.release()
+    }
 
     function mediaDisplayName() {
         if (root.meta && root.meta.displayName && root.meta.displayName.length > 0)
@@ -226,8 +242,9 @@ Window {
                                                   owner.meta.playMethod, mpv.position, false)
             }
         }
-        // 暂停/恢复等状态变化立即上报一次(携带 IsPaused)。
+        // 幂等切换(见 root._setInhibit),多窗口共享计数不出现过减。
         function onStateChanged() {
+            root._setInhibit(mpv.state === "playing")
             if (!owner.reporting || mpv.state === "idle")
                 return
             EmbyClient.reportPlaybackProgress(owner.meta.serverUrl, owner.meta.token,
@@ -236,12 +253,12 @@ Window {
                                               owner.meta.playMethod, mpv.position,
                                               mpv.state === "paused")
         }
-        // 播放结束(正常播完或出错) → 上报停止。
+        // 播放结束(正常播完或出错) → 上报停止,并兜底释放待机抑制。
         // resume 位置与已看由服务器维护(Progress 每 10s 写入位置,
         // 播完 ≥90% 时服务器自动标已看)。
         function onPlaybackEnded(error) {
+            root._setInhibit(false)
             if (owner.reporting && !owner.stoppedReported) {
-                owner.stoppedReported = true
                 EmbyClient.reportPlaybackStopped(owner.meta.serverUrl, owner.meta.token,
                                                  owner.meta.userId, owner.meta.itemId,
                                                  owner.meta.mediaSourceId, owner.meta.playSessionId,

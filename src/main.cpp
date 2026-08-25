@@ -15,6 +15,7 @@
 #include "core/configmanager.h"
 #include "core/constants.h"
 #include "core/embyclient.h"
+#include "core/screeninhibit.h"
 #include "core/settingsstore.h"
 #include "models/colorprovider.h"
 #include "models/posterprovider.h"
@@ -120,6 +121,12 @@ int main(int argc, char *argv[])
     PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager, &configManager);
     ColorProvider colorProvider(posterProvider);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
+
+    // 播放防待机:视频播放期间抑制系统睡眠/灭屏(多窗口引用计数)。
+    // 无依赖,但须在 QML 引用前注入成单例供 PlayerWindow 调用。
+    ScreenInhibit screenInhibit;
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                 "ScreenInhibit", &screenInhibit);
 
     // 启动日志:当前网络代理(直连/HTTP),便于确认配置生效。
     const QNetworkProxy appProxy = configManager.proxyObject();
