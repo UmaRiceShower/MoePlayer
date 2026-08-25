@@ -19,7 +19,7 @@
 #include "core/settingsstore.h"
 #include "models/colorprovider.h"
 #include "models/posterprovider.h"
-#include "playback/mpvitem.h"
+#include "playback/mpvclient.h"
 
 namespace {
 // QML 模块版本(major, minor):QML 侧 import 不带版本,仅 C++ 注册使用;
@@ -68,17 +68,13 @@ int main(int argc, char *argv[])
     // 全局 applicationVersion() 与 UA/认证头共用,无第二处副本。
     app.setApplicationVersion(QStringLiteral(MOEPLAYER_VERSION));
 
-    // QGuiApplication 会按环境设置 locale,而 libmpv 要求 LC_NUMERIC 为 C,须在 mpv_create 前恢复。
-    std::setlocale(LC_NUMERIC, "C");
-
-    // QQuickFramebufferObject 仅支持 OpenGL 后端,固定并校验。
+    // 场景图固定 OpenGL 后端(嵌入视频已交外部 mpv 进程,Qt 不渲染视频帧,
+    // 但其余 QML/ShaderEffect 仍走 OpenGL RHI)。
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     const auto api = QQuickWindow::graphicsApi();
     qInfo().noquote() << "RHI backend:"
                       << (api == QSGRendererInterface::OpenGL ? QStringLiteral("opengl")
                                                               : QStringLiteral("other"));
-    if (api != QSGRendererInterface::OpenGL)
-        qFatal("OpenGL scene graph backend unavailable");
 
     // 单实例锁:重复启动直接退出。
     QLockFile lock(QDir::temp().filePath(MoePlayer::kAppName + QStringLiteral(".lock")));
@@ -88,14 +84,13 @@ int main(int argc, char *argv[])
     }
 
     // 向 QML 暴露 C++ 类型与单例。
-    // 无依赖/无共享实例需求的类型(SettingsStore/MediaItemModel/MpvItem)由
+    // 无依赖/无共享实例需求的类型(SettingsStore/MediaItemModel 等)由
     // qmltyperegistrar 经 QML_ELEMENT/QML_SINGLETON/QML_NAMED_ELEMENT 自动注册
     // 到 MoePlayer.Core。生成的注册函数 qml_register_types_MoePlayer_Core() 由
     // qmltyperegistrations.cpp 中的 QQmlModuleRegistration 静态注册,理论上引擎
     // import 模块时自动触发;但实测(Qt 6.11,qrc qmldir 与静态注册并存)静态注册
-    // 未在组件类型解析前触发(PlayerWindow 解析 MpvItem 报 "is not a type"),
-    // 故在此显式调用该注册函数,保证类型在 loadFromModule 前就绪。宏与手动
-    // qmlRegister 不并存,无双注册。
+    // 未在组件类型解析前触发,故在此显式调用该注册函数,保证类型在
+    // loadFromModule 前就绪。宏与手动 qmlRegister 不并存,无双注册。
     qml_register_types_MoePlayer_Core();
     // 以下单例因构造依赖或需与 C++ 侧共享同一实例(PosterProvider 复用
     // EmbyClient/AccountManager;ColorProvider 复用 PosterProvider),按官方
@@ -122,11 +117,16 @@ int main(int argc, char *argv[])
     ColorProvider colorProvider(posterProvider);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
 
-    // 播放防待机:视频播放期间抑制系统睡眠/灭屏(多窗口引用计数)。
-    // 无依赖,但须在 QML 引用前注入成单例供 PlayerWindow 调用。
+    // 播放防待机:视频播放期间抑制系统睡眠/灭屏(多会话引用计数)。
+    // 无依赖,但须在 QML 引用前注入成单例。
     ScreenInhibit screenInhibit;
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "ScreenInhibit", &screenInhibit);
+    // 外部 mpv 进程客户端(路线2):点播放即 spawn 系统 mpv + 官方 osc.lua,
+    // 经 JSON IPC 控制/订阅、承接 Emby 播放状态回传。须在 QML 引用前注入。
+    MpvClient mpvClient(&embyClient, &configManager);
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                 "MpvClient", &mpvClient);
 
     // 启动日志:当前网络代理(直连/HTTP),便于确认配置生效。
     const QNetworkProxy appProxy = configManager.proxyObject();
