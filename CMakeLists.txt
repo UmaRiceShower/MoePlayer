@@ -12,7 +12,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # qrc 资源路径。buildDir 由 qmlls 自动读取,无需手动配置扩展。
 set(QT_QML_GENERATE_QMLLS_INI ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
+find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
 # 官方推荐项目默认(Qt 6.3+):开 AUTOMOC/AUTOUIC、GNUInstallDirs、RPATH,
 # 并按 REQUIRES 6.8 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
 # 不设 AUTORCC(无 .qrc)与 C++ 标准(上方手动设置,该命令不涉及)。
@@ -39,6 +39,7 @@ qt_add_executable(MoePlayer
     src/core/embyclient.cpp
     src/core/accountmanager.cpp
     src/core/configmanager.cpp
+    src/core/screeninhibit.cpp
     src/models/colorprovider.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
@@ -118,4 +119,4 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${PROJECT_VERSION}"
     MOEPLAYER_NAME="${PROJECT_NAME}")
-target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets PkgConfig::MPV)
+target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus PkgConfig::MPV)

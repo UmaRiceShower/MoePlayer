@@ -149,9 +149,13 @@ QQuickFramebufferObject::Renderer *MpvItem::createRenderer() const
 
 QString MpvItem::state() const
 {
+    // core-idle 在暂停时也为 true(mpv 语义:仅真正出帧播放时为 false),
+    // 故暂停判定须优先于 idle,否则暂停后会被误判为 idle,playPause 失效。
+    if (m_paused)
+        return QStringLiteral("paused");
     if (m_idle)
         return QStringLiteral("idle");
-    return m_paused ? QStringLiteral("paused") : QStringLiteral("playing");
+    return QStringLiteral("playing");
 }
 
 void MpvItem::setVolume(int v)
@@ -160,7 +164,8 @@ void MpvItem::setVolume(int v)
     if (v == m_volume)
         return;
     m_volume = v;
-    mpv_set_property(m_mpv, "volume", MPV_FORMAT_INT64, &v);
+    int64_t vv = v;
+    mpv_set_property(m_mpv, "volume", MPV_FORMAT_INT64, &vv);
     emit volumeChanged();
 }
 
@@ -194,7 +199,10 @@ void MpvItem::seek(double seconds)
 
 void MpvItem::setPause(bool p)
 {
-    mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &p);
+    // MPV_FORMAT_FLAG 要求 int*,传 bool* 是未定义行为:false 时 mpv
+    // 会读取 bool 之后的栈字节(可能非零)而视为 true,导致无法恢复播放。
+    int v = p ? 1 : 0;
+    mpv_set_property(m_mpv, "pause", MPV_FORMAT_FLAG, &v);
 }
 
 void MpvItem::command(const QVariantList &params)
