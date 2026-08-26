@@ -16,7 +16,7 @@ Item {
     property var heroItems: []
     property int heroIndex: 0
     readonly property real navH: 48
-    readonly property real heroH: Math.min(380, (parent ? parent.height : 720) * 0.42)
+    readonly property real heroH: Math.min(500, (parent ? parent.height : 720) * 0.5)
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl)
     signal openLibrary(string viewId, string serverUrl, string viewName)
@@ -99,6 +99,17 @@ Item {
                     anchors.centerIn: parent
                     iconName: "search"
                     onClicked: root.openSearch()
+                }
+            }
+            GlassBar {
+                width: 42
+                height: 42
+                radius: 21
+                blurSource: pageList
+                GlassCircleButton {
+                    anchors.centerIn: parent
+                    iconName: "history"
+                    // 播放历史页未做,点击暂不响应
                 }
             }
             GlassBar {
@@ -283,13 +294,17 @@ Item {
                                                       libRow.modelData.viewName)
             }
             // 条目卡片横向行(鼠标拖拽横向滚动)。
+            // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
+            // (1.06,横向溢出 4.6px)立即被裁;header 垫 8px 让首卡左缘内移,
+            // 高度 +16 容纳垂直溢出(230×1.06=243.8)。
             ListView {
                 id: rowItems
                 width: libRow.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
-                height: Constants.rowHeight + 12
+                height: Constants.rowHeight + 16
                 orientation: ListView.Horizontal
                 spacing: Constants.rowSpacing
                 clip: true
+                header: Item { width: 8; height: 1 }
                 // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
                 reuseItems: true
                 cacheBuffer: 600
@@ -298,7 +313,7 @@ Item {
                     required property var modelData
                     required property int index
                     width: Constants.rowCardW
-                    height: Constants.rowHeight + 12
+                    height: Constants.rowHeight + 16
                     z: pc.hovered ? 2 : 0
                     PosterCard {
                         id: pc
@@ -376,23 +391,22 @@ Item {
             blurMax: 22
         }
 
-        // 玻璃底色 + 描边 + 顶部微光。
+        // 玻璃底色 + 描边。
         Rectangle {
             anchors.fill: parent
             color: gbar.glassColor
             radius: gbar.radius
             border.width: 1
             border.color: gbar.borderColor
-            Rectangle {
-                anchors.top: parent.top
-                anchors.left: parent.left
-                anchors.right: parent.right
-                height: parent.height * 0.5
-                radius: parent.radius
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.08) }
-                    GradientStop { position: 1.0; color: "transparent" }
-                }
+        }
+        // 顶部微光:与底色同形整圆,填充随自身 radius 裁切;
+        // 半高胶囊做法顶角会伸出圆外(clip 是矩形裁剪,管不到圆角)。
+        Rectangle {
+            anchors.fill: parent
+            radius: gbar.radius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.08) }
+                GradientStop { position: 0.5; color: "transparent" }
             }
         }
 
@@ -603,8 +617,12 @@ Item {
             }
             // layer 效果:内容一次进 layer 纹理,effect 采样透视(无双卡)。
             // layer.samplerName 与 shader 采样名(src)一致;w/h 用本卡尺寸。
+            // 侧卡经 scale + 透视倾斜是缩采样,双线性无 mipmap 文字会糊;
+            // 2 倍超采样渲染进纹理,缩小后仍保持 1:1 以上采样密度。
             layer.enabled: true
             layer.samplerName: "src"
+            layer.textureSize: Qt.size(Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio * 2)),
+                                       Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio * 2)))
             layer.effect: ShaderEffect {
                 property real sideTilt: hcard.tilt
                 property real w: cardContent.width

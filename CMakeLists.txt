@@ -113,6 +113,7 @@ qt_add_resources(MoePlayer "nav_icons"
     PREFIX "/icons"
     BASE "qml/assets/icons"
     FILES
+        qml/assets/icons/history.svg
         qml/assets/icons/search.svg
         qml/assets/icons/settings.svg
         qml/assets/icons/server.svg

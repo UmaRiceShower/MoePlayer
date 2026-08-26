@@ -61,7 +61,7 @@ QtObject {
     readonly property int detailCardH: 168        // 相似推荐海报卡高
 
     // ---- 首页行(堆叠轮盘) ----
-    readonly property int rowHeight: 172   // 海报卡高;卡宽=rowHeight*2/3(2:3 海报)
+    readonly property int rowHeight: 230   // 海报卡高;卡宽=rowHeight*2/3(2:3 海报)
     readonly property int rowCardW: Math.round(rowHeight * 2 / 3)    // 条目海报卡宽(2:3)
     readonly property int rowLibraryH: rowHeight                     // 大库海报高(与条目同高)
     readonly property int rowLibraryW: Math.round(rowHeight * 16 / 9) // 大库海报宽(库图16:9)
