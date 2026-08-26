@@ -49,6 +49,14 @@ Item {
     // 需要模糊的背景内容(主窗口传入 StackView,避免把浮层自身也模糊)。
     property Item backgroundSource: null
 
+    // 结果网格自适应卡宽(与 Library 同款):卡宽在 [cellMinW, cellMaxW]
+    // 伸缩填满整行;cell = 卡 + gap,卡在 cell 内居中,gap/2(12px)即
+    // hover 放大余量(1.06 溢出 <10.4px),首行顶/末行底/左右列不被裁。
+    readonly property real cardW: Constants.gridCardW(Math.max(1, gridContainer.width), Constants.searchCellMinW, Constants.searchCellMaxW)
+    readonly property int cardH: Constants.gridCardH(root.cardW)
+    readonly property real cellW: Constants.gridCellW(Math.max(1, gridContainer.width), Constants.searchCellMinW, Constants.searchCellMaxW)
+    readonly property int cellH: Constants.gridCellH(root.cardW)
+
     onServerUrlChanged: {
         if (root.serverUrl !== "")
             root.sm = EmbyClient.searchModelFor(root.serverUrl)
@@ -533,6 +541,7 @@ Item {
             // GridView 锚定 Item 计算列数。直接放 ColumnLayout 里时,
             // 布局按 implicitWidth 放置,显式 width 绑定被覆盖 → 只有 1 列。
             Item {
+                id: gridContainer
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
@@ -541,15 +550,10 @@ Item {
                     // 复用 cell 减少滚动重建;cacheBuffer 预备离屏项。
                     reuseItems: true
                     cacheBuffer: 600
-                    anchors.top: parent.top
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    // 宽度 = 整数列 × cellW 并水平居中:结果不满一行时
-                    // 内容居中显示,而非左贴边;满行时与容器等宽。
-                    width: Math.max(1, Math.floor((parent.width - 4) / Constants.cellW))
-                           * Constants.cellW
-                    cellWidth: Constants.cellW
-                    cellHeight: Constants.cellH
+                    anchors.fill: parent
+                    cellWidth: root.cellW
+                    cellHeight: root.cellH
+                    clip: true
                     model: root.sm
                     // 结果项入场动画:淡入 + 轻微缩放,萌系轻盈感。
                     add: Transition {
@@ -562,26 +566,36 @@ Item {
                             root.loadMore()
                     }
                     // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
-                    delegate: PosterCard {
-                        // delegate 根即本卡,兄弟间 z 直接生效(放大浮起
-                        // 盖住相邻结果)。
-                        z: hovered ? 2 : 0
-                        width: 152
-                        height: 236
-                        showActions: false
-                        itemId: model.id
-                        posterId: model.posterId
-                        title: model.name
-                        year: model.year
-                        rating: model.rating
-                        played: model.played
-                        favorite: model.favorite
-                        positionTicks: model.positionTicks
-                        runtimeTicks: model.runtimeTicks
-                        unplayedCount: model.unplayedCount
-                        itemType: model.type
-                        onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                    // 卡居中铺满 cell(同 Library):cell 内 gap/2 是 hover
+                    // 放大余量;delegate 根提 z 让放大卡盖住相邻 cell。
+                    delegate: Item {
+                        required property var model
+                        required property int index
+                        width: resultGrid.cellWidth
+                        height: resultGrid.cellHeight
+                        z: card.hovered ? 2 : 0
+                        PosterCard {
+                            id: card
+                            anchors.centerIn: parent
+                            width: root.cardW
+                            height: root.cardH
+                            model: parent.model
+                            index: parent.index
+                            showActions: false
+                            itemId: model.id
+                            posterId: model.posterId
+                            title: model.name
+                            year: model.year
+                            rating: model.rating
+                            played: model.played
+                            favorite: model.favorite
+                            positionTicks: model.positionTicks
+                            runtimeTicks: model.runtimeTicks
+                            unplayedCount: model.unplayedCount
+                            itemType: model.type
+                            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
                         }
+                    }
                 }
             }
         }
