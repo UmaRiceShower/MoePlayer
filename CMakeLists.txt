@@ -125,5 +125,7 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 # applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${PROJECT_VERSION}"
-    MOEPLAYER_NAME="${PROJECT_NAME}")
+    MOEPLAYER_NAME="${PROJECT_NAME}"
+    # 仅 Debug 启用 QML 调试/剖析(QML Profiler / -qmljsdebugger 需要 QT_QML_DEBUG)。
+    $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus)

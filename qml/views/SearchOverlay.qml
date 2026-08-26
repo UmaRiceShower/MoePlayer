@@ -538,6 +538,9 @@ Item {
                 clip: true
                 GridView {
                     id: resultGrid
+                    // 复用 cell 减少滚动重建;cacheBuffer 预备离屏项。
+                    reuseItems: true
+                    cacheBuffer: 600
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     anchors.horizontalCenter: parent.horizontalCenter

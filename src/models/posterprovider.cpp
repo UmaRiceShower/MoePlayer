@@ -24,6 +24,16 @@
 #include "core/constants.h"
 #include "core/embyclient.h"
 
+// 按显示宽度请求图片的档位化:小幅窗口缩放不改变档位,缓存键稳定。
+static int quantizedWidth(int width)
+{
+    const int steps[] = {128, 320, 640, 1280, 1920};
+    for (int s : steps)
+        if (width <= s)
+            return s;
+    return steps[4];
+}
+
 PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts,
                                ConfigManager *config)
     : m_client(client)
@@ -97,7 +107,7 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     QString serverUrl, token, itemId, tag, kind;
     if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind))
         return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
-    const QUrl url = imageUrl(serverUrl, itemId, tag, kind);
+    const QUrl url = imageUrl(serverUrl, itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
         QMutexLocker locker(&g_memMutex);
@@ -162,13 +172,17 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
 }
 
 QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
-                              const QString &tag, const QString &kind)
+                              const QString &tag, const QString &kind,
+                              const QSize &requestedSize)
 {
-    // 固定尺寸(卡片显示宽度足够)且 URL 不含 api_key:缓存键稳定,
-    // 重登换 token 不会导致整盘缓存失效;认证经 X-Emby-Token 请求头。
+    // 按显示尺寸请求,档位化避免小幅窗口缩放抖动缓存键;未传尺寸(取色等)
+    // 用 kind 上限。URL 不含 api_key,重登换 token 不失效;认证经请求头。
     QUrlQuery q;
-    const int maxW = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
-                                                       : MoePlayer::kPosterMaxWidth;
+    const int kindMax = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
+                                                          : MoePlayer::kPosterMaxWidth;
+    int maxW = kindMax;
+    if (requestedSize.isValid() && requestedSize.width() > 0)
+        maxW = qBound(1, quantizedWidth(requestedSize.width()), kindMax);
     q.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxW));
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
