@@ -496,6 +496,10 @@ void AccountManager::maybeAssembleHomeRows()
                 items[i] = it;
             }
             row.insert(QStringLiteral("items"), items);
+            // 空库(本次拉到 0 条目)不出现在首页;失败沿用旧行的路径
+            // (上方 401/网络失败)不受此过滤影响。
+            if (items.isEmpty())
+                continue;
             out.append(row);
         }
     }
