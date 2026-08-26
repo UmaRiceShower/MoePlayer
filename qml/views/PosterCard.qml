@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Shapes
+import QtQuick.Effects
 import MoePlayer.Core
 
 //! 通用海报卡片(媒体库网格/搜索浮层共用):海报 + 评分/已看/未看集数角标
@@ -103,7 +104,9 @@ Item {
         height: parent.height + 20
         radius: 20
         color: "transparent"
-        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.03
+        // 静止时隐藏,滚动不再参与绘制(几十张卡同时滚过时省去 radial gradient)。
+        visible: cardHover.hovered || root.current
+        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.0
 
         gradient: RadialGradient {
             centerX: 0.5
@@ -118,36 +121,65 @@ Item {
     }
 
     Rectangle {
-        anchors.fill: parent
+        x: 0
+        y: 0
+        width: parent.width
+        height: parent.height
         color: root.surfaceTint
         radius: 14
         clip: true
 
-        // CrossfadeImage:圆角在绘制层裁切(Item::clip 只裁矩形;Rectangle
-        // radius 不影响子项)。duration 0 = delegate 复用瞬时切换,无动画开销。
-        CrossfadeImage {
+        // 海报图:普通 Image(仅作 MultiEffect 的源,不直接显示)。相比
+        // CrossfadeImage,列表/网格卡片静止时无需溶解动画,省去「双图 + 溶解」
+        // 的每帧片元与两个离屏 FBO;圆角由 MultiEffect + 蒙版单 pass 裁切。
+        Image {
             id: posterImg
-            anchors.fill: parent
-            cornerRadius: 14
+            x: 0
+            y: 0
+            width: parent.width
+            height: parent.height
             source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
-            // 网格滚动 delegate 复用:禁用替换动画(duration 0 = 瞬时切换)。
-            duration: 0
-            // 仅 Ready 可见:加载中露卡片底色,失败隐藏(配合 fallback 图标)。
-            visible: status === Image.Ready
-            opacity: 0
-            // 成功淡入;失败走 fallback。
+            visible: false
             onStatusChanged: {
                 if (status === Image.Ready)
                     fadeIn.restart()
             }
         }
+        // 圆角蒙版:白色圆角矩形(经 layer 成为纹理源),MultiEffect 采样其
+        // alpha 裁出圆角(圆角外 alpha=0 真透明,透出卡片底色)。
+        Rectangle {
+            id: roundMask
+            x: 0
+            y: 0
+            width: parent.width
+            height: parent.height
+            radius: 14
+            color: "white"
+            layer.enabled: true
+            layer.smooth: false
+            visible: false
+        }
+        // 圆角显示层:单 pass 采样海报 + 蒙版;静态不重绘(无持续动画)。
+        MultiEffect {
+            id: posterFx
+            x: 0
+            y: 0
+            width: parent.width
+            height: parent.height
+            source: posterImg
+            maskEnabled: true
+            maskSource: roundMask
+            maskThresholdMin: 0.01
+            visible: posterImg.status === Image.Ready
+            opacity: 0
+        }
         // 加载成功淡入,避免图片突然出现。
         NumberAnimation {
             id: fadeIn
-            target: posterImg
+            target: posterFx
             property: "opacity"
             to: 1
             duration: 200
@@ -344,7 +376,10 @@ Item {
 
     // 萌系光晕边框:hover / 键盘焦点时泛出粉色轮廓。
     Rectangle {
-        anchors.fill: parent
+        x: 0
+        y: 0
+        width: parent.width
+        height: parent.height
         color: "transparent"
         radius: 14
         border.width: (cardHover.hovered || root.current) ? 2.5 : 0

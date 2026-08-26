@@ -1283,6 +1283,9 @@ Item {
     // --- 主体:选中媒体库的条目网格(填充头部以下空间) ---
     GridView {
         id: grid
+        // 复用 cell 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
+        reuseItems: true
+        cacheBuffer: 800
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
         onAtYEndChanged: {
             if (!atYEnd)

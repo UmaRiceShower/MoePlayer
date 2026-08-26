@@ -9,12 +9,12 @@ Item {
     // 动画时间,驱动 shader 内光斑漂移;周期约 200 秒,肉眼几乎无感。
     property real u_time: 0.0
 
-    // 循环动画:数值很大时精度足够,周期结束自然衔接。
-    NumberAnimation on u_time {
-        loops: Animation.Infinite
-        from: 0
-        to: 10000
-        duration: 2000000
+    // 低频驱动(30fps):光斑慢速漂移,无需 60fps 逐帧更新——Profiler 显示
+    Timer {
+        interval: 33
+        repeat: true
+        running: true
+        onTriggered: root.u_time = (root.u_time + 0.165) % 10000
     }
 
     ShaderEffect {

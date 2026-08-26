@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Effects
 import MoePlayer.Core
 
 //! 首页(主流平铺版):整页 Flickable 上下滚动;顶部导航固定。
@@ -95,110 +96,107 @@ Item {
     }
 
     // 整页可滚动(主流:hero + 所有库行随页面上下滚动)。
-    Flickable {
-        id: page
+    ListView {
+        id: pageList
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        contentWidth: width
+        // CPU-bound 滚动场景关闭像素平滑,降低 QSGRenderThread 滚动负载。
+        smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        contentHeight: pageCol.childrenRect.height
-        Column {
-            id: pageCol
-            width: page.width
+        // 垂直 ListView:只实例化可见范围+缓存的行(懒加载,对齐 LinPlayer):
+        // 屏外行图不加载,削减并发解码与内存。
+        model: root.rows
+        reuseItems: true
+        cacheBuffer: 400
 
-            // ---- hero 卡片轮播:三卡可视,中间 16:9,两侧倾斜缩小 ----
-            Item {
-                id: heroCar
-                height: root.heroH
-                width: parent.width
-                visible: root.heroItems.length > 0
-                clip: false
-                readonly property real cardH: height * 0.74
-                readonly property real cardW: Math.min(cardH * 16 / 9, width * 0.56)
+        // header = hero 轮播(顶部一屏,随内容滚动,常驻加载 3 张图)。
+        header: Item {
+            id: heroCar
+            height: root.heroH
+            width: pageList.width
+            visible: root.heroItems.length > 0
+            clip: false
+            readonly property real cardH: height * 0.74
+            readonly property real cardW: Math.min(cardH * 16 / 9, width * 0.56)
 
-                PathView {
-                    id: heroPv
-                    anchors.fill: parent
-                    model: root.heroItems
-                    pathItemCount: 3
-                    preferredHighlightBegin: 0.5
-                    preferredHighlightEnd: 0.5
-                    highlightRangeMode: PathView.StrictlyEnforceRange
-                    snapMode: PathView.SnapOneItem
-                    interactive: false
+            PathView {
+                id: heroPv
+                anchors.fill: parent
+                model: root.heroItems
+                pathItemCount: 3
+                preferredHighlightBegin: 0.5
+                preferredHighlightEnd: 0.5
+                highlightRangeMode: PathView.StrictlyEnforceRange
+                snapMode: PathView.SnapOneItem
+                interactive: false
 
-                    path: Path {
-                        startX: heroCar.width * 0.12
-                        startY: heroCar.height * 0.5
-                        PathAttribute { name: "itemScale"; value: 0.72 }
-                        PathAttribute { name: "tilt"; value: 1 }
-                        PathAttribute { name: "itemZ"; value: 0 }
-                        PathLine { x: heroCar.width * 0.5; y: heroCar.height * 0.5 }
-                        PathAttribute { name: "itemScale"; value: 1.0 }
-                        PathAttribute { name: "tilt"; value: 0 }
-                        PathAttribute { name: "itemZ"; value: 2 }
-                        PathLine { x: heroCar.width * 0.88; y: heroCar.height * 0.5 }
-                        PathAttribute { name: "itemScale"; value: 0.72 }
-                        PathAttribute { name: "tilt"; value: -1 }
-                        PathAttribute { name: "itemZ"; value: 0 }
-                    }
-                    delegate: HeroCard {}
+                path: Path {
+                    startX: heroCar.width * 0.12
+                    startY: heroCar.height * 0.5
+                    PathAttribute { name: "itemScale"; value: 0.72 }
+                    PathAttribute { name: "tilt"; value: 1 }
+                    PathAttribute { name: "itemZ"; value: 0 }
+                    PathLine { x: heroCar.width * 0.5; y: heroCar.height * 0.5 }
+                    PathAttribute { name: "itemScale"; value: 1.0 }
+                    PathAttribute { name: "tilt"; value: 0 }
+                    PathAttribute { name: "itemZ"; value: 2 }
+                    PathLine { x: heroCar.width * 0.88; y: heroCar.height * 0.5 }
+                    PathAttribute { name: "itemScale"; value: 0.72 }
+                    PathAttribute { name: "tilt"; value: -1 }
+                    PathAttribute { name: "itemZ"; value: 0 }
                 }
+                delegate: HeroCard {}
+            }
 
-                // 底部渐变已移除:文字用描边保证可读,卡片保持清晰亮度。
+            // 底部渐变已移除:文字用描边保证可读,卡片保持清晰亮度。
 
-                // 圆点指示+hover/点击切换。
-                Row {
-                    z: 7
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 10
-                    spacing: 8
-                    Repeater {
-                        model: root.heroItems.length
-                        delegate: Rectangle {
-                            required property int index
-                            id: dot
-                            width: heroPv.currentIndex === index ? 14 : 7
-                            height: 7
-                            radius: height / 2
-                            color: heroPv.currentIndex === index
-                                   ? Constants.moePink : Qt.rgba(1, 1, 1, 0.55)
-                            Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
-                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onEntered: dot.scale = 1.45
-                                onExited: dot.scale = 1.0
-                                onClicked: {
-                                    heroPv.currentIndex = index
-                                    heroTimer.restart()
-                                }
+            // 圆点指示+hover/点击切换。
+            Row {
+                z: 7
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottom: parent.bottom
+                anchors.bottomMargin: 10
+                spacing: 8
+                Repeater {
+                    model: root.heroItems.length
+                    delegate: Rectangle {
+                        required property int index
+                        id: dot
+                        width: heroPv.currentIndex === index ? 14 : 7
+                        height: 7
+                        radius: height / 2
+                        color: heroPv.currentIndex === index
+                               ? Constants.moePink : Qt.rgba(1, 1, 1, 0.55)
+                        Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: dot.scale = 1.45
+                            onExited: dot.scale = 1.0
+                            onClicked: {
+                                heroPv.currentIndex = index
+                                heroTimer.restart()
                             }
                         }
                     }
                 }
-
-                Timer {
-                    id: heroTimer
-                    interval: 5000
-                    repeat: true
-                    running: root.heroItems.length > 1
-                    onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % root.heroItems.length
-                }
             }
 
-            // ---- 每库一行:大库海报 + 条目卡片横向行 ----
-            Repeater {
-                model: root.rows
-                delegate: LibraryRow {
-                    width: pageCol.width
-                }
+            Timer {
+                id: heroTimer
+                interval: 5000
+                repeat: true
+                running: root.heroItems.length > 1
+                onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % root.heroItems.length
             }
+        }
+
+        delegate: LibraryRow {
+            width: ListView.view.width
         }
     }
 
@@ -260,6 +258,9 @@ Item {
                 orientation: ListView.Horizontal
                 spacing: Constants.rowSpacing
                 clip: true
+                // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
+                reuseItems: true
+                cacheBuffer: 600
                 model: libRow.modelData.items
                 delegate: Item {
                     required property var modelData
@@ -372,18 +373,36 @@ Item {
         height: cardH
         color: Theme.surface
         radius: 14
-        CrossfadeImage {
+        // 大库海报图:普通 Image + MultiEffect 圆角(静态,无需溶解动画;
+        // 省去 CrossfadeImage 的双图 + 溶解每帧片元开销)。
+        Image {
+            id: rowCardImg
             anchors.fill: parent
             anchors.leftMargin: 5
             anchors.rightMargin: 5
             anchors.topMargin: 5
             anchors.bottomMargin: 24
-            cornerRadius: 14
-            duration: 0
             source: rowCard.cardImage !== "" ? "image://emby/" + rowCard.cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
+            visible: false
+        }
+        Rectangle {
+            id: rowMask
+            anchors.fill: rowCardImg
+            radius: 14
+            color: "white"
+            layer.enabled: true
+            layer.smooth: false
+            visible: false
+        }
+        MultiEffect {
+            anchors.fill: rowCardImg
+            source: rowCardImg
+            maskEnabled: true
+            maskSource: rowMask
+            maskThresholdMin: 0.01
         }
         AppText {
             visible: rowCard.cardImage === ""
@@ -438,7 +457,9 @@ Item {
             color: "transparent"
             border.width: 0
             clip: true
-            opacity: 0
+            // 用 layer.effect 做透视(Qt 官方图片效果方式):本卡内容一次渲染进
+            // layer 纹理,effect(ShaderEffect)采样透视——无独立 ShaderEffectSource,
+            // Qt 保证不重复渲染(无双卡)。
 
             Image {
                 id: cardImg
@@ -449,8 +470,9 @@ Item {
                     return id ? "image://emby/" + id : ""
                 }
                 fillMode: Image.PreserveAspectCrop
-                sourceSize.width: 1280
-                sourceSize.height: 720
+                // 解码尺寸=显示尺寸×DPR,避免按 1280 固定大图浪费内存。
+                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio))
                 asynchronous: true
             }
             // 底部渐变,保证右下角文字可读
@@ -489,30 +511,22 @@ Item {
                     horizontalAlignment: Text.AlignRight
                 }
             }
-        }
-        ShaderEffectSource {
-            id: effectSource
-            width: cardContent.width
-            height: cardContent.height
-            sourceItem: cardContent
-            live: true
-            hideSource: false
-            opacity: 0
-            enabled: false
-        }
-        ShaderEffect {
-            anchors.fill: parent
-            property variant src: effectSource
-            property real sideTilt: hcard.tilt
-            property real w: parent.width
-            property real h: parent.height
-            property real maxAngle: 38
-            property real focal: 1100
-            property real sideInset: 0
-            property real meshDensity: 32
-            mesh: Qt.size(32, 32)
-            vertexShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.vert.qsb"
-            fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.frag.qsb"
+            // layer 效果:内容一次进 layer 纹理,effect 采样透视(无双卡)。
+            // layer.samplerName 与 shader 采样名(src)一致;w/h 用本卡尺寸。
+            layer.enabled: true
+            layer.samplerName: "src"
+            layer.effect: ShaderEffect {
+                property real sideTilt: hcard.tilt
+                property real w: cardContent.width
+                property real h: cardContent.height
+                property real maxAngle: 38
+                property real focal: 1100
+                property real sideInset: 0
+                property real meshDensity: 16
+                mesh: Qt.size(16, 16)
+                vertexShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.vert.qsb"
+                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.frag.qsb"
+            }
         }
         MouseArea {
             anchors.fill: parent
