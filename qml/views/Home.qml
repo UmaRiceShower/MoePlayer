@@ -148,8 +148,6 @@ Item {
         smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        // 垂直 ListView:只实例化可见范围+缓存的行(懒加载,对齐 LinPlayer):
-        // 屏外行图不加载,削减并发解码与内存。
         model: root.rows
         reuseItems: true
         cacheBuffer: 400

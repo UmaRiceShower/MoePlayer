@@ -460,7 +460,9 @@ Item {
         if (gb >= 1)
             return gb.toFixed(1) + " GB"
         const mb = bytes / (1024 * 1024)
-        return mb.toFixed(0) + " MB"
+        if (mb >= 1)
+            return mb.toFixed(0) + " MB"
+        return Math.max(1, Math.round(bytes / 1024)) + " KB"
     }
     function formatBitrate(bps) {
         if (!bps || bps <= 0)
@@ -470,57 +472,85 @@ Item {
             return mbps.toFixed(1) + " Mbps"
         return (bps / 1000).toFixed(0) + " kbps"
     }
-    function streamLabel(s) {
-        if (s.type === "Video") {
-            const parts = ["视频", s.codec ? s.codec.toUpperCase() : ""]
-            if (s.profile)
-                parts.push(s.profile)
-            if (s.width > 0 && s.height > 0)
-                parts.push(s.width + "×" + s.height)
-            if (s.bitDepth > 0)
-                parts.push(s.bitDepth + "bit")
-            if (s.frameRate > 0)
-                parts.push(s.frameRate.toFixed(2) + "fps")
-            if (s.level > 0)
-                parts.push("Lv" + s.level)
-            if (s.videoRange)
-                parts.push(s.videoRange)
-            if (s.pixelFormat)
-                parts.push(s.pixelFormat)
-            if (s.isInterlaced)
-                parts.push("隔行")
-            return parts.filter(function (x) { return x !== "" }).join(" · ")
-        }
-        if (s.type === "Audio") {
-            const parts = ["音轨", s.codec ? s.codec.toUpperCase() : ""]
-            if (s.channelLayout)
-                parts.push(s.channelLayout)
-            else if (s.channels > 0)
-                parts.push(s.channels + "声道")
-            if (s.sampleRate > 0)
-                parts.push((s.sampleRate / 1000).toFixed(s.sampleRate % 1000 === 0 ? 0 : 1) + "kHz")
-            if (s.bitDepth > 0)
-                parts.push(s.bitDepth + "bit")
-            if (s.language)
-                parts.push(s.language)
-            if (s.isDefault)
-                parts.push("默认")
-            return parts.filter(function (x) { return x !== "" }).join(" · ")
-        }
-        if (s.type === "Subtitle") {
-            const parts = ["字幕", s.codec ? s.codec.toUpperCase() : ""]
-            if (s.language)
-                parts.push(s.language)
-            if (s.isForced)
-                parts.push("强制")
-            parts.push(s.isExternal ? "外挂" : "内嵌")
-            if (s.isDefault)
-                parts.push("默认")
-            return parts.filter(function (x) { return x !== "" }).join(" · ")
-        }
-        return s.type
+    // 流归类:优先按 Type;Type 缺失/生僻时按 codec 推断;都不认识回退
+    // 原始 Type(调用方对未知 Type 出通用卡,cap 原样显示)。
+    function streamKind(s) {
+        const t = s.type || ""
+        if (t === "Video" || t === "Audio" || t === "Subtitle" || t === "Attachment")
+            return t
+        const c = String(s.codec || "").toLowerCase()
+        if (["h264", "avc", "hevc", "h265", "av1", "vp8", "vp9", "mpeg2video", "mpeg4",
+             "vc1", "wmv3", "prores", "theora", "mjpeg", "avs", "avs2"].indexOf(c) >= 0)
+            return "Video"
+        if (["aac", "ac3", "eac3", "dts", "dca", "truehd", "dtshd", "flac", "mp3", "mp2",
+             "opus", "vorbis", "alac", "pcm_s16le", "pcm_s24le", "pcm_s32le", "wma",
+             "wavpack", "ape", "mlp"].indexOf(c) >= 0)
+            return "Audio"
+        if (["subrip", "srt", "ass", "ssa", "pgs", "pgssub", "dvd_subtitle", "dvbsub",
+             "mov_text", "webvtt", "sub", "xsub"].indexOf(c) >= 0)
+            return "Subtitle"
+        if (["ttf", "otf", "woff", "woff2"].indexOf(c) >= 0)
+            return "Attachment"
+        return t
     }
-
+    // 流类型显示名:命中映射给中文,否则回退 API 原始 Type。
+    function streamTypeLabel(t) {
+        const m = { "Video": "视频", "Audio": "音频", "Subtitle": "字幕", "Attachment": "附件", "Data": "数据" }
+        return m[t] || t
+    }
+    // 编码显示名:常见编码给标准写法,否则回退原始值大写。
+    function codecLabel(c) {
+        if (!c)
+            return ""
+        const m = {
+            "h264": "H.264", "avc": "H.264", "hevc": "H.265", "h265": "H.265",
+            "av1": "AV1", "vp8": "VP8", "vp9": "VP9", "mpeg2video": "MPEG-2",
+            "mpeg4": "MPEG-4", "vc1": "VC-1", "wmv3": "WMV3", "prores": "ProRes",
+            "aac": "AAC", "ac3": "AC-3", "eac3": "E-AC-3", "dts": "DTS", "dca": "DTS",
+            "truehd": "TrueHD", "dtshd": "DTS-HD", "flac": "FLAC", "mp3": "MP3",
+            "opus": "Opus", "vorbis": "Vorbis", "alac": "ALAC", "wma": "WMA",
+            "wavpack": "WavPack", "ape": "APE", "mlp": "MLP",
+            "pcm_s16le": "PCM", "pcm_s24le": "PCM", "pcm_s32le": "PCM",
+            "subrip": "SRT", "srt": "SRT", "ass": "ASS", "ssa": "SSA",
+            "pgs": "PGS", "pgssub": "PGS", "dvd_subtitle": "VobSub",
+            "mov_text": "MOV_TEXT", "webvtt": "WebVTT",
+            "ttf": "TTF", "otf": "OTF"
+        }
+        const k = String(c).toLowerCase()
+        return m[k] || String(c).toUpperCase()
+    }
+    // 动态范围:VideoRangeType(新)优先,DOVI* 归一 Dolby Vision,
+    // 其余(SDR/HDR10/HLG…)原样回退。
+    function rangeLabel(s) {
+        const r = s.videoRangeType || s.videoRange || ""
+        if (r === "")
+            return ""
+        if (r.indexOf("DOVI") === 0)
+            return "Dolby Vision"
+        return r
+    }
+    function formatSampleRate(sr) {
+        if (!sr || sr <= 0)
+            return ""
+        return (sr % 1000 === 0 ? sr / 1000 : (sr / 1000).toFixed(1)) + " kHz"
+    }
+    // 色彩三件套:一致时合并显示(如 bt709),不一致 / 拼接。
+    function colorLabel(s) {
+        const parts = []
+        for (const v of [s.colorSpace, s.colorTransfer, s.colorPrimaries]) {
+            if (v && parts.indexOf(v) < 0)
+                parts.push(v)
+        }
+        return parts.join(" / ")
+    }
+    // 字幕位置:InternalStream=内嵌,ExternalStream=外挂;缺省按 isExternal。
+    function subtitleLocationLabel(s) {
+        if (s.locationType === "InternalStream")
+            return "内嵌"
+        if (s.locationType === "ExternalStream")
+            return "外挂"
+        return s.isExternal ? "外挂" : "内嵌"
+    }
     // 快照旧文字并让旧树就位:旧树全宽全显盖住新树(此刻两者内容一致,
     // 无缝;新树随后被 applyDetail 换新值,但 opacity 已 0,不产生叠影)。
     function snapshotOldText() {
@@ -1216,117 +1246,282 @@ Item {
                         }
                         Repeater {
                             model: root.detail.mediaSources
-                            delegate: Column {
-                                id: mediaSourceItem
-                                // 同 people delegate:required 声明让 qmllint 识别 modelData。
+                            // 每版本一整块:头部版本名+徽章,下方流卡片横排。
+                            delegate: Rectangle {
+                                id: verBlock
                                 required property var modelData
+                                required property int index
                                 width: parent.width
-                                spacing: 8
-                                // 汇总信息 chip 行。
-                                Flow {
-                                    width: parent.width
-                                    spacing: 6
-                                    Rectangle {
-                                        visible: mediaSourceItem.modelData.name
-                                        height: 22
-                                        width: nameChipText.implicitWidth + 16
-                                        radius: 11
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                        border.width: 1
-                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                        AppText {
-                                            id: nameChipText
-                                            anchors.centerIn: parent
-                                            text: mediaSourceItem.modelData.name || ""
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                        }
+                                height: verCol.implicitHeight + 28
+                                radius: 12
+                                color: Qt.rgba(1, 1, 1, 0.04)
+                                border.width: 1
+                                border.color: Qt.rgba(1, 1, 1, 0.10)
+
+                                // 本版本视频流(头部徽章取分辨率/动态范围)。
+                                readonly property var videoStream: {
+                                    const ss = verBlock.modelData.streams || []
+                                    for (let i = 0; i < ss.length; ++i) {
+                                        if (root.streamKind(ss[i]) === "Video")
+                                            return ss[i]
                                     }
-                                    Rectangle {
-                                        visible: mediaSourceItem.modelData.container
-                                        height: 22
-                                        width: containerChipText.implicitWidth + 16
-                                        radius: 11
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                        border.width: 1
-                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                        AppText {
-                                            id: containerChipText
-                                            anchors.centerIn: parent
-                                            text: mediaSourceItem.modelData.container ? mediaSourceItem.modelData.container.toUpperCase() : ""
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                        }
-                                    }
-                                    Rectangle {
-                                        visible: mediaSourceItem.modelData.sizeBytes > 0
-                                        height: 22
-                                        width: sizeChipText.implicitWidth + 16
-                                        radius: 11
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                        border.width: 1
-                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                        AppText {
-                                            id: sizeChipText
-                                            anchors.centerIn: parent
-                                            text: root.formatSize(mediaSourceItem.modelData.sizeBytes)
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                        }
-                                    }
-                                    Rectangle {
-                                        visible: mediaSourceItem.modelData.bitrate > 0
-                                        height: 22
-                                        width: bitrateChipText.implicitWidth + 16
-                                        radius: 11
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                        border.width: 1
-                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                        AppText {
-                                            id: bitrateChipText
-                                            anchors.centerIn: parent
-                                            text: root.formatBitrate(mediaSourceItem.modelData.bitrate)
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                        }
-                                    }
-                                    Rectangle {
-                                        visible: mediaSourceItem.modelData.runTimeTicks > 0
-                                        height: 22
-                                        width: runtimeChipText.implicitWidth + 16
-                                        radius: 11
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                        border.width: 1
-                                        border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                        AppText {
-                                            id: runtimeChipText
-                                            anchors.centerIn: parent
-                                            text: root.formatTime(mediaSourceItem.modelData.runTimeTicks / Constants.ticksPerSecond)
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                        }
-                                    }
+                                    return null
                                 }
-                                // 轨道 chip 行。
-                                Flow {
-                                    width: parent.width
-                                    spacing: 6
-                                    Repeater {
-                                        model: mediaSourceItem.modelData.streams
+                                // 头部徽章:容器/大小/时长/总码率/分辨率/动态范围(空值不占位)。
+                                readonly property var headBadges: {
+                                    const out = []
+                                    const m = verBlock.modelData
+                                    if (m.container)
+                                        out.push(m.container.toUpperCase())
+                                    if (m.sizeBytes > 0)
+                                        out.push(root.formatSize(m.sizeBytes))
+                                    if (m.runTimeTicks > 0)
+                                        out.push(root.formatTime(m.runTimeTicks / Constants.ticksPerSecond))
+                                    if (m.bitrate > 0)
+                                        out.push(root.formatBitrate(m.bitrate))
+                                    const vs = verBlock.videoStream
+                                    if (vs && vs.height > 0)
+                                        out.push(vs.height >= 2160 ? "4K" : vs.height + "p")
+                                    const rg = vs ? root.rangeLabel(vs) : ""
+                                    if (rg)
+                                        out.push(rg)
+                                    return out
+                                }
+                                // 流卡片模型:视频 + 音频×n + 字幕×n + 附件×n;空值行不出。
+                                // 文件级信息(容器/大小/时长/总码率/路径)在版本块头部,不占卡。
+                                readonly property var cardModels: {
+                                    const out = []
+                                    const m = verBlock.modelData
+                                    const ss = m.streams || []
+                                    const vs = verBlock.videoStream
+                                    if (vs) {
+                                        const rows = []
+                                        rows.push({ k: "编码", v: root.codecLabel(vs.codec) + (vs.profile ? " · " + vs.profile : "") })
+                                        if (vs.width > 0 && vs.height > 0)
+                                            rows.push({ k: "分辨率", v: vs.width + "×" + vs.height })
+                                        const rg = root.rangeLabel(vs)
+                                        if (rg)
+                                            rows.push({ k: "动态范围", v: rg })
+                                        if (vs.frameRate > 0)
+                                            rows.push({ k: "帧率", v: vs.frameRate.toFixed(3) })
+                                        if (vs.bitDepth > 0)
+                                            rows.push({ k: "位深", v: vs.bitDepth + "bit" })
+                                        const cl = root.colorLabel(vs)
+                                        if (cl)
+                                            rows.push({ k: "色彩", v: cl })
+                                        if (vs.bitrate > 0)
+                                            rows.push({ k: "码率", v: root.formatBitrate(vs.bitrate) })
+                                        out.push({ cap: root.streamTypeLabel("Video"), tag: false, rows: rows })
+                                    }
+                                    let an = 0
+                                    let sn = 0
+                                    // 附件(ASS 字体等)逐条信息量低且数量多,汇总一卡不逐条铺。
+                                    let attCount = 0
+                                    let attSize = 0
+                                    const attFormats = {}
+                                    for (let i = 0; i < ss.length; ++i) {
+                                        const s = ss[i]
+                                        const kind = root.streamKind(s)
+                                        if (kind === "Audio") {
+                                            an += 1
+                                            const rows = []
+                                            rows.push({ k: "编码", v: root.codecLabel(s.codec) + (s.profile ? " · " + s.profile : "") })
+                                            const ch = s.channelLayout || (s.channels > 0 ? s.channels + "ch" : "")
+                                            if (ch)
+                                                rows.push({ k: "声道", v: ch })
+                                            const lang = s.displayLanguage || s.language
+                                            if (lang)
+                                                rows.push({ k: "语言", v: lang })
+                                            const sr = root.formatSampleRate(s.sampleRate)
+                                            if (sr)
+                                                rows.push({ k: "采样率", v: sr })
+                                            if (s.bitDepth > 0)
+                                                rows.push({ k: "位深", v: s.bitDepth + "bit" })
+                                            if (s.bitrate > 0)
+                                                rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
+                                            out.push({ cap: root.streamTypeLabel(s.type) + " " + an, tag: !!s.isDefault, rows: rows })
+                                        } else if (kind === "Subtitle") {
+                                            sn += 1
+                                            const rows = []
+                                            rows.push({ k: "格式", v: root.codecLabel(s.codec) })
+                                            const st = s.displayTitle || s.title
+                                            if (st)
+                                                rows.push({ k: "标题", v: st })
+                                            const sl = s.displayLanguage || s.language
+                                            if (sl)
+                                                rows.push({ k: "语言", v: sl })
+                                            rows.push({ k: "位置", v: root.subtitleLocationLabel(s) })
+                                            if (s.isForced)
+                                                rows.push({ k: "强制", v: "是" })
+                                            out.push({ cap: root.streamTypeLabel(s.type) + " " + sn, tag: !!s.isDefault, rows: rows })
+                                        } else if (kind === "Attachment") {
+                                            attCount += 1
+                                            attSize += s.attachmentSize || 0
+                                            const f = root.codecLabel(s.codec)
+                                            attFormats[f] = (attFormats[f] || 0) + 1
+                                        } else if (kind !== "Video") {
+                                            // 未知类型(Type/codec 均无映射):通用卡,cap 回退原始 Type。
+                                            const rows = []
+                                            rows.push({ k: "编码", v: root.codecLabel(s.codec) })
+                                            const gl = s.displayLanguage || s.language
+                                            if (gl)
+                                                rows.push({ k: "语言", v: gl })
+                                            if (s.bitrate > 0)
+                                                rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
+                                            out.push({ cap: root.streamTypeLabel(s.type || "未知"), tag: !!s.isDefault, rows: rows })
+                                        }
+                                    }
+                                    if (attCount > 0) {
+                                        const rows = [{ k: "数量", v: String(attCount) }]
+                                        if (attSize > 0)
+                                            rows.push({ k: "总大小", v: root.formatSize(attSize) })
+                                        rows.push({ k: "格式", v: Object.keys(attFormats).map(function (f) { return f + "×" + attFormats[f] }).join(" · ") })
+                                        out.push({ cap: root.streamTypeLabel("Attachment"), tag: false, rows: rows })
+                                    }
+                                    // 时间卡(添加/修改,条目级):每个版本块都出。
+                                    const dc = (root.detail.dateCreated || "").slice(0, 10)
+                                    const dm = (root.detail.dateModified || "").slice(0, 10)
+                                    if (dc || dm) {
+                                        const rows = []
+                                        if (dc)
+                                            rows.push({ k: "添加", v: dc })
+                                        if (dm)
+                                            rows.push({ k: "修改", v: dm })
+                                        out.push({ cap: "时间", tag: false, rows: rows })
+                                    }
+                                    return out
+                                }
+
+                                Column {
+                                    id: verCol
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.margins: 14
+                                    spacing: 12
+                                    // 头部:版本名 + 徽章。
+                                    Item {
+                                        width: parent.width
+                                        height: 24
+                                        AppText {
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 14
+                                            font.bold: true
+                                        }
+                                        Row {
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            spacing: 6
+                                            Repeater {
+                                                model: verBlock.headBadges
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    height: 22
+                                                    width: badgeText.implicitWidth + 14
+                                                    radius: 11
+                                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                                    border.width: 1
+                                                    border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                                    AppText {
+                                                        id: badgeText
+                                                        anchors.centerIn: parent
+                                                        text: modelData
+                                                        color: Theme.textPrimary
+                                                        font.pixelSize: 12
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // 流卡片横排(超出可横向拖动)。
+                                    ListView {
+                                        width: parent.width
+                                        height: 224
+                                        orientation: ListView.Horizontal
+                                        spacing: 12
+                                        clip: true
+                                        model: verBlock.cardModels
                                         delegate: Rectangle {
+                                            id: miCard
                                             required property var modelData
-                                            height: 22
-                                            width: streamChipText.implicitWidth + 16
+                                            width: 190
+                                            height: 224
                                             radius: 11
-                                            color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.10)
+                                            color: Theme.surface
                                             border.width: 1
-                                            border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.25)
-                                            AppText {
-                                                id: streamChipText
-                                                anchors.centerIn: parent
-                                                text: root.streamLabel(modelData)
-                                                color: Theme.textMuted
-                                                font.pixelSize: 12
+                                            border.color: Qt.rgba(1, 1, 1, 0.10)
+                                            Column {
+                                                anchors.fill: parent
+                                                anchors.margins: 13
+                                                spacing: 4
+                                                // 卡头:流名(粉色小字)+ 默认标记。
+                                                Item {
+                                                    width: parent.width
+                                                    height: 16
+                                                    AppText {
+                                                        anchors.left: parent.left
+                                                        text: miCard.modelData.cap
+                                                        color: Constants.moePink
+                                                        font.pixelSize: 11
+                                                        font.bold: true
+                                                        font.letterSpacing: 1.2
+                                                    }
+                                                    Rectangle {
+                                                        visible: miCard.modelData.tag
+                                                        anchors.right: parent.right
+                                                        height: 15
+                                                        width: tagText.implicitWidth + 10
+                                                        radius: 4
+                                                        color: "transparent"
+                                                        border.width: 1
+                                                        border.color: Qt.rgba(1, 1, 1, 0.25)
+                                                        AppText {
+                                                            id: tagText
+                                                            anchors.centerIn: parent
+                                                            text: "默认"
+                                                            color: Theme.textMuted
+                                                            font.pixelSize: 10
+                                                        }
+                                                    }
+                                                }
+                                                // KV 行:键左值右,行间细分隔线(首行无)。
+                                                Repeater {
+                                                    model: miCard.modelData.rows
+                                                    delegate: Item {
+                                                        id: kvRow
+                                                        required property var modelData
+                                                        required property int index
+                                                        width: parent.width
+                                                        height: 22
+                                                        Rectangle {
+                                                            visible: kvRow.index > 0
+                                                            anchors.top: parent.top
+                                                            width: parent.width
+                                                            height: 1
+                                                            color: Qt.rgba(1, 1, 1, 0.07)
+                                                        }
+                                                        AppText {
+                                                            anchors.left: parent.left
+                                                            anchors.verticalCenter: parent.verticalCenter
+                                                            text: kvRow.modelData.k
+                                                            color: Theme.textMuted
+                                                            font.pixelSize: 12
+                                                        }
+                                                        AppText {
+                                                            anchors.right: parent.right
+                                                            anchors.verticalCenter: parent.verticalCenter
+                                                            width: Math.min(implicitWidth, parent.width - 60)
+                                                            horizontalAlignment: Text.AlignRight
+                                                            text: kvRow.modelData.v
+                                                            color: Theme.textPrimary
+                                                            font.pixelSize: 12
+                                                            elide: Text.ElideRight
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
