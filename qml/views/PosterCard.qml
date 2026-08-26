@@ -13,8 +13,11 @@ Item {
     // delegate 用法下由 GridView/ListView 注入,使用方在实例上经
     // model.<角色> 读取条目;required 声明让 qmllint 静态识别
     // (C++ 模型角色无法从类型推导,未声明则报 unqualified)。
-    required property var model
-    required property int index
+    // 数据经显式绑定(itemId/posterId/…)输入;model/index 是 Grid/List
+    // delegate 标识(Library/Search 作网格 delegate 用),非必需——Home
+    // 行卡可直接绑属性而不传 model/index。
+    property var model: undefined
+    property int index: -1
     // 条目数据(由使用方从模型角色绑定)。
     property string itemId: ""
     property string posterId: ""

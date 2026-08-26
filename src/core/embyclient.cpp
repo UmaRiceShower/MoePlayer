@@ -665,7 +665,8 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
     // DateLastMediaAdded 在部分服务器条目级排序会异常,改用 DateModified。
     q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateModified"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
-    q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio"));
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags"));
     q.addQueryItem(QStringLiteral("Limit"),
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
@@ -676,6 +677,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
                 const QJsonObject o = v.toObject();
                 const QString tag = o.value(QLatin1String("ImageTags"))
                                         .toObject().value(QLatin1String("Primary")).toString();
+                const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
                 QVariantMap m;
                 m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
                 m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
@@ -684,6 +686,36 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
                          tag.isEmpty() ? QString()
                                        : o.value(QLatin1String("Id")).toString()
                                              + QLatin1Char('~') + tag);
+                // Hero 背景:剧集/电影条目直接用条目 id 请求 Backdrop 端点(tag 留空,
+                // 服务器返回默认背景)。部分服务器列表路由不回 BackdropImageTags,
+                // 但 /Items/{id}/Images/Backdrop 端点仍可取到;Series/Season 取自身,
+                // Episode 取父级剧集(ParentBackdropItemId)。提供器格式
+                // <encodeServerKey(serverUrl)>~<itemId>~<tag>~Backdrop,tag 空则用默认背景。
+                const QString prefix = AccountManager::encodeServerKey(serverUrl);
+                const QString iid = o.value(QLatin1String("Id")).toString();
+                const QJsonArray btags = o.value(QLatin1String("BackdropImageTags")).toArray();
+                const QString btag = btags.isEmpty() ? QString() : btags.first().toString();
+                const QString type = o.value(QLatin1String("Type")).toString();
+                const QJsonArray pbtags = o.value(QLatin1String("ParentBackdropImageTags")).toArray();
+                const QString pbid = o.value(QLatin1String("ParentBackdropItemId")).toString();
+                if (type == QLatin1String("Series") || type == QLatin1String("Movie")
+                    || type == QLatin1String("Season") || type == QLatin1String("MusicVideo")
+                    || !btags.isEmpty()) {
+                    // 自身/系列级条目:直接用自身 id + Backdrop 端点。
+                    m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + iid
+                             + QLatin1Char('~') + btag + QStringLiteral("~Backdrop"));
+                } else if (!pbid.isEmpty()) {
+                    // 分集:用父级剧集 id + Backdrop 端点。
+                    const QString ptag = pbtags.isEmpty() ? QString() : pbtags.first().toString();
+                    m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + pbid
+                             + QLatin1Char('~') + ptag + QStringLiteral("~Backdrop"));
+                }
+                m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
+                m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
+                m.insert(QStringLiteral("unplayedCount"), ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
+                m.insert(QStringLiteral("playbackDateTicks"), ud.value(QLatin1String("PlaybackDateTicks")).toDouble(0));
+                m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
+                m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
                 items.append(m);
             }
             emit serverItemsReceived(serverUrl, viewId, items);

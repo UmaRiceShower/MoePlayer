@@ -62,15 +62,14 @@ QtObject {
 
     // ---- 首页行(堆叠轮盘) ----
     readonly property int rowCardW: 112
-    readonly property int rowCardH: 168
-    readonly property int rowLibraryW: 124
+    readonly property int rowLibraryW: 180
     readonly property int rowHeight: 172
     readonly property int rowTitleH: 24
-    readonly property int rowOverlap: 44        // 行间负间距(重叠量)
+    readonly property int rowGap: 10            // 行间正间距(平铺聚焦,行不重叠且紧凑)
     readonly property int rowSpacing: 12        // 条目卡片间距
     readonly property int rowCellStep: rowCardW + rowSpacing // 一格宽
     readonly property int rowLeftMargin: 24     // 行内容左边距
-    readonly property int rowStepFallback: rowTitleH + rowHeight - rowOverlap // 行距兜底
+    readonly property int rowStepFallback: rowHeight + rowGap // 行距兜底(正间距;无标题行)
 
     // ---- 分页 ----
     readonly property int pageSize: 200         // Emby 单页上限
@@ -116,13 +115,13 @@ QtObject {
     readonly property real bigBounceOvershoot: 2.0 // 大幅跨行回弹
 
     // ---- 首页堆叠行(缩放/透明度随距视口中心距离) ----
-    readonly property real rowMinScale: 0.55      // 最远行最小缩放
-    readonly property real rowScaleFactor: 0.14   // 缩放衰减斜率
-    readonly property real rowMinOpacity: 0.3     // 最远行最小透明度
-    readonly property real rowOpacityFactor: 0.7  // 透明度衰减斜率
+    readonly property real rowMinScale: 0.8       // 最远行最小缩放(平铺:非焦点行轻度缩小)
+    readonly property real rowScaleFactor: 0.18   // 缩放衰减斜率
+    readonly property real rowMinOpacity: 0.82    // 最远行最小透明度(非焦点行轻度减淡)
+    readonly property real rowOpacityFactor: 0.35 // 透明度衰减斜率
     readonly property real rowCenterBand: 60      // 距中心该距离内全尺寸/全透明
-    readonly property real rowZNear: 90           // z=3(最近层)距离阈值
-    readonly property real rowZMid: 220           // z=2(中间层)距离阈值
+    readonly property real rowZNear: 140          // z=3(近层,供 hover 放大溢出)距离阈值
+    readonly property real rowZMid: 320           // z=2(中间层)距离阈值
 
     // ---- 播放回传间隔 / 协议换算 ----
     readonly property int progressReportMs: 10000
