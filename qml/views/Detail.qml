@@ -1826,11 +1826,11 @@ Item {
                                     // 颜色随莫奈取色更新(Canvas 不随外部属性自动重绘)。
                                     property color badgeColor: root.accentColor
                                     onBadgeColorChanged: requestPaint()
-                                    width: 34
-                                    height: 34
+                                    width: 22
+                                    height: 22
                                     anchors.top: parent.top
                                     anchors.right: parent.right
-                                    anchors.margins: 9
+                                    anchors.margins: 6
                                     visible: episodeItem.model.played
                                     onPaint: {
                                         const ctx = getContext("2d")

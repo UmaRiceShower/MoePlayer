@@ -758,9 +758,9 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
     // UserData 携带已看状态/播放位置/收藏;People 供演职人员;Series 相关字段
     // 供剧集详情显示"剧名 + S/E"与选集条定位;Backdrop 标签供 Hero 背景。
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId,DateCreated,DateModified"));
+                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId,DateCreated,DateModified,PrimaryImageAspectRatio"));
     get(key, token, userId, QStringLiteral("/Users/%1/Items/%2?%3").arg(userId, itemId, q.toString()),
-        [this, key](const QJsonDocument &doc) {
+        [this, key, token, userId](const QJsonDocument &doc) {
             const QJsonObject o = doc.object();
             const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
             const QString prefix = AccountManager::encodeServerKey(key);
@@ -873,7 +873,50 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                 versions.append(vm);
             }
             m.insert(QStringLiteral("mediaSources"), versions);
-            emit itemDetailReady(key, m);
+            // 单集主图多为 16:9 剧照,入 2:3 海报槽违和:自身 Primary 非竖版
+            // (aspect 缺失或 >0.75)时按 季→剧 借竖版海报(父级比例批量补查,
+            // 仅横版条目付这一次请求);借不到回退自身 Primary。
+            const double ownAspect = o.value(QLatin1String("PrimaryImageAspectRatio")).toDouble(0);
+            const QString seasonId = o.value(QLatin1String("SeasonId")).toString();
+            if ((ownAspect > 0 && ownAspect <= 0.75) || (seasonId.isEmpty() && seriesId.isEmpty())) {
+                emit itemDetailReady(key, m);
+                return;
+            }
+            QStringList parentIds;
+            if (!seasonId.isEmpty())
+                parentIds << seasonId;
+            if (!seriesId.isEmpty())
+                parentIds << seriesId;
+            QUrlQuery pq;
+            pq.addQueryItem(QStringLiteral("Ids"), parentIds.join(QLatin1Char(',')));
+            pq.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio,ImageTags"));
+            get(key, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, pq.toString()),
+                [this, key, m, parentIds](const QJsonDocument &pdoc) mutable {
+                    const QJsonArray arr = pdoc.object().value(QLatin1String("Items")).toArray();
+                    bool found = false;
+                    for (const QString &want : parentIds) {
+                        for (const auto &iv : arr) {
+                            const QJsonObject io = iv.toObject();
+                            if (io.value(QLatin1String("Id")).toString() != want)
+                                continue;
+                            const double a = io.value(QLatin1String("PrimaryImageAspectRatio")).toDouble(0);
+                            const QString ptag = io.value(QLatin1String("ImageTags")).toObject()
+                                                     .value(QLatin1String("Primary")).toString();
+                            if (a > 0 && a <= 0.75 && !ptag.isEmpty()) {
+                                m.insert(QStringLiteral("posterId"),
+                                         AccountManager::encodeServerKey(key) + QLatin1Char('~')
+                                             + want + QLatin1Char('~') + ptag + QStringLiteral("~Primary"));
+                                found = true;
+                            }
+                            break;
+                        }
+                        if (found)
+                            break;
+                    }
+                    emit itemDetailReady(key, m);
+                },
+                [this, key, m]() mutable { emit itemDetailReady(key, m); },
+                QStringLiteral("获取父级海报"));
         }, nullptr, QStringLiteral("获取条目详情"));
 }
 
