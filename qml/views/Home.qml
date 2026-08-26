@@ -346,7 +346,12 @@ Item {
             source: gbtn.iconName ? "qrc:/icons/" + gbtn.iconName + ".svg" : ""
             fillMode: Image.PreserveAspectFit
             // 通透感:图标纯白、柔和、略缩(36px 圆内 15px,留足边距)。
+            // SVG 以高分辨率栅格化(sourceSize)+ mipmap 多级采样,避免细描边
+            // 图标从大图大幅缩小时产生锯齿/闪烁(纯 smooth 双线性不足)。
             smooth: true
+            sourceSize.width: 48
+            sourceSize.height: 48
+            mipmap: true
             opacity: 0.96
         }
     }
