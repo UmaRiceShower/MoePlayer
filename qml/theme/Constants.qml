@@ -9,24 +9,24 @@ QtObject {
     // 媒体库网格:弹性列数——卡宽在 [cellMinW, cellMaxW] 区间伸缩,窗口
     // resize 时列数自动增减、整行铺满(业界通用做法,等价 CSS Grid
     // repeat(auto-fill, minmax(minW, 1fr)))。2:3 竖版海报。
-    readonly property int cellMinW: 210
-    readonly property int cellMaxW: 232
+    readonly property int cellMinW: 186
+    readonly property int cellMaxW: 206
+    // 搜索浮层网格:卡宽区间比媒体库更小(结果轻量浏览,一屏更多条)。
+    readonly property int searchCellMinW: 156
+    readonly property int searchCellMaxW: 172
     readonly property int cellGap: 24
     readonly property real cellAspect: 2 / 3
-    // 搜索浮层网格:固定卡宽 + 整行居中(结果不满一行时居中,余白对称)。
-    readonly property int cellW: 176
-    readonly property int cellH: 260
 
     // 弹性卡宽(GridView 无 gap 语义:cell 宽 = 卡宽 + cellGap,delegate
     // 取卡宽,cell 内右/下缘留 gap → 卡间距 = cellGap、整行铺满无空白)。
     // 按"卡宽+gap"求满行列数,总宽减去 n 个 gap 后均分到各列;结果不足
     // minW 时按 minW 减列重算(卡放大,可略超 maxW)。
-    function gridCardW(availW) {
+    function gridCardW(availW, minW, maxW) {
         const gap = cellGap
-        let n = Math.max(1, Math.floor((availW + gap) / (cellMaxW + gap)))
+        let n = Math.max(1, Math.floor((availW + gap) / (maxW + gap)))
         let w = (availW - n * gap) / n
-        if (w < cellMinW) {
-            n = Math.max(1, Math.floor((availW + gap) / (cellMinW + gap)))
+        if (w < minW) {
+            n = Math.max(1, Math.floor((availW + gap) / (minW + gap)))
             w = (availW - n * gap) / n
         }
         return w
@@ -38,8 +38,8 @@ QtObject {
     // + 1)(C++ 截断):cellWidth = avail/n 数学整除,但 double 除法舍入可落
     // 5.9999… → 截断少一列 → 右侧空一整列(网格贴左)。cell 宽下偏 1e-6
     // 使 int(width/cellWidth) 恰为 n(右空 < n×1e-6 px,不可见)。
-    function gridCellW(availW) {
-        return gridCardW(availW) + cellGap - 1e-6
+    function gridCellW(availW, minW, maxW) {
+        return gridCardW(availW, minW, maxW) + cellGap - 1e-6
     }
     function gridCellH(w) {
         return gridCardH(w) + cellGap - 1e-6

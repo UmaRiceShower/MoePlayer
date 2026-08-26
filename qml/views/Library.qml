@@ -35,9 +35,9 @@ Item {
     // cell = 卡宽 + cellGap(GridView 无 gap 语义,delegate 取卡宽在 cell
     // 内留右/下缘 → 卡间距 = cellGap);cellW 已含 1e-6 下偏,保证
     // GridView 内部列数截断恰为 n,整行铺满无右侧空白(见 gridCellW)。
-    readonly property real cardW: Constants.gridCardW(Math.max(1, root.width - 48))
+    readonly property real cardW: Constants.gridCardW(Math.max(1, root.width - 48), Constants.cellMinW, Constants.cellMaxW)
     readonly property int cardH: Constants.gridCardH(root.cardW)
-    readonly property real cellW: Constants.gridCellW(Math.max(1, root.width - 48))
+    readonly property real cellW: Constants.gridCellW(Math.max(1, root.width - 48), Constants.cellMinW, Constants.cellMaxW)
     // gridCellH 参数是**卡宽**(内部按 2:3 转卡高再 +gap);传卡高会把
     // cell 高算成 cardH×1.5+gap → 行间距 ≈ 半卡高(上下间距过大)。
     readonly property int cellH: Constants.gridCellH(root.cardW)
