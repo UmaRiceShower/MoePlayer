@@ -9,9 +9,9 @@ QtObject {
     // 媒体库网格:弹性列数——卡宽在 [cellMinW, cellMaxW] 区间伸缩,窗口
     // resize 时列数自动增减、整行铺满(业界通用做法,等价 CSS Grid
     // repeat(auto-fill, minmax(minW, 1fr)))。2:3 竖版海报。
-    readonly property int cellMinW: 160
-    readonly property int cellMaxW: 176
-    readonly property int cellGap: 16
+    readonly property int cellMinW: 210
+    readonly property int cellMaxW: 232
+    readonly property int cellGap: 24
     readonly property real cellAspect: 2 / 3
     // 搜索浮层网格:固定卡宽 + 整行居中(结果不满一行时居中,余白对称)。
     readonly property int cellW: 176

@@ -96,30 +96,6 @@ Item {
         }
     }
 
-    // 萌系柔焦光晕:卡片背后一层粉紫光,hover / 焦点时增强,呼应背景。
-    Rectangle {
-        id: glowShadow
-        anchors.centerIn: parent
-        width: parent.width + 20
-        height: parent.height + 20
-        radius: 20
-        color: "transparent"
-        // 静止时隐藏,滚动不再参与绘制(几十张卡同时滚过时省去 radial gradient)。
-        visible: cardHover.hovered || root.current
-        opacity: (cardHover.hovered || root.current) ? 0.22 : 0.0
-
-        gradient: RadialGradient {
-            centerX: 0.5
-            centerY: 0.5
-            centerRadius: 0.5
-            GradientStop { position: 0.0; color: Constants.moePink }
-            GradientStop { position: 0.65; color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.25) }
-            GradientStop { position: 1.0; color: "transparent" }
-        }
-
-        Behavior on opacity { NumberAnimation { duration: 180 } }
-    }
-
     Rectangle {
         x: 0
         y: 0
@@ -168,7 +144,7 @@ Item {
             opacity: 0.6
 
             AppText {
-                text: root.itemType === "Series" ? "❀" : "♡"
+                text: root.itemType === "Series" ? "❀" : "🎞"
                 color: Constants.moePink
                 font.pixelSize: 44
                 horizontalAlignment: Text.AlignHCenter
@@ -193,6 +169,7 @@ Item {
                 GradientStop { position: 0.0; color: "transparent" }
                 GradientStop { position: 1.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.72) }
             }
+            radius: 14
         }
 
         // 标题 + 年份(第二行小字,避免长标题截断年份)。

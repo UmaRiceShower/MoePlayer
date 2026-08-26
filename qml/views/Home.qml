@@ -83,15 +83,46 @@ Item {
             font.pixelSize: 22
             font.bold: true
         }
-        // 圆形图标按钮(透明背景,hover 淡底;去除文字/色块,仅图标)。
+        // iOS 毛玻璃导航:三个圆形通透毛玻璃按钮(背景模糊 + 半透明 + 微光)。
+        // 模糊源用滚动内容 pageList,内容滚过按钮时实时通透模糊。
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 12
+            anchors.rightMargin: 16
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
-            GlassIconButton { iconName: "search"; onClicked: root.openSearch() }
-            GlassIconButton { iconName: "server"; onClicked: root.openServerManager() }
-            GlassIconButton { iconName: "settings"; onClicked: root.openSettings() }
+            GlassBar {
+                width: 42
+                height: 42
+                radius: 21
+                blurSource: pageList
+                GlassCircleButton {
+                    anchors.centerIn: parent
+                    iconName: "search"
+                    onClicked: root.openSearch()
+                }
+            }
+            GlassBar {
+                width: 42
+                height: 42
+                radius: 21
+                blurSource: pageList
+                GlassCircleButton {
+                    anchors.centerIn: parent
+                    iconName: "server"
+                    onClicked: root.openServerManager()
+                }
+            }
+            GlassBar {
+                width: 42
+                height: 42
+                radius: 21
+                blurSource: pageList
+                GlassCircleButton {
+                    anchors.centerIn: parent
+                    iconName: "settings"
+                    onClicked: root.openSettings()
+                }
+            }
         }
     }
 
@@ -296,65 +327,108 @@ Item {
         }
     }
 
-    // 玻璃态圆形图标按钮:半透明白 + 白边框 + 顶部高光(近似液态玻璃)。
-    component GlassIconButton: Button {
-        id: gbtn
-        property string iconName: ""
-        width: 36
-        height: 36
-        padding: 0
-        background: Item {
-            // 液态玻璃:极透底 + 细透边框 + 顶部椭圆高光 + 底部内暗影(立体感)。
+    // iOS 毛玻璃容器(胶囊/圆):背景内容高斯模糊 + 半透明暗底 + 微光描边。
+    // 形状由 radius 决定(胶囊=height/2,圆=width/2);content 置于玻璃之上。
+    component GlassBar: Rectangle {
+        id: gbar
+        property var blurSource: null
+        property color glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.5)
+        property color borderColor: Qt.rgba(1, 1, 1, 0.22)
+        color: "transparent"
+        border.width: 0
+        clip: true
+
+        // 取背后区块,降采样后高斯模糊 → 毛玻璃通透。
+        ShaderEffectSource {
+            id: gbarBg
+            sourceItem: gbar.blurSource
+            sourceRect: {
+                if (!gbarBg.sourceItem)
+                    return Qt.rect(0, 0, 0, 0)
+                const p = gbar.mapToItem(gbarBg.sourceItem, 0, 0)
+                return Qt.rect(p.x, p.y, gbar.width, gbar.height)
+            }
+            textureSize: Qt.size(Math.max(1, Math.round(gbar.width / 2)),
+                                  Math.max(1, Math.round(gbar.height / 2)))
+            live: true
+            hideSource: false
+        }
+        // 圆角遮罩:clip 是矩形裁剪,管不到圆角;模糊层四角须用 mask 裁掉。
+        Rectangle {
+            id: gbarMask
+            width: gbar.width
+            height: gbar.height
+            radius: gbar.radius
+            visible: false
+            layer.enabled: true
+            layer.smooth: true
+        }
+        MultiEffect {
+            anchors.fill: parent
+            source: gbarBg
+            maskEnabled: true
+            maskSource: gbarMask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 1.0
+            autoPaddingEnabled: false
+            blurEnabled: true
+            blur: 1.0
+            blurMax: 22
+        }
+
+        // 玻璃底色 + 描边 + 顶部微光。
+        Rectangle {
+            anchors.fill: parent
+            color: gbar.glassColor
+            radius: gbar.radius
+            border.width: 1
+            border.color: gbar.borderColor
             Rectangle {
-                id: body
-                anchors.fill: parent
-                radius: height / 2
-                color: gbtn.hovered ? Qt.rgba(1, 1, 1, 0.16) : Qt.rgba(1, 1, 1, 0.07)
-                border.width: 1
-                border.color: gbtn.hovered ? Qt.rgba(1, 1, 1, 0.48) : Qt.rgba(1, 1, 1, 0.26)
-                clip: true
-                // 顶部椭圆高光:柔和、半透明,模拟玻璃顶缘反射。
-                Rectangle {
-                    anchors.top: parent.top
-                    anchors.topMargin: 1
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: parent.width * 0.66
-                    height: parent.height * 0.5
-                    radius: width / 2
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, gbtn.hovered ? 0.34 : 0.18) }
-                        GradientStop { position: 0.6; color: Qt.rgba(1, 1, 1, gbtn.hovered ? 0.10 : 0.05) }
-                        GradientStop { position: 1.0; color: "transparent" }
-                    }
-                }
-                // 底部内暗影:增强玻璃厚度感(底部略暗)。
-                Rectangle {
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    height: parent.height * 0.4
-                    radius: height / 2
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "transparent" }
-                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.18) }
-                    }
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: parent.height * 0.5
+                radius: parent.radius
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.08) }
+                    GradientStop { position: 1.0; color: "transparent" }
                 }
             }
         }
-        contentItem: Image {
-            width: 15
-            height: 15
-            anchors.centerIn: parent
-            source: gbtn.iconName ? "qrc:/icons/" + gbtn.iconName + ".svg" : ""
-            fillMode: Image.PreserveAspectFit
-            // 通透感:图标纯白、柔和、略缩(36px 圆内 15px,留足边距)。
-            // SVG 以高分辨率栅格化(sourceSize)+ mipmap 多级采样,避免细描边
-            // 图标从大图大幅缩小时产生锯齿/闪烁(纯 smooth 双线性不足)。
-            smooth: true
-            sourceSize.width: 48
-            sourceSize.height: 48
-            mipmap: true
-            opacity: 0.96
+
+        default property alias content: gbarContent.data
+        Item { id: gbarContent; anchors.fill: parent }
+    }
+
+    // 圆形毛玻璃按钮(放大镜等):圆形玻璃底 + 居中图标。
+    component GlassCircleButton: Button {
+        id: gcb
+        property string iconName: ""
+        width: 42
+        height: 42
+        padding: 0
+        hoverEnabled: true
+        background: Item {
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: gcb.hovered ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
+                Behavior on color { ColorAnimation { duration: 150 } }
+            }
+        }
+        // contentItem 会被 Button 拉伸至全尺寸,图标须放进容器内居中才能保持小尺寸。
+        // SVG 按显示尺寸×DPR 栅格化:避免大图降采样把细描边摊灰。
+        contentItem: Item {
+            Image {
+                width: 14
+                height: 14
+                anchors.centerIn: parent
+                source: gcb.iconName ? "qrc:/icons/" + gcb.iconName + ".svg" : ""
+                fillMode: Image.PreserveAspectFit
+                smooth: true
+                sourceSize.width: Math.max(1, Math.round(14 * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round(14 * Screen.devicePixelRatio))
+            }
         }
     }
 
