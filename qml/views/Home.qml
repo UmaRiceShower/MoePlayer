@@ -230,7 +230,7 @@ Item {
         id: libRow
         required property var modelData
         width: parent ? parent.width : 0
-        height: Constants.rowHeight + 20
+        height: Constants.rowLibraryH + 20
         spacing: 14
         Row {
             anchors.left: parent.left
@@ -245,7 +245,8 @@ Item {
                            ? libRow.modelData.serverName + " · " : "") + libRow.modelData.viewName
                 isLibrary: true
                 cardW: Constants.rowLibraryW
-                cardH: Constants.rowHeight
+                cardH: Constants.rowLibraryH
+                anchors.verticalCenter: parent.verticalCenter
                 cardArea.onClicked: root.openLibrary(libRow.modelData.viewId,
                                                       libRow.modelData.serverUrl,
                                                       libRow.modelData.viewName)
@@ -254,7 +255,7 @@ Item {
             ListView {
                 id: rowItems
                 width: libRow.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
-                height: Constants.rowHeight
+                height: Constants.rowHeight + 12
                 orientation: ListView.Horizontal
                 spacing: Constants.rowSpacing
                 clip: true
@@ -266,7 +267,7 @@ Item {
                     required property var modelData
                     required property int index
                     width: Constants.rowCardW
-                    height: Constants.rowHeight
+                    height: Constants.rowHeight + 12
                     z: pc.hovered ? 2 : 0
                     PosterCard {
                         id: pc
@@ -366,6 +367,7 @@ Item {
         property string cardText: ""
         property bool isLibrary: false
         property bool selected: false
+        property bool hovered: false
         property int cardW: Constants.rowCardW
         property int cardH: Constants.rowHeight
         property alias cardArea: cardArea
@@ -378,31 +380,41 @@ Item {
         Image {
             id: rowCardImg
             anchors.fill: parent
-            anchors.leftMargin: 5
-            anchors.rightMargin: 5
-            anchors.topMargin: 5
-            anchors.bottomMargin: 24
             source: rowCard.cardImage !== "" ? "image://emby/" + rowCard.cardImage : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
-            visible: false
+            layer.enabled:true
+            layer.smooth:true
+            Rectangle {
+                id: rowMask
+                visible: false
+                anchors.fill: parent
+                radius: 14
+                layer.enabled: true
+            }
+            layer.effect: MultiEffect{
+                maskEnabled: true
+                maskSource: rowMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 1.0
+            }
         }
+        // 底部渐变压暗:让左下角库名可读(与条目卡文字展示一致)。
         Rectangle {
-            id: rowMask
-            anchors.fill: rowCardImg
+            id: libGrad
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 48
             radius: 14
-            color: "white"
-            layer.enabled: true
-            layer.smooth: false
-            visible: false
-        }
-        MultiEffect {
-            anchors.fill: rowCardImg
-            source: rowCardImg
-            maskEnabled: true
-            maskSource: rowMask
-            maskThresholdMin: 0.01
+            visible: rowCard.cardImage !== ""
+            opacity: rowCard.hovered ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.60) }
+            }
         }
         AppText {
             visible: rowCard.cardImage === ""
@@ -421,20 +433,24 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.leftMargin: 6
-            anchors.rightMargin: 6
-            anchors.bottomMargin: 4
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            anchors.bottomMargin: 9
             text: rowCard.cardText
-            color: Theme.textPrimary
-            font.pixelSize: 13
+            color: "white"
+            font.pixelSize: 15
             font.bold: rowCard.isLibrary
             elide: Text.ElideRight
-            horizontalAlignment: Text.AlignHCenter
+            horizontalAlignment: Text.AlignLeft
+            opacity: rowCard.hovered ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
         }
         MouseArea {
             id: cardArea
             anchors.fill: parent
             hoverEnabled: true
+            onEntered: rowCard.hovered = true
+            onExited: rowCard.hovered = false
         }
     }
 
