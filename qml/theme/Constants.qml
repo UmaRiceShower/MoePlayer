@@ -61,15 +61,16 @@ QtObject {
     readonly property int detailCardH: 168        // 相似推荐海报卡高
 
     // ---- 首页行(堆叠轮盘) ----
-    readonly property int rowCardW: 112
-    readonly property int rowLibraryW: 180
-    readonly property int rowHeight: 172
+    readonly property int rowHeight: 172   // 海报卡高;卡宽=rowHeight*2/3(2:3 海报)
+    readonly property int rowCardW: Math.round(rowHeight * 2 / 3)    // 条目海报卡宽(2:3)
+    readonly property int rowLibraryH: rowHeight                     // 大库海报高(与条目同高)
+    readonly property int rowLibraryW: Math.round(rowHeight * 16 / 9) // 大库海报宽(库图16:9)
     readonly property int rowTitleH: 24
     readonly property int rowGap: 10            // 行间正间距(平铺聚焦,行不重叠且紧凑)
     readonly property int rowSpacing: 12        // 条目卡片间距
     readonly property int rowCellStep: rowCardW + rowSpacing // 一格宽
     readonly property int rowLeftMargin: 24     // 行内容左边距
-    readonly property int rowStepFallback: rowHeight + rowGap // 行距兜底(正间距;无标题行)
+    readonly property int rowStepFallback: rowLibraryH + rowGap // 行距兜底(正间距;无标题行)
 
     // ---- 分页 ----
     readonly property int pageSize: 200         // Emby 单页上限

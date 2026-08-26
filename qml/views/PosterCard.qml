@@ -129,9 +129,9 @@ Item {
         radius: 14
         clip: true
 
-        // 海报图:普通 Image(仅作 MultiEffect 的源,不直接显示)。相比
+        // 海报图:Image 自身 layer + layer.effect(MultiEffect)圆角。相比
         // CrossfadeImage,列表/网格卡片静止时无需溶解动画,省去「双图 + 溶解」
-        // 的每帧片元与两个离屏 FBO;圆角由 MultiEffect + 蒙版单 pass 裁切。
+        // 的每帧片元与两个离屏 FBO;圆角由 Image 的 layer.effect 单 pass 裁切。
         Image {
             id: posterImg
             x: 0
@@ -142,47 +142,22 @@ Item {
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
-            visible: false
-            onStatusChanged: {
-                if (status === Image.Ready)
-                    fadeIn.restart()
-            }
-        }
-        // 圆角蒙版:白色圆角矩形(经 layer 成为纹理源),MultiEffect 采样其
-        // alpha 裁出圆角(圆角外 alpha=0 真透明,透出卡片底色)。
-        Rectangle {
-            id: roundMask
-            x: 0
-            y: 0
-            width: parent.width
-            height: parent.height
-            radius: 14
-            color: "white"
             layer.enabled: true
-            layer.smooth: false
-            visible: false
-        }
-        // 圆角显示层:单 pass 采样海报 + 蒙版;静态不重绘(无持续动画)。
-        MultiEffect {
-            id: posterFx
-            x: 0
-            y: 0
-            width: parent.width
-            height: parent.height
-            source: posterImg
-            maskEnabled: true
-            maskSource: roundMask
-            maskThresholdMin: 0.01
-            visible: posterImg.status === Image.Ready
-            opacity: 0
-        }
-        // 加载成功淡入,避免图片突然出现。
-        NumberAnimation {
-            id: fadeIn
-            target: posterFx
-            property: "opacity"
-            to: 1
-            duration: 200
+            layer.smooth: true
+            // 圆角蒙版(Image 子项,经自身 layer 供 layer.effect 采样 alpha 裁切)。
+            Rectangle {
+                id: roundMask
+                visible: false
+                anchors.fill: parent
+                radius: 14
+                layer.enabled: true
+            }
+            layer.effect: MultiEffect {
+                maskEnabled: true
+                maskSource: roundMask
+                maskThresholdMin: 0.5
+                maskSpreadAtMin: 1.0
+            }
         }
 
         // 无主图或加载失败:萌系占位,不显示空卡(对照上游 404 契约)。
