@@ -86,6 +86,8 @@ qt_add_shaders(MoePlayer moeplayer_shaders
           shaders/crossfade.frag
           shaders/episode-fade.frag
           shaders/hero-fade.frag
+          shaders/hero.vert
+          shaders/hero.frag
 )
 
 # 计数器 GIF:qt_add_resources 替代 AUTORCC + assets.qrc(官方推荐路径)。
@@ -105,6 +107,15 @@ qt_add_resources(MoePlayer "counter_assets"
         qml/assets/counter/7.gif
         qml/assets/counter/8.gif
         qml/assets/counter/9.gif
+)
+# 顶部导航图标(Lucide, ISC):qrc:/icons/<name>.svg。
+qt_add_resources(MoePlayer "nav_icons"
+    PREFIX "/icons"
+    BASE "qml/assets/icons"
+    FILES
+        qml/assets/icons/search.svg
+        qml/assets/icons/settings.svg
+        qml/assets/icons/server.svg
 )
 
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件

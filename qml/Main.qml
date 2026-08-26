@@ -95,6 +95,8 @@ ApplicationWindow {
                 root.pushLibrary(viewId, serverUrl, viewName)
             }
             onOpenServerManager: stackView.push(serverManagerPage)
+            onOpenSettings: stackView.push(settingsPage)
+            onOpenSearch: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
         }
     }
 
