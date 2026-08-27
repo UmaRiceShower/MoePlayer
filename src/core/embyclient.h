@@ -125,11 +125,14 @@ public:
                                    const QString &userId, const QString &seriesId,
                                    const QString &seasonId);
     // 拉取指定服务器的视图列表(首页聚合,不走模型,结果经 serverViewsReceived)。
-    Q_INVOKABLE void fetchServerViews(const QString &serverUrl, const QString &token,
-                                      const QString &userId);
+    // accountId 为触发账号,回调按 id 准确归位(同服务器多账号不串)。
+    Q_INVOKABLE void fetchServerViews(const QString &serverUrl, const QString &accountId,
+                                      const QString &token, const QString &userId);
     // 拉取指定库按更新时间倒序的前 limit 条(首页聚合,结果经 serverItemsReceived)。
-    Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &token,
-                                      const QString &userId, const QString &viewId, int limit);
+    // accountId 为触发账号,回调按 id 准确归位。
+    Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &accountId,
+                                      const QString &token, const QString &userId,
+                                      const QString &viewId, int limit);
     // 跨服务器账密登录(不改任何状态),供 token 失效后重登。
     // 结果经 serverLoginFinished 通知。
     Q_INVOKABLE void loginFor(const QString &serverUrl, const QString &username,
@@ -201,9 +204,10 @@ signals:
     // 由 AccountManager 落盘本地缓存,不存远程 URL)。
     void serverIconReceived(const QString &serverUrl, const QString &iconUrl,
                             const QByteArray &imageData);
-    void serverViewsReceived(const QString &serverUrl, const QVariantList &views);
-    void serverItemsReceived(const QString &serverUrl, const QString &viewId,
-                             const QVariantList &items);
+    void serverViewsReceived(const QString &serverUrl, const QString &accountId,
+                             const QVariantList &views);
+    void serverItemsReceived(const QString &serverUrl, const QString &accountId,
+                             const QString &viewId, const QVariantList &items);
     // 服务器请求失败:message 含 "HTTP 401" 表示 token 失效,否则为网络/服务器错误。
     // 所有失败(含浏览路径)都发此信号,AccountManager 据此标失效/重登。
     void serverRequestFailed(const QString &serverUrl, const QString &message);

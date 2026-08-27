@@ -2122,7 +2122,7 @@ Item {
                     height: 36
                     leftPadding: 14
                     rightPadding: 14
-                    placeholderText: "https://example.com/logo.png"
+                    placeholderText: "图片 URL 或本地路径,如 /path/icon.png"
                     placeholderTextColor: Theme.textMuted
                     color: "white"
                     font.pixelSize: 14
