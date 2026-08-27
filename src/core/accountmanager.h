@@ -1,8 +1,10 @@
 #pragma once
 
 #include <QObject>
+#include <QQueue>
 #include <QSettings>
 #include <QSet>
+#include <QTimer>
 #include <QVariantList>
 
 #include "core/constants.h"
@@ -47,10 +49,9 @@ public:
 
     // 新增账号:使用给定凭据登录(异步),成功后保存账号。
     // 返回 true 表示已发起登录,结果经 accountLoginFinished(ok, message) 通知;
-    // rememberPassword 为真时混淆保存密码(供 token 失效后免输入)。
+    // 登录成功后混淆保存密码(供 token 失效后免输入自动重登)。
     Q_INVOKABLE bool addAccount(const QString &name, const QString &serverUrl,
-                                const QString &userName, const QString &password,
-                                bool rememberPassword);
+                                const QString &userName, const QString &password);
 
     // 删除账号:同时清理 EmbyClient 中该服务器的模型。
     Q_INVOKABLE void removeAccount(const QString &id);
@@ -66,8 +67,6 @@ public:
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
-    // 供海报提供方按服务器取 token(聚合行的跨服务器海报用)。
-    QString tokenForServer(const QString &serverUrl) const;
     // 账号排序:在账号列表中上移/下移,顺序即首页聚合顺序与列表展示顺序。
     Q_INVOKABLE void moveAccountUp(const QString &id);
     Q_INVOKABLE void moveAccountDown(const QString &id);
@@ -103,12 +102,14 @@ public:
     // 从所在文件夹移除账号(回到未分组);不在任何文件夹则忽略。
     Q_INVOKABLE void removeAccountFromFolder(const QString &accountId);
 
-    // 供 UI 读取某账号的明文密码(仅当 rememberPassword;混淆解码)。
+    // 供 UI 读取某账号的明文密码(混淆解码;密码始终保存)。
     Q_INVOKABLE QString passwordFor(const QString &id) const;
 
     // 浏览请求凭据查询:返回 {token, userId}(QML 组装无状态请求用);
     // 服务器无账号或 token 为空时返回空 map。
     Q_INVOKABLE QVariantMap credsForServer(const QString &serverUrl) const;
+    // 按账号 id 取凭据(同服务器多账号时精确定位,不依赖 serverUrl 首账号)。
+    Q_INVOKABLE QVariantMap credsForAccount(const QString &accountId) const;
 
     // 跨服务器海报 id 前缀编码(URL 安全):<encodeServerKey(serverUrl)>~<itemId>~<tag>。
     static QString encodeServerKey(const QString &serverUrl);
@@ -131,18 +132,16 @@ private:
         QString userName;
         QString userId; // 登录时获取(Emby 4.9 无 /Users/Me)
         QString token;
-        bool rememberPassword = false;
-        QString password; // 混淆存储
-        QString icon; // 自定义图标(图片 URL;空 = 名称首字)
-        QString serverIcon; // 服务器默认图标本地缓存 file:// URL(空 = 未解析到)
+        QString password; // 混淆存储(始终保存,供 token 失效自动重登)
+        QString icon; // 统一图标:本地缓存 file:// URL(MD5 命名;空 = 名称首字)。
         qint64 lastUsed = 0;
     };
 
     void load();
     void save();
-    // 服务器图标图片落盘本地缓存(不存远程 URL),返回 file:// URL(失败空)。
-    static QString writeServerIconCache(const QString &serverUrl, const QString &iconUrl,
-                                        const QByteArray &imageData);
+    // 图标图片落盘本地缓存:文件名 = 图片内容 MD5(去重,同图同文件),
+    // 返回 file:// URL(失败空)。
+    static QString writeIconCache(const QByteArray &imageData);
     // 简单混淆(XOR + base64):防随手翻看,不防专业取证。
     static QString obfuscate(const QString &plain);
     static QString deobfuscate(const QString &cipher);
@@ -185,6 +184,8 @@ private:
     int folderIndexById(const QString &id) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
     const AccountInfo *accountById(const QString &id) const;
+    // 按账号 id 取索引,找不到返回 -1。
+    int accountIndexById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
     static QString serverPosterId(const QString &serverUrl, const QString &posterId);
 
@@ -210,9 +211,33 @@ private:
     QHash<int, QVariantList> m_homeViews; // 账号索引 -> 该服视图列表
     QHash<QString, QVariantMap> m_homeRowByKey; // "<账号索引>|<viewId>" -> 行(含 items)
     QVariantList m_homeAccountOrder; // 本次聚合的账号顺序快照 [{index,id,serverUrl,name}]
-    // 账号检测状态:确认 token 失效且重登失败的服务器(UI 标红)。
-    QSet<QString> m_invalidServers;
-    QSet<QString> m_loggingInServers; // 正在账密重登的服务器(失败回调忽略重复处理)
+    // 账号检测状态按**账号 id** 键控(同服务器可多账号,serverUrl 会串):
+    // 确认 token 失效且重登失败的账号(authStatus="invalid")。
+    QSet<QString> m_invalidAccountIds;
+    // 网络不可达/服务器错误(非 401)的账号(authStatus="network"),定时重试。
+    QSet<QString> m_networkAccountIds;
+    QSet<QString> m_loggingInAccountIds; // 正在账密重登的账号(失败回调忽略重复处理)
+    // 重登进行中:serverUrl -> 正在重登的账号 id(EmbyClient 回调仅携带
+    // serverUrl,用它路由回账号)。同服多账号同时需重登时,同一时刻只发
+    // 一个,其余进 m_reloginQueue 按序处理,保证 owner 不被覆盖。
+    QHash<QString, QString> m_reloginOwner;
+    QHash<QString, QQueue<QString>> m_reloginQueue; // serverUrl -> 等待重登的账号 id 队列
+    // 服务器默认图标回填:serverUrl -> 触发拉取该图标的账号 id(同服多账号
+    // 时图标为服务器默认,内容相同,仅决定归属账号)。
+    QHash<QString, QString> m_serverIconOwner;
+    QTimer m_netRetryTimer; // 网络问题账号定期重试
+    // 账号认证状态(accounts() 暴露 authStatus):invalid/network/ok。
+    QString authStatusOf(const QString &accountId) const;
+    // 对某账号发起一次 token 校验(结果经 validateToken 回调处理)。
+    void checkAccountToken(const QString &accountId);
+    // token 校验结果分发:0=有效,1=401→账密重登,2=网络→标记+定时重试。
+    void onTokenChecked(const QString &accountId, int result);
+    // 尝试用账号密码重登(guard 防并发;失败标 invalid)。Emby 允许无密码
+    // 账号,密码为空也照常发起登录。
+    void reloginFor(const QString &accountId);
+    // 定时重试网络问题的账号(先 token 再账密)。
+    void retryNetworkAccounts();
+    void ensureNetRetryTimer();
     // 首页聚合缓存:上次成功数据,启动先展示再后台刷新。返回缓存数据,
     // 由调用方与当前展示比较后决定是否重建(相同则跳过,避免无意义重建)。
     QVariantList loadHomeCache();

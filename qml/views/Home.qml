@@ -18,20 +18,23 @@ Item {
     readonly property real navH: 48
     readonly property real heroH: Math.min(500, (parent ? parent.height : 720) * 0.5)
 
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
-    signal openLibrary(string viewId, string serverUrl, string viewName)
+    signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
+    signal openLibrary(string viewId, string serverUrl, string viewName, string accountId)
     signal openServerManager()
     signal openSettings()
     signal openSearch()
 
     // 聚合 hero 轮播数据(继续观看优先,不足补最新添加)。
+    // TODO:接入/Suggestions和继续播放,打分选择
     function rebuildTop() {
         const all = []
         for (const row of root.rows) {
             const sv = row.serverUrl || ""
+            const aid = row.accountId || ""
             for (const it of (row.items || [])) {
                 const m = Object.assign({}, it)
                 m.serverUrl = sv
+                m.accountId = aid
                 all.push(m)
             }
         }
@@ -47,8 +50,8 @@ Item {
 
     Component.onCompleted: {
         if (AccountManager.hasAccounts) {
-            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
             AccountManager.validateTokens()
+            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
         }
     }
     onRowsChanged: root.rebuildTop()
@@ -289,7 +292,8 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 cardArea.onClicked: root.openLibrary(libRow.modelData.viewId,
                                                       libRow.modelData.serverUrl,
-                                                      libRow.modelData.viewName)
+                                                      libRow.modelData.viewName,
+                                                      libRow.modelData.accountId)
             }
             // 条目卡片横向行(鼠标拖拽横向滚动)。
             // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
@@ -333,7 +337,8 @@ Item {
                         unplayedCount: parent.modelData.unplayedCount || 0
                         itemType: parent.modelData.type || ""
                         onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
-                                                   parent.modelData.name, libRow.modelData.serverUrl)
+                                                   parent.modelData.name, libRow.modelData.serverUrl,
+                                                   libRow.modelData.accountId)
                     }
                 }
             }
@@ -639,7 +644,8 @@ Item {
             onClicked: {
                 if (PathView.isCurrentItem) {
                     root.showDetail(hcard.modelData.id, hcard.modelData.posterId || "",
-                                    hcard.modelData.name, hcard.modelData.serverUrl)
+                                    hcard.modelData.name, hcard.modelData.serverUrl,
+                                    hcard.modelData.accountId)
                 } else {
                     heroPv.currentIndex = hcard.index
                     heroTimer.restart()

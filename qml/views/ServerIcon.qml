@@ -1,29 +1,24 @@
 import QtQuick
 import MoePlayer.Core
 
-//! 服务器图标:自定义图标(图片 URL)→ 服务器默认图标 → 名称首字。
-//! 服务器默认图标在添加服务器时浏览器式解析一次(见
-//! EmbyClient.fetchServerIcon,结果存账号 serverIcon 字段),此后不再
-//! 拉取;解析失败或加载失败静默回退首字,不重试。
+//! 服务器图标:统一图标(本地缓存 file:// URL,自定义或服务器默认)→
+//! 名称首字。加载失败或为空时静默回退首字,不重试。
 //! 加载由命令式 updateSource() 驱动(避免状态属性参与 Image.source
 //! 绑定引发 QML binding-loop 误报)。
 Item {
     id: root
 
-    // 用户自定义图标 URL(空 = 用服务器默认图标)。
-    property string customIcon: ""
-    // 服务器默认图标(添加服务器时解析,账号 serverIcon 字段)。
-    property string defaultIcon: ""
+    // 统一图标:本地缓存 file:// URL(自定义或服务器默认;空 = 名称首字)。
+    property string icon: ""
     // 全部加载失败时显示的文字(名称首字等)。
     property string fallbackText: ""
     // 当前加载源(命令式更新,不参与绑定依赖链)。
     property string currentSource: ""
-    onCustomIconChanged: root.updateSource()
-    onDefaultIconChanged: root.updateSource()
+    onIconChanged: root.updateSource()
     Component.onCompleted: root.updateSource()
 
     function updateSource() {
-        root.currentSource = root.customIcon !== "" ? root.customIcon : root.defaultIcon
+        root.currentSource = root.icon
     }
 
     Image {

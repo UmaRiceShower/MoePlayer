@@ -48,15 +48,22 @@ public:
     // 静态资源且路径随部署不同,故用 HTML 解析。仅添加服务器时调用;
     // 图片字节由 AccountManager 落盘本地缓存(不存远程 URL)。
     Q_INVOKABLE void fetchServerIcon(const QString &serverUrl);
-    // 校验 token 有效性(/System/Info 轻量认证请求):401 经 serverRequestFailed
-    // 通知(AccountManager 标失效/重登),网络错误与超时不算失效(静默)。
-    Q_INVOKABLE void validateToken(const QString &serverUrl, const QString &token,
-                                   const QString &userId);
+    // 下载任意图片 URL 字节(无认证;用户自定义图标用):成功调用 onDone
+    // 传字节,失败/超时传空 QByteArray。不触发 serverRequestFailed
+    // (图标失败静默,UI 回退名称首字)。
+    void downloadImage(const QString &url, std::function<void(const QByteArray &)> onDone);
+    // 校验 token 有效性(/System/Info 轻量认证请求):结果经 onDone(int)
+    // 返回——0=有效;1=401(凭据失效,需账密重登);2=其他失败(网络不可达/
+    // 超时/服务器错误,可稍后重试)。不触发 serverRequestFailed,由
+    // AccountManager 的回调自决标记与重试。
+    void validateToken(const QString &serverUrl, const QString &token,
+                       const QString &userId, std::function<void(int)> onDone);
     // 用户名密码登录(/Users/AuthenticateByName):凭据经 loginSucceeded
-    // (serverUrl, token, userId, userName) 返回,不设置会话状态;
-    // 调用方(AccountManager 存账号 / 表单直连浏览)自行保管凭据。
+    // (serverUrl, token, userId, userName, accountId) 返回,不设置会话状态;
+    // accountId 为调用方传入的记账上下文(添加账号时用,回调按 id 精确
+    // 定位待保存账号,避免同服务器多账号按 serverUrl 错配)。
     Q_INVOKABLE void login(const QString &serverUrl, const QString &username,
-                           const QString &password);
+                           const QString &password, const QString &accountId);
     // 通知服务器会话结束(/Sessions/Logout,官方 Requires authentication
     // as user)。结果完全忽略:部分 Emby 服务器未实现该端点,登出失败
     // 不影响本地删除;不触发任何账号状态信号。
@@ -181,8 +188,10 @@ signals:
     // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
     void itemDetailReady(const QString &serverUrl, const QVariantMap &detail);
     // 登录成功:携带目标服务器与凭据(AccountManager 存账号 / 页面直连浏览)。
+    // accountId 为 login 调用方传入的上下文,直连浏览时为空。
     void loginSucceeded(const QString &serverUrl, const QString &token,
-                        const QString &userId, const QString &userName);
+                        const QString &userId, const QString &userName,
+                        const QString &accountId);
     // 跨服务器拉取结果(见 fetchServer*):serverUrl 标识来源服务器。
     // 请求失败时 views/items 仍发空结果(推进调用方计数),并另发
     // serverRequestFailed 携带失败原因。

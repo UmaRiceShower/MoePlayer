@@ -14,6 +14,8 @@ Item {
 
     // 搜索目标服务器(主窗口按最近浏览的页面注入;空则不可搜索)。
     property string serverUrl: ""
+    // 浏览用账号 id(搜索凭据精确定位;空则回退 credsForServer)。
+    property string accountId: ""
     // 该服务器的搜索结果模型(serverUrl 就绪后一次性取引用)。
     property var sm: null
     readonly property bool canSearch: root.serverUrl !== "" && root.creds().token !== ""
@@ -63,6 +65,8 @@ Item {
     }
 
     function creds() {
+        if (root.accountId !== "")
+            return AccountManager.credsForAccount(root.accountId)
         return AccountManager.credsForServer(root.serverUrl)
     }
 
