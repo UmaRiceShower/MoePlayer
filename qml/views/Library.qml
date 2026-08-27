@@ -502,12 +502,15 @@ Item {
     // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
     ListModel {
         id: sortOptions
+        ListElement { label: "最近添加"; key: "DateLastContentAdded" }
         ListElement { label: "加入时间"; key: "DateCreated" }
-        ListElement { label: "修改时间"; key: "DateModified" }
         ListElement { label: "上映日期"; key: "PremiereDate" }
-        ListElement { label: "年份"; key: "ProductionYear" }
-        ListElement { label: "评分"; key: "CommunityRating" }
         ListElement { label: "名称"; key: "SortName" }
+        ListElement { label: "出品年份"; key: "ProductionYear" }
+        ListElement { label: "社区评分"; key: "CommunityRating" }
+        ListElement { label: "影评评分"; key: "CriticRating" }
+        ListElement { label: "随机"; key: "Random" }
+        ListElement { label: "修改时间"; key: "DateModified" }
     }
 
     // 头部面包屑标签形状(QtQuick.Shapes 矢量多边形,右向尖角 ▸):
