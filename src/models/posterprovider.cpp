@@ -140,7 +140,7 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
     const int s1 = id.indexOf(QLatin1Char('~'));
     const int s2 = id.indexOf(QLatin1Char('~'), s1 + 1);
     const QString url = AccountManager::decodeServerKey(id.left(s1));
-    const QString tok = m_accounts->tokenForServer(url);
+    const QString tok = m_accounts->credsForServer(url).value(QStringLiteral("token")).toString();
     const QString iid = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
     // 末段 "<tag>" 或 "<tag>~<kind>";kind 白名单外一律回退 Primary。
     QString tg;

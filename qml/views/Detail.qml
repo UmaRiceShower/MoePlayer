@@ -13,8 +13,10 @@ Item {
     property string itemId: ""
     property string posterId: ""
     property string title: ""
-    // 条目所在服务器:所有请求按该服务器凭据路由(无状态)。
+    // 条目所在服务器:请求路由用;凭据用 accountId 精确定位(多账号不串)。
     property string serverUrl: ""
+    // 浏览用账号 id(主窗口导航时注入;空则回退 credsForServer)。
+    property string accountId: ""
 
     // 详情间导航历史(相似推荐原地替换):栈内保存被替换前的条目,
     // back 时逐级恢复,替代"压新页再 pop"的整页重建。
@@ -131,8 +133,10 @@ Item {
             root.resyncModels()
     }
 
-    // 该服务器凭据(账号缺失返回空 map)。
+    // 该服务器凭据:优先按账号 id(多账号精确定位);无 id 回退服务器首账号。
     function creds() {
+        if (root.accountId !== "")
+            return AccountManager.credsForAccount(root.accountId)
         return AccountManager.credsForServer(root.serverUrl)
     }
 

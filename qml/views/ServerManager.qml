@@ -79,7 +79,7 @@ Item {
     // ---- 图标设置浮窗 ----
     property bool iconOpen: false
     property string iconAccountId: ""
-    property string iconServerDefault: ""
+    property string iconCurrent: ""
 
     // ---- 服务器修改浮窗 ----
     // Ctrl+点击账号卡打开:编辑名称/地址/用户名、设置图标、删除。
@@ -628,10 +628,7 @@ Item {
     }
     // 从修改浮窗打开图标设置(传递当前图标/服务器默认图标)。
     function openEditIconDialog() {
-        const acc = AccountManager.accounts.find(a => a.id === root.editAccountId)
-        root.openIconDialog(root.editAccountId,
-                            acc ? acc.icon : "",
-                            acc ? acc.serverIcon : "")
+        root.openIconDialog(root.editAccountId)
     }
 
     function openAddDialog() {
@@ -649,19 +646,22 @@ Item {
         passField.text = "" // 不留密码于控件,避免二次读取
     }
 
-    function openIconDialog(id, current, serverDefault) {
+    function openIconDialog(id) {
+        const acc = AccountManager.accounts.find(a => a.id === id)
         root.iconAccountId = id
-        root.iconServerDefault = serverDefault
-        iconUrlField.text = current || ""
+        root.iconCurrent = acc ? (acc.icon || "") : ""
+        iconUrlField.text = ""
         root.iconOpen = true
         iconUrlField.forceActiveFocus()
     }
     function closeIconDialog() {
         root.iconOpen = false
     }
-    // 保存即持久化(AccountManager.setAccountIcon 立即落盘)。
+    // 保存即下载缓存并持久化;文本为空不动作(避免误清当前图标)。
     function saveIcon() {
-        AccountManager.setAccountIcon(root.iconAccountId, iconUrlField.text.trim())
+        const url = iconUrlField.text.trim()
+        if (url !== "")
+            AccountManager.setAccountIcon(root.iconAccountId, url)
         root.closeIconDialog()
     }
     // 清除自定义图标 → 恢复默认(服务器 Emby 图标)。
@@ -686,8 +686,7 @@ Item {
         const full = url.indexOf("://") < 0 ? "http://" + url : url
         root.errorMsg = ""
         root.adding = true
-        AccountManager.addAccount(nameField.text, full, user, passField.text,
-                                  passField.text.length > 0)
+        AccountManager.addAccount(nameField.text, full, user, passField.text)
     }
 
     // 重排动画(被拖卡 480ms)结束后清状态,防后续 hover 挤压误判。
@@ -1137,8 +1136,8 @@ Item {
                 Drag.hotSpot.y: height / 2
                 property string accountId: card.modelData.id
                 // 凭据失效(重登失败)标红边;拖动落点高亮用强调色。
-                border.width: card.modelData.tokenValid === false ? 2 : (card.dropTarget ? 2 : 1)
-                border.color: card.modelData.tokenValid === false ? Theme.danger
+                border.width: card.modelData.authStatus === "invalid" ? 2 : (card.dropTarget ? 2 : 1)
+                border.color: card.modelData.authStatus === "invalid" ? Theme.danger
                               : (card.dropTarget ? Theme.accent
                               : (card.hovered ? Constants.moePink : Theme.bg))
                 // 常驻阴影 + hover 粉色柔光外圈。
@@ -1335,8 +1334,7 @@ Item {
                     color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
                     ServerIcon {
                         anchors.fill: parent
-                        customIcon: card.modelData.icon
-                        defaultIcon: card.modelData.serverIcon
+                        icon: card.modelData.icon
                         fallbackText: (card.modelData.name !== "" ? card.modelData.name : card.modelData.userName).charAt(0)
                     }
                 }
@@ -1359,10 +1357,10 @@ Item {
                             font.pixelSize: 15
                             font.bold: true
                             elide: Text.ElideRight
-                            width: parent.width - (card.modelData.tokenValid === false ? 78 : 0)
+                            width: parent.width - (card.modelData.authStatus === "invalid" ? 78 : 0)
                         }
                         AppText {
-                            visible: card.modelData.tokenValid === false
+                            visible: card.modelData.authStatus === "invalid"
                             text: "[凭据失效]"
                             color: Theme.danger
                             font.pixelSize: 12
@@ -2098,8 +2096,7 @@ Item {
                         color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                         ServerIcon {
                             anchors.fill: parent
-                            customIcon: iconUrlField.text.trim()
-                            defaultIcon: root.iconServerDefault
+                            icon: iconUrlField.text.trim() !== "" ? iconUrlField.text.trim() : root.iconCurrent
                             fallbackText: "图"
                         }
                     }

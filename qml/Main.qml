@@ -13,6 +13,8 @@ ApplicationWindow {
     property var libraryState: null
     // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
     property string currentServerUrl: ""
+    // 最近浏览的账号 id(凭据精确定位;随导航更新)。
+    property string currentAccountId: ""
 
     // 主窗口关闭:外部 mpv 子进程随 MpvClient 析构一并终止,应用直接退出。
     onClosing: function (close) {
@@ -40,25 +42,31 @@ ApplicationWindow {
         }
     }
 
-    // 打开详情页:记录浏览服务器(全局搜索路由),防抖在调用方。
-    function pushDetail(itemId, posterId, title, serverUrl) {
+    // 打开详情页:记录浏览服务器与账号(全局搜索路由),防抖在调用方。
+    function pushDetail(itemId, posterId, title, serverUrl, accountId) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
+        if (accountId)
+            root.currentAccountId = accountId
         stackView.push(detailPage, {
             itemId: itemId,
             posterId: posterId,
             title: title,
-            serverUrl: serverUrl || root.currentServerUrl
+            serverUrl: serverUrl || root.currentServerUrl,
+            accountId: accountId || root.currentAccountId
         })
     }
-    // 打开媒体库页:记录浏览服务器。
-    function pushLibrary(viewId, serverUrl, viewName) {
+    // 打开媒体库页:记录浏览服务器与账号。
+    function pushLibrary(viewId, serverUrl, viewName, accountId) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
+        if (accountId)
+            root.currentAccountId = accountId
         stackView.push(libraryPage, {
             initialViewId: viewId || "",
             initialViewName: viewName || "",
             serverUrl: serverUrl || root.currentServerUrl,
+            accountId: accountId || root.currentAccountId,
             restore: root.libraryState || null
         })
     }
@@ -77,10 +85,11 @@ ApplicationWindow {
         anchors.fill: parent
         visible: false
         serverUrl: root.currentServerUrl
+        accountId: root.currentAccountId
         backgroundSource: stackView
         onShowDetail: function (itemId, posterId, title, serverUrl) {
             searchOverlay.close()
-            root.pushDetail(itemId, posterId, title, serverUrl)
+            root.pushDetail(itemId, posterId, title, serverUrl, root.currentAccountId)
         }
     }
 
@@ -88,11 +97,11 @@ ApplicationWindow {
     Component {
         id: homePage
         Home {
-            onShowDetail: function (itemId, posterId, title, serverUrl) {
-                root.pushDetail(itemId, posterId, title, serverUrl)
+            onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
+                root.pushDetail(itemId, posterId, title, serverUrl, accountId)
             }
-            onOpenLibrary: function (viewId, serverUrl, viewName) {
-                root.pushLibrary(viewId, serverUrl, viewName)
+            onOpenLibrary: function (viewId, serverUrl, viewName, accountId) {
+                root.pushLibrary(viewId, serverUrl, viewName, accountId)
             }
             onOpenServerManager: stackView.push(serverManagerPage)
             onOpenSettings: stackView.push(settingsPage)
@@ -110,14 +119,14 @@ ApplicationWindow {
             onLibraryStateSaved: function (state) {
                 root.libraryState = state
             }
-            onShowDetail: function (itemId, posterId, title, serverUrl) {
+            onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
                 // 双击卡片会连发两次 showDetail,已打开详情页时忽略,避免叠出双实例。
                 // 同 refreshCurrentAfterPlayback:currentItem 动态类型,短路判空下安全。
                 // qmllint disable missing-property
                 if (stackView.currentItem && stackView.currentItem.isDetailPage)
                     return
                 // qmllint enable missing-property
-                root.pushDetail(itemId, posterId, title, serverUrl)
+                root.pushDetail(itemId, posterId, title, serverUrl, accountId)
             }
         }
     }

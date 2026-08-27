@@ -24,6 +24,8 @@ Item {
     property string initialViewName: ""
     // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
     property string serverUrl: ""
+    // 浏览用账号 id(主窗口导航时注入;空则回退 credsForServer)。
+    property string accountId: ""
     // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
     property var restore: null
     // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
@@ -116,8 +118,8 @@ Item {
 
     // 请求播放(携带完整播放地址/头/元数据)。
     signal playRequested(string url, var headers, var meta)
-    // 点击条目进入详情页(携带所在服务器)。
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    // 点击条目进入详情页(携带所在服务器与账号)。
+    signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
     // 离开页面时保存浏览状态(由主窗口存下,再次进入经 restore 恢复)。
     signal libraryStateSaved(var state)
 
@@ -540,8 +542,10 @@ Item {
     // ============================= 函数 =============================
 
     // --- 基础 ---
-    // 该服务器凭据(账号缺失/失效返回空 map → 显示连接表单)。
+    // 该服务器凭据:优先按账号 id(多账号精确定位);无 id 回退服务器首账号。
     function creds() {
+        if (root.accountId !== "")
+            return AccountManager.credsForAccount(root.accountId)
         return AccountManager.credsForServer(root.serverUrl)
     }
     // 服务器显示名:账号名/用户名,未匹配回退地址。
@@ -670,8 +674,9 @@ Item {
         if (root.serverUrl === "") {
             const accs = AccountManager.accounts
             for (const a of accs) {
-                if (AccountManager.credsForServer(a.serverUrl).token !== "") {
+                if (AccountManager.credsForAccount(a.id).token !== "") {
                     root.serverUrl = a.serverUrl
+                    root.accountId = a.id
                     break
                 }
             }
@@ -1363,8 +1368,8 @@ Item {
             // cell 内排前,盖不过兄弟 cell;必须提升 delegate 根(cell)的
             // z(兄弟间比较),放大溢出才能正确覆盖相邻卡。
             z: card.hovered ? 2 : 0
-            Keys.onReturnPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
-            Keys.onEnterPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+            Keys.onReturnPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl, root.accountId)
+            Keys.onEnterPressed: root.showDetail(model.id, model.posterId, model.name, root.serverUrl, root.accountId)
             PosterCard {
                 id: card
                 anchors.centerIn: parent
@@ -1373,7 +1378,7 @@ Item {
                 model: parent.model
                 index: parent.index
                 current: GridView.isCurrentItem
-                onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl, root.accountId)
                 onFavoriteRequested: function (id, fav) {
                     const c = root.creds()
                     EmbyClient.setFavorite(root.serverUrl, c.token, c.userId, id, fav)

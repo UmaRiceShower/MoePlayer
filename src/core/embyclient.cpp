@@ -267,7 +267,8 @@ void EmbyClient::dropServerModels(const QString &serverUrl)
 
 // ---------- 登录与公开信息 ----------
 
-void EmbyClient::login(const QString &serverUrl, const QString &username, const QString &password)
+void EmbyClient::login(const QString &serverUrl, const QString &username, const QString &password,
+                       const QString &accountId)
 {
     QJsonObject body;
     body.insert(QStringLiteral("Username"), username);
@@ -276,13 +277,14 @@ void EmbyClient::login(const QString &serverUrl, const QString &username, const 
     body.insert(QStringLiteral("Pw"), password);
     body.insert(QStringLiteral("Password"), password);
     postFrom(serverUrl, QStringLiteral("/Users/AuthenticateByName"), body,
-             [this, serverUrl](const QJsonDocument &doc) {
+             [this, serverUrl, accountId](const QJsonDocument &doc) {
                  const QJsonObject o = doc.object();
                  const QJsonObject u = o.value(QLatin1String("User")).toObject();
                  emit loginSucceeded(serverUrl,
                                      o.value(QLatin1String("AccessToken")).toString(),
                                      u.value(QLatin1String("Id")).toString(),
-                                     u.value(QLatin1String("Name")).toString());
+                                     u.value(QLatin1String("Name")).toString(),
+                                     accountId);
              },
              nullptr, QStringLiteral("登录"));
 }
@@ -354,6 +356,22 @@ void EmbyClient::downloadServerIconImage(const QString &serverUrl, const QString
             });
 }
 
+// 下载任意图片 URL 字节(无认证):成功传字节,失败/超时传空。用于用户
+// 自定义图标(可能非 Emby 域),不触发 serverRequestFailed。
+void EmbyClient::downloadImage(const QString &url, std::function<void(const QByteArray &)> onDone)
+{
+    QNetworkRequest req{QUrl(url)};
+    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
+    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    QNetworkReply *reply = m_nam.get(req);
+    connect(reply, &QNetworkReply::finished, this,
+            [reply, onDone = std::move(onDone)]() {
+                reply->deleteLater();
+                onDone(reply->error() == QNetworkReply::NoError ? reply->readAll()
+                                                                : QByteArray());
+            });
+}
+
 // 解析 HTML 图标 link:apple-touch-icon 优先(选 192x192,Emby 的 PWA
 // 图标尺寸),其次常规 icon/shortcut icon;href 相对路径按文档 URL 解析。
 QString EmbyClient::parseFaviconLink(const QString &html, const QString &baseHtmlUrl)
@@ -401,12 +419,23 @@ QString EmbyClient::parseFaviconLink(const QString &html, const QString &baseHtm
 }
 
 void EmbyClient::validateToken(const QString &serverUrl, const QString &token,
-                               const QString &userId)
+                               const QString &userId, std::function<void(int)> onDone)
 {
-    // GET /System/Info(带 token),仅 401 视为
-    // token 失效(经 serverRequestFailed 通知);网络错误/超时静默不打扰。
-    get(serverUrl, token, userId, QStringLiteral("/System/Info"),
-        [](const QJsonDocument &) {}, nullptr, QStringLiteral("校验登录状态"));
+    // GET /System/Info(带 token):0=有效;401=凭证失效;其余=网络/服务器错误。
+    // 走原始 reply 取 HTTP 状态,不触发全局 serverRequestFailed(需求区分)。
+    QNetworkReply *reply = m_nam.get(makeRequest(serverUrl, token, userId,
+                                                 QStringLiteral("/System/Info"), false));
+    connect(reply, &QNetworkReply::finished, this,
+            [reply, onDone = std::move(onDone)]() {
+                reply->deleteLater();
+                if (reply->error() == QNetworkReply::NoError) {
+                    onDone(0);
+                    return;
+                }
+                const int status = reply->attribute(
+                    QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                onDone(status == 401 ? 1 : 2);
+            });
 }
 
 // ---------- 浏览(按服务器路由) ----------

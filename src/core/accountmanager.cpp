@@ -1,5 +1,6 @@
 #include "accountmanager.h"
 
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -40,6 +41,8 @@ const QStringList kPresetFolderColors = {
 };
 // 首页聚合缓存文件名(CacheLocation 下)。
 const QString kHomeCacheFileName = QStringLiteral("/home-rows.json");
+// 网络问题账号的定期重试间隔。
+constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
 } // namespace
 
 AccountManager::AccountManager(EmbyClient *client, QObject *parent)
@@ -51,14 +54,19 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     loadLayoutOrder();
     loadServerNames();
 
+    // 网络问题账号定期重试:先 token 再账密,恢复后清除标记。
+    m_netRetryTimer.setInterval(kNetRetryIntervalMs);
+    connect(&m_netRetryTimer, &QTimer::timeout, this,
+            &AccountManager::retryNetworkAccounts);
+
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
     connect(m_client, &EmbyClient::loginSucceeded, this,
             [this](const QString &serverUrl, const QString &token, const QString &userId,
-                   const QString &userName) {
+                   const QString &userName, const QString &accountId) {
                 if (m_pending.isEmpty()
-                    || m_pending.value(QStringLiteral("serverUrl")).toString().trimmed() != serverUrl.trimmed())
-                    return;
+                    || accountId != m_pending.value(QStringLiteral("id")).toString())
+                    return; // 非本类发起的登录(直连浏览/已清除),忽略
                 AccountInfo acc;
                 acc.id = m_pending.value(QStringLiteral("id")).toString();
                 acc.name = m_pending.value(QStringLiteral("name")).toString();
@@ -66,35 +74,18 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 acc.userName = userName.isEmpty()
                                    ? m_pending.value(QStringLiteral("userName")).toString()
                                    : userName;
-                acc.rememberPassword = m_pending.value(QStringLiteral("rememberPassword")).toBool();
-                acc.password = acc.rememberPassword
-                                   ? obfuscate(m_pending.value(QStringLiteral("password")).toString())
-                                   : QString();
+                acc.password = obfuscate(m_pending.value(QStringLiteral("password")).toString());
                 acc.token = token;
                 acc.userId = userId;
                 acc.lastUsed = QDateTime::currentMSecsSinceEpoch();
                 m_pending.clear();
 
-                // 同服务器+用户已存在则更新,否则新增。
-                // 更新时名称留空视为"不改名":保留原账号名(新增时才用
-                // 服务器端 ServerName 回填,见 serverPublicInfoReceived)。
-                auto it = std::find_if(m_accounts.begin(), m_accounts.end(),
-                                       [&acc](const AccountInfo &a) {
-                                           return a.serverUrl == acc.serverUrl
-                                                  && a.userName == acc.userName;
-                                       });
-                if (it != m_accounts.end()) {
-                    if (acc.name.isEmpty())
-                        acc.name = it->name;
-                    acc.id = it->id; // 账号 id 是稳定标识,更新不换
-                    *it = acc;
-                } else {
-                    m_accounts.append(acc);
-                    // 新账号进入视觉顺序(未分组,追加尾部;更新已有账号
-                    // 时 id 不变,不重复追加)。
-                    m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), acc.id));
-                    persistLayoutOrder();
-                }
+                // 每次添加都是独立新账号(MoePlayer 固定新 id):不做同服+
+                // 同名去重,全局一律按账号 id 路由(同服务器多账号互不串)。
+                // 账号名后续由 serverPublicInfoReceived 按 id 回填,不入库去重。
+                m_accounts.append(acc);
+                m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), acc.id));
+                persistLayoutOrder();
                 save();
                 emit accountsChanged();
                 emit accountLoginFinished(true, QString());
@@ -102,8 +93,10 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 // ServerName 回填账号名(见 serverPublicInfoReceived)。
                 if (acc.name.isEmpty())
                     m_client->fetchServerPublicInfo(acc.serverUrl);
-                // 浏览器式解析服务器图标:仅添加/重新添加时拉取(用户主动
-                // 操作,图标可能已更新),此后不再重复请求。
+                // 浏览器式解析服务器图标:仅添加时拉取(用户主动操作,图标
+                // 可能已更新)。记录触发账号,回调按 id 路由(同服多账号时
+                // 图标为服务器默认,内容相同,仅决定归属)。
+                m_serverIconOwner.insert(acc.serverUrl, acc.id);
                 m_client->fetchServerIcon(acc.serverUrl);
             });
 
@@ -126,37 +119,44 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 emit accountLoginFinished(false, msg);
             });
 
-    // 跨服务器请求失败:401 且账号记住密码 → 尝试账密重登(token 刷新);
-    // 401 且无密码 → 标失效;其余为网络错误,数据已按空处理,不标红。
+    // 跨服务器请求失败:401 → 尝试账密重登(token 刷新),无密码/再失败标
+    // invalid;其余(网络/服务器错误)不在此处标记,数据已按空处理。
+    // 同服务器多账号时信号无 id,仅该服唯一账号才自动重登(避免错账号)。
     connect(m_client, &EmbyClient::serverRequestFailed, this,
             [this](const QString &serverUrl, const QString &message) {
-                if (m_loggingInServers.contains(serverUrl))
-                    return; // 登录请求自身的失败,由 serverLoginFinished 处理
-                const int idx = accountIndexByServer(serverUrl);
-                if (idx < 0 || !message.contains(QLatin1String("401")))
+                if (!message.contains(QLatin1String("401")))
                     return;
-                if (m_invalidServers.contains(serverUrl))
-                    return; // 已确认失效(重登失败过),不再重复尝试,避免循环
-                const AccountInfo &a = m_accounts.at(idx);
-                if (a.rememberPassword && !deobfuscate(a.password).isEmpty()) {
-                    m_loggingInServers.insert(serverUrl);
-                    m_client->loginFor(serverUrl, a.userName, deobfuscate(a.password));
-                } else {
-                    m_invalidServers.insert(serverUrl);
-                    emit accountsChanged();
+                // 找出该服唯一账号(多账号时无法定位,不自动重登)。
+                QString uniqueId;
+                int count = 0;
+                for (const auto &a : m_accounts) {
+                    if (a.serverUrl == serverUrl) {
+                        ++count;
+                        uniqueId = a.id;
+                    }
                 }
+                if (count != 1 || m_loggingInAccountIds.contains(uniqueId))
+                    return; // 多账号歧义 / 已在重登(由 serverLoginFinished 处理)
+                if (m_invalidAccountIds.contains(uniqueId))
+                    return; // 已确认失效,避免循环
+                reloginFor(uniqueId);
             });
     // 账密重登结果:成功写回新 token(持久化)并解标失效;
     // 之后重拉各库数据(先展示缓存),恢复该服首页行。
     connect(m_client, &EmbyClient::serverLoginFinished, this,
             [this](const QString &serverUrl, bool ok, const QString &token,
                    const QString &userId, const QString &userName) {
-                m_loggingInServers.remove(serverUrl);
-                const int idx = accountIndexByServer(serverUrl);
+                // 按重登发起时记录的 owner(账号 id)路由;loginFor 仅本类
+                // reloginFor 调用,owner 必存在,不再回退 serverUrl。
+                const QString accountId = m_reloginOwner.take(serverUrl);
+                // 同服排队中的下一个账号接续重登(先递送本结果,清 owner)。
+                m_loggingInAccountIds.remove(accountId);
+                const int idx = accountIndexById(accountId);
                 if (idx >= 0) {
                     AccountInfo &a = m_accounts[idx];
                     if (!ok) {
-                        m_invalidServers.insert(serverUrl);
+                        m_invalidAccountIds.insert(accountId);
+                        m_networkAccountIds.remove(accountId);
                         emit accountsChanged();
                     } else {
                         qInfo() << "Emby: relogin ok on" << serverUrl;
@@ -166,42 +166,46 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                         if (!userName.isEmpty())
                             a.userName = userName;
                         a.lastUsed = QDateTime::currentMSecsSinceEpoch();
-                        m_invalidServers.remove(serverUrl);
+                        m_invalidAccountIds.remove(accountId);
+                        m_networkAccountIds.remove(accountId);
                         save();
                         emit accountsChanged();
                     }
                 }
+                if (m_networkAccountIds.isEmpty())
+                    m_netRetryTimer.stop();
+                // 接续该服排队的下一个重登(owner 已取空,可新发起)。
+                QQueue<QString> &q = m_reloginQueue[serverUrl];
+                if (!q.isEmpty())
+                    reloginFor(q.dequeue());
+                else
+                    m_reloginQueue.remove(serverUrl);
                 // token 校验/重登风暴结束(无账号仍在重登)后一次性重拉首页
                 // 数据:避免每台重登完成就 fetch 一次——数据逐步恢复会让
                 // 首页反复整体重建,Qt 引擎在 delegate 销毁期求值,打印
                 // "QQmlVMEMetaObject: Internal error" 噪音。
-                if (m_loggingInServers.isEmpty())
+                if (m_loggingInAccountIds.isEmpty())
                     fetchHomeRows(m_homeLimit);
             });
 
-    // 浏览器式图标解析+下载结果(仅添加服务器时拉取 / 存量账号本地化
-    // 迁移):图片字节落盘本地缓存(CacheLocation,不存远程 URL),账号
-    // serverIcon 字段存本地文件路径。失败(字节空)静默置空:不写、不
-    // 记录、不重试,卡片回退名称首字。
+    // 服务器默认图标解析+下载结果(仅添加服务器时拉取):图片字节落盘
+    // 本地缓存(文件名 = 内容 MD5,同图同文件去重),写账号 icon 字段。
+    // 已有自定义图标(icon 非空)时不覆盖;失败(字节空)静默不动。
     connect(m_client, &EmbyClient::serverIconReceived, this,
             [this](const QString &serverUrl, const QString &iconUrl,
                    const QByteArray &imageData) {
-                const int idx = accountIndexByServer(serverUrl);
-                if (idx < 0)
+                Q_UNUSED(iconUrl)
+                // 按触发拉取时记录的账号 id 路由(不再用 serverUrl 取首账号)。
+                const int idx = accountIndexById(m_serverIconOwner.take(serverUrl));
+                if (idx < 0 || imageData.isEmpty())
                     return;
                 AccountInfo &a = m_accounts[idx];
-                if (imageData.isEmpty()) {
-                    if (a.serverIcon.isEmpty())
-                        return;
-                    a.serverIcon.clear();
-                    save();
-                    emit accountsChanged();
+                if (!a.icon.isEmpty())
+                    return; // 用户自定义图标优先,服务器默认不覆盖
+                const QString localPath = writeIconCache(imageData);
+                if (localPath.isEmpty() || a.icon == localPath)
                     return;
-                }
-                const QString localPath = writeServerIconCache(serverUrl, iconUrl, imageData);
-                if (localPath.isEmpty() || a.serverIcon == localPath)
-                    return;
-                a.serverIcon = localPath;
+                a.icon = localPath;
                 save();
                 emit accountsChanged();
             });
@@ -216,12 +220,15 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                     m_serverNames.insert(serverUrl, name);
                     persistServerNames();
                 }
-                // 添加服务器时名称留空:用服务器端 ServerName 回填账号名。
-                const int idx = accountIndexByServer(serverUrl);
-                if (idx >= 0 && m_accounts[idx].name.isEmpty()) {
-                    m_accounts[idx].name = name;
-                    save();
-                    emit accountsChanged();
+                // 添加服务器时名称留空:用 ServerName 回填该服名称仍为空的
+                // 账号(多账号时只回填未命名的,不覆盖用户已改的名字)。
+                for (auto &a : m_accounts) {
+                    if (a.serverUrl == serverUrl && a.name.isEmpty()) {
+                        a.name = name;
+                        save();
+                        emit accountsChanged();
+                        break;
+                    }
                 }
             });
     connect(m_client, &EmbyClient::serverViewsReceived, this,
@@ -268,12 +275,9 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("name"), a.name);
         m.insert(QStringLiteral("serverUrl"), a.serverUrl);
         m.insert(QStringLiteral("userName"), a.userName);
-        m.insert(QStringLiteral("rememberPassword"), a.rememberPassword);
         m.insert(QStringLiteral("icon"), a.icon);
-        m.insert(QStringLiteral("serverIcon"), a.serverIcon);
         m.insert(QStringLiteral("lastUsed"), a.lastUsed);
-        // 确认 token 失效且重登失败的服务器为 false(UI 标红);未知/正常为 true。
-        m.insert(QStringLiteral("tokenValid"), !m_invalidServers.contains(a.serverUrl));
+        m.insert(QStringLiteral("authStatus"), authStatusOf(a.id));
         out.append(m);
     }
     return out;
@@ -284,11 +288,17 @@ bool AccountManager::hasAccounts() const
     return !m_accounts.isEmpty();
 }
 
+// TODO
 QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
 {
     const QString url = serverUrl.trimmed();
-    for (const auto &a : m_accounts) {
-        if (a.serverUrl == url && !a.token.isEmpty()) {
+    // 同服务器多账号:优先未标失效的(首个有效 token);全失效时取首个。
+    for (int pass = 0; pass < 2; ++pass) {
+        for (const auto &a : m_accounts) {
+            if (a.serverUrl != url || a.token.isEmpty())
+                continue;
+            if (pass == 0 && m_invalidAccountIds.contains(a.id))
+                continue;
             QVariantMap m;
             m.insert(QStringLiteral("token"), a.token);
             m.insert(QStringLiteral("userId"), a.userId);
@@ -298,21 +308,118 @@ QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
     return QVariantMap();
 }
 
+QVariantMap AccountManager::credsForAccount(const QString &accountId) const
+{
+    const AccountInfo *a = accountById(accountId);
+    if (!a || a->token.isEmpty())
+        return QVariantMap();
+    QVariantMap m;
+    m.insert(QStringLiteral("token"), a->token);
+    m.insert(QStringLiteral("userId"), a->userId);
+    return m;
+}
+
 // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
-// 401 经 serverRequestFailed 回到这里 → 记住密码的账号自动账密重登,
-// 无密码的标失效(UI 红);网络错误/超时不算失效(不打扰用户)。
 void AccountManager::validateTokens()
 {
     for (const auto &a : m_accounts)
         if (!a.token.isEmpty())
-            m_client->validateToken(a.serverUrl, a.token, a.userId);
-    // 不在此处拉取服务器图标:图标只在添加服务器时解析(见
-    // loginSucceeded 回调),后续用缓存/失败记忆,避免每次启动重复请求。
+            checkAccountToken(a.id);
+}
+
+// 账号认证状态(invalid/network/ok;供 accounts() 暴露 authStatus)。
+QString AccountManager::authStatusOf(const QString &accountId) const
+{
+    if (m_invalidAccountIds.contains(accountId))
+        return QStringLiteral("invalid");
+    if (m_networkAccountIds.contains(accountId))
+        return QStringLiteral("network");
+    return QStringLiteral("ok");
+}
+
+// 对某账号发起一次 token 校验;结果经回调自决标记与重试。
+void AccountManager::checkAccountToken(const QString &accountId)
+{
+    const int idx = accountIndexById(accountId);
+    if (idx < 0)
+        return;
+    const AccountInfo &a = m_accounts.at(idx);
+    if (a.token.isEmpty())
+        return;
+    m_client->validateToken(a.serverUrl, a.token, a.userId,
+                            [this, accountId](int result) { onTokenChecked(accountId, result); });
+}
+
+// token 校验结果:0=有效(清标记);1=401(账密重登);2=网络(标记+定时重试)。
+void AccountManager::onTokenChecked(const QString &accountId, int result)
+{
+    if (accountIndexById(accountId) < 0)
+        return; // 账号已删,过期回调丢弃
+    if (result == 0) {
+        if (m_invalidAccountIds.remove(accountId) || m_networkAccountIds.remove(accountId))
+            emit accountsChanged();
+        if (m_networkAccountIds.isEmpty())
+            m_netRetryTimer.stop();
+        return;
+    }
+    if (result == 2) {
+        // 网络不可达/服务器错误:标记 network,定时重试(先 token 再账密)。
+        m_invalidAccountIds.remove(accountId);
+        if (!m_networkAccountIds.contains(accountId)) {
+            m_networkAccountIds.insert(accountId);
+            emit accountsChanged();
+        }
+        ensureNetRetryTimer();
+        return;
+    }
+    // 401:token 失效 → 账密重登;失败标 invalid(见 serverLoginFinished)。
+    m_networkAccountIds.remove(accountId);
+    reloginFor(accountId);
+}
+
+// 用账号密码重登(guard 防并发;失败标 invalid,结果经 serverLoginFinished)。
+// Emby 允许无密码账号:密码为空也照常发 AuthenticateByName(空密码合法)。
+// 同服同时至多一个在途重登,其余排队(m_reloginQueue),保证 owner 无歧义。
+void AccountManager::reloginFor(const QString &accountId)
+{
+    if (m_loggingInAccountIds.contains(accountId))
+        return;
+    const int idx = accountIndexById(accountId);
+    if (idx < 0)
+        return;
+    const AccountInfo &a = m_accounts.at(idx);
+    const QString srv = a.serverUrl;
+    if (m_reloginOwner.contains(srv)) {
+        // 该服已有重登在途:排队等前一个完成,避免 owner 被覆盖。
+        if (!m_reloginQueue[srv].contains(accountId))
+            m_reloginQueue[srv].enqueue(accountId);
+        return;
+    }
+    m_loggingInAccountIds.insert(accountId);
+    m_reloginOwner.insert(srv, accountId); // 路由 serverLoginFinished 回账号
+    m_client->loginFor(srv, a.userName, deobfuscate(a.password));
+}
+
+// 定时重试网络问题的账号:先 token,401 再账密;恢复清标记,仍网络保持。
+void AccountManager::retryNetworkAccounts()
+{
+    if (m_networkAccountIds.isEmpty()) {
+        m_netRetryTimer.stop();
+        return;
+    }
+    const auto ids = m_networkAccountIds;
+    for (const QString &id : ids)
+        checkAccountToken(id);
+}
+
+void AccountManager::ensureNetRetryTimer()
+{
+    if (!m_networkAccountIds.isEmpty() && !m_netRetryTimer.isActive())
+        m_netRetryTimer.start();
 }
 
 bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
-                                const QString &userName, const QString &password,
-                                bool rememberPassword)
+                                const QString &userName, const QString &password)
 {
     if (serverUrl.trimmed().isEmpty() || userName.trimmed().isEmpty())
         return false;
@@ -322,9 +429,9 @@ bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
         { QStringLiteral("serverUrl"), serverUrl.trimmed() },
         { QStringLiteral("userName"), userName.trimmed() },
         { QStringLiteral("password"), password },
-        { QStringLiteral("rememberPassword"), rememberPassword },
     };
-    m_client->login(serverUrl.trimmed(), userName.trimmed(), password);
+    m_client->login(serverUrl.trimmed(), userName.trimmed(), password,
+                    m_pending.value(QStringLiteral("id")).toString());
     return true;
 }
 
@@ -514,14 +621,6 @@ void AccountManager::maybeAssembleHomeRows()
     saveHomeCache(); // 缓存本次成功数据,下次启动先展示
     emit homeRowsReady();
     finishHomeFetch();
-}
-
-QString AccountManager::tokenForServer(const QString &serverUrl) const
-{
-    for (const auto &a : m_accounts)
-        if (a.serverUrl == serverUrl && !a.token.isEmpty())
-            return a.token;
-    return QString();
 }
 
 // 账号排序统一委托 setLayoutOrder(单一通道):账号项(未分组账号)移到
@@ -1018,10 +1117,6 @@ void AccountManager::loadFolders()
         f.id = o.value(QLatin1String("id")).toString();
         f.name = o.value(QLatin1String("name")).toString();
         f.color = o.value(QLatin1String("color")).toString();
-        // 旧数据(升级前创建)无颜色:随机挑一个,与新建默认行为一致。
-        if (f.color.isEmpty())
-            f.color = kPresetFolderColors.at(QRandomGenerator::global()
-                                                 ->bounded(kPresetFolderColors.size()));
         const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
         for (const auto &id : ids) {
             const QString aid = id.toString();
@@ -1053,25 +1148,56 @@ void AccountManager::saveFolders()
     m_settings.sync();
 }
 
-// 设置图标即持久化(conf 落盘 + UI 通知),用户无需额外保存。
+// 设置图标:URL 非空 → 下载图片字节,落盘 MD5 命名本地缓存后写 icon;
+// URL 空 → 清除 icon(回退名称首字)。用户自定义图标优先于服务器默认。
 void AccountManager::setAccountIcon(const QString &id, const QString &icon)
 {
-    for (auto &a : m_accounts) {
-        if (a.id != id)
-            continue;
-        if (a.icon == icon)
+    const QString url = icon.trimmed();
+    if (url.isEmpty()) {
+        for (auto &a : m_accounts) {
+            if (a.id != id)
+                continue;
+            if (a.icon.isEmpty())
+                return;
+            a.icon.clear();
+            save();
+            emit accountsChanged();
             return;
-        a.icon = icon.trimmed();
-        save();
-        emit accountsChanged();
+        }
         return;
     }
+    // 下载与缓存写回异步;完成时按 id 定位账号(可能已被删除/新建,忽略)。
+    m_client->downloadImage(url, [this, id](const QByteArray &data) {
+        if (data.isEmpty())
+            return; // 下载失败静默,保留当前图标
+        const QString localPath = writeIconCache(data);
+        if (localPath.isEmpty())
+            return;
+        for (auto &a : m_accounts) {
+            if (a.id != id)
+                continue;
+            if (a.icon == localPath)
+                return;
+            a.icon = localPath;
+            save();
+            emit accountsChanged();
+            return;
+        }
+    });
 }
 
 int AccountManager::accountIndexByServer(const QString &serverUrl) const
 {
     for (int i = 0; i < m_accounts.size(); ++i)
         if (m_accounts.at(i).serverUrl == serverUrl)
+            return i;
+    return -1;
+}
+
+int AccountManager::accountIndexById(const QString &id) const
+{
+    for (int i = 0; i < m_accounts.size(); ++i)
+        if (m_accounts.at(i).id == id)
             return i;
     return -1;
 }
@@ -1125,33 +1251,23 @@ QString AccountManager::encodeServerKey(const QString &serverUrl)
         QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
 }
 
-// 服务器图标图片落盘本地缓存(CacheLocation,不存远程 URL):文件名
-// server-icon-<encodeServerKey(serverUrl)><扩展名>,扩展名取图标 URL 后缀
-// (Qt Image 按内容解码,扩展名仅作标识)。返回本地绝对路径,写失败返回空。
-QString AccountManager::writeServerIconCache(const QString &serverUrl,
-                                             const QString &iconUrl,
-                                             const QByteArray &imageData)
+// 图标图片落盘本地缓存(CacheLocation/account-icons/):文件名 = 内容 MD5
+// (同图同文件,跨账号去重),后缀统一 .img(Qt Image 按内容解码)。返回
+// file:// URL(QML Image.source 裸绝对路径会被 qrc 解析失败,须显式 file://),
+// 写失败返回空。
+QString AccountManager::writeIconCache(const QByteArray &imageData)
 {
     const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
     if (dir.isEmpty())
         return QString();
+    const QString iconDir = dir + QStringLiteral("/account-icons");
     QDir d;
-    if (!d.mkpath(dir))
+    if (!d.mkpath(iconDir))
         return QString();
-    // 扩展名:仅接受 ≤5 位小写字母数字后缀(防 ".html" 等误用),否则 .png。
-    QString ext = QStringLiteral(".png");
-    const QString path = QUrl(iconUrl).path();
-    const int dot = path.lastIndexOf(QLatin1Char('.'));
-    if (dot >= 0) {
-        const QString e = path.mid(dot + 1).toLower();
-        bool ok = !e.isEmpty() && e.size() <= 5;
-        for (const QChar ch : e)
-            ok = ok && (ch.isLower() || ch.isDigit());
-        if (ok)
-            ext = QLatin1Char('.') + e;
-    }
-    const QString file = dir + QStringLiteral("/server-icon-")
-                         + encodeServerKey(serverUrl) + ext;
+    const QString file = iconDir + QLatin1Char('/')
+                         + QString::fromLatin1(QCryptographicHash::hash(
+                             imageData, QCryptographicHash::Md5).toHex())
+                         + QStringLiteral(".img");
     QFile f(file);
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return QString();
@@ -1161,8 +1277,6 @@ QString AccountManager::writeServerIconCache(const QString &serverUrl,
         return QString();
     }
     f.close();
-    // file:// URL 形式:QML Image.source 的字符串按相对当前 URL(qrc)解析,
-    // 裸绝对路径会被当成 qrc:/... 资源路径加载失败,必须显式 file://。
     return QUrl::fromLocalFile(file).toString();
 }
 
@@ -1236,7 +1350,7 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
 QString AccountManager::passwordFor(const QString &id) const
 {
     for (const auto &a : m_accounts)
-        if (a.id == id && a.rememberPassword && !a.password.isEmpty())
+        if (a.id == id && !a.password.isEmpty())
             return deobfuscate(a.password);
     return QString();
 }
@@ -1254,10 +1368,8 @@ void AccountManager::load()
         a.userName = o.value(QLatin1String("userName")).toString();
         a.userId = o.value(QLatin1String("userId")).toString();
         a.token = o.value(QLatin1String("token")).toString();
-        a.rememberPassword = o.value(QLatin1String("rememberPassword")).toBool();
         a.password = o.value(QLatin1String("password")).toString();
         a.icon = o.value(QLatin1String("icon")).toString();
-        a.serverIcon = o.value(QLatin1String("serverIcon")).toString();
         a.lastUsed = o.value(QLatin1String("lastUsed")).toVariant().toLongLong();
         if (!a.id.isEmpty())
             m_accounts.append(a);
@@ -1275,10 +1387,8 @@ void AccountManager::save()
         o.insert(QLatin1String("userName"), a.userName);
         o.insert(QLatin1String("userId"), a.userId);
         o.insert(QLatin1String("token"), a.token);
-        o.insert(QLatin1String("rememberPassword"), a.rememberPassword);
         o.insert(QLatin1String("password"), a.password);
         o.insert(QLatin1String("icon"), a.icon);
-        o.insert(QLatin1String("serverIcon"), a.serverIcon);
         o.insert(QLatin1String("lastUsed"), a.lastUsed);
         arr.append(o);
     }
