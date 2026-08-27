@@ -612,10 +612,4 @@ Item {
                 root.searchNow(true)
         }
     }
-
-    // Esc 关闭。
-    Shortcut {
-        sequences: ["Esc"]
-        onActivated: root.close()
-    }
 }

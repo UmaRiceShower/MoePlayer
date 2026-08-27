@@ -67,7 +67,7 @@ qt_add_qml_module(MoePlayer
         qml/views/Home.qml
         qml/views/Library.qml
         qml/views/Detail.qml
-        qml/views/Settings.qml
+        qml/views/SettingsOverlay.qml
         qml/views/ServerManager.qml
         qml/views/SearchOverlay.qml
         qml/views/PosterCard.qml

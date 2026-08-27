@@ -44,6 +44,25 @@ Rectangle {
         blurEnabled: true
         blur: 1.0
         blurMax: root.blurRadius
+        // 只裁圆角:MultiEffect 的 source 铺满矩形,若不遮罩会露出方角;
+        // maskSource 用白底圆角矩形的 alpha 通道,把模糊裁到 root.radius。
+        maskEnabled: true
+        maskSource: bgMask
+    }
+
+    // 圆角遮罩采样:ShaderEffectSource 采样白底圆角矩形,用其 alpha 通道作 mask;
+    // hideSource 让该矩形从场景隐藏,避免显示成一块白色。
+    ShaderEffectSource {
+        id: bgMask
+        sourceItem: maskRect
+        hideSource: true
+        visible: false
+    }
+    Rectangle {
+        id: maskRect
+        anchors.fill: parent
+        radius: root.radius
+        color: "white"
     }
 
     Rectangle {
