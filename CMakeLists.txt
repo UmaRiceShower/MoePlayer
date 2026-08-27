@@ -41,6 +41,7 @@ qt_add_executable(MoePlayer
     src/core/configmanager.cpp
     src/core/screeninhibit.cpp
     src/models/colorprovider.cpp
+    src/models/homerowsmodel.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvclient.cpp
