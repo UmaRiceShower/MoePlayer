@@ -23,7 +23,6 @@ namespace {
 const QString kAccountsKey = QStringLiteral("accounts/list");
 const QString kFoldersKey = QStringLiteral("accounts/folders");
 const QString kLayoutOrderKey = QStringLiteral("accounts/layoutOrder");
-const QString kServerNamesKey = QStringLiteral("accounts/serverNames");
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 文件夹预设色(hex):新建随机/修改选择 UI 共用,顺序即 UI 展示顺序。
@@ -52,7 +51,6 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     load();
     loadFolders();
     loadLayoutOrder();
-    loadServerNames();
 
     // 网络问题账号定期重试:先 token 再账密,恢复后清除标记。
     m_netRetryTimer.setInterval(kNetRetryIntervalMs);
@@ -210,18 +208,12 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 emit accountsChanged();
             });
 
-    // 首页聚合:跨服务器拉取结果归位,全部完成后组装并通知;
-    // 同时服务"添加服务器未填名称"场景:登录成功回填 ServerName 到账号名。
+    // 添加服务器未填名称:用拉到的 ServerName 回填该服名称仍为空的账号
+    // (只回填未命名的,不覆盖用户已填/已改的名字);同服多账号只回填首个。
     connect(m_client, &EmbyClient::serverPublicInfoReceived, this,
             [this](const QString &serverUrl, const QString &name) {
                 if (name.isEmpty())
                     return;
-                if (m_serverNames.value(serverUrl) != name) {
-                    m_serverNames.insert(serverUrl, name);
-                    persistServerNames();
-                }
-                // 添加服务器时名称留空:用 ServerName 回填该服名称仍为空的
-                // 账号(多账号时只回填未命名的,不覆盖用户已改的名字)。
                 for (auto &a : m_accounts) {
                     if (a.serverUrl == serverUrl && a.name.isEmpty()) {
                         a.name = name;
@@ -232,29 +224,28 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 }
             });
     connect(m_client, &EmbyClient::serverViewsReceived, this,
-            [this](const QString &serverUrl, const QVariantList &views) {
-                const int idx = accountIndexByServer(serverUrl);
-                if (idx < 0 || m_homeReqGen.value(idx) != m_homeGen)
+            [this](const QString &serverUrl, const QString &accountId, const QVariantList &views) {
+                const AccountInfo *a = accountById(accountId);
+                if (!a || m_homeReqGen.value(accountId) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
-                if (m_homeViews.contains(idx))
+                if (m_homeViews.contains(accountId))
                     return; // 本代已处理(旧代残留同数据回调),避免重复计数/发请求
-                m_homeViews.insert(idx, views);
+                m_homeViews.insert(accountId, views);
                 --m_homePending;
-                const AccountInfo &a = m_accounts.at(idx);
                 for (const auto &v : views) {
                     ++m_homePending; // 每库一个条目请求
-                    m_client->fetchServerItems(serverUrl, a.token, a.userId,
+                    m_client->fetchServerItems(serverUrl, accountId, a->token, a->userId,
                                                v.toMap().value(QStringLiteral("id")).toString(),
                                                m_homeLimit);
                 }
                 maybeAssembleHomeRows();
             });
     connect(m_client, &EmbyClient::serverItemsReceived, this,
-            [this](const QString &serverUrl, const QString &viewId, const QVariantList &items) {
-                const int idx = accountIndexByServer(serverUrl);
-                if (idx < 0 || m_homeReqGen.value(idx) != m_homeGen)
+            [this](const QString &serverUrl, const QString &accountId,
+                   const QString &viewId, const QVariantList &items) {
+                if (accountIndexById(accountId) < 0 || m_homeReqGen.value(accountId) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
-                const QString key = QString::number(idx) + QLatin1Char('|') + viewId;
+                const QString key = accountId + QLatin1Char('|') + viewId;
                 if (m_homeRowByKey.contains(key))
                     return; // 本代已处理(旧代残留),避免重复递减计数
                 QVariantMap row;
@@ -470,15 +461,13 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         if (a.token.isEmpty())
             continue; // 无凭据的账号跳过,不参与聚合
         QVariantMap order;
-        order.insert(QStringLiteral("index"), i);
         order.insert(QStringLiteral("id"), a.id);
         order.insert(QStringLiteral("serverUrl"), a.serverUrl);
         order.insert(QStringLiteral("name"), a.name);
         m_homeAccountOrder.append(order);
-        m_homeReqGen.insert(i, gen);
+        m_homeReqGen.insert(a.id, gen);
         ++m_homePending; // 该服视图请求
-        m_client->fetchServerPublicInfo(a.serverUrl);
-        m_client->fetchServerViews(a.serverUrl, a.token, a.userId);
+        m_client->fetchServerViews(a.serverUrl, a.id, a.token, a.userId);
     }
     if (m_homePending == 0)
         finishHomeFetch();
@@ -494,9 +483,10 @@ void AccountManager::finishHomeFetch()
     }
 }
 
-// 首页聚合行"语义等价"比较:忽略易变字段(posterId 的 tag/serverName
-// 补全时序等),只比账号归属、视图与条目身份/名称——重登/重复拉取返回
-// 的微差(如 serverName 拉取时序、items 字段细节)不应触发无意义重建。
+// 首页聚合行"语义等价"比较:忽略易变字段(posterId 的 tag 补全时序等),
+// 只比账号归属、视图与条目身份/名称——重登/重复拉取返回的微差(如
+// items 字段细节)不应触发无意义重建。
+//TODO
 bool AccountManager::sameHomeRows(const QVariantList &a, const QVariantList &b)
 {
     if (a.size() != b.size())
@@ -550,42 +540,19 @@ void AccountManager::maybeAssembleHomeRows()
     QVariantList out;
     for (const auto &ord : m_homeAccountOrder) {
         const QVariantMap om = ord.toMap();
-        const int idx = om.value(QStringLiteral("index")).toInt();
+        const QString accountId = om.value(QStringLiteral("id")).toString();
         const QString serverUrl = om.value(QStringLiteral("serverUrl")).toString();
-        // 服务器显示名:用户填的账号名优先,未填(名称为空)才用拉取的
-        // ServerName;两者皆空时留空,前端仅显示媒体库名。
-        QString serverName = om.value(QStringLiteral("name")).toString();
-        if (serverName.isEmpty())
-            serverName = m_serverNames.value(serverUrl);
-        const QVariantList views = m_homeViews.value(idx);
-        if (views.isEmpty()) {
-            // 该服本次无数据(401/token 失效/网络失败):沿用上次聚合该服的
-            // 行,避免重登期间数据抖动导致首页反复重建(Qt 引擎噪音)。
-            for (const auto &old : m_homeRows) {
-                if (old.toMap().value(QStringLiteral("serverUrl")).toString() == serverUrl)
-                    out.append(old);
-            }
-            continue;
-        }
+        const QString serverName = om.value(QStringLiteral("name")).toString();
+        const QVariantList views = m_homeViews.value(accountId);
+        if (views.isEmpty())
+            continue; // 该服本次无数据(401/token 失效/网络失败):跳过,不显示
         for (const auto &v : views) {
             const QVariantMap vm = v.toMap();
-            const QString key = QString::number(idx) + QLatin1Char('|')
+            const QString key = accountId + QLatin1Char('|')
                                 + vm.value(QStringLiteral("id")).toString();
             QVariantMap row = m_homeRowByKey.value(key);
-            if (row.isEmpty()) {
-                // 该库条目拉取失败(401):沿用上次该库的行(同服同库)。
-                for (const auto &old : m_homeRows) {
-                    const QVariantMap om = old.toMap();
-                    if (om.value(QStringLiteral("serverUrl")).toString() == serverUrl
-                        && om.value(QStringLiteral("viewId")).toString()
-                               == vm.value(QStringLiteral("id")).toString()) {
-                        row = om;
-                        break;
-                    }
-                }
-                if (row.isEmpty())
-                    continue;
-            }
+            if (row.isEmpty())
+                continue; // 该库条目拉取失败(401/网络失败):跳过,不显示
             row.insert(QStringLiteral("viewName"), vm.value(QStringLiteral("name")));
             row.insert(QStringLiteral("accountId"), om.value(QStringLiteral("id")));
             row.insert(QStringLiteral("serverUrl"), serverUrl);
@@ -603,16 +570,12 @@ void AccountManager::maybeAssembleHomeRows()
                 items[i] = it;
             }
             row.insert(QStringLiteral("items"), items);
-            // 空库(本次拉到 0 条目)不出现在首页;失败沿用旧行的路径
-            // (上方 401/网络失败)不受此过滤影响。
+            // 空库(本次拉到 0 条目)不出现在首页。
             if (items.isEmpty())
                 continue;
             out.append(row);
         }
     }
-    // 与当前展示语义相同则不重建(重登/重复拉取数据常不变;重建触发 Home
-    // 行 delegate 销毁/孵化,连续重建会让 Qt 引擎在失效 context 上求值,
-    // 打印 "QQmlVMEMetaObject: Internal error" 警告)。
     if (sameHomeRows(m_homeRows, out)) {
         finishHomeFetch();
         return;
@@ -621,82 +584,6 @@ void AccountManager::maybeAssembleHomeRows()
     saveHomeCache(); // 缓存本次成功数据,下次启动先展示
     emit homeRowsReady();
     finishHomeFetch();
-}
-
-// 账号排序统一委托 setLayoutOrder(单一通道):账号项(未分组账号)移到
-// 账号项序列 toIndex 位,规范化后统一重排 accounts/folders 并持久化,
-// "展平视觉账号顺序 == accounts 顺序"不变量任何时刻成立。QML 拖动
-// 排序直接调 setLayoutOrder(moveLayoutElement),moveAccount* 保留供
-// 外部索引式调用(toIndex 为账号项序列索引)。
-void AccountManager::moveAccount(const QString &id, int toIndex)
-{
-    int acctCount = 0;
-    for (const auto &v : m_layoutOrder)
-        if (v.toMap().value(QLatin1String("type")).toString() == QLatin1String("account"))
-            ++acctCount;
-    if (acctCount < 2)
-        return;
-    toIndex = qBound(0, toIndex, acctCount - 1);
-    QVariantList order;
-    int seen = 0;
-    bool moved = false;
-    for (const auto &v : m_layoutOrder) {
-        const QVariantMap m = v.toMap();
-        const bool isAcct = m.value(QLatin1String("type")).toString() == QLatin1String("account");
-        if (isAcct && m.value(QLatin1String("id")).toString() == id)
-            continue; // 目标元素:移除,稍后插入
-        if (isAcct) {
-            if (!moved && seen == toIndex) {
-                order.append(makeLayoutEntry(QLatin1String("account"), id));
-                moved = true;
-            }
-            order.append(v);
-            ++seen;
-        } else {
-            order.append(v);
-        }
-    }
-    if (!moved)
-        order.append(makeLayoutEntry(QLatin1String("account"), id));
-    setLayoutOrder(order);
-}
-
-void AccountManager::moveAccountUp(const QString &id)
-{
-    // 账号项序列中 id 的位置 → 前移一位。
-    int pos = -1;
-    int seen = 0;
-    for (const auto &v : m_layoutOrder) {
-        const QVariantMap m = v.toMap();
-        if (m.value(QLatin1String("type")).toString() != QLatin1String("account"))
-            continue;
-        if (m.value(QLatin1String("id")).toString() == id) {
-            pos = seen;
-            break;
-        }
-        ++seen;
-    }
-    if (pos > 0)
-        moveAccount(id, pos - 1);
-}
-
-void AccountManager::moveAccountDown(const QString &id)
-{
-    // 账号项序列中 id 的位置 → 后移一位。
-    int pos = -1;
-    int seen = 0;
-    int total = 0;
-    for (const auto &v : m_layoutOrder) {
-        const QVariantMap m = v.toMap();
-        if (m.value(QLatin1String("type")).toString() != QLatin1String("account"))
-            continue;
-        if (m.value(QLatin1String("id")).toString() == id)
-            pos = seen;
-        ++seen;
-        ++total;
-    }
-    if (pos >= 0 && pos + 1 < total)
-        moveAccount(id, pos + 1);
 }
 
 // ---- 服务器文件夹(分类)----
@@ -964,41 +851,9 @@ void AccountManager::removeFolder(const QString &id)
     }
 }
 
-void AccountManager::moveFolder(const QString &id, int toIndex)
-{
-    // 委托 setLayoutOrder(单一通道):把 folder 项移到 folder 项序列
-    // toIndex 位,规范化后统一重排 folders/accounts 并持久化——展平
-    // 视觉账号顺序 == accounts 顺序的不变量任何时刻成立。QML 排序现
-    // 统一走 setLayoutOrder,moveFolder 保留供外部索引式调用。
-    if (folderIndexById(id) < 0)
-        return;
-    QVariantList order;
-    int folderSeen = 0;
-    bool moved = false;
-    for (const auto &v : m_layoutOrder) {
-        const QVariantMap m = v.toMap();
-        const bool isFolder = m.value(QLatin1String("type")).toString() == QLatin1String("folder");
-        if (isFolder && m.value(QLatin1String("id")).toString() == id)
-            continue; // 目标元素:移除,稍后插入
-        if (isFolder) {
-            if (!moved && folderSeen == toIndex) {
-                order.append(makeLayoutEntry(QLatin1String("folder"), id));
-                moved = true;
-            }
-            order.append(v);
-            ++folderSeen;
-        } else {
-            order.append(v);
-        }
-    }
-    if (!moved)
-        order.append(makeLayoutEntry(QLatin1String("folder"), id));
-    setLayoutOrder(order);
-}
-
 void AccountManager::renameFolder(const QString &id, const QString &name)
 {
-    FolderInfo *f = folderByIdMutable(id);
+    FolderInfo *f = folderById(id);
     if (!f)
         return;
     const QString n = name.trimmed();
@@ -1011,7 +866,7 @@ void AccountManager::renameFolder(const QString &id, const QString &name)
 
 void AccountManager::setFolderColor(const QString &id, const QString &color)
 {
-    FolderInfo *f = folderByIdMutable(id);
+    FolderInfo *f = folderById(id);
     if (!f)
         return;
     const QString c = color.trimmed();
@@ -1037,7 +892,7 @@ QString AccountManager::folderIdOfAccount(const QString &accountId) const
 
 void AccountManager::addAccountToFolder(const QString &folderId, const QString &accountId)
 {
-    FolderInfo *f = folderByIdMutable(folderId);
+    FolderInfo *f = folderById(folderId);
     if (!f)
         return;
     if (f->accountIds.contains(accountId))
@@ -1101,7 +956,7 @@ const AccountManager::FolderInfo *AccountManager::folderById(const QString &id) 
     return i >= 0 ? &m_folders.at(i) : nullptr;
 }
 
-AccountManager::FolderInfo *AccountManager::folderByIdMutable(const QString &id)
+AccountManager::FolderInfo *AccountManager::folderById(const QString &id)
 {
     const int i = folderIndexById(id);
     return i >= 0 ? &m_folders[i] : nullptr;
@@ -1148,12 +1003,41 @@ void AccountManager::saveFolders()
     m_settings.sync();
 }
 
-// 设置图标:URL 非空 → 下载图片字节,落盘 MD5 命名本地缓存后写 icon;
-// URL 空 → 清除 icon(回退名称首字)。用户自定义图标优先于服务器默认。
+// 设置图标:来源可为远程 URL(下载字节)或本地图片(file:///已有路径,
+// 直接读字节);统一落盘 MD5 命名本地缓存后写 icon。来源空 → 清除 icon
+// (回退名称首字)。用户自定义图标优先于服务器默认。
+
+// 读取本地图片原始字节(本地绝对路径;读失败/文件不存在返回空)。
+static QByteArray readLocalImageFile(const QString &path)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QByteArray();
+    return f.readAll();
+}
+
+// 写入图标缓存并按 id 落位:内容去重(同图不重写),账号不存在忽略。
+void AccountManager::applyAccountIcon(const QString &id, const QByteArray &imageData)
+{
+    const QString localPath = writeIconCache(imageData);
+    if (localPath.isEmpty())
+        return;
+    for (auto &a : m_accounts) {
+        if (a.id != id)
+            continue;
+        if (a.icon == localPath)
+            return;
+        a.icon = localPath;
+        save();
+        emit accountsChanged();
+        return;
+    }
+}
+
 void AccountManager::setAccountIcon(const QString &id, const QString &icon)
 {
-    const QString url = icon.trimmed();
-    if (url.isEmpty()) {
+    const QString src = icon.trimmed();
+    if (src.isEmpty()) {
         for (auto &a : m_accounts) {
             if (a.id != id)
                 continue;
@@ -1166,32 +1050,21 @@ void AccountManager::setAccountIcon(const QString &id, const QString &icon)
         }
         return;
     }
-    // 下载与缓存写回异步;完成时按 id 定位账号(可能已被删除/新建,忽略)。
-    m_client->downloadImage(url, [this, id](const QByteArray &data) {
+    // 本地图片:file:// 或已有的本地路径直接读字节落缓存(不经网络);
+    // 否则按远程 URL 下载,失败静默保留当前图标。
+    const QUrl u(src);
+    if (u.isLocalFile() || QFileInfo::exists(src)) {
+        const QString path = u.isLocalFile() ? u.toLocalFile() : src;
+        const QByteArray data = readLocalImageFile(path);
+        if (!data.isEmpty())
+            applyAccountIcon(id, data);
+        return;
+    }
+    m_client->downloadImage(src, [this, id](const QByteArray &data) {
         if (data.isEmpty())
-            return; // 下载失败静默,保留当前图标
-        const QString localPath = writeIconCache(data);
-        if (localPath.isEmpty())
             return;
-        for (auto &a : m_accounts) {
-            if (a.id != id)
-                continue;
-            if (a.icon == localPath)
-                return;
-            a.icon = localPath;
-            save();
-            emit accountsChanged();
-            return;
-        }
+        applyAccountIcon(id, data);
     });
-}
-
-int AccountManager::accountIndexByServer(const QString &serverUrl) const
-{
-    for (int i = 0; i < m_accounts.size(); ++i)
-        if (m_accounts.at(i).serverUrl == serverUrl)
-            return i;
-    return -1;
 }
 
 int AccountManager::accountIndexById(const QString &id) const
@@ -1286,29 +1159,9 @@ QString AccountManager::decodeServerKey(const QString &key)
                                                     QByteArray::Base64UrlEncoding));
 }
 
-void AccountManager::loadServerNames()
-{
-    const QJsonObject o = QJsonDocument::fromJson(
-        m_settings.value(kServerNamesKey).toString().toUtf8()).object();
-    for (auto it = o.begin(); it != o.end(); ++it)
-        m_serverNames.insert(it.key(), it.value().toString());
-}
-
-void AccountManager::persistServerNames()
-{
-    QJsonObject o;
-    for (auto it = m_serverNames.constBegin(); it != m_serverNames.constEnd(); ++it)
-        o.insert(it.key(), it.value());
-    m_settings.setValue(kServerNamesKey,
-                        QString::fromUtf8(QJsonDocument(o).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
-}
-
+// TODO
 void AccountManager::removeAccount(const QString &id)
 {
-    // 先向服务器发送登出信号(/Sessions/Logout,官方 API),结果忽略
-    // (部分 Emby 服务器未实现该端点);随后删除本地数据。登出请求
-    // 已携带 token 发出,删除不影响其完成。
     for (const auto &a : m_accounts) {
         if (a.id == id && !a.token.isEmpty()) {
             m_client->logout(a.serverUrl, a.token, a.userId);
@@ -1332,6 +1185,7 @@ void AccountManager::removeAccount(const QString &id)
     emit homeRowsReady();
 }
 
+//TODO
 void AccountManager::updateAccount(const QString &id, const QString &name,
                                    const QString &serverUrl, const QString &userName)
 {
@@ -1345,14 +1199,6 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
         emit accountsChanged();
         return;
     }
-}
-
-QString AccountManager::passwordFor(const QString &id) const
-{
-    for (const auto &a : m_accounts)
-        if (a.id == id && !a.password.isEmpty())
-            return deobfuscate(a.password);
-    return QString();
 }
 
 void AccountManager::load()

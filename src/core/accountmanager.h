@@ -67,11 +67,6 @@ public:
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
-    // 账号排序:在账号列表中上移/下移,顺序即首页聚合顺序与列表展示顺序。
-    Q_INVOKABLE void moveAccountUp(const QString &id);
-    Q_INVOKABLE void moveAccountDown(const QString &id);
-    // 账号拖动排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
-    Q_INVOKABLE void moveAccount(const QString &id, int toIndex);
     // 提交新的管理页视觉顺序(跨类排序统一入口):规范化(过滤未知/
     // 重复、成员不占位、缺失补全)后按序重排文件夹与账号(首页聚合
     // 跟随视觉),持久化并发信号。
@@ -87,9 +82,6 @@ public:
     Q_INVOKABLE QString addFolder(const QString &name, const QString &color = QString());
     // 删除文件夹:成员自动释放为未分组,账号本身不删。
     Q_INVOKABLE void removeFolder(const QString &id);
-    // 文件夹排序:把 id 移动到 toIndex(移除后插入,其余顺移)。
-    // 顺序即管理页展示顺序,持久化于 accounts/folders。
-    Q_INVOKABLE void moveFolder(const QString &id, int toIndex);
     Q_INVOKABLE void renameFolder(const QString &id, const QString &name);
     // 修改文件夹颜色(hex "#RRGGBB",空值忽略)。
     Q_INVOKABLE void setFolderColor(const QString &id, const QString &color);
@@ -101,9 +93,6 @@ public:
     Q_INVOKABLE void addAccountToFolder(const QString &folderId, const QString &accountId);
     // 从所在文件夹移除账号(回到未分组);不在任何文件夹则忽略。
     Q_INVOKABLE void removeAccountFromFolder(const QString &accountId);
-
-    // 供 UI 读取某账号的明文密码(混淆解码;密码始终保存)。
-    Q_INVOKABLE QString passwordFor(const QString &id) const;
 
     // 浏览请求凭据查询:返回 {token, userId}(QML 组装无状态请求用);
     // 服务器无账号或 token 为空时返回空 map。
@@ -142,6 +131,9 @@ private:
     // 图标图片落盘本地缓存:文件名 = 图片内容 MD5(去重,同图同文件),
     // 返回 file:// URL(失败空)。
     static QString writeIconCache(const QByteArray &imageData);
+    // 写入图标缓存并按 id 落位(下载/本地读取共用);缓存成功且账号在
+    // 且内容不同才更新并通知。
+    void applyAccountIcon(const QString &id, const QByteArray &imageData);
     // 简单混淆(XOR + base64):防随手翻看,不防专业取证。
     static QString obfuscate(const QString &plain);
     static QString deobfuscate(const QString &cipher);
@@ -149,11 +141,6 @@ private:
     void maybeAssembleHomeRows();
     // 首页聚合串行化:结束本轮,飞行中排队的触发重跑一次。
     void finishHomeFetch();
-    // 服务器显示名(ServerName)持久化于 QSettings,启动时读入,拉取成功后刷新。
-    void loadServerNames();
-    void persistServerNames();
-    // 按服务器地址取账号索引(聚合回调归位用),找不到返回 -1。
-    int accountIndexByServer(const QString &serverUrl) const;
     // 文件夹结构(见 folders 属性)。
     struct FolderInfo {
         QString id;
@@ -179,8 +166,9 @@ private:
     void removeFromLayoutOrder(const QString &type, const QString &id);
     // 构造 {type, id} 项。
     static QVariantMap makeLayoutEntry(const QString &type, const QString &id);
+    // 按 id 取文件夹,找不到返回 nullptr;const/非 const 重载给出只读/可写访问。
     const FolderInfo *folderById(const QString &id) const;
-    FolderInfo *folderByIdMutable(const QString &id);
+    FolderInfo *folderById(const QString &id);
     int folderIndexById(const QString &id) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
     const AccountInfo *accountById(const QString &id) const;
@@ -198,7 +186,6 @@ private:
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
-    QHash<QString, QString> m_serverNames; // serverUrl -> ServerName(持久化缓存)
     // 首页聚合串行化:飞行中收到新触发(启动拉取/重登/账号变化)时排队,
     // 本轮完成后重跑一次。避免并发 fill 打断正在孵化的 ListView delegate
     // (Qt 报 "Object or context destroyed during incubation")。
@@ -207,10 +194,10 @@ private:
     int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
-    QHash<int, int> m_homeReqGen; // 账号索引 -> 发起聚合的代次
-    QHash<int, QVariantList> m_homeViews; // 账号索引 -> 该服视图列表
-    QHash<QString, QVariantMap> m_homeRowByKey; // "<账号索引>|<viewId>" -> 行(含 items)
-    QVariantList m_homeAccountOrder; // 本次聚合的账号顺序快照 [{index,id,serverUrl,name}]
+    QHash<QString, int> m_homeReqGen; // 账号 id -> 发起聚合的代次
+    QHash<QString, QVariantList> m_homeViews; // 账号 id -> 该服视图列表
+    QHash<QString, QVariantMap> m_homeRowByKey; // "<账号id>|<viewId>" -> 行(含 items)
+    QVariantList m_homeAccountOrder; // 本轮聚合的账号顺序快照 [{id,serverUrl,name}]
     // 账号检测状态按**账号 id** 键控(同服务器可多账号,serverUrl 会串):
     // 确认 token 失效且重登失败的账号(authStatus="invalid")。
     QSet<QString> m_invalidAccountIds;

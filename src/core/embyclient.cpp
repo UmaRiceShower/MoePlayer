@@ -659,11 +659,11 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &token, c
 
 // ---------- 跨服务器只读拉取(首页聚合用,结果经信号返回) ----------
 
-void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &token,
-                                  const QString &userId)
+void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accountId,
+                                  const QString &token, const QString &userId)
 {
     get(serverUrl, token, userId, QStringLiteral("/Users/%1/Views").arg(userId),
-        [this, serverUrl](const QJsonDocument &doc) {
+        [this, serverUrl, accountId](const QJsonDocument &doc) {
             QVariantList out;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
                 const QJsonObject o = v.toObject();
@@ -678,15 +678,16 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &token
                                              + QLatin1Char('~') + tag);
                 out.append(m);
             }
-            emit serverViewsReceived(serverUrl, out);
+            emit serverViewsReceived(serverUrl, accountId, out);
         },
         // 失败:发空视图推进聚合计数,原因经 serverRequestFailed 通知。
-        [this, serverUrl] { emit serverViewsReceived(serverUrl, QVariantList()); },
+        [this, serverUrl, accountId] { emit serverViewsReceived(serverUrl, accountId, QVariantList()); },
         QStringLiteral("获取媒体库视图"));
 }
 
-void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token,
-                                  const QString &userId, const QString &viewId, int limit)
+void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accountId,
+                                  const QString &token, const QString &userId,
+                                  const QString &viewId, int limit)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
@@ -700,7 +701,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, serverUrl, viewId](const QJsonDocument &doc) {
+        [this, serverUrl, viewId, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
                 const QJsonObject o = v.toObject();
@@ -747,10 +748,10 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &token
                 m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
                 items.append(m);
             }
-            emit serverItemsReceived(serverUrl, viewId, items);
+            emit serverItemsReceived(serverUrl, accountId, viewId, items);
         },
         // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
-        [this, serverUrl, viewId] { emit serverItemsReceived(serverUrl, viewId, QVariantList()); },
+        [this, serverUrl, accountId, viewId] { emit serverItemsReceived(serverUrl, accountId, viewId, QVariantList()); },
         QStringLiteral("获取首页行"));
 }
 
