@@ -21,6 +21,7 @@
 | **库内搜索** | 头部搜索栏(防抖 300ms),SearchTerm 与筛选/排序/分页正交,搜索激活时排序置灰 |
 | **全局搜索** | 毛玻璃搜索浮窗,状态/年份/类型筛选,结果网格分页加载 |
 | **详情页** | 元数据、演员、媒体源信息、相似推荐(hover 放大)、收藏 / 已看状态 |
+| **设置浮窗** | Ctrl+S / 首页按钮开关;左分类 / 右设置项两级面板;界面/媒体库/详情页/代理/关于分类,开关/下拉/输入直连 ConfigManager(config.toml 热重载) |
 | **萌系主题** | 粉白配色、极光背景(QML shader)、柔焦光斑、毛玻璃弹层、卡片 hover 放大浮起 |
 
 ## 界面预览
@@ -35,6 +36,9 @@
   <tr>
     <td><img src="screenshots/searchoverlay.png" width="100%" alt="全局搜索"><br><sub><b>全局搜索浮窗</b></sub></td>
     <td><img src="screenshots/detail.png" width="100%" alt="详情页"><br><sub><b>详情页</b></sub></td>
+  </tr>
+  <tr>
+    <td><img src="screenshots/settings.png" width="100%" alt="设置浮窗"><br><sub><b>设置浮窗</b>(Ctrl+S / 首页按钮;左分类右设置项,详情页海报下拉打开中)</sub></td>
   </tr>
 </table>
 
@@ -60,6 +64,7 @@ cmake --build build -j$(nproc)
 2. 登录获得凭据(或已有账号直接连接)
 3. 进入媒体库:面包屑导航 / 筛选 / 搜索
 4. 点击卡片播放(libmpv 窗口)
+5. `Ctrl+S` 打开设置浮窗:左分类 / 右设置项,值改动即时写入 config.toml 并热重载
 
 ## 技术架构
 
@@ -75,7 +80,7 @@ qml/
   Main.qml            应用入口
   player/             播放器窗口
   theme/              主题与通用组件(Theme, Constants, GlassPanel, MoeBackground, BokehOrb, CrossfadeImage …)
-  views/              页面(ServerManager, Library, Detail, SearchOverlay, PosterCard, Settings …)
+  views/              页面(ServerManager, Library, Detail, SearchOverlay, PosterCard, SettingsOverlay …)
   assets/             数字动画帧(counter)
 src/
   core/               EmbyClient / AccountManager / 配置持久化
