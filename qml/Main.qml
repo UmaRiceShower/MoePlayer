@@ -92,6 +92,13 @@ ApplicationWindow {
             root.pushDetail(itemId, posterId, title, serverUrl, root.currentAccountId)
         }
     }
+    // 设置浮层(Ctrl+S / 首页设置按钮):左分类右设置项的两级面板。
+    SettingsOverlay {
+        id: settingsOverlay
+        anchors.fill: parent
+        visible: false
+        backgroundSource: stackView
+    }
 
     // 首页:每行一库聚合(库海报进媒体库,条目进详情)。
     Component {
@@ -104,7 +111,7 @@ ApplicationWindow {
                 root.pushLibrary(viewId, serverUrl, viewName, accountId)
             }
             onOpenServerManager: stackView.push(serverManagerPage)
-            onOpenSettings: stackView.push(settingsPage)
+            onOpenSettings: settingsOverlay.visible ? settingsOverlay.close() : settingsOverlay.open()
             onOpenSearch: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
         }
     }
@@ -148,11 +155,6 @@ ApplicationWindow {
         }
     }
 
-    Component {
-        id: settingsPage
-        Settings {}
-    }
-
     // 服务器管理页(Ctrl+O):展示已保存的 Emby 服务器,拖动排序。
     Component {
         id: serverManagerPage
@@ -173,10 +175,21 @@ ApplicationWindow {
     }
     Shortcut {
         sequences: ["Ctrl+S"]
-        onActivated: stackView.push(settingsPage)
+        onActivated: settingsOverlay.visible ? settingsOverlay.close() : settingsOverlay.open()
     }
     Shortcut {
         sequences: ["Ctrl+K"]
         onActivated: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
+    }
+    // Esc 收敛到主窗口单一处理器:两个浮层各自注册同键 Esc 会在
+    // QShortcutMap 里按注册顺序冲突(先注册的 SearchOverlay 覆盖 SettingsOverlay)。
+    Shortcut {
+        sequences: ["Esc"]
+        onActivated: {
+            if (settingsOverlay.visible)
+                settingsOverlay.close()
+            else if (searchOverlay.visible)
+                searchOverlay.close()
+        }
     }
 }

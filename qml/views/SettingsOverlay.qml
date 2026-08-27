@@ -1,0 +1,686 @@
+pragma ComponentBehavior: Bound
+import QtQuick
+import QtQuick.Controls
+import QtQuick.Layouts
+import MoePlayer.Core
+
+//! 设置浮层(Ctrl+S / 首页设置按钮开关):两级布局,左侧设置分类,
+//! 右侧对应该分类的具体设置项;Esc / 点击背景关闭。
+//! 值全部直读写 ConfigManager(config.toml,外部修改热重载):控件初始
+//! 绑定会被用户交互打断,故每个可同步控件注册进 syncables,open() 与
+//! 任意配置变化信号(热重载/恢复默认)时统一 resync 回填实际生效值。
+Item {
+    id: root
+
+    // 需要模糊的背景内容(主窗口传入 StackView,避免把浮层自身也模糊)。
+    property Item backgroundSource: null
+
+    // 可回填控件注册表:Switch/ComboBox/TextField 的用户写入会打断
+    // 初始绑定,统一经各自的 resync() 从 ConfigManager 回填。
+    property var syncables: []
+    function registerSyncable(c) { root.syncables.push(c) }
+    function syncAll() {
+        for (let i = 0; i < root.syncables.length; ++i)
+            root.syncables[i].resync()
+    }
+
+    function open() {
+        root.syncAll()
+        root.visible = true
+    }
+    function close() {
+        root.visible = false
+    }
+
+    // 热重载/恢复默认:任一配置变化统一回填(幂等,值相同无视觉变化)。
+    Connections {
+        target: ConfigManager
+        function onMonetEnabledChanged() { root.syncAll() }
+        function onLibrarySortByChanged() { root.syncAll() }
+        function onLibrarySortOrderChanged() { root.syncAll() }
+        function onDetailSidebarLeftChanged() { root.syncAll() }
+        function onDetailPosterPosChanged() { root.syncAll() }
+        function onDetailTextPosChanged() { root.syncAll() }
+        function onDetailButtonsPosChanged() { root.syncAll() }
+        function onDetailTextWidthChanged() { root.syncAll() }
+        function onDetailTextHeightChanged() { root.syncAll() }
+        function onProxyChanged() { root.syncAll() }
+    }
+
+    // ===================== 内部组件 =====================
+
+    // 设置行:左标签(+ 可选描述),右侧控件(default 属性注入)。
+    component SettingRow: Item {
+        id: srow
+        required property string label
+        property string description: ""
+        default property alias control: srowLayout.data
+        width: parent.width
+        height: srowCol.implicitHeight
+        Column {
+            id: srowCol
+            width: parent.width
+            spacing: 6
+            RowLayout {
+                id: srowLayout
+                width: parent.width
+                spacing: 12
+                AppText {
+                    text: srow.label
+                    color: "white"
+                    font.pixelSize: 14
+                    Layout.fillWidth: true
+                }
+            }
+            AppText {
+                visible: srow.description !== ""
+                text: srow.description
+                color: Theme.textMuted
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+                width: parent.width
+            }
+        }
+    }
+
+    // 开关:绑 ConfigManager 布尔键;胶囊指示器,选中粉色。
+    component SettingSwitch: Switch {
+        id: ssw
+        required property string configKey
+        padding: 0
+        spacing: 0
+        // 按下夺取焦点:输入框随之失焦(editingFinished 完成提交)。
+        onDownChanged: if (down) root.forceActiveFocus()
+        // contentItem 为 0 尺寸占位时 Qt 不回退到 indicator 尺寸,
+        // 控件 implicitWidth 变 0(布局里不可见),须显式声明。
+        implicitWidth: 42
+        implicitHeight: 24
+        checked: ConfigManager[ssw.configKey]
+        onToggled: ConfigManager[ssw.configKey] = checked
+        function resync() { checked = ConfigManager[ssw.configKey] }
+        Component.onCompleted: root.registerSyncable(ssw)
+        indicator: Rectangle {
+            implicitWidth: 42
+            implicitHeight: 24
+            radius: 12
+            color: ssw.checked ? Constants.moePink : Qt.rgba(1, 1, 1, 0.10)
+            border.width: 1
+            border.color: ssw.checked ? Constants.moePink : Qt.rgba(1, 1, 1, 0.25)
+            Rectangle {
+                width: 18
+                height: 18
+                radius: 9
+                y: 3
+                x: ssw.checked ? parent.width - width - 3 : 3
+                color: "white"
+                Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            }
+        }
+        contentItem: Item { implicitWidth: 0; implicitHeight: 0 }
+    }
+
+    // 下拉:绑 ConfigManager 字符串键;model 统一 ListModel(label/key),
+    // 视觉与 Library 的 FilterCombo 同款(暗底圆角/hover 粉描边/选中圆点)。
+    component SettingCombo: ComboBox {
+        id: scombo
+        required property string configKey
+        width: 220
+        height: 34
+        padding: 0
+        textRole: "label"
+
+        function resync() {
+            const v = ConfigManager[scombo.configKey]
+            for (let i = 0; i < scombo.count; ++i) {
+                if (scombo.model.get(i).key === v) {
+                    scombo.currentIndex = i
+                    return
+                }
+            }
+        }
+        Component.onCompleted: {
+            scombo.resync()
+            root.registerSyncable(scombo)
+        }
+        onActivated: function (index) {
+            ConfigManager[scombo.configKey] = scombo.model.get(index).key
+        }
+
+        background: Rectangle {
+            radius: 17
+            color: Theme.bg
+            border.width: 1
+            border.color: scombo.hovered || scombo.popup.opened ? Constants.moePink : Theme.textMuted
+        }
+        contentItem: Item {
+            AppText {
+                anchors.left: parent.left
+                anchors.leftMargin: 12
+                anchors.right: scomboArrow.left
+                anchors.rightMargin: 6
+                anchors.verticalCenter: parent.verticalCenter
+                text: scombo.displayText
+                color: "white"
+                font.pixelSize: 13
+                elide: Text.ElideRight
+            }
+            AppText {
+                id: scomboArrow
+                anchors.right: parent.right
+                anchors.rightMargin: 12
+                anchors.verticalCenter: parent.verticalCenter
+                text: scombo.popup.opened ? "▴" : "▾"
+                color: "white"
+                font.pixelSize: 10
+            }
+        }
+        indicator: null
+        popup: Popup {
+            id: scomboPopup
+            y: scombo.height + 4
+            width: scombo.width
+            implicitHeight: contentItem.implicitHeight
+            padding: 6
+            enter: Transition {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+            }
+            background: Rectangle {
+                color: Qt.rgba(0.10, 0.11, 0.14, 0.92)
+                radius: 8
+                border.width: 1
+                border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+            }
+            contentItem: ListView {
+                clip: true
+                implicitHeight: contentHeight
+                model: scombo.delegateModel
+                currentIndex: scombo.highlightedIndex
+                highlightMoveDuration: 0
+            }
+        }
+        delegate: ItemDelegate {
+            // Qt6 delegate 上下文(Bound 模式):required 声明注入属性。
+            required property int index
+            required property var model
+            property string itemText: model[scombo.textRole]
+            width: ListView.view.width
+            height: 30
+            padding: 0
+            contentItem: Item {
+                AppText {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: parent.parent.itemText
+                    color: "white"
+                    font.pixelSize: 13
+                    elide: Text.ElideRight
+                }
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 6
+                    height: 6
+                    radius: 3
+                    color: Constants.moePink
+                    visible: scombo.currentIndex === parent.parent.index
+                }
+            }
+            highlighted: scombo.highlightedIndex === index
+            background: Rectangle {
+                radius: 4
+                color: parent.highlighted || parent.hovered
+                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                    : "transparent"
+            }
+        }
+    }
+
+    // 文本/整数输入:绑 ConfigManager 键,intOnly 启用整数校验;
+    // 非法值被后端拒绝(代理格式/非正整数)时编辑结束回填实际生效值。
+    component SettingField: TextField {
+        id: sfield
+        required property string configKey
+        property bool intOnly: false
+        width: 220
+        height: 34
+        color: "white"
+        font.pixelSize: 13
+        leftPadding: 12
+        rightPadding: 12
+        placeholderTextColor: Theme.textMuted
+        validator: sfield.intOnly ? sfieldIntValidator : null
+        IntValidator { id: sfieldIntValidator; bottom: 1; top: 9999 }
+        text: ConfigManager[sfield.configKey]
+        function resync() { text = String(ConfigManager[sfield.configKey]) }
+        Component.onCompleted: root.registerSyncable(sfield)
+        onEditingFinished: {
+            if (sfield.intOnly)
+                ConfigManager[sfield.configKey] = parseInt(text)
+            else
+                ConfigManager[sfield.configKey] = text.trim()
+            sfield.resync()
+            // 回车提交后主动失焦(点按其他区域由下方各失焦层转移焦点,
+            // 焦点丢失同样触发本函数完成提交)。
+            sfield.focus = false
+        }
+        background: Rectangle {
+            radius: 8
+            color: Theme.bg
+            border.width: 1
+            border.color: sfield.activeFocus ? Constants.moePink : Theme.textMuted
+        }
+    }
+
+    // 设置页:纵向滚动容器,default 属性直写 Column。
+    component SettingsPage: ScrollView {
+        id: spage
+        default property alias content: spageCol.data
+        clip: true
+        contentWidth: availableWidth
+        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        // 内容容器:至少撑满视口高,让失焦层覆盖行间隙与下方空白区;
+        // 点击夺走输入框焦点(editingFinished 完成提交)。
+        // (Column 是定位器,子项不能用 anchors,故失焦层放外层 Item。)
+        Item {
+            width: spage.availableWidth
+            height: Math.max(spageCol.implicitHeight, spage.availableHeight)
+            implicitHeight: spageCol.implicitHeight
+            MouseArea {
+                anchors.fill: parent
+                onPressed: root.forceActiveFocus()
+            }
+            Column {
+                id: spageCol
+                width: parent.width
+                spacing: 18
+                topPadding: 2
+                bottomPadding: 8
+            }
+        }
+    }
+
+    // 页标题(分类名)。
+    component PageHeader: AppText {
+        color: "white"
+        font.pixelSize: 16
+        font.bold: true
+    }
+
+    // ===================== 浮层外壳(同 SearchOverlay) =====================
+
+    // 毛玻璃暗遮罩:模糊背景 + 半透明压暗,点击关闭。
+    GlassPanel {
+        anchors.fill: parent
+        blurSource: root.backgroundSource
+        fullSource: true
+        blurRadius: 64
+        glassColor: Qt.rgba(0.04, 0.05, 0.07, 0.55)
+        border.width: 0
+        MouseArea {
+            anchors.fill: parent
+            onClicked: root.close()
+        }
+    }
+
+    Rectangle {
+        anchors.top: parent.top
+        anchors.topMargin: 48
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: parent.width*0.8
+        height: parent.height - 96
+        radius: 16
+        color: "transparent"
+        border.width: 0
+
+        // 毛玻璃面板底色。
+        GlassPanel {
+            anchors.fill: parent
+            blurSource: root.backgroundSource
+            fullSource: true
+            blurRadius: 48
+            glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.72)
+            borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.35)
+            radius: parent.radius
+        }
+
+        // 吞掉面板内空白处的点击,防止穿透到遮罩 MouseArea 误关闭。
+        MouseArea {
+            anchors.fill: parent
+            z: -1
+            onClicked: { }
+            onPressed: root.forceActiveFocus()
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 16
+            spacing: 12
+
+            // 标题行。
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+                AppText {
+                    text: "♥"
+                    color: Constants.moePink
+                    font.pixelSize: 20
+                }
+                AppText {
+                    text: "设置"
+                    color: "white"
+                    font.pixelSize: 18
+                    font.bold: true
+                }
+                Item { Layout.fillWidth: true }
+                AppText {
+                    text: "Esc 关闭"
+                    color: Theme.textMuted
+                    font.pixelSize: 12
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 1
+                color: Qt.rgba(1, 1, 1, 0.08)
+            }
+
+            // 两级主体:左分类列表,右设置项页。
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 14
+
+                ListView {
+                    id: catList
+                    Layout.preferredWidth: 160
+                    Layout.fillHeight: true
+                    clip: true
+                    currentIndex: 0
+                    model: ListModel {
+                        ListElement { label: "界面" }
+                        ListElement { label: "媒体库" }
+                        ListElement { label: "详情页" }
+                        ListElement { label: "代理" }
+                        ListElement { label: "关于" }
+                    }
+                    // 分类不满一列时下方空白区:点击夺走输入框焦点。
+                    MouseArea {
+                        z: -1
+                        width: catList.width
+                        height: Math.max(catList.contentHeight, catList.height)
+                        onPressed: root.forceActiveFocus()
+                    }
+                    delegate: ItemDelegate {
+                        id: catItem
+                        required property string label
+                        required property int index
+                        width: catList.width
+                        height: 40
+                        padding: 0
+                        onDownChanged: if (down) root.forceActiveFocus()
+                        onClicked: catList.currentIndex = catItem.index
+                        contentItem: Item {
+                            AppText {
+                                anchors.left: parent.left
+                                anchors.leftMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: catItem.label
+                                font.pixelSize: 14
+                                color: catList.currentIndex === catItem.index ? "white" : Theme.textMuted
+                            }
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.rightMargin: 12
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: Constants.moePink
+                                visible: catList.currentIndex === catItem.index
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 8
+                            color: catList.currentIndex === catItem.index
+                                   ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.25)
+                                   : catItem.hovered
+                                     ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.12)
+                                     : "transparent"
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.preferredWidth: 1
+                    Layout.fillHeight: true
+                    color: Qt.rgba(1, 1, 1, 0.08)
+                }
+
+                StackLayout {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: catList.currentIndex
+
+                    // ---- 界面 ----
+                    SettingsPage {
+                        PageHeader { text: "界面" }
+                        SettingRow {
+                            label: "海报莫奈取色"
+                            description: "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。"
+                            SettingSwitch { configKey: "monetEnabled" }
+                        }
+                    }
+
+                    // ---- 媒体库 ----
+                    SettingsPage {
+                        PageHeader { text: "媒体库" }
+                        SettingRow {
+                            label: "默认排序"
+                            description: "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。"
+                            SettingCombo {
+                                configKey: "librarySortBy"
+                                model: ListModel {
+                                    ListElement { label: "最近添加"; key: "DateLastContentAdded" }
+                                    ListElement { label: "加入时间"; key: "DateCreated" }
+                                    ListElement { label: "上映日期"; key: "PremiereDate" }
+                                    ListElement { label: "名称"; key: "SortName" }
+                                    ListElement { label: "出品年份"; key: "ProductionYear" }
+                                    ListElement { label: "社区评分"; key: "CommunityRating" }
+                                    ListElement { label: "影评评分"; key: "CriticRating" }
+                                    ListElement { label: "随机"; key: "Random" }
+                                    ListElement { label: "修改时间"; key: "DateModified" }
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "排序方向"
+                            SettingCombo {
+                                configKey: "librarySortOrder"
+                                model: ListModel {
+                                    ListElement { label: "降序"; key: "Descending" }
+                                    ListElement { label: "升序"; key: "Ascending" }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- 详情页 ----
+                    SettingsPage {
+                        PageHeader { text: "详情页" }
+                        SettingRow {
+                            label: "选集栏靠左"
+                            description: "开启后选季/选集栏靠左显示;默认靠右。"
+                            SettingSwitch { configKey: "detailSidebarLeft" }
+                        }
+                        SettingRow {
+                            label: "海报位置"
+                            description: "详情页海报在 hero 区的九宫格位置。"
+                            SettingCombo {
+                                configKey: "detailPosterPos"
+                                model: ListModel {
+                                    ListElement { label: "左上"; key: "top-left" }
+                                    ListElement { label: "上中"; key: "top-center" }
+                                    ListElement { label: "右上"; key: "top-right" }
+                                    ListElement { label: "左中"; key: "middle-left" }
+                                    ListElement { label: "正中"; key: "middle-center" }
+                                    ListElement { label: "右中"; key: "middle-right" }
+                                    ListElement { label: "左下"; key: "bottom-left" }
+                                    ListElement { label: "下中"; key: "bottom-center" }
+                                    ListElement { label: "右下"; key: "bottom-right" }
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "标题与介绍位置"
+                            description: "跟随海报,或固定在 hero 区九宫格位置(优先于海报)。"
+                            SettingCombo {
+                                configKey: "detailTextPos"
+                                model: ListModel {
+                                    ListElement { label: "跟随海报"; key: "followPoster" }
+                                    ListElement { label: "左上"; key: "top-left" }
+                                    ListElement { label: "上中"; key: "top-center" }
+                                    ListElement { label: "右上"; key: "top-right" }
+                                    ListElement { label: "左中"; key: "middle-left" }
+                                    ListElement { label: "正中"; key: "middle-center" }
+                                    ListElement { label: "右中"; key: "middle-right" }
+                                    ListElement { label: "左下"; key: "bottom-left" }
+                                    ListElement { label: "下中"; key: "bottom-center" }
+                                    ListElement { label: "右下"; key: "bottom-right" }
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "按钮组位置"
+                            description: "播放/收藏/已看按钮组:跟随标题、跟随海报,或背景图左下角。"
+                            SettingCombo {
+                                configKey: "detailButtonsPos"
+                                model: ListModel {
+                                    ListElement { label: "跟随标题"; key: "text" }
+                                    ListElement { label: "跟随海报"; key: "poster" }
+                                    ListElement { label: "背景图左下"; key: "backdrop" }
+                                }
+                            }
+                        }
+                        SettingRow {
+                            label: "文字区宽度"
+                            description: "标题+介绍区固定宽度(px),默认 280。"
+                            SettingField { configKey: "detailTextWidth"; intOnly: true }
+                        }
+                        SettingRow {
+                            label: "文字区高度"
+                            description: "标题+介绍区固定高度(px),默认 140。"
+                            SettingField { configKey: "detailTextHeight"; intOnly: true }
+                        }
+                    }
+
+                    // ---- 代理 ----
+                    SettingsPage {
+                        PageHeader { text: "代理" }
+                        SettingRow {
+                            label: "代理地址"
+                            description: "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连,新请求即时生效。"
+                            SettingField {
+                                configKey: "proxy"
+                                placeholderText: "http://host:port"
+                            }
+                        }
+                        Column {
+                            width: parent.width
+                            spacing: 6
+                            AppText {
+                                text: "配置文件"
+                                color: Theme.textMuted
+                                font.pixelSize: 12
+                            }
+                            AppText {
+                                text: ConfigManager.configPath
+                                color: "white"
+                                font.pixelSize: 12
+                                wrapMode: Text.WrapAnywhere
+                                width: parent.width
+                            }
+                            AppText {
+                                text: "可直接编辑,保存后自动热重载。"
+                                color: Theme.textMuted
+                                font.pixelSize: 12
+                            }
+                        }
+                    }
+
+                    // ---- 关于 ----
+                    SettingsPage {
+                        PageHeader { text: "关于" }
+                        AppText {
+                            text: Qt.application.name + " " + Qt.application.version
+                            color: "white"
+                            font.pixelSize: 14
+                        }
+                        AppText {
+                            text: "萌系粉白 Emby 桌面客户端。"
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                        }
+                        SettingRow {
+                            label: "恢复默认设置"
+                            description: "全部设置恢复默认值并立即写入配置文件。"
+                            ItemDelegate {
+                                id: resetBtn
+                                // 尺寸自适应:去掉硬编码 width,宽度由文字+左右内边距决定(Control implicitWidth),
+                                // 高度固定胶囊高;background 半径跟随高度。改文字/字体不再溢出。
+                                // 二次确认防误点:首击进入"确认恢复"红色待定态,再击才真正恢复默认;
+                                // 待定态 4 秒未确认自动撤销,避免留下危险的红色按钮。
+                                property bool confirmArmed: false
+                                padding: 0
+                                implicitHeight: 34
+                                leftPadding: 14
+                                rightPadding: 14
+                                onDownChanged: if (down) root.forceActiveFocus()
+                                onClicked: {
+                                    if (resetBtn.confirmArmed) {
+                                        ConfigManager.resetToDefaults()
+                                        resetBtn.confirmArmed = false
+                                    } else {
+                                        resetBtn.confirmArmed = true
+                                        resetTimer.restart()
+                                    }
+                                }
+                                Timer {
+                                    id: resetTimer
+                                    interval: 4000
+                                    onTriggered: resetBtn.confirmArmed = false
+                                }
+                                contentItem: AppText {
+                                    text: resetBtn.confirmArmed ? "确认恢复" : "恢复默认"
+                                    color: resetBtn.confirmArmed ? "white" : Constants.moePink
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                background: Rectangle {
+                                    radius: parent.height / 2
+                                    color: resetBtn.confirmArmed
+                                        ? (parent.hovered
+                                           ? Qt.rgba(0.76, 0.18, 0.22, 1)
+                                           : Qt.rgba(0.87, 0.24, 0.28, 1))
+                                        : (parent.hovered
+                                           ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                           : "transparent")
+                                    border.width: 1
+                                    border.color: resetBtn.confirmArmed
+                                        ? Qt.rgba(0.87, 0.24, 0.28, 1)
+                                        : Constants.moePink
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
