@@ -24,7 +24,7 @@ Item {
     property string initialViewName: ""
     // 浏览目标服务器(从首页/主窗口传入;空则默认第一个有效账号)。
     property string serverUrl: ""
-    // 浏览用账号 id(主窗口导航时注入;空则回退 credsForServer)。
+    // 浏览用账号 id(主窗口导航时注入)。
     property string accountId: ""
     // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
     property var restore: null
@@ -542,11 +542,9 @@ Item {
     // ============================= 函数 =============================
 
     // --- 基础 ---
-    // 该服务器凭据:优先按账号 id(多账号精确定位);无 id 回退服务器首账号。
+    // 该服务器凭据:按账号 id 精确定位(多账号不串)。
     function creds() {
-        if (root.accountId !== "")
-            return AccountManager.credsForAccount(root.accountId)
-        return AccountManager.credsForServer(root.serverUrl)
+        return AccountManager.credsForAccount(root.accountId)
     }
     // 服务器显示名:账号名/用户名,未匹配回退地址。
     function serverLabel() {

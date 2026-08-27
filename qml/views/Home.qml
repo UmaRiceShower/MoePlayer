@@ -9,9 +9,6 @@ import MoePlayer.Core
 Item {
     id: root
 
-    // 聚合行(所有账号的媒体库,顺序按账号排序)。
-    property var rows: []
-    property var pendingRows: []
     // hero 轮播(继续观看前 8,不足补最新添加前 8)。
     property var heroItems: []
     property int heroIndex: 0
@@ -28,7 +25,9 @@ Item {
     // TODO:接入/Suggestions和继续播放,打分选择
     function rebuildTop() {
         const all = []
-        for (const row of root.rows) {
+        const hm = AccountManager.homeRows
+        for (let i = 0; i < hm.count; ++i) {
+            const row = hm.rowAt(i)
             const sv = row.serverUrl || ""
             const aid = row.accountId || ""
             for (const it of (row.items || [])) {
@@ -54,20 +53,12 @@ Item {
             AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
         }
     }
-    onRowsChanged: root.rebuildTop()
 
-    // rows 更新门控(账号增删/重登时 pendingRows 可能连续刷新,合并后一次替换)。
-    Timer {
-        id: rowsTimer
-        onTriggered: root.rows = root.pendingRows
-        interval: 40
-        repeat: false
-    }
+    // 行模型按行增量更新;此处仅重算 hero(从行模型读取)。
     Connections {
         target: AccountManager
         function onHomeRowsReady() {
-            root.pendingRows = AccountManager.homeRows
-            rowsTimer.restart()
+            root.rebuildTop()
         }
     }
 
@@ -151,7 +142,7 @@ Item {
         smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: root.rows
+        model: AccountManager.homeRows
         reuseItems: true
         cacheBuffer: 400
 
@@ -299,47 +290,58 @@ Item {
             // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
             // (1.06,横向溢出 4.6px)立即被裁;header 垫 8px 让首卡左缘内移,
             // 高度 +16 容纳垂直溢出(230×1.06=243.8)。
-            ListView {
-                id: rowItems
+            Item {
                 width: libRow.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
                 height: Constants.rowHeight + 16
-                orientation: ListView.Horizontal
-                spacing: Constants.rowSpacing
                 clip: true
-                header: Item { width: 8; height: 1 }
-                // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
-                reuseItems: true
-                cacheBuffer: 600
-                model: libRow.modelData.items
-                delegate: Item {
-                    required property var modelData
-                    required property int index
-                    width: Constants.rowCardW
-                    height: Constants.rowHeight + 16
-                    z: pc.hovered ? 2 : 0
-                    PosterCard {
-                        id: pc
-                        anchors.centerIn: parent
+                ListView {
+                    id: rowItems
+                    anchors.fill: parent
+                    orientation: ListView.Horizontal
+                    spacing: Constants.rowSpacing
+                    header: Item { width: 8; height: 1 }
+                    // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
+                    reuseItems: true
+                    cacheBuffer: 600
+                    model: libRow.modelData.items
+                    delegate: Item {
+                        required property var modelData
+                        required property int index
                         width: Constants.rowCardW
-                        height: Constants.rowHeight
-                        model: parent.modelData
-                        index: parent.index
-                        showActions: false
-                        itemId: parent.modelData.id || ""
-                        posterId: parent.modelData.posterId || ""
-                        title: parent.modelData.name || ""
-                        year: parent.modelData.year || 0
-                        rating: parent.modelData.rating || 0
-                        played: !!parent.modelData.played
-                        favorite: !!parent.modelData.favorite
-                        positionTicks: parent.modelData.positionTicks || 0
-                        runtimeTicks: parent.modelData.runtimeTicks || 0
-                        unplayedCount: parent.modelData.unplayedCount || 0
-                        itemType: parent.modelData.type || ""
-                        onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
-                                                   parent.modelData.name, libRow.modelData.serverUrl,
-                                                   libRow.modelData.accountId)
+                        height: Constants.rowHeight + 16
+                        z: pc.hovered ? 2 : 0
+                        PosterCard {
+                            id: pc
+                            anchors.centerIn: parent
+                            width: Constants.rowCardW
+                            height: Constants.rowHeight
+                            model: parent.modelData
+                            index: parent.index
+                            showActions: false
+                            itemId: parent.modelData.id || ""
+                            posterId: parent.modelData.posterId || ""
+                            title: parent.modelData.name || ""
+                            year: parent.modelData.year || 0
+                            rating: parent.modelData.rating || 0
+                            played: !!parent.modelData.played
+                            favorite: !!parent.modelData.favorite
+                            positionTicks: parent.modelData.positionTicks || 0
+                            runtimeTicks: parent.modelData.runtimeTicks || 0
+                            unplayedCount: parent.modelData.unplayedCount || 0
+                            itemType: parent.modelData.type || ""
+                            onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
+                                                       parent.modelData.name, libRow.modelData.serverUrl,
+                                                       libRow.modelData.accountId)
+                        }
                     }
+                }
+                // 库壳已到、条目未到时显示加载占位(items 空且 loading)。
+                Text {
+                    anchors.centerIn: parent
+                    visible: rowItems.count === 0 && libRow.modelData.loading
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                    text: "加载中…"
                 }
             }
         }

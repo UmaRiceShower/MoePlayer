@@ -8,6 +8,7 @@
 #include <QVariantList>
 
 #include "core/constants.h"
+#include "homerowsmodel.h"
 
 class EmbyClient;
 
@@ -32,15 +33,16 @@ class AccountManager : public QObject
     // (展平:各文件夹块成员 + 未分组账号)恒等于 accounts 顺序,首页
     // 聚合与视觉一致。
     Q_PROPERTY(QVariantList layoutOrder READ layoutOrder NOTIFY layoutOrderChanged)
-    // 首页聚合行:所有账号的媒体库按账号顺序排列,每行含
-    // {accountId, serverUrl, serverName, viewName, posterId, items}。
-    Q_PROPERTY(QVariantList homeRows READ homeRows NOTIFY homeRowsReady)
+    // 首页聚合行模型:所有账号的媒体库按账号顺序排列,每行含
+    // {accountId, serverUrl, serverName, viewName, posterId, items, loading}。
+    // 按行增量更新(见 HomeRowsModel::setRows),只触发变化行的 delegate 重估。
+    Q_PROPERTY(HomeRowsModel* homeRows READ homeRowsModel NOTIFY homeRowsReady)
 public:
     explicit AccountManager(EmbyClient *client, QObject *parent = nullptr);
 
     QVariantList accounts() const;
     int accountCount() const { return m_accounts.size(); }
-    QVariantList homeRows() const { return m_homeRows; }
+    HomeRowsModel *homeRowsModel() const { return m_homeRowsModel; }
     QVariantList folders() const;
     QVariantList layoutOrder() const { return m_layoutOrder; }
 
@@ -186,6 +188,8 @@ private:
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
+    // 首页聚合行模型(QML 渲染按行增量;m_homeRows 为快照,供缓存/语义比较)。
+    HomeRowsModel *m_homeRowsModel = nullptr;
     // 首页聚合串行化:飞行中收到新触发(启动拉取/重登/账号变化)时排队,
     // 本轮完成后重跑一次。避免并发 fill 打断正在孵化的 ListView delegate
     // (Qt 报 "Object or context destroyed during incubation")。
@@ -232,6 +236,4 @@ private:
     // 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排聚合行,不重拉
     // 网络(避免撞上重登中的 token 失效触发连锁重登与首页反复重建)。
     void reorderHomeRows();
-    // 首页聚合行语义等价比较(忽略 posterId/serverName 等易变字段)。
-    bool sameHomeRows(const QVariantList &a, const QVariantList &b);
 };
