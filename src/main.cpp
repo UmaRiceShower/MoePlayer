@@ -12,6 +12,7 @@
 #include <clocale>
 
 #include "core/accountmanager.h"
+#include "core/applog.h"
 #include "core/configmanager.h"
 #include "core/constants.h"
 #include "core/embyclient.h"
@@ -67,6 +68,9 @@ int main(int argc, char *argv[])
     // 版本号来自 CMake project(VERSION),经 MOEPLAYER_VERSION 编译期注入,
     // 全局 applicationVersion() 与 UA/认证头共用,无第二处副本。
     app.setApplicationVersion(QStringLiteral(MOEPLAYER_VERSION));
+    // 文件日志:setApplicationName 后即可定位 AppConfigLocation,
+    // 尽早安装让首个 qInfo(RHI backend)也落盘。
+    AppLog::install();
 
     // 场景图固定 OpenGL 后端(嵌入视频已交外部 mpv 进程,Qt 不渲染视频帧,
     // 但其余 QML/ShaderEffect 仍走 OpenGL RHI)。
