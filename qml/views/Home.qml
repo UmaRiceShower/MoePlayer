@@ -15,7 +15,10 @@ Item {
     readonly property real navH: Constants.homeNavH
     // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
     // 窄窗随宽度收缩,卡片保持满带宽。
-    readonly property real heroH: (parent ? parent.width : 1280) * Constants.homeHeroWidthRatio
+    // 用窗口宽度而非父宽:页面首帧布局时父宽度尚未赋值,会致 ListView 以 0
+    // hero 高做首次布局(条目从不重排,hero 被留在内容上方不可见)。
+    readonly property real heroH: (root.Window && root.Window.width > 0
+                                   ? root.Window.width : 1280) * Constants.homeHeroWidthRatio
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
     signal openLibrary(string viewId, string serverUrl, string viewName, string accountId)
@@ -151,19 +154,20 @@ Item {
         // 行间间距:标题与上一行海报间距(14)>= 标题与自身海报间距(12)。
         spacing: Constants.homeRowGap
 
-        // header = hero 轮播(顶部一屏,随内容滚动,常驻加载 3 张图)。
+        // header = hero 轮播 + 媒体库节(顶部一屏,随内容滚动,常驻加载 3 张图)。
+        // 高度只依赖窗口宽度与常量:首次布局即最终尺寸,后续不翻转——
+        // header 高度异步变化时 ListView 不会重排条目,只把 header 顶出内容区。
         header: Item {
             id: heroCar
-            height: (root.heroItems.length > 0 ? root.heroH : 0)
-                    + (AccountManager.homeRows.count > 0 ? mediaSecH : 0)
+            height: root.heroH + heroCar.mediaSecH
             width: pageList.width
-            visible: root.heroItems.length > 0 || AccountManager.homeRows.count > 0
             clip: false
             readonly property real cardH: root.heroH * Constants.homeHeroCardH
             readonly property real cardW: Math.min(cardH * Constants.homeHeroCardAspect,
                                                    width * Constants.homeHeroCardWCap)
-            // 媒体库节高:标题 + 间距 + 库卡高 + 底部留白(随节内实际内容)。
-            readonly property real mediaSecH: mediaLib.implicitHeight
+            // 媒体库节高 = 标题隐高 + 间距 + 库卡高 + 底部留白(常量构成,稳定)。
+            readonly property real mediaSecH: mediaTitle.implicitHeight + mediaLib.spacing
+                                              + Constants.homeMediaCardH + Constants.homeMediaBottomPad
 
             PathView {
                 id: heroPv
@@ -250,6 +254,7 @@ Item {
                 // 底部留白:首行标题离媒体库卡片的间距与行内 12px 规则一致。
                 bottomPadding: Constants.homeMediaBottomPad
                 AppText {
+                    id: mediaTitle
                     anchors.left: parent.left
                     anchors.leftMargin: Constants.rowLeftMargin
                     text: "媒体库"
