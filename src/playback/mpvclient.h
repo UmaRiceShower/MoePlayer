@@ -49,6 +49,8 @@ public:
     // Library 直连:spawn 并立即起播。
     Q_INVOKABLE void start(const QString &url, const QVariantList &headers,
                            const QVariantMap &meta);
+    // 终止全部 mpv 子进程(应用退出时;析构与强制退出路径共用)。
+    void shutdownAll();
 
     // 播放控制(作用于指定 itemId 会话;缺省作用于最近活跃会话)。
     Q_INVOKABLE void seek(double seconds, const QString &itemId = {});
