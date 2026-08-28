@@ -20,6 +20,13 @@ WheelHandler {
             return
         const step = wheel.pageStep > 0 ? wheel.pageStep : ConfigManager.wheelStep
         targetItem.contentY -= (event.angleDelta.y / 120) * step
+        // 官方 API:手动写 contentY 不触发边界 fixup,写入后调用
+        // Flickable::returnToBounds() 按视图自身边界(含 ListView/GridView
+        // 的 originY 语义与 header)回弹,防止滚过 hero 上方/内容末尾。
+        // 手算边界不可靠(maxYExtent/minYExtent 未暴露给 QML;contentY
+        // 正/负域随 view 的 origin 而变),交给视图自己的 fixup。
+        if (typeof targetItem.returnToBounds === "function")
+            targetItem.returnToBounds()
         event.accepted = true
     }
 }
