@@ -17,6 +17,24 @@
 
 #include "core/constants.h"
 #include "core/embyclient.h"
+// 服务器版本是否支持首页建议过滤(/Suggestions 的 IncludeItemTypes,4.9+):
+// 旧版本忽略该参数,建议内容为目录条目(Studio/Artist/Album),客户端跳过不发,
+// hero 回退本地聚合。
+static bool suggestionsSupported(const QString &version)
+{
+    const QStringList parts = version.split(QLatin1Char('.'));
+    if (parts.size() < 2)
+        return false;
+    bool ok = false;
+    const int major = parts.at(0).toInt(&ok);
+    if (!ok)
+        return false;
+    const int minor = parts.at(1).toInt(&ok);
+    if (!ok)
+        return false;
+    return major > 4 || (major == 4 && minor >= 9);
+}
+
 
 namespace {
 // QSettings 键。
@@ -212,16 +230,33 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     // 添加服务器未填名称:用拉到的 ServerName 回填该服名称仍为空的账号
     // (只回填未命名的,不覆盖用户已填/已改的名字);同服多账号只回填首个。
     connect(m_client, &EmbyClient::serverPublicInfoReceived, this,
-            [this](const QString &serverUrl, const QString &name) {
-                if (name.isEmpty())
-                    return;
-                for (auto &a : m_accounts) {
-                    if (a.serverUrl == serverUrl && a.name.isEmpty()) {
-                        a.name = name;
-                        save();
-                        emit accountsChanged();
-                        break;
+            [this](const QString &serverUrl, const QString &name, const QString &version) {
+                if (!version.isEmpty())
+                    m_serverVersion.insert(serverUrl, version);
+                if (!name.isEmpty()) {
+                    for (auto &a : m_accounts) {
+                        if (a.serverUrl == serverUrl && a.name.isEmpty()) {
+                            a.name = name;
+                            save();
+                            emit accountsChanged();
+                            break;
+                        }
                     }
+                }
+                // 版本回执后补发首页建议(见 fetchHomeRows 门控);<4.9 跳过。
+                const auto waitIt = m_suggWaitVersion.find(serverUrl);
+                if (waitIt == m_suggWaitVersion.end())
+                    return;
+                const QStringList ids = waitIt.value();
+                m_suggWaitVersion.erase(waitIt);
+                if (!suggestionsSupported(m_serverVersion.value(serverUrl)))
+                    return;
+                for (const QString &id : ids) {
+                    const AccountInfo *a = accountById(id);
+                    if (!a || m_homeSuggReqGen.value(id) != m_homeGen)
+                        continue; // 账号已删或属过期代次,丢弃
+                    m_client->fetchServerSuggestions(a->serverUrl, id, a->token, a->userId,
+                                                     MoePlayer::kHomeSuggestLimit);
                 }
             });
     connect(m_client, &EmbyClient::serverViewsReceived, this,
@@ -241,6 +276,16 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 }
                 maybeAssembleHomeRows();
             });
+    // 服务器建议到位:存账号建议列表并通知(hero 轮播用)。不参与
+    // homePending 计数(建议失败不影响行聚合完成),代次过滤见 m_homeSuggReqGen。
+    connect(m_client, &EmbyClient::serverSuggestionsReceived, this,
+            [this](const QString &serverUrl, const QString &accountId, const QVariantList &items) {
+                Q_UNUSED(serverUrl)
+                if (accountIndexById(accountId) < 0 || m_homeSuggReqGen.value(accountId) != m_homeGen)
+                    return; // 无对应账号或属过期代次,丢弃
+                m_homeSuggByAccount.insert(accountId, items);
+                emit suggestionsUpdated();
+            });
     connect(m_client, &EmbyClient::serverItemsReceived, this,
             [this](const QString &serverUrl, const QString &accountId,
                    const QString &viewId, const QVariantList &items) {
@@ -256,6 +301,28 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 --m_homePending;
                 maybeAssembleHomeRows();
             });
+}
+
+// 展平全部账号的服务器建议:按账号顺序拼接,每条补 serverUrl/accountId 与
+// 海报前缀(解析时只带了 backdropId 前缀)。QML 端过滤无图条目后取前 N。
+QVariantList AccountManager::suggestions() const
+{
+    QVariantList out;
+    for (const auto &a : m_accounts) {
+        const auto it = m_homeSuggByAccount.constFind(a.id);
+        if (it == m_homeSuggByAccount.constEnd())
+            continue;
+        for (const auto &v : it.value()) {
+            QVariantMap m = v.toMap();
+            m.insert(QStringLiteral("serverUrl"), a.serverUrl);
+            m.insert(QStringLiteral("accountId"), a.id);
+            const QString pid = m.value(QStringLiteral("posterId")).toString();
+            if (!pid.isEmpty())
+                m.insert(QStringLiteral("posterId"), serverPosterId(a.serverUrl, pid));
+            out.append(m);
+        }
+    }
+    return out;
 }
 
 QVariantList AccountManager::accounts() const
@@ -466,6 +533,21 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         order.insert(QStringLiteral("name"), a.name);
         m_homeAccountOrder.append(order);
         m_homeReqGen.insert(a.id, gen);
+        // 服务器建议(hero 轮播):按版本门控——4.9+ 直接发;版本未知
+        // 先探测(/System/Info/Public 轻量公开端点),回执后按版本补发;
+        // <4.9 跳过(旧版建议为目录条目,无可用内容)。
+        m_homeSuggReqGen.insert(a.id, gen);
+        const QString ver = m_serverVersion.value(a.serverUrl);
+        if (ver.isEmpty()) {
+            auto &wait = m_suggWaitVersion[a.serverUrl];
+            if (!wait.contains(a.id))
+                wait.append(a.id);
+            if (wait.size() == 1) // 同服首账号触发探测,其余共享回执
+                m_client->fetchServerPublicInfo(a.serverUrl);
+        } else if (suggestionsSupported(ver)) {
+            m_client->fetchServerSuggestions(a.serverUrl, a.id, a.token, a.userId,
+                                             MoePlayer::kHomeSuggestLimit);
+        }
         ++m_homePending; // 该服视图请求
         m_client->fetchServerViews(a.serverUrl, a.id, a.token, a.userId);
     }

@@ -24,16 +24,6 @@
 #include "core/constants.h"
 #include "core/embyclient.h"
 
-// 按显示宽度请求图片的档位化:小幅窗口缩放不改变档位,缓存键稳定。
-static int quantizedWidth(int width)
-{
-    const int steps[] = {128, 320, 640, 1280, 1920};
-    for (int s : steps)
-        if (width <= s)
-            return s;
-    return steps[4];
-}
-
 PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts,
                                ConfigManager *config)
     : m_client(client)
@@ -175,15 +165,12 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                               const QString &tag, const QString &kind,
                               const QSize &requestedSize)
 {
-    // 按显示尺寸请求,档位化避免小幅窗口缩放抖动缓存键;未传尺寸(取色等)
-    // 用 kind 上限。URL 不含 api_key,重登换 token 不失效;认证经请求头。
+    Q_UNUSED(requestedSize)
+    // 直接请求原图(不带 maxWidth);缩放全部在客户端 sourceSize 解码完成。
+    // URL 恒定(id/tag/kind 固定)→ 网络缓存命中,窗口缩放不重新请求
+    // (此前 maxWidth 随档位变化,跨档即重拉致空图/闪烁)。
+    // URL 不含 api_key,重登换 token 不失效;认证经请求头。
     QUrlQuery q;
-    const int kindMax = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
-                                                          : MoePlayer::kPosterMaxWidth;
-    int maxW = kindMax;
-    if (requestedSize.isValid() && requestedSize.width() > 0)
-        maxW = qBound(1, quantizedWidth(requestedSize.width()), kindMax);
-    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(maxW));
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
     return QUrl(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")

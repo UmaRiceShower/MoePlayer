@@ -37,6 +37,58 @@ QStringList requiredHeaders(const QJsonObject &source)
     return out;
 }
 
+// 解析首页条目(库行 / 服务器建议共用):字段与 QML HeroCard、行卡片消费
+// 一致(id/name/type/posterId/backdropId/positionTicks/played/year/runtimeTicks/
+// rating/favorite/unplayedCount);posterId 不带服务器前缀(调用方补),
+// backdropId 直接带前缀(请求时即知服务器)。
+QVariantMap parseHomeItem(const QJsonObject &o, const QString &serverUrl)
+{
+    const QString tag = o.value(QLatin1String("ImageTags"))
+                            .toObject().value(QLatin1String("Primary")).toString();
+    const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+    QVariantMap m;
+    m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+    m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+    m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
+    m.insert(QStringLiteral("posterId"),
+             tag.isEmpty() ? QString()
+                           : o.value(QLatin1String("Id")).toString()
+                                 + QLatin1Char('~') + tag);
+    // Hero 背景:剧集/电影条目直接用条目 id 请求 Backdrop 端点(tag 留空,
+    // 服务器返回默认背景)。部分服务器列表路由不回 BackdropImageTags,
+    // 但 /Items/{id}/Images/Backdrop 端点仍可取到;Series/Season 取自身,
+    // Episode 取父级剧集(ParentBackdropItemId)。提供器格式
+    // <encodeServerKey(serverUrl)>~<itemId>~<tag>~Backdrop,tag 空则用默认背景。
+    const QString prefix = AccountManager::encodeServerKey(serverUrl);
+    const QString iid = o.value(QLatin1String("Id")).toString();
+    const QJsonArray btags = o.value(QLatin1String("BackdropImageTags")).toArray();
+    const QString btag = btags.isEmpty() ? QString() : btags.first().toString();
+    const QString type = o.value(QLatin1String("Type")).toString();
+    const QJsonArray pbtags = o.value(QLatin1String("ParentBackdropImageTags")).toArray();
+    const QString pbid = o.value(QLatin1String("ParentBackdropItemId")).toString();
+    if (type == QLatin1String("Series") || type == QLatin1String("Movie")
+        || type == QLatin1String("Season") || type == QLatin1String("MusicVideo")
+        || !btags.isEmpty()) {
+        // 自身/系列级条目:直接用自身 id + Backdrop 端点。
+        m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + iid
+                 + QLatin1Char('~') + btag + QStringLiteral("~Backdrop"));
+    } else if (!pbid.isEmpty()) {
+        // 分集:用父级剧集 id + Backdrop 端点。
+        const QString ptag = pbtags.isEmpty() ? QString() : pbtags.first().toString();
+        m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + pbid
+                 + QLatin1Char('~') + ptag + QStringLiteral("~Backdrop"));
+    }
+    m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
+    m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
+    m.insert(QStringLiteral("unplayedCount"), ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
+    m.insert(QStringLiteral("playbackDateTicks"), ud.value(QLatin1String("PlaybackDateTicks")).toDouble(0));
+    m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
+    m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
+    m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
+    m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
+    return m;
+}
+
 } // namespace
 
 EmbyClient::EmbyClient(QObject *parent)
@@ -305,7 +357,8 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
     get(serverUrl, QString(), QString(), QStringLiteral("/System/Info/Public"),
         [this, serverUrl](const QJsonDocument &doc) {
             emit serverPublicInfoReceived(
-                serverUrl, doc.object().value(QLatin1String("ServerName")).toString());
+                serverUrl, doc.object().value(QLatin1String("ServerName")).toString(),
+                doc.object().value(QLatin1String("Version")).toString());
         }, nullptr, QStringLiteral("获取服务器信息"));
 }
 
@@ -703,58 +756,44 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
         [this, serverUrl, viewId, accountId](const QJsonDocument &doc) {
             QVariantList items;
-            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
-                const QJsonObject o = v.toObject();
-                const QString tag = o.value(QLatin1String("ImageTags"))
-                                        .toObject().value(QLatin1String("Primary")).toString();
-                const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
-                QVariantMap m;
-                m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
-                m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
-                m.insert(QStringLiteral("type"), o.value(QLatin1String("Type")).toString());
-                m.insert(QStringLiteral("posterId"),
-                         tag.isEmpty() ? QString()
-                                       : o.value(QLatin1String("Id")).toString()
-                                             + QLatin1Char('~') + tag);
-                // Hero 背景:剧集/电影条目直接用条目 id 请求 Backdrop 端点(tag 留空,
-                // 服务器返回默认背景)。部分服务器列表路由不回 BackdropImageTags,
-                // 但 /Items/{id}/Images/Backdrop 端点仍可取到;Series/Season 取自身,
-                // Episode 取父级剧集(ParentBackdropItemId)。提供器格式
-                // <encodeServerKey(serverUrl)>~<itemId>~<tag>~Backdrop,tag 空则用默认背景。
-                const QString prefix = AccountManager::encodeServerKey(serverUrl);
-                const QString iid = o.value(QLatin1String("Id")).toString();
-                const QJsonArray btags = o.value(QLatin1String("BackdropImageTags")).toArray();
-                const QString btag = btags.isEmpty() ? QString() : btags.first().toString();
-                const QString type = o.value(QLatin1String("Type")).toString();
-                const QJsonArray pbtags = o.value(QLatin1String("ParentBackdropImageTags")).toArray();
-                const QString pbid = o.value(QLatin1String("ParentBackdropItemId")).toString();
-                if (type == QLatin1String("Series") || type == QLatin1String("Movie")
-                    || type == QLatin1String("Season") || type == QLatin1String("MusicVideo")
-                    || !btags.isEmpty()) {
-                    // 自身/系列级条目:直接用自身 id + Backdrop 端点。
-                    m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + iid
-                             + QLatin1Char('~') + btag + QStringLiteral("~Backdrop"));
-                } else if (!pbid.isEmpty()) {
-                    // 分集:用父级剧集 id + Backdrop 端点。
-                    const QString ptag = pbtags.isEmpty() ? QString() : pbtags.first().toString();
-                    m.insert(QStringLiteral("backdropId"), prefix + QLatin1Char('~') + pbid
-                             + QLatin1Char('~') + ptag + QStringLiteral("~Backdrop"));
-                }
-                m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
-                m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
-                m.insert(QStringLiteral("unplayedCount"), ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
-                m.insert(QStringLiteral("playbackDateTicks"), ud.value(QLatin1String("PlaybackDateTicks")).toDouble(0));
-                m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
-                m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
-                m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
-                m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
-                items.append(m);
-            }
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                items.append(parseHomeItem(v.toObject(), serverUrl));
             emit serverItemsReceived(serverUrl, accountId, viewId, items);
         },
         // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
         [this, serverUrl, accountId, viewId] { emit serverItemsReceived(serverUrl, accountId, viewId, QVariantList()); },
         QStringLiteral("获取首页行"));
+}
+
+void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString &accountId,
+                                        const QString &token, const QString &userId, int limit)
+{
+    QUrlQuery q;
+    // 字段与库行条目一致(hero 卡消费 backdropId/name/year/runtimeTicks 等),
+    // EnableUserData 带回继续观看进度(hero 点击进详情后可用)。
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags"));
+    q.addQueryItem(QStringLiteral("EnableUserData"), QStringLiteral("true"));
+    // 只保留影片与剧集(4.9.5 生效;4.8 忽略该参数,由 QML 端白名单兜底
+    // 过滤目录条目)。分集建议不进 hero(无独立背景,界面是剧集主题)。
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"),
+                   QStringLiteral("Movie,Series"));
+    // 只返回带背景图的条目(4.9.5 生效):hero 大卡必需背景,无背景条目
+    // 由服务器直接从建议中滤掉;4.8 无视全部过滤参数,由版本门控跳过。
+    q.addQueryItem(QStringLiteral("ImageTypes"), QStringLiteral("Backdrop"));
+    q.addQueryItem(QStringLiteral("Limit"),
+                   QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
+    get(serverUrl, token, userId,
+        QStringLiteral("/Users/%1/Suggestions?%2").arg(userId, q.toString()),
+        [this, serverUrl, accountId](const QJsonDocument &doc) {
+            QVariantList items;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                items.append(parseHomeItem(v.toObject(), serverUrl));
+            emit serverSuggestionsReceived(serverUrl, accountId, items);
+        },
+        // 失败:发空列表(调用方回退本地聚合),原因经 serverRequestFailed 通知。
+        [this, serverUrl, accountId] { emit serverSuggestionsReceived(serverUrl, accountId, QVariantList()); },
+        QStringLiteral("获取首页建议"));
 }
 
 void EmbyClient::loginFor(const QString &serverUrl, const QString &username,
