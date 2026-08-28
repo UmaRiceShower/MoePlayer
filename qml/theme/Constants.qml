@@ -46,7 +46,7 @@ QtObject {
     }
 
     // ---- 详情页(Hero + 右侧选集条) ----
-    readonly property int detailTextRevealMs: 3000 // hero 文字滑动揭示动画时长
+    readonly property int detailTextRevealMs: 1000 // hero 文字滑动揭示动画时长
     readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
     readonly property int detailPosterH: 300      // Hero 海报高
     readonly property int detailSidebarW: 260     // 右侧选集条宽
