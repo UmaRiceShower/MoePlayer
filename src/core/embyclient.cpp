@@ -745,6 +745,8 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
                 m.insert(QStringLiteral("unplayedCount"), ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
                 m.insert(QStringLiteral("playbackDateTicks"), ud.value(QLatin1String("PlaybackDateTicks")).toDouble(0));
                 m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
+                m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
+                m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
                 m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
                 items.append(m);
             }
