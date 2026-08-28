@@ -49,6 +49,14 @@ class ConfigManager : public QObject
     // 不支持:mpv 播放流无 SOCKS;mihomo mixed-port 同端口说 HTTP 方言,
     // 填 http:// 即可)。非法值忽略回退直连。
     Q_PROPERTY(QString proxy READ proxy WRITE setProxy NOTIFY proxyChanged)
+    // 滚轮步进(px/格):各滚动页面默认使用;页面级键(如 homeWheelStep)
+    // >0 时覆盖。默认 150。设置浮窗只暴露此项,页面级靠手改 config。
+    Q_PROPERTY(int wheelStep READ wheelStep WRITE setWheelStep NOTIFY wheelStepChanged)
+    Q_PROPERTY(int homeWheelStep READ homeWheelStep WRITE setHomeWheelStep NOTIFY homeWheelStepChanged)
+    Q_PROPERTY(int detailWheelStep READ detailWheelStep WRITE setDetailWheelStep NOTIFY detailWheelStepChanged)
+    Q_PROPERTY(int searchWheelStep READ searchWheelStep WRITE setSearchWheelStep NOTIFY searchWheelStepChanged)
+    Q_PROPERTY(int settingsWheelStep READ settingsWheelStep WRITE setSettingsWheelStep NOTIFY settingsWheelStepChanged)
+    Q_PROPERTY(int libraryWheelStep READ libraryWheelStep WRITE setLibraryWheelStep NOTIFY libraryWheelStepChanged)
     // 配置文件绝对路径(只读,供 UI 展示/排障)。
     Q_PROPERTY(QString configPath READ configPath CONSTANT)
 public:
@@ -74,6 +82,18 @@ public:
     void setDetailTextHeight(int v);
     QString proxy() const { return m_proxy; }
     void setProxy(const QString &v);
+    int wheelStep() const { return m_wheelStep; }
+    void setWheelStep(int v);
+    int homeWheelStep() const { return m_homeWheelStep; }
+    void setHomeWheelStep(int v);
+    int detailWheelStep() const { return m_detailWheelStep; }
+    void setDetailWheelStep(int v);
+    int searchWheelStep() const { return m_searchWheelStep; }
+    void setSearchWheelStep(int v);
+    int settingsWheelStep() const { return m_settingsWheelStep; }
+    void setSettingsWheelStep(int v);
+    int libraryWheelStep() const { return m_libraryWheelStep; }
+    void setLibraryWheelStep(int v);
     // 当前代理(按 proxy 串解析;空/非法 = NoProxy)。网络层每请求现取,
     // 热重载后新请求自动用新代理。
     QNetworkProxy proxyObject() const;
@@ -95,6 +115,12 @@ signals:
     void detailTextWidthChanged();
     void detailTextHeightChanged();
     void proxyChanged();
+    void wheelStepChanged();
+    void homeWheelStepChanged();
+    void detailWheelStepChanged();
+    void searchWheelStepChanged();
+    void settingsWheelStepChanged();
+    void libraryWheelStepChanged();
 
 private:
     // 解析文件并应用(缺失/类型不合法回退默认值;解析失败仅告警不崩溃)。
@@ -123,4 +149,11 @@ private:
     QTimer *m_reloadTimer = nullptr;
     // 自己 commit 触发 fileChanged 时置位,避免自触发重载。
     bool m_suppressReload = false;
+    // 滚轮步进:全局默认 80;页面级 0 = 跟随全局(手改 config 覆盖)。
+    int m_wheelStep = 80;
+    int m_homeWheelStep = 0;
+    int m_detailWheelStep = 0;
+    int m_searchWheelStep = 0;
+    int m_settingsWheelStep = 0;
+    int m_libraryWheelStep = 0;
 };

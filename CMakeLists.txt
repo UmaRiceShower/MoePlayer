@@ -72,6 +72,7 @@ qt_add_qml_module(MoePlayer
         qml/views/ServerManager.qml
         qml/views/SearchOverlay.qml
         qml/views/PosterCard.qml
+        qml/views/WheelStepHandler.qml
         qml/views/ServerIcon.qml
         qml/views/FilterChip.qml
 )

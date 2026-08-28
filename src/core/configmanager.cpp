@@ -58,7 +58,9 @@ QNetworkProxy parseProxy(const QString &spec)
 QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sortOrder,
                    bool detailSidebarLeft, const QString &detailPosterPos,
                    const QString &detailTextPos, const QString &detailButtonsPos,
-                   int detailTextWidth, int detailTextHeight, const QString &proxy)
+                   int detailTextWidth, int detailTextHeight, const QString &proxy,
+                   int wheelStep, int homeWheelStep, int detailWheelStep,
+                   int searchWheelStep, int settingsWheelStep, int libraryWheelStep)
 {
     return QStringLiteral(
                "# MoePlayer \u7528\u6237\u914d\u7f6e(TOML)\n"
@@ -92,7 +94,15 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
                "                # SOCKS);mihomo mixed-port \u540c\u7aef\u53e3\u8bf4 HTTP \u65b9\u8a00,\n"
                "                # \u586b http:// \u5373\u53ef\u3002\u914d\u7f6e\u540e\u6d4f\u89c8/\u56fe\u7247/\u56fe\u6807\n"
                "                # \u5747\u8d70\u4ee3\u7406;\u64ad\u653e\u7ecf mpv --http-proxy(\u672c\u673a\n"
-               "                # \u5b9e\u6d4b https \u4ea6 CONNECT \u96a7\u9053,\u5176\u5b83\u7248\u672c\u672a\u9a8c\u8bc1)\u3002\n")
+               "                # \u5b9e\u6d4b https \u4ea6 CONNECT \u96a7\u9053,\u5176\u5b83\u7248\u672c\u672a\u9a8c\u8bc1)\u3002\n"
+               "\n"
+               "[scroll]\n"
+               "wheelStep = %11        # \u6eda\u8f6e\u6bcf\u683c\u6eda\u52a8\u8ddd\u79bb(\u50cf\u7d20/\u683c)\uff0c\u8bbe\u7f6e\u6d6e\u7a97\u5c31\u662f\u8fd9\u4e2a\uff1b\u9ed8\u8ba4 80\u3002\u5176\u4f59\u9875\u9762\u7ea7\u952e 0 = \u8ddf\u968f\u5168\u5c40\n"
+               "homeWheelStep = %12    # \u9996\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40 (wheelStep)\n"
+               "detailWheelStep = %13  # \u8be6\u60c5\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
+               "searchWheelStep = %14  # \u641c\u7d22\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
+               "settingsWheelStep = %15 # \u8bbe\u7f6e\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
+               "libraryWheelStep = %16 # \u5e93\u6d4f\u89c8\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n")
         .arg(monetEnabled ? QStringLiteral("true") : QStringLiteral("false"))
         .arg(sortBy, sortOrder)
         .arg(detailSidebarLeft ? QStringLiteral("true") : QStringLiteral("false"))
@@ -101,7 +111,13 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
         .arg(detailButtonsPos)
         .arg(detailTextWidth)
         .arg(detailTextHeight)
-        .arg(proxy);
+        .arg(proxy)
+        .arg(wheelStep)
+        .arg(homeWheelStep)
+        .arg(detailWheelStep)
+        .arg(searchWheelStep)
+        .arg(settingsWheelStep)
+        .arg(libraryWheelStep);
 }
 
 } // namespace
@@ -231,6 +247,63 @@ void ConfigManager::setProxy(const QString &v)
     emit proxyChanged();
     commit();
 }
+void ConfigManager::setWheelStep(int v)
+{
+    // 非法值忽略(页面级 0 = 跟随全局,全局须 ≥1)。
+    if (v < 1)
+        return;
+    if (v == m_wheelStep)
+        return;
+    m_wheelStep = v;
+    emit wheelStepChanged();
+    commit();
+}
+
+// 页面级步进:0 = 跟随全局(值合法即接受,不设下限)。
+void ConfigManager::setHomeWheelStep(int v)
+{
+    if (v < 0 || v == m_homeWheelStep)
+        return;
+    m_homeWheelStep = v;
+    emit homeWheelStepChanged();
+    commit();
+}
+
+void ConfigManager::setDetailWheelStep(int v)
+{
+    if (v < 0 || v == m_detailWheelStep)
+        return;
+    m_detailWheelStep = v;
+    emit detailWheelStepChanged();
+    commit();
+}
+
+void ConfigManager::setSearchWheelStep(int v)
+{
+    if (v < 0 || v == m_searchWheelStep)
+        return;
+    m_searchWheelStep = v;
+    emit searchWheelStepChanged();
+    commit();
+}
+
+void ConfigManager::setSettingsWheelStep(int v)
+{
+    if (v < 0 || v == m_settingsWheelStep)
+        return;
+    m_settingsWheelStep = v;
+    emit settingsWheelStepChanged();
+    commit();
+}
+
+void ConfigManager::setLibraryWheelStep(int v)
+{
+    if (v < 0 || v == m_libraryWheelStep)
+        return;
+    m_libraryWheelStep = v;
+    emit libraryWheelStepChanged();
+    commit();
+}
 
 QNetworkProxy ConfigManager::proxyObject() const
 {
@@ -259,6 +332,12 @@ void ConfigManager::resetToDefaults()
     m_detailTextWidth = 280;
     m_detailTextHeight = 140;
     m_proxy = QString();
+    m_wheelStep = 80;
+    m_homeWheelStep = 0;
+    m_detailWheelStep = 0;
+    m_searchWheelStep = 0;
+    m_settingsWheelStep = 0;
+    m_libraryWheelStep = 0;
     emit monetEnabledChanged();
     emit librarySortByChanged();
     emit librarySortOrderChanged();
@@ -269,6 +348,12 @@ void ConfigManager::resetToDefaults()
     emit detailTextWidthChanged();
     emit detailTextHeightChanged();
     emit proxyChanged();
+    emit wheelStepChanged();
+    emit homeWheelStepChanged();
+    emit detailWheelStepChanged();
+    emit searchWheelStepChanged();
+    emit settingsWheelStepChanged();
+    emit libraryWheelStepChanged();
     commit();
 }
 
@@ -311,6 +396,18 @@ void ConfigManager::loadFromFile()
             if (parseProxy(m_proxy).type() == QNetworkProxy::NoProxy && !m_proxy.trimmed().isEmpty())
                 m_proxy.clear(); // 非法值回退直连(与其它键一致)
         }
+        const auto scroll = cfg["scroll"];
+        if (scroll.is_table()) {
+            // 页面级 0 = 跟随全局;全局非法值回退默认 150。
+            m_wheelStep = scroll["wheelStep"].value_or(m_wheelStep);
+            if (m_wheelStep < 1)
+                m_wheelStep = 80;
+            m_homeWheelStep = scroll["homeWheelStep"].value_or(m_homeWheelStep);
+            m_detailWheelStep = scroll["detailWheelStep"].value_or(m_detailWheelStep);
+            m_searchWheelStep = scroll["searchWheelStep"].value_or(m_searchWheelStep);
+            m_settingsWheelStep = scroll["settingsWheelStep"].value_or(m_settingsWheelStep);
+            m_libraryWheelStep = scroll["libraryWheelStep"].value_or(m_libraryWheelStep);
+        }
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
         emit monetEnabledChanged();
@@ -323,6 +420,12 @@ void ConfigManager::loadFromFile()
         emit detailTextWidthChanged();
         emit detailTextHeightChanged();
         emit proxyChanged();
+        emit wheelStepChanged();
+        emit homeWheelStepChanged();
+        emit detailWheelStepChanged();
+        emit searchWheelStepChanged();
+        emit settingsWheelStepChanged();
+        emit libraryWheelStepChanged();
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
                              << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));
@@ -338,7 +441,8 @@ void ConfigManager::commit()
         file.write(renderToml(m_monetEnabled, m_librarySortBy, m_librarySortOrder,
                               m_detailSidebarLeft, m_detailPosterPos, m_detailTextPos,
                               m_detailButtonsPos, m_detailTextWidth, m_detailTextHeight,
-                              m_proxy)
+                              m_proxy, m_wheelStep, m_homeWheelStep, m_detailWheelStep,
+                              m_searchWheelStep, m_settingsWheelStep, m_libraryWheelStep)
                        .toUtf8());
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();

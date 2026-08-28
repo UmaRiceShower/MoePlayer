@@ -728,6 +728,11 @@ Item {
                 height: parent.height
                 clip: true
                 contentHeight: overviewColumn.implicitHeight
+                // 滚轮步进走配置(页级 detailWheelStep,0=全局)。
+                WheelStepHandler {
+                    targetItem: overview
+                    pageStep: ConfigManager.detailWheelStep
+                }
 
                 Column {
                     id: overviewColumn

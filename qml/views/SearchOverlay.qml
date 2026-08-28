@@ -557,6 +557,11 @@ Item {
                     cellHeight: root.cellH
                     clip: true
                     model: root.sm
+                    // 滚轮步进走配置(页级 searchWheelStep,0=全局)。
+                    WheelStepHandler {
+                        targetItem: resultGrid
+                        pageStep: ConfigManager.searchWheelStep
+                    }
                     // 结果项入场动画:淡入 + 轻微缩放,萌系轻盈感。
                     add: Transition {
                         NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }

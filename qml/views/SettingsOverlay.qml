@@ -283,6 +283,11 @@ Item {
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+        // 滚轮步进走配置(页级 settingsWheelStep,0=全局)。
+        WheelStepHandler {
+            targetItem: spage
+            pageStep: ConfigManager.settingsWheelStep
+        }
         // 内容容器:至少撑满视口高,让失焦层覆盖行间隙与下方空白区;
         // 点击夺走输入框焦点(editingFinished 完成提交)。
         // (Column 是定位器,子项不能用 anchors,故失焦层放外层 Item。)
@@ -470,6 +475,11 @@ Item {
                     // ---- 界面 ----
                     SettingsPage {
                         PageHeader { text: "界面" }
+                        SettingRow {
+                            label: "滚轮步进"
+                            description: "鼠标滚轮每格滚动距离(px);所有页面默认,页面级可手改 config.toml(homeWheelStep 等)。"
+                            SettingField { configKey: "wheelStep"; intOnly: true }
+                        }
                         SettingRow {
                             label: "海报莫奈取色"
                             description: "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。"

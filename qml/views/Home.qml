@@ -160,6 +160,12 @@ Item {
         model: AccountManager.homeRows
         reuseItems: true
         cacheBuffer: 400
+        // 滚轮步进走配置:页级 homeWheelStep(0=全局 ConfigManager.wheelStep,
+        // 默认 150;设置浮窗只调全局,页面级手改 config.toml)。
+        WheelStepHandler {
+            targetItem: pageList
+            pageStep: ConfigManager.homeWheelStep
+        }
 
         // 行间间距:标题与上一行海报间距(14)>= 标题与自身海报间距(12)。
         spacing: Constants.homeRowGap
