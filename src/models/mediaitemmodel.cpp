@@ -99,14 +99,26 @@ static MediaItem parseItem(const QJsonValue &v, bool withPosters, const QString 
 
 void MediaItemModel::setItems(const QJsonArray &items, bool withPosters)
 {
-    beginResetModel();
-    m_items.clear();
-    m_items.reserve(items.size());
+    QList<MediaItem> parsed;
+    parsed.reserve(items.size());
     for (const auto &v : items) {
         const MediaItem it = parseItem(v, withPosters, m_serverPrefix);
         if (!it.id.isEmpty())
-            m_items.append(it);
+            parsed.append(it);
     }
+    // 行集相同(数量 + 逐位 id 相同)即原地刷新:仅对变化行发 dataChanged,
+    // 列表定位保持(同剧换集重拉同季分集,已看/进度等用户数据照常更新)。
+    if (sameRowSet(parsed)) {
+        for (int i = 0; i < parsed.size(); ++i) {
+            if (!sameItem(m_items.at(i), parsed.at(i))) {
+                m_items[i] = parsed.at(i);
+                emit dataChanged(index(i, 0), index(i, 0));
+            }
+        }
+        return;
+    }
+    beginResetModel();
+    m_items = parsed;
     endResetModel();
     emit countChanged();
 }
@@ -127,6 +139,27 @@ void MediaItemModel::appendItems(const QJsonArray &items, bool withPosters)
     m_items.append(page);
     endInsertRows();
     emit countChanged();
+}
+
+bool MediaItemModel::sameRowSet(const QList<MediaItem> &other) const
+{
+    if (other.size() != m_items.size())
+        return false;
+    for (int i = 0; i < other.size(); ++i) {
+        if (other.at(i).id != m_items.at(i).id)
+            return false;
+    }
+    return true;
+}
+
+bool MediaItemModel::sameItem(const MediaItem &a, const MediaItem &b)
+{
+    return a.name == b.name && a.posterId == b.posterId
+        && a.parentBackdropId == b.parentBackdropId && a.type == b.type
+        && a.year == b.year && a.rating == b.rating && a.played == b.played
+        && a.favorite == b.favorite && a.positionTicks == b.positionTicks
+        && a.runtimeTicks == b.runtimeTicks && a.unplayedCount == b.unplayedCount
+        && a.episodeNo == b.episodeNo && a.seasonNo == b.seasonNo;
 }
 
 void MediaItemModel::setTotal(int total)

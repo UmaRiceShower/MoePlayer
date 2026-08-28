@@ -30,6 +30,8 @@ Item {
     // pendingDetail),动画中 applyDetail 落地并淡入,完成后复位。
     // 只对文字层淡入淡出(textFade),图片各自走圆形扩散溶解(CrossfadeImage)。
     property bool replacing: false
+    // 当前替换是否同剧换集(保留正文/选集滚动;换其它条目复位)。
+    property bool replaceKeepScroll: false
     property var pendingDetail: null
     // 文字层透明度:详情切换时正文文字淡出→换字→淡入;图片不受此影响。
     property real textFade: 1
@@ -217,19 +219,22 @@ Item {
     // ---- 原地替换(切集/相似推荐/返回恢复):更新自身 id 触发
     // onItemIdChanged 重拉,不重建页面。旧正文保持显示直到新 detail
     // 到达,选集/推荐区先行清空,图片经 retainWhileLoading 无空白换新。 ----
-    function replaceItem(newItemId, newPosterId, newTitle) {
+    function replaceItem(newItemId, newPosterId, newTitle, keepScroll) {
         root.itemId = newItemId
         root.posterId = newPosterId
         root.title = newTitle
         // 重置条目相关状态:季与收藏(新 detail 到达前不显示旧条目状态)、
-        // 候选季、相似推荐(stale 隐藏旧推荐)、滚动回顶。
+        // 候选季、相似推荐(stale 隐藏旧推荐)。
         root.currentSeasonId = ""
         root.isFavorite = false
         root.seasonNos = []
         root.seasonCandidate = 1
         root.similarStale = true
         root.replacing = true
-        overview.contentY = 0
+        root.replaceKeepScroll = !!keepScroll
+        // 同剧换集保留滚动位置(内容原地连续);换其它条目/返回回顶。
+        if (!keepScroll)
+            overview.contentY = 0
     }
     // 相似推荐点击:压历史(记录当前条目)后原地替换,不 push 新页。
     function openItemDetail(itemId, posterId, title, serverUrl) {
@@ -305,8 +310,8 @@ Item {
         if (root.itemId !== "")
             EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
     }
-    // 选集条选季:拉该季分集并回顶部。
-    function selectSeason(seasonId) {
+    // 选集条选季:拉该季分集;明确换季才回顶(见 resetScroll)。
+    function selectSeason(seasonId, resetScroll) {
         root.currentSeasonId = seasonId
         // 候选季号跟随实际选中季:进入详情/切季/确认季都经此,
         // 否则初始显示停留在 resetDetail 的默认 1,仅 hover 才纠正。
@@ -316,7 +321,9 @@ Item {
             const c = root.creds()
             EmbyClient.fetchEpisodes(root.serverUrl, c.token, c.userId, seriesId, seasonId)
         }
-        episodeList.contentY = 0
+        // 明确换季才回顶(列表从头展示);原地换集触发的重拉链保留位置。
+        if (resetScroll)
+            episodeList.contentY = 0
     }
 
     // ---- 选季胶囊 ----
@@ -388,7 +395,7 @@ Item {
             }
         }
         if (bestId)
-            root.selectSeason(bestId)
+            root.selectSeason(bestId, true)
     }
 
     // pop 回来时共享模型(seasons/episodes/similar/allEpisodes 按 serverUrl
@@ -882,7 +889,7 @@ Item {
                                         width: parent.width
                                         horizontalAlignment: root.heroTextAlign
                                         opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                                        Behavior on opacity { NumberAnimation { duration: 100 } }
                                     }
                                 }
                             }
@@ -934,7 +941,7 @@ Item {
                                         width: parent.width
                                         horizontalAlignment: root.heroTextAlign
                                         opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 200 } }
+                                        Behavior on opacity { NumberAnimation { duration: 100 } }
                                     }
                                 }
                             }
@@ -1305,7 +1312,8 @@ Item {
                                 id: verBlock
                                 required property var modelData
                                 required property int index
-                                width: parent.width
+                                // 销毁期间 parent 会被置 null(换集重建媒体源时),空防。
+                                width: parent ? parent.width : 0
                                 height: verCol.implicitHeight + 28
                                 radius: 12
                                 color: Qt.rgba(1, 1, 1, 0.04)
@@ -1548,12 +1556,13 @@ Item {
                                                         id: kvRow
                                                         required property var modelData
                                                         required property int index
-                                                        width: parent.width
+                                                        // 销毁期间 parent 会被置 null(换集重建米卡时),空防。
+                                                        width: parent ? parent.width : 0
                                                         height: 22
                                                         Rectangle {
                                                             visible: kvRow.index > 0
                                                             anchors.top: parent.top
-                                                            width: parent.width
+                                                            width: kvRow.width
                                                             height: 1
                                                             color: Qt.rgba(1, 1, 1, 0.07)
                                                         }
@@ -1567,7 +1576,7 @@ Item {
                                                         AppText {
                                                             anchors.right: parent.right
                                                             anchors.verticalCenter: parent.verticalCenter
-                                                            width: Math.min(implicitWidth, parent.width - 60)
+                                                            width: Math.min(implicitWidth, parent ? parent.width - 60 : 0)
                                                             horizontalAlignment: Text.AlignRight
                                                             text: kvRow.modelData.v
                                                             color: Theme.textPrimary
@@ -1950,7 +1959,7 @@ Item {
                         TapHandler {
                             onTapped: {
                                 // 选集条点集:原地替换(剧集页与集详情页一致,栈深恒为 1)。
-                                root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name)
+                                root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name, true)
                             }
                         }
                     }
@@ -2002,7 +2011,7 @@ Item {
             if (!seasonId && model.count > 0)
                 seasonId = model.itemAt(0).id
             if (seasonId)
-                root.selectSeason(seasonId)
+                root.selectSeason(seasonId, !root.replaceKeepScroll)
             else
                 root.loaded = true // 无季/无分集:选集就绪,直接渲染结构
         }

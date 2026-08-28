@@ -105,6 +105,10 @@ signals:
 
 private:
     QList<MediaItem> m_items;
+    // 行集判定:数量 + 逐位 id 相同即视为同一行集(原地 dataChanged,不重置)。
+    bool sameRowSet(const QList<MediaItem> &other) const;
+    // 两行除 id 外完全一致(同 id 行是否需要发 dataChanged)。
+    static bool sameItem(const MediaItem &a, const MediaItem &b);
     int m_total = 0;
     bool m_hasMore = false;
     QString m_serverPrefix; // 海报 id 服务器前缀(见 setServerPrefix)。
