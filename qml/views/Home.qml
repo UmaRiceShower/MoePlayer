@@ -12,8 +12,10 @@ Item {
     // hero 轮播(继续观看前 8,不足补最新添加前 8)。
     property var heroItems: []
     property int heroIndex: 0
-    readonly property real navH: 48
-    readonly property real heroH: Math.min(500, (parent ? parent.height : 720) * 0.5)
+    readonly property real navH: Constants.homeNavH
+    // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
+    // 窄窗随宽度收缩,卡片保持满带宽。
+    readonly property real heroH: (parent ? parent.width : 1280) * Constants.homeHeroWidthRatio
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
     signal openLibrary(string viewId, string serverUrl, string viewName, string accountId)
@@ -70,24 +72,24 @@ Item {
         width: parent.width
         AppText {
             anchors.left: parent.left
-            anchors.leftMargin: 20
+            anchors.leftMargin: Constants.homeNavMarginL
             anchors.verticalCenter: parent.verticalCenter
             text: "MoePlayer"
             color: Theme.textPrimary
-            font.pixelSize: 22
+            font.pixelSize: Constants.homeNavTitlePx
             font.bold: true
         }
         // iOS 毛玻璃导航:三个圆形通透毛玻璃按钮(背景模糊 + 半透明 + 微光)。
         // 模糊源用滚动内容 pageList,内容滚过按钮时实时通透模糊。
         Row {
             anchors.right: parent.right
-            anchors.rightMargin: 16
+            anchors.rightMargin: Constants.homeNavMarginR
             anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
+            spacing: Constants.homeNavSpacing
             GlassBar {
-                width: 42
-                height: 42
-                radius: 21
+                width: Constants.homeNavBtnSize
+                height: Constants.homeNavBtnSize
+                radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 GlassCircleButton {
                     anchors.centerIn: parent
@@ -96,9 +98,9 @@ Item {
                 }
             }
             GlassBar {
-                width: 42
-                height: 42
-                radius: 21
+                width: Constants.homeNavBtnSize
+                height: Constants.homeNavBtnSize
+                radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 GlassCircleButton {
                     anchors.centerIn: parent
@@ -107,9 +109,9 @@ Item {
                 }
             }
             GlassBar {
-                width: 42
-                height: 42
-                radius: 21
+                width: Constants.homeNavBtnSize
+                height: Constants.homeNavBtnSize
+                radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 GlassCircleButton {
                     anchors.centerIn: parent
@@ -118,9 +120,9 @@ Item {
                 }
             }
             GlassBar {
-                width: 42
-                height: 42
-                radius: 21
+                width: Constants.homeNavBtnSize
+                height: Constants.homeNavBtnSize
+                radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 GlassCircleButton {
                     anchors.centerIn: parent
@@ -146,19 +148,30 @@ Item {
         reuseItems: true
         cacheBuffer: 400
 
+        // 行间间距:标题与上一行海报间距(14)>= 标题与自身海报间距(12)。
+        spacing: Constants.homeRowGap
+
         // header = hero 轮播(顶部一屏,随内容滚动,常驻加载 3 张图)。
         header: Item {
             id: heroCar
-            height: root.heroH
+            height: (root.heroItems.length > 0 ? root.heroH : 0)
+                    + (AccountManager.homeRows.count > 0 ? mediaSecH : 0)
             width: pageList.width
-            visible: root.heroItems.length > 0
+            visible: root.heroItems.length > 0 || AccountManager.homeRows.count > 0
             clip: false
-            readonly property real cardH: height * 0.74
-            readonly property real cardW: Math.min(cardH * 16 / 9, width * 0.56)
+            readonly property real cardH: root.heroH * Constants.homeHeroCardH
+            readonly property real cardW: Math.min(cardH * Constants.homeHeroCardAspect,
+                                                   width * Constants.homeHeroCardWCap)
+            // 媒体库节高:标题 + 间距 + 库卡高 + 底部留白(随节内实际内容)。
+            readonly property real mediaSecH: mediaLib.implicitHeight
 
             PathView {
                 id: heroPv
-                anchors.fill: parent
+                // 仅占 hero 区(上方);媒体库节在下方。
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: root.heroH
                 model: root.heroItems
                 pathItemCount: 3
                 preferredHighlightBegin: 0.5
@@ -168,17 +181,17 @@ Item {
                 interactive: false
 
                 path: Path {
-                    startX: heroCar.width * 0.12
-                    startY: heroCar.height * 0.5
-                    PathAttribute { name: "itemScale"; value: 0.72 }
+                    startX: heroCar.width * Constants.homeHeroPathStartX
+                    startY: root.heroH * 0.5
+                    PathAttribute { name: "itemScale"; value: Constants.homeHeroSideScale }
                     PathAttribute { name: "tilt"; value: 1 }
                     PathAttribute { name: "itemZ"; value: 0 }
-                    PathLine { x: heroCar.width * 0.5; y: heroCar.height * 0.5 }
+                    PathLine { x: heroCar.width * Constants.homeHeroPathCenterX; y: root.heroH * 0.5 }
                     PathAttribute { name: "itemScale"; value: 1.0 }
                     PathAttribute { name: "tilt"; value: 0 }
                     PathAttribute { name: "itemZ"; value: 2 }
-                    PathLine { x: heroCar.width * 0.88; y: heroCar.height * 0.5 }
-                    PathAttribute { name: "itemScale"; value: 0.72 }
+                    PathLine { x: heroCar.width * Constants.homeHeroPathEndX; y: root.heroH * 0.5 }
+                    PathAttribute { name: "itemScale"; value: Constants.homeHeroSideScale }
                     PathAttribute { name: "tilt"; value: -1 }
                     PathAttribute { name: "itemZ"; value: 0 }
                 }
@@ -189,16 +202,17 @@ Item {
             Row {
                 z: 7
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottom: parent.bottom
-                anchors.bottomMargin: 10
-                spacing: 8
+                anchors.top: parent.top
+                anchors.topMargin: root.heroH * 0.5 + heroCar.cardH / 2 + Constants.homeHeroDotsGap
+                spacing: Constants.homeHeroDotSpacing
                 Repeater {
                     model: root.heroItems.length
                     delegate: Rectangle {
                         required property int index
                         id: dot
-                        width: heroPv.currentIndex === index ? 14 : 7
-                        height: 7
+                        width: heroPv.currentIndex === index
+                               ? Constants.homeHeroDotSizeSel : Constants.homeHeroDotSize
+                        height: Constants.homeHeroDotSize
                         radius: height / 2
                         color: heroPv.currentIndex === index
                                ? Constants.moePink : Qt.rgba(1, 1, 1, 0.55)
@@ -220,10 +234,108 @@ Item {
 
             Timer {
                 id: heroTimer
-                interval: 5000
+                interval: Constants.homeHeroTimerMs
                 repeat: true
                 running: root.heroItems.length > 1
                 onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % root.heroItems.length
+            }
+            // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
+            Column {
+                id: mediaLib
+                anchors.top: parent.top
+                anchors.topMargin: root.heroH
+                width: parent.width
+                spacing: 10
+                visible: AccountManager.homeRows.count > 0
+                // 底部留白:首行标题离媒体库卡片的间距与行内 12px 规则一致。
+                bottomPadding: Constants.homeMediaBottomPad
+                AppText {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.rowLeftMargin
+                    text: "媒体库"
+                    color: Theme.textPrimary
+                    font.pixelSize: Constants.homeMediaTitlePx
+                    font.bold: true
+                }
+                Item {
+                    width: parent.width
+                    height: Constants.homeMediaCardH
+                    clip: true
+                    ListView {
+                        anchors.fill: parent
+                        orientation: ListView.Horizontal
+                        spacing: Constants.rowSpacing
+                        header: Item { width: Constants.rowLeftMargin; height: 1 }
+                        model: AccountManager.homeRows
+                        delegate: Rectangle {
+                            id: libCard
+                            required property var modelData
+                            property bool hovered: false
+                            width: Constants.homeMediaCardW
+                            height: Constants.homeMediaCardH
+                            radius: Constants.homeMediaCardRadius
+                            color: Theme.surface
+                            border.width: 1
+                            border.color: libCard.hovered ? Constants.moePink : Qt.rgba(1, 1, 1, 0.10)
+                            Image {
+                                anchors.fill: parent
+                                source: libCard.modelData.posterId
+                                       ? "image://emby/" + libCard.modelData.posterId : ""
+                                fillMode: Image.PreserveAspectCrop
+                                cache: true
+                                asynchronous: true
+                                layer.enabled: true
+                                layer.smooth: true
+                                Rectangle {
+                                    id: libMask
+                                    visible: false
+                                    anchors.fill: parent
+                                    radius: Constants.homeMediaCardRadius
+                                    layer.enabled: true
+                                }
+                                layer.effect: MultiEffect {
+                                    maskEnabled: true
+                                    maskSource: libMask
+                                    maskThresholdMin: 0.5
+                                    maskSpreadAtMin: 1.0
+                                }
+                            }
+                            // 底部渐变压暗 + 库名常显(与库海报 hover 显字的机制不同)。
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: Constants.homeMediaGradH
+                                radius: Constants.homeMediaCardRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.65) }
+                                }
+                            }
+                            AppText {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: Constants.homeMediaTextMargin
+                                anchors.rightMargin: Constants.homeMediaTextMargin
+                                anchors.bottomMargin: Constants.homeMediaTextBottom
+                                text: libCard.modelData.viewName
+                                color: "white"
+                                font.pixelSize: Constants.homeMediaTextPx
+                                elide: Text.ElideRight
+                            }
+                            HoverHandler {
+                                onHoveredChanged: libCard.hovered = hovered
+                            }
+                            TapHandler {
+                                onTapped: root.openLibrary(libCard.modelData.viewId,
+                                                           libCard.modelData.serverUrl,
+                                                           libCard.modelData.viewName,
+                                                           libCard.modelData.accountId)
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -257,47 +369,73 @@ Item {
         }
     }
 
-    // 库行(一个媒体库):大库海报(行首)+ 该库条目横向卡片行。
+    // 库行(一个媒体库):行头文字(库名)+ 该库条目横向卡片行。
     component LibraryRow: Column {
         id: libRow
         required property var modelData
         width: parent ? parent.width : 0
-        height: Constants.rowLibraryH + 20
-        spacing: 14
-        Row {
+        // 行高 = 行头文字 + 标题行间距 + 条目卡行(hover 溢出缓冲)。
+        height: Constants.rowTitleH + Constants.homeRowTitleGap
+                + Constants.rowHeight + Constants.homeRowHoverPad
+        // 标题贴近自身海报(下间距 < 与上一节的上间距)。
+        spacing: Constants.homeRowTitleGap
+
+        // 行头(Column 子项不可上下锚定,故包一层 Item 做水平布局):
+        // 左库名 + 右「查看全部 ›」链接(进入对应媒体库)。
+        Item {
+            height: Constants.rowTitleH
+            width: parent.width
+            AppText {
+                id: rowTitle
+                anchors.left: parent.left
+                anchors.leftMargin: Constants.rowLeftMargin
+                anchors.right: seeAllLink.left
+                anchors.rightMargin: Constants.homeRowTitlePad
+                anchors.verticalCenter: parent.verticalCenter
+                text: (libRow.modelData.serverName !== ""
+                       ? libRow.modelData.serverName + " · " : "") + libRow.modelData.viewName
+                color: Theme.textPrimary
+                font.pixelSize: Constants.homeRowTitlePx
+                font.bold: true
+                elide: Text.ElideRight
+            }
+            AppText {
+                id: seeAllLink
+                anchors.right: parent.right
+                anchors.rightMargin: Constants.rowLeftMargin
+                anchors.verticalCenter: parent.verticalCenter
+                text: "查看全部 ›"
+                color: seeAllMouse.hovered ? Constants.moePink : Theme.textMuted
+                font.pixelSize: Constants.homeSeeAllPx
+                MouseArea {
+                    id: seeAllMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openLibrary(libRow.modelData.viewId,
+                                                libRow.modelData.serverUrl,
+                                                libRow.modelData.viewName,
+                                                libRow.modelData.accountId)
+                }
+            }
+        }
+        // 条目卡片横向行(鼠标拖拽横向滚动)。
+        // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
+        // (1.06,横向溢出 4.6px)立即被裁;header 垫 8px 让首卡左缘内移,
+        // 高度 +16 容纳垂直溢出(230×1.06=243.8)。
+        Item {
             anchors.left: parent.left
             anchors.leftMargin: Constants.rowLeftMargin
-            spacing: Constants.rowSpacing
-            // 大库海报:图片 + 底部"服名 · 库名"文字。
-            RowCard {
-                modelData: libRow.modelData
-                index: -1
-                cardImage: libRow.modelData.posterId || ""
-                cardText: (libRow.modelData.serverName !== ""
-                           ? libRow.modelData.serverName + " · " : "") + libRow.modelData.viewName
-                isLibrary: true
-                cardW: Constants.rowLibraryW
-                cardH: Constants.rowLibraryH
-                anchors.verticalCenter: parent.verticalCenter
-                cardArea.onClicked: root.openLibrary(libRow.modelData.viewId,
-                                                      libRow.modelData.serverUrl,
-                                                      libRow.modelData.viewName,
-                                                      libRow.modelData.accountId)
-            }
-            // 条目卡片横向行(鼠标拖拽横向滚动)。
-            // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
-            // (1.06,横向溢出 4.6px)立即被裁;header 垫 8px 让首卡左缘内移,
-            // 高度 +16 容纳垂直溢出(230×1.06=243.8)。
-            Item {
-                width: libRow.width - Constants.rowLeftMargin - Constants.rowLibraryW - Constants.rowSpacing
-                height: Constants.rowHeight + 16
-                clip: true
+            width: libRow.width - Constants.rowLeftMargin
+            height: Constants.rowHeight + Constants.homeRowHoverPad
+            clip: true
                 ListView {
                     id: rowItems
                     anchors.fill: parent
                     orientation: ListView.Horizontal
                     spacing: Constants.rowSpacing
-                    header: Item { width: 8; height: 1 }
+                    // 首卡左缘内移(hover 放大横向溢出的一半),避免被 clip 裁切。
+                    header: Item { width: Constants.homeRowHoverPad / 2; height: 1 }
                     // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
                     reuseItems: true
                     cacheBuffer: 600
@@ -306,7 +444,7 @@ Item {
                         required property var modelData
                         required property int index
                         width: Constants.rowCardW
-                        height: Constants.rowHeight + 16
+                        height: Constants.rowHeight + Constants.homeRowHoverPad
                         z: pc.hovered ? 2 : 0
                         PosterCard {
                             id: pc
@@ -342,7 +480,6 @@ Item {
                     text: "加载中…"
                 }
             }
-        }
     }
 
     // iOS 毛玻璃容器(胶囊/圆):背景内容高斯模糊 + 半透明暗底 + 微光描边。
@@ -421,8 +558,8 @@ Item {
     component GlassCircleButton: Button {
         id: gcb
         property string iconName: ""
-        width: 42
-        height: 42
+        width: Constants.homeNavBtnSize
+        height: Constants.homeNavBtnSize
         padding: 0
         hoverEnabled: true
         background: Item {
@@ -449,109 +586,13 @@ Item {
         }
     }
 
-    // 库海报卡(大):图片 + 底部文字,点击上抛由使用方路由。
-    component RowCard: Rectangle {
-        id: rowCard
-        required property var modelData
-        required property int index
-        property string cardImage: ""
-        property string cardText: ""
-        property bool isLibrary: false
-        property bool selected: false
-        property bool hovered: false
-        property int cardW: Constants.rowCardW
-        property int cardH: Constants.rowHeight
-        property alias cardArea: cardArea
-        width: cardW
-        height: cardH
-        color: Theme.surface
-        radius: 14
-        // 大库海报图:普通 Image + MultiEffect 圆角(静态,无需溶解动画;
-        // 省去 CrossfadeImage 的双图 + 溶解每帧片元开销)。
-        Image {
-            id: rowCardImg
-            anchors.fill: parent
-            source: rowCard.cardImage !== "" ? "image://emby/" + rowCard.cardImage : ""
-            fillMode: Image.PreserveAspectCrop
-            cache: true
-            asynchronous: true
-            layer.enabled:true
-            layer.smooth:true
-            Rectangle {
-                id: rowMask
-                visible: false
-                anchors.fill: parent
-                radius: 14
-                layer.enabled: true
-            }
-            layer.effect: MultiEffect{
-                maskEnabled: true
-                maskSource: rowMask
-                maskThresholdMin: 0.5
-                maskSpreadAtMin: 1.0
-            }
-        }
-        // 底部渐变压暗:让左下角库名可读(与条目卡文字展示一致)。
-        Rectangle {
-            id: libGrad
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 48
-            radius: 14
-            visible: rowCard.cardImage !== ""
-            opacity: rowCard.hovered ? 1.0 : 0.0
-            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.60) }
-            }
-        }
-        AppText {
-            visible: rowCard.cardImage === ""
-            anchors.centerIn: parent
-            text: rowCard.cardText
-            color: Theme.textPrimary
-            font.pixelSize: 16
-            font.bold: rowCard.isLibrary
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            width: parent.width - 8
-            wrapMode: Text.Wrap
-        }
-        AppText {
-            visible: rowCard.cardImage !== ""
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.leftMargin: 12
-            anchors.rightMargin: 12
-            anchors.bottomMargin: 9
-            text: rowCard.cardText
-            color: "white"
-            font.pixelSize: 15
-            font.bold: rowCard.isLibrary
-            elide: Text.ElideRight
-            horizontalAlignment: Text.AlignLeft
-            opacity: rowCard.hovered ? 1.0 : 0.0
-            Behavior on opacity { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-        }
-        MouseArea {
-            id: cardArea
-            anchors.fill: parent
-            hoverEnabled: true
-            onEntered: rowCard.hovered = true
-            onExited: rowCard.hovered = false
-        }
-    }
-
     component HeroCard: Item {
         id: hcard
         required property var modelData
         required property int index
         width: heroCar.cardW
         height: heroCar.cardH
-        scale: PathView.onPath ? PathView.itemScale : 0.78
+        scale: PathView.onPath ? PathView.itemScale : Constants.homeHeroOffPathScale
         z: PathView.onPath ? PathView.itemZ : 0
         property real tilt: PathView.onPath ? PathView.tilt : 0
 
@@ -560,7 +601,7 @@ Item {
         Rectangle {
             id: cardContent
             anchors.fill: parent
-            radius: 16
+            radius: Constants.homeHeroRadius
             color: "transparent"
             border.width: 0
             clip: true
@@ -577,9 +618,10 @@ Item {
                     return id ? "image://emby/" + id : ""
                 }
                 fillMode: Image.PreserveAspectCrop
-                // 解码尺寸=显示尺寸×DPR,避免按 1280 固定大图浪费内存。
-                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio))
-                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio))
+                // 解码尺寸=显示尺寸×DPR,量化到 256px 步进:窗口连续缩放时避免
+                // 每帧请求重解码(异步解码间隙闪现旧图/空白 = 闪烁)。
+                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio / 256) * 256)
+                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio / 256) * 256)
                 asynchronous: true
             }
             // 底部渐变,保证右下角文字可读
@@ -605,7 +647,7 @@ Item {
                     width: parent.width
                     text: hcard.modelData.name || ""
                     color: "white"
-                    font.pixelSize: 13
+                    font.pixelSize: Constants.homeHeroTitlePx
                     font.bold: true
                     elide: Text.ElideRight
                     horizontalAlignment: Text.AlignRight
@@ -614,7 +656,7 @@ Item {
                     visible: (hcard.modelData.year || 0) > 0
                     text: hcard.modelData.year || ""
                     color: Qt.rgba(1, 1, 1, 0.9)
-                    font.pixelSize: 11
+                    font.pixelSize: Constants.homeHeroYearPx
                     horizontalAlignment: Text.AlignRight
                 }
             }
@@ -624,8 +666,9 @@ Item {
             // 2 倍超采样渲染进纹理,缩小后仍保持 1:1 以上采样密度。
             layer.enabled: true
             layer.samplerName: "src"
-            layer.textureSize: Qt.size(Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio * 2)),
-                                       Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio * 2)))
+            // 2 倍超采样,量化 128px 步进:缩放时纹理尺寸不逐帧重建(重建闪烁)。
+            layer.textureSize: Qt.size(Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio * 2 / 128) * 128),
+                                       Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio * 2 / 128) * 128))
             layer.effect: ShaderEffect {
                 property real sideTilt: hcard.tilt
                 property real w: cardContent.width
