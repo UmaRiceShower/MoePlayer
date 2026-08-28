@@ -149,10 +149,15 @@ int main(int argc, char *argv[])
     // 随 qml.qrc 布局删除。
     engine.addImageProvider(QStringLiteral("emby"), posterProvider);
 
+    QObject::connect(&app, &QGuiApplication::lastWindowClosed, &app,
+                     &QCoreApplication::quit);
+
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
                      []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
 
     engine.loadFromModule(QStringLiteral("MoePlayer.Core"), QStringLiteral("Main"));
 
-    return app.exec();
+    const int ret = app.exec();
+    mpvClient.shutdownAll();
+    std::_Exit(ret);
 }

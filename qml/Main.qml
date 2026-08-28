@@ -19,6 +19,7 @@ ApplicationWindow {
     // 主窗口关闭:外部 mpv 子进程随 MpvClient 析构一并终止,应用直接退出。
     onClosing: function (close) {
         close.accepted = true
+        Qt.quit()
     }
 
     // 通知当前页面重拉(Detail/Library 各自实现 refreshAfterPlayback)。

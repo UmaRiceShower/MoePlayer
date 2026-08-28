@@ -38,7 +38,7 @@ MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
 {
 }
 
-MpvClient::~MpvClient()
+void MpvClient::shutdownAll()
 {
     // 应用退出:终止全部 mpv 子进程(避免残留窗口/进程)。
     const auto keys = m_sessions.keys();
@@ -48,6 +48,11 @@ MpvClient::~MpvClient()
             destroySession(s, false, false);
     }
     m_sessions.clear();
+}
+
+MpvClient::~MpvClient()
+{
+    shutdownAll();
 }
 
 QString MpvClient::findMpvBinary()
