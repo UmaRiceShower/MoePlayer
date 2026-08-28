@@ -363,6 +363,11 @@ Item {
                 id: fpanelFlick
                 clip: true
                 contentHeight: fpanelCol.implicitHeight
+                // 面板内滚轮步进同页面级配置。
+                WheelStepHandler {
+                    targetItem: fpanelFlick
+                    pageStep: ConfigManager.libraryWheelStep
+                }
                 // 面板整体滚动(类型分面可上百项),上限半窗高。
                 implicitHeight: Math.min(contentHeight, Math.max(240, root.height * 0.5))
                 Column {
@@ -1292,6 +1297,11 @@ Item {
         // 复用 cell 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
         reuseItems: true
         cacheBuffer: 800
+        // 滚轮步进走配置(页级 libraryWheelStep,0=全局)。
+        WheelStepHandler {
+            targetItem: grid
+            pageStep: ConfigManager.libraryWheelStep
+        }
         // 滚动到底部且还有未加载条目时,加载下一页(Emby 单页上限 200)。
         onAtYEndChanged: {
             if (!atYEnd)
