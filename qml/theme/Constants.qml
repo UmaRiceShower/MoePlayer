@@ -83,8 +83,8 @@ QtObject {
     readonly property int homeHeroDotSizeSel: 14          // 选中圆点宽
     readonly property int homeHeroDotSpacing: 8           // 圆点间距
     readonly property int homeHeroTimerMs: 5000           // 自动轮播间隔
-    readonly property int homeHeroTitlePx: 20             // 卡右下标题字号
-    readonly property int homeHeroYearPx: 11              // 卡右下年份字号
+    readonly property int homeHeroTitlePx: 25             // 卡右下标题字号
+    readonly property int homeHeroYearPx: 16              // 卡右下年份字号
 
     // ---- 媒体库节 ----
     readonly property int homeMediaCardW: 260             // 库卡宽

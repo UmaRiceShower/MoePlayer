@@ -118,6 +118,14 @@ Item {
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true
+            // 降采样锯齿主解:mipmap 预滤波层级(原图上千像素缩到卡面
+            // 230×323,纯双线性无 mipmap 会毛边);smooth 双线性保留。
+            smooth: true
+            mipmap: true
+            // 解码尺寸与显示一致(×DPR):卡尺寸固定,不再有 1.0~1.5× 的
+            // 升/降采样错配(此前按原图全尺寸解码,缩放全由渲染器做)。
+            sourceSize.width: Math.max(1, Math.round(root.width * Screen.devicePixelRatio))
+            sourceSize.height: Math.max(1, Math.round(root.height * Screen.devicePixelRatio))
             layer.enabled: true
             layer.smooth: true
             // 圆角蒙版(Image 子项,经自身 layer 供 layer.effect 采样 alpha 裁切)。

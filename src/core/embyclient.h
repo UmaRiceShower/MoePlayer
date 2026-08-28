@@ -133,6 +133,13 @@ public:
     Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId,
                                       const QString &viewId, int limit);
+    // 拉取服务器建议(/Users/{id}/Suggestions,首页 hero 轮播数据源;结果经
+    // serverSuggestionsReceived 返回)。suggestion 由服务器按混合类型排序
+    // (继续观看/最新/热门等,不受客户端控制);失败发空列表,连同
+    // serverRequestFailed 由调用方回退本地聚合。accountId 为触发账号。
+    Q_INVOKABLE void fetchServerSuggestions(const QString &serverUrl, const QString &accountId,
+                                            const QString &token, const QString &userId,
+                                            int limit);
     // 跨服务器账密登录(不改任何状态),供 token 失效后重登。
     // 结果经 serverLoginFinished 通知。
     Q_INVOKABLE void loginFor(const QString &serverUrl, const QString &username,
@@ -198,7 +205,10 @@ signals:
     // 跨服务器拉取结果(见 fetchServer*):serverUrl 标识来源服务器。
     // 请求失败时 views/items 仍发空结果(推进调用方计数),并另发
     // serverRequestFailed 携带失败原因。
-    void serverPublicInfoReceived(const QString &serverUrl, const QString &serverName);
+    // 服务器公开信息(/System/Info/Public):version 为服务器版本,供调用方按
+    // 版本门控功能(如首页建议 4.9+ 才请求)。
+    void serverPublicInfoReceived(const QString &serverUrl, const QString &serverName,
+                                  const QString &version);
     // 服务器图标解析+下载结果(见 fetchServerIcon/downloadServerIconImage):
     // iconUrl 为原始图标 URL(供取扩展名),imageData 为图片字节(空 = 失败,
     // 由 AccountManager 落盘本地缓存,不存远程 URL)。
@@ -208,6 +218,10 @@ signals:
                              const QVariantList &views);
     void serverItemsReceived(const QString &serverUrl, const QString &accountId,
                              const QString &viewId, const QVariantList &items);
+    // 服务器建议结果(见 fetchServerSuggestions):serverUrl/accountId 归位,
+    // items 字段与首页行条目一致(id/name/type/posterId/backdropId/year 等)。
+    void serverSuggestionsReceived(const QString &serverUrl, const QString &accountId,
+                                   const QVariantList &items);
     // 服务器请求失败:message 含 "HTTP 401" 表示 token 失效,否则为网络/服务器错误。
     // 所有失败(含浏览路径)都发此信号,AccountManager 据此标失效/重登。
     void serverRequestFailed(const QString &serverUrl, const QString &message);

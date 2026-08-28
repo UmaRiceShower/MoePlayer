@@ -37,6 +37,10 @@ class AccountManager : public QObject
     // {accountId, serverUrl, serverName, viewName, posterId, items, loading}。
     // 按行增量更新(见 HomeRowsModel::setRows),只触发变化行的 delegate 重估。
     Q_PROPERTY(HomeRowsModel* homeRows READ homeRowsModel NOTIFY homeRowsReady)
+    // 服务器建议(首页 hero 轮播数据源):全部账号的建议按账号顺序展平,
+    // 每条含行条目字段 + {serverUrl, accountId}(posterId 已带服务器前缀);
+    // 逐账号到位即发 suggestionsUpdated,新数据覆盖旧数据(不等待全部)。
+    Q_PROPERTY(QVariantList suggestions READ suggestions NOTIFY suggestionsUpdated)
 public:
     explicit AccountManager(EmbyClient *client, QObject *parent = nullptr);
 
@@ -45,6 +49,7 @@ public:
     HomeRowsModel *homeRowsModel() const { return m_homeRowsModel; }
     QVariantList folders() const;
     QVariantList layoutOrder() const { return m_layoutOrder; }
+    QVariantList suggestions() const;
 
     // 是否已保存任何账号。
     Q_INVOKABLE bool hasAccounts() const;
@@ -114,6 +119,8 @@ signals:
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
     void homeRowsReady();
+    // 某个账号的服务器建议到位(见 fetchHomeRows)。
+    void suggestionsUpdated();
 
 private:
     struct AccountInfo {
@@ -199,6 +206,15 @@ private:
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
     QHash<QString, int> m_homeReqGen; // 账号 id -> 发起聚合的代次
+    // 服务器建议:账号 id -> 建议列表(带代次过滤,见 m_homeSuggReqGen)。
+    QHash<QString, QVariantList> m_homeSuggByAccount;
+    QHash<QString, int> m_homeSuggReqGen; // 账号 id -> 发起建议请求的代次
+    // 服务器版本缓存(/System/Info/Public 的 Version):首页建议按版本门控
+    // (4.9+ 的 /Suggestions 支持 IncludeItemTypes;旧版返回目录条目,跳过)。
+    QHash<QString, QString> m_serverVersion;
+    // 等待版本回执的服务器:serverUrl -> 该服等待中的账号 id 列表
+    // (版本到位后按版本决定补发建议或跳过)。
+    QHash<QString, QStringList> m_suggWaitVersion;
     QHash<QString, QVariantList> m_homeViews; // 账号 id -> 该服视图列表
     QHash<QString, QVariantMap> m_homeRowByKey; // "<账号id>|<viewId>" -> 行(含 items)
     QVariantList m_homeAccountOrder; // 本轮聚合的账号顺序快照 [{id,serverUrl,name}]

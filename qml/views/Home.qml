@@ -26,9 +26,16 @@ Item {
     signal openSettings()
     signal openSearch()
 
-    // 聚合 hero 轮播数据(继续观看优先,不足补最新添加)。
-    // TODO:接入/Suggestions和继续播放,打分选择
+    // 聚合 hero 轮播数据:优先服务器建议(/Suggestions),按建议顺序展示;
+    // 建议未到/为空时回退本地聚合(继续观看优先,不足补最新添加)。
     function rebuildTop() {
+        // 服务端已按 IncludeItemTypes=Movie,Series & ImageTypes=Backdrop 过滤
+        // (4.9+ 版本门控,旧版跳过),此处只管截断显示条数。
+        const sugOk = AccountManager.suggestions
+        if (sugOk.length > 0) {
+            root.heroItems = sugOk.slice(0, 10)
+            return
+        }
         const all = []
         const hm = AccountManager.homeRows
         for (let i = 0; i < hm.count; ++i) {
@@ -48,8 +55,8 @@ Item {
         cw.sort(function (a, b) {
             return (b.playbackDateTicks || 0) - (a.playbackDateTicks || 0)
         })
-        const cwTop = cw.slice(0, 8)
-        root.heroItems = cwTop.length > 0 ? cwTop : all.slice(0, 8)
+        const cwTop = cw.slice(0, 10)
+        root.heroItems = cwTop.length > 0 ? cwTop : all.slice(0, 10)
     }
 
     Component.onCompleted: {
@@ -63,6 +70,9 @@ Item {
     Connections {
         target: AccountManager
         function onHomeRowsReady() {
+            root.rebuildTop()
+        }
+        function onSuggestionsUpdated() {
             root.rebuildTop()
         }
     }
@@ -289,6 +299,12 @@ Item {
                                 fillMode: Image.PreserveAspectCrop
                                 cache: true
                                 asynchronous: true
+                                // 与 PosterCard 同源修复:原图全尺寸解码缩到卡面
+                                // 会毛边,解码尺寸对齐显示 + mipmap 降采样。
+                                smooth: true
+                                mipmap: true
+                                sourceSize.width: Math.max(1, Math.round(parent.width * Screen.devicePixelRatio))
+                                sourceSize.height: Math.max(1, Math.round(parent.height * Screen.devicePixelRatio))
                                 layer.enabled: true
                                 layer.smooth: true
                                 Rectangle {
@@ -600,6 +616,8 @@ Item {
         scale: PathView.onPath ? PathView.itemScale : Constants.homeHeroOffPathScale
         z: PathView.onPath ? PathView.itemZ : 0
         property real tilt: PathView.onPath ? PathView.tilt : 0
+        // 中心卡判定(容差):root 级绑定,供文字显隐。
+        readonly property bool isCenter: Math.abs(PathView.tilt) < 0.01
 
         // 卡片整体(图片 + 底部渐变 + 文字)被 ShaderEffectSource 抓取成纹理,
         // 再由 ShaderEffect 做透视映射——文字随卡片一起倾斜。
@@ -623,11 +641,19 @@ Item {
                     return id ? "image://emby/" + id : ""
                 }
                 fillMode: Image.PreserveAspectCrop
-                // 解码尺寸=显示尺寸×DPR,量化到 256px 步进:窗口连续缩放时避免
-                // 每帧请求重解码(异步解码间隙闪现旧图/空白 = 闪烁)。
-                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio / 256) * 256)
-                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio / 256) * 256)
+                // 平滑缩放:mipmap 预滤波层级,降采样(窗口缩小/解码尺寸大于
+                // 显示)比 smooth 双线性明显更少锯齿(官方:降缩放下 mipmap
+                // quality 优于 smooth,代价是初始化与渲染开销)。
+                smooth: true
+                mipmap: true
+                // 解码尺寸与显示尺寸精确一致(×DPR):量化(256px 步进)会让
+                // 解码尺寸偏离显示,窗口缩放中出现 1.0~1.5× 升采样/拉伸,
+                // 双线性放大无 mipmap 兜底 → 边缘锯齿/模糊。缩放中重解码由
+                // retainWhileLoading 保留旧纹理,避免闪烁(不再需要量化防抖)。
+                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio))
                 asynchronous: true
+                retainWhileLoading: true
             }
             // 底部渐变,保证右下角文字可读
             Rectangle {
@@ -640,29 +666,40 @@ Item {
                     GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.62) }
                 }
             }
-            // 右下角标题/年份
-            Column {
+            // 文字区(仅中心卡显示;侧卡纯图):年份靠左、标题靠右、底部平齐。
+            // 锚定只连兄弟/直接父(官方限制),故年份与标题共用一个容器 Item,
+            // 各自 anchors.left/right 到容器两侧;容器单边锚+显式 height 合法,
+            // 标题单边右锚+width 合法(elide 需要确定宽)。
+            // 判中心卡不用 isCurrentItem(实测本 PathView 恒 false),
+            // 用路径 tilt=0 + 浮点容差(吸附毫厘差不瞬间失显)。
+            Item {
+                visible: hcard.isCenter
+                anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
+                anchors.leftMargin: 12
                 anchors.rightMargin: 12
                 anchors.bottomMargin: 12
-                width: parent.width * 0.85
-                spacing: 2
+                height: titleText.height
                 AppText {
-                    width: parent.width
+                    id: yearText
+                    visible: (hcard.modelData.year || 0) > 0
+                    text: hcard.modelData.year || ""
+                    color: Qt.rgba(1, 1, 1, 0.9)
+                    font.pixelSize: Constants.homeHeroYearPx
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                }
+                AppText {
+                    id: titleText
                     text: hcard.modelData.name || ""
                     color: "white"
                     font.pixelSize: Constants.homeHeroTitlePx
                     font.bold: true
                     elide: Text.ElideRight
-                    horizontalAlignment: Text.AlignRight
-                }
-                AppText {
-                    visible: (hcard.modelData.year || 0) > 0
-                    text: hcard.modelData.year || ""
-                    color: Qt.rgba(1, 1, 1, 0.9)
-                    font.pixelSize: Constants.homeHeroYearPx
-                    horizontalAlignment: Text.AlignRight
+                    width: Math.min(implicitWidth, heroCar.cardW * 0.55)
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
                 }
             }
             // layer 效果:内容一次进 layer 纹理,effect 采样透视(无双卡)。
@@ -671,6 +708,10 @@ Item {
             // 2 倍超采样渲染进纹理,缩小后仍保持 1:1 以上采样密度。
             layer.enabled: true
             layer.samplerName: "src"
+            // 侧卡(item 级 scale 变换)的降采样发生在 layer 纹理上:双线性会
+            // 锯齿,mipmap 预滤波消除;2 倍超采样纹理本身缓解,两者叠加更干净。
+            layer.smooth: true
+            layer.mipmap: true
             // 2 倍超采样,量化 128px 步进:缩放时纹理尺寸不逐帧重建(重建闪烁)。
             layer.textureSize: Qt.size(Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio * 2 / 128) * 128),
                                        Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio * 2 / 128) * 128))

@@ -22,6 +22,8 @@ inline constexpr int kProbeTimeoutMs = 5000;
 inline constexpr int kMaxPageSize = 200;
 // 首页聚合每库条目上限。
 inline constexpr int kHomePerLibraryLimit = 20;
+// 首页 hero 服务器建议条数(每账号;全部账号展平后由 QML 再截断)。
+inline constexpr int kHomeSuggestLimit = 10;
 // 搜索返回条数上限。
 inline constexpr int kSearchLimit = 40;
 inline constexpr int kPosterMaxWidth = 320;
