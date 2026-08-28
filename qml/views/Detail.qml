@@ -44,7 +44,7 @@ Item {
     // 旧树内容快照(换字前冻结旧值,动画期间旧树显示旧文字)。
     property string heroOldTitle: ""
     property string heroOldMeta: ""
-    property string heroOldOverview: ""
+    property string heroOldEpisode: ""
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
@@ -151,7 +151,7 @@ Item {
         root.playWindowRequested({
             serverUrl: root.serverUrl,
             itemId: itemId,
-            displayName: root.heroTitle(),
+            displayName: root.heroFullTitle(),
             seriesId: seriesId,
             seriesName: seriesName
         })
@@ -408,7 +408,27 @@ Item {
 
 
     // ---- 显示辅助 ----
+    // 主标题:集时只显示剧名(集名+S*E* 另起副标题),季/剧/电影显示原名。
     function heroTitle() {
+        if (root.detail.type === "Episode")
+            return root.detail.seriesName || root.title
+        return root.detail.name || root.title
+    }
+    // 集副标题:S*E* + 集名,比主标题小一号;非集返回空。
+    function heroEpisodeLine() {
+        if (root.detail.type !== "Episode")
+            return ""
+        let t = ""
+        if (root.detail.seasonNo > 0 && root.detail.episodeNo > 0)
+            t += "S" + root.detail.seasonNo + "E" + root.detail.episodeNo
+        if (root.detail.name) {
+            if (t) t += " · "
+            t += root.detail.name
+        }
+        return t
+    }
+    // 播放用完整标题(单行):剧名 · S*E* · 集名。
+    function heroFullTitle() {
         if (root.detail.type === "Episode") {
             let t = root.detail.seriesName || root.title
             if (root.detail.seasonNo > 0 && root.detail.episodeNo > 0)
@@ -558,7 +578,7 @@ Item {
     function snapshotOldText() {
         root.heroOldTitle = root.heroTitle()
         root.heroOldMeta = root.metaLine()
-        root.heroOldOverview = root.detail.overview || ""
+        root.heroOldEpisode = root.heroEpisodeLine()
         root.textReveal = 1
         root.oldTextOpacity = 1
         root.newTextOpacity = 0
@@ -845,23 +865,20 @@ Item {
                                         }
                                     }
                                     AppText {
+                                        text: root.heroOldEpisode
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 18
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        visible: text !== ""
+                                    }
+                                    AppText {
                                         text: root.heroOldMeta
                                         color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                         font.pixelSize: 14
                                         // 显式宽 + 对齐跟随:文字区靠右时评分/
                                         // 时间行右对齐(隐式宽下对齐无效)。
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 200 } }
-                                    }
-                                    AppText {
-                                        text: root.heroOldOverview
-                                        color: Theme.textMuted
-                                        font.pixelSize: 13
-                                        wrapMode: Text.Wrap
-                                        elide: Text.ElideRight
-                                        maximumLineCount: 2
                                         width: parent.width
                                         horizontalAlignment: root.heroTextAlign
                                         opacity: text !== "" ? 1 : 0
@@ -902,21 +919,18 @@ Item {
                                         }
                                     }
                                     AppText {
+                                        text: root.heroEpisodeLine()
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 18
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                        visible: text !== ""
+                                    }
+                                    AppText {
                                         text: root.metaLine()
                                         color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
                                         font.pixelSize: 14
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 200 } }
-                                    }
-                                    AppText {
-                                        text: root.detail.overview || ""
-                                        color: Theme.textMuted
-                                        font.pixelSize: 13
-                                        wrapMode: Text.Wrap
-                                        elide: Text.ElideRight
-                                        maximumLineCount: root.detail.overview && root.detail.overview.length > 0 ? 2 : 0
                                         width: parent.width
                                         horizontalAlignment: root.heroTextAlign
                                         opacity: text !== "" ? 1 : 0
@@ -1123,6 +1137,44 @@ Item {
                                 }
                             }
                         }                    
+                    }
+
+                    // ================= 简介 =================
+                    Column {
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.detailSectionMargin
+                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
+                        spacing: 8
+                        // 空/缺失简介不显示该节。
+                        visible: !!root.detail.overview && root.detail.overview.length > 0
+                        opacity: root.textFade * visible
+                        Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                        AppText {
+                            text: "简介"
+                            color: Theme.textPrimary
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+                        // 简介文字框:同媒体信息框(略暗底 + 白字),完整显示不截断。
+                        Rectangle {
+                            id: overviewBox
+                            width: parent.width
+                            height: overviewBoxText.implicitHeight + 24
+                            radius: 12
+                            color: Qt.rgba(0, 0, 0, 0.26)
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.10)
+                            AppText {
+                                id: overviewBoxText
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                text: root.detail.overview || ""
+                                color: "white"
+                                font.pixelSize: 14
+                                wrapMode: Text.Wrap
+                            }
+                        }
                     }
 
                     // ================= 演职人员 =================
