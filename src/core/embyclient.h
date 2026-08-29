@@ -150,7 +150,9 @@ public:
     Q_INVOKABLE void fetchPlaybackInfo(const QString &serverUrl, const QString &token,
                                        const QString &userId, const QString &itemId,
                                        const QString &mediaSourceId = QString(),
-                                       const QString &seriesId = QString());
+                                       const QString &seriesId = QString(),
+                                       int audioStreamIndex = -1,
+                                       int subtitleStreamIndex = -1);
     // 条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
     Q_INVOKABLE void fetchItemDetail(const QString &serverUrl, const QString &token,
                                      const QString &userId, const QString &itemId);
