@@ -113,6 +113,14 @@ Item {
     property string pendingPlayItemId: ""
     property double resumeTicks: 0
     property bool playbackPending: false
+    // ---- 播放选项(版本/音频/字幕,Q2=B:持久选择,非一次性指令)。----
+    // 默认跟随服务器默认轨;切换版本时音轨/字幕按新源默认轨重设。
+    // 字幕 -2 = 显式关闭;-1 = 未选(用服务器默认)。
+    property string selMediaSourceId: ""
+    property int selAudioIndex: -1
+    property int selSubtitleIndex: -1
+    // 摘要行当前展开段:""/"version"/"audio"/"subtitle"(三段互斥,开新收旧)。
+    property string expandedSection: ""
     property bool _ready: false
 
     signal playWindowRequested(var meta)
@@ -158,7 +166,13 @@ Item {
             seriesName: seriesName
         })
         const c = root.creds()
-        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId, "", seriesId)
+        // 携带播放选项:版本 + 音轨/字幕轨 index。后端仅 >=0 写入请求体锁轨
+        // (转码路径);-1 未选/-2 显式关均不落请求,由后端按所选轨解析进 meta,
+        // mpv 起播后据 track-list 匹配选轨(-2 → sid no)。
+        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId,
+                                     root.selMediaSourceId, seriesId,
+                                     root.selAudioIndex,
+                                     root.selSubtitleIndex)
     }
     // 播放当前详情条目:resume 为 true 时从上次位置续播。
     function startPlayback(resume) {
@@ -271,6 +285,7 @@ Item {
     // 替换场景,文字揭示动画由 fadeInOut 自身编排)。
     function applyDetail(d, fromReplace) {
         root.detail = d
+        root.resetPlaybackSelection()
         root.isFavorite = d.isFavorite
         // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
         // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
@@ -445,6 +460,151 @@ Item {
             return t
         }
         return root.detail.name || root.title
+    }
+    // ---- 播放选项辅助:版本/音频/字幕的当前源、默认轨、标签。----
+    // 当前选中的版本对象(默认第一个,与后端"显式>第一个"一致)。
+    function selVersion() {
+        const ms = root.detail.mediaSources || []
+        if (ms.length === 0)
+            return null
+        for (let i = 0; i < ms.length; ++i) {
+            if (ms[i].id === root.selMediaSourceId)
+                return ms[i]
+        }
+        return ms[0]
+    }
+    // 当前源内按类型筛流(kind 归一:Video/Audio/Subtitle/Attachment)。
+    function streamsOfKind(kind) {
+        const v = root.selVersion()
+        const out = []
+        if (!v)
+            return out
+        const ss = v.streams || []
+        for (let i = 0; i < ss.length; ++i) {
+            if (root.streamKind(ss[i]) === kind)
+                out.push(ss[i])
+        }
+        return out
+    }
+    // 默认轨 index:优先版本级 defaultXxxStreamIndex,否则 IsDefault 标记。
+    function defaultTrackIndex(kind, versionLevel) {
+        const ss = root.streamsOfKind(kind)
+        if (versionLevel >= 0) {
+            for (let i = 0; i < ss.length; ++i) {
+                if (ss[i].index === versionLevel)
+                    return ss[i].index
+            }
+        }
+        for (let i = 0; i < ss.length; ++i) {
+            if (ss[i].isDefault)
+                return ss[i].index
+        }
+        return ss.length > 0 ? ss[0].index : -1
+    }
+    // 重置为服务器默认轨(详情落地/换版本时调用)。
+    function resetPlaybackSelection() {
+        const v = root.selVersion()
+        root.selMediaSourceId = v ? v.id : ""
+        // 有轨选服务器默认轨(具体轨);无轨回「默认」(-1,仅此时显示"默认")。
+        root.selAudioIndex = root.defaultTrackIndex("Audio", v ? (v.defaultAudioStreamIndex ?? -1) : -1)
+        root.selSubtitleIndex = root.defaultTrackIndex("Subtitle", v ? (v.defaultSubtitleStreamIndex ?? -1) : -1)
+    }
+    // 切换版本:重设该源默认轨。
+    function selectVersion(id) {
+        root.selMediaSourceId = id
+        const v = root.selVersion()
+        root.selAudioIndex = root.defaultTrackIndex("Audio", v ? (v.defaultAudioStreamIndex ?? -1) : -1)
+        root.selSubtitleIndex = root.defaultTrackIndex("Subtitle", v ? (v.defaultSubtitleStreamIndex ?? -1) : -1)
+    }
+    // 音轨标签:显示名 + 语言/声道。
+    function audioLabel(s) {
+        let t = s.displayTitle || s.title || root.codecLabel(s.codec)
+        return t
+    }
+    // 字幕标签:显示名 + 位置(内封/外挂)。
+    function subtitleLabel(s) {
+        let t = s.displayTitle || s.title || root.codecLabel(s.codec)
+        const loc = root.subtitleLocationLabel(s)
+        return loc ? t + " · " + loc : t
+    }
+    // 字幕选项:服务器字幕轨前置"关闭字幕"项(index -2 显式关)。
+    function subtitleOptions() {
+        const subs = root.streamsOfKind("Subtitle").slice()
+        subs.unshift({ index: -2, displayTitle: "关闭字幕", "_off": true })
+        return subs
+    }
+    // 音轨选项(常显):前置 关闭音轨(-2);有轨接各实际轨,无轨补「默认」(-1)。
+    function audioOptions() {
+        const out = [{ index: -2, "_off": true }]
+        const ss = root.streamsOfKind("Audio")
+        for (let i = 0; i < ss.length; ++i)
+            out.push(ss[i])
+        if (ss.length === 0)
+            out.push({ index: -1, "_def": true })
+        return out
+    }
+    // 字幕选项(常显):前置 关闭字幕(-2);有轨接各实际轨,无轨补「默认」(-1)。
+    function subtitleOptionsFull() {
+        const out = [{ index: -2, "_off": true }]
+        const ss = root.streamsOfKind("Subtitle")
+        for (let i = 0; i < ss.length; ++i)
+            out.push(ss[i])
+        if (ss.length === 0)
+            out.push({ index: -1, "_def": true })
+        return out
+    }
+    // 选项行标签:sentinel(-2 关/-1 默认)或实际轨标签。
+    function trackOptionLabel(kind, e) {
+        if (e._off)
+            return kind === "Audio" ? "关闭音轨" : "关闭字幕"
+        if (e._def)
+            return "默认"
+        return kind === "Audio" ? root.audioLabel(e) : root.subtitleLabel(e)
+    }
+    // 版本摘要副行:容器/大小/分辨率。
+    function versionSubLabel(v) {
+        if (!v)
+            return ""
+        let res = ""
+        const ss = v.streams || []
+        for (let i = 0; i < ss.length; ++i) {
+            if (root.streamKind(ss[i]) === "Video" && ss[i].height > 0) {
+                res = ss[i].height >= 2160 ? "4K" : ss[i].height + "p"
+                break
+            }
+        }
+        return [v.container ? v.container.toUpperCase() : "",
+                v.sizeBytes > 0 ? root.formatSize(v.sizeBytes) : "",
+                res].filter(function (s) { return s !== "" }).join(" · ")
+    }
+    // 当前选中摘要(三段行首行文字)。
+    function currentVersionLabel() {
+        const v = root.selVersion()
+        return v ? (v.name || "版本") : ""
+    }
+    function currentAudioLabel() {
+        if (root.selAudioIndex === -2)
+            return "关闭音轨"
+        if (root.selAudioIndex === -1)
+            return "默认"
+        const ss = root.streamsOfKind("Audio")
+        for (let i = 0; i < ss.length; ++i) {
+            if (ss[i].index === root.selAudioIndex)
+                return root.audioLabel(ss[i])
+        }
+        return "默认"
+    }
+    function currentSubtitleLabel() {
+        if (root.selSubtitleIndex === -2)
+            return "关闭字幕"
+        if (root.selSubtitleIndex === -1)
+            return "默认"
+        const ss = root.streamsOfKind("Subtitle")
+        for (let i = 0; i < ss.length; ++i) {
+            if (ss[i].index === root.selSubtitleIndex)
+                return root.subtitleLabel(ss[i])
+        }
+        return "默认"
     }
     function metaLine() {
         let parts = []
@@ -1001,7 +1161,7 @@ Item {
                             }
                             // 播放键弹性宽:锚距内放不下时压缩(下限 120 保可点)。
                             readonly property real _playW: Math.min(220, Math.max(120,
-                                parent.width - _ref - 16 - 44 - 44 - 20))
+                                parent.width - _ref - 16 - 44 - 20))
                             // 垂直:backdrop → 背景 16:9 底缘(背景高 = 宽*9/16,
                             // 与 heroBackdrop 同式);poster → 海报底对齐;
                             // text → 标题行顶(与标题对齐;标题在揭示树深处
@@ -1012,13 +1172,13 @@ Item {
                                        ? posterSlot.y + posterSlot.height - 44
                                        : textSlot.y + heroNewCol.y)
 
+
                             Row {
                                 id: btnRow
                                 // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
                                 // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
                                 // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
                                 // LayoutMirroring 只反转子项,按钮内容不镜像;
-                                // 自身无锚点,故不触发 anchors 反转。
                                 LayoutMirroring.enabled: !btnHolder._leftSide
                                 spacing: 10
                                 opacity: root.textFade
@@ -1151,6 +1311,224 @@ Item {
                         }                    
                     }
 
+                    // ================= 播放选项(版本/音频/字幕) =================
+                    // 正文流一节(Hero 与简介之间),占自有空间不与 hero 标题/播放键重叠。
+                    // 三段摘要行常显当前选中;点行弹出该行下方的下拉浮层(Popup 覆盖
+                    // 在上层,点外/Esc 自动收起)。选中存 root.sel*,点播放带入协商。
+                    Column {
+                        id: playOptsCol
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.detailSectionMargin
+                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
+                        spacing: 6
+                        visible: (root.detail.mediaSources || []).length > 0
+                        opacity: root.textFade
+
+                        // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
+                        // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
+                        component OptRow: Rectangle {
+                            id: optRow
+                            property string sectionKey: ""
+                            property string icon: ""
+                            property string mainText: ""
+                            property string subText: ""
+                            property var listModel: []
+                            property real rowWidth: 100
+                            signal picked(var entry)
+                            width: rowWidth
+                            height: subText !== "" ? 52 : 40
+                            radius: 10
+                            color: Qt.rgba(1, 1, 1, 0.04)
+                            border.width: 1
+                            border.color: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.10)
+
+                            Row {
+                                id: headRow
+                                anchors.fill: parent
+                                spacing: 10
+                                AppText {
+                                    width: 28
+                                    height: parent.height
+                                    text: optRow.icon
+                                    color: Theme.textMuted
+                                    font.pixelSize: 16
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                Column {
+                                    width: parent.width - 28 - 24 - 10 * 3
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    spacing: 2
+                                    AppText {
+                                        width: parent.width
+                                        text: optRow.mainText
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                    }
+                                    AppText {
+                                        width: parent.width
+                                        visible: optRow.subText !== ""
+                                        text: optRow.subText
+                                        color: Theme.textMuted
+                                        font.pixelSize: 11
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                AppText {
+                                    width: 24
+                                    height: parent.height
+                                    text: drop.opened ? "▴" : "▾"
+                                    color: Theme.textMuted
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: drop.opened ? drop.close() : drop.open()
+                            }
+
+                            // 下拉浮层:贴行下方弹出,覆盖在上层内容之上;
+                            // modal+CloseOnPressOutside:点行外任意处/Esc 收起;点行头 toggle。
+                            Popup {
+                                id: drop
+                                y: optRow.height + 4
+                                width: optRow.width
+                                height: Math.min(optListCol.implicitHeight + 8, 288)
+                                padding: 4
+                                // modal:true 使打开时行头 press 被 modal 消费(只关不重开),非 modal
+                                // 时 outside 事件透传行头会收起又重开。dim:false 不遮暗背景。
+                                // 代价:下拉开着时点其他行只关不切(需二次点击),属预期。
+                                modal: true
+                                dim: false
+                                focus: true
+                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                                background: Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.98)
+                                    border.width: 1
+                                    border.color: Qt.rgba(1, 1, 1, 0.12)
+                                }
+                                contentItem: Flickable {
+                                    contentWidth: width
+                                    contentHeight: optListCol.implicitHeight
+                                    clip: true
+                                    Column {
+                                        id: optListCol
+                                        width: drop.width - 8
+                                        spacing: 2
+                                        Repeater {
+                                            model: optRow.listModel
+                                            delegate: Rectangle {
+                                                id: optEntry
+                                                required property var modelData
+                                                width: optListCol.width
+                                                height: 34
+                                                radius: 8
+                                                property bool sel: modelData._sel === true
+                                                color: sel ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
+                                                           : (entryMa.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                                                Rectangle {
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 12
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    width: 8
+                                                    height: 8
+                                                    radius: 4
+                                                    color: root.accentColor
+                                                    visible: optEntry.sel
+                                                }
+                                                AppText {
+                                                    anchors.left: parent.left
+                                                    anchors.leftMargin: 28
+                                                    anchors.right: parent.right
+                                                    anchors.rightMargin: 10
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    text: optEntry.modelData._label || ""
+                                                    color: optEntry.sel ? Theme.textPrimary : Theme.textMuted
+                                                    font.pixelSize: 13
+                                                    elide: Text.ElideRight
+                                                }
+                                                MouseArea {
+                                                    id: entryMa
+                                                    anchors.fill: parent
+                                                    hoverEnabled: true
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: {
+                                                        optRow.picked(optEntry.modelData)
+                                                        drop.close()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // ---- 版本行(多版本才显示) ----
+                        OptRow {
+                            sectionKey: "version"
+                            icon: "🎞"
+                            rowWidth: playOptsCol.width
+                            visible: (root.detail.mediaSources || []).length > 0
+                            mainText: root.currentVersionLabel()
+                            subText: root.versionSubLabel(root.selVersion())
+                            listModel: {
+                                const ms = root.detail.mediaSources || []
+                                const out = []
+                                for (let i = 0; i < ms.length; ++i) {
+                                    const v = ms[i]
+                                    out.push({ id: v.id, _sel: v.id === root.selMediaSourceId,
+                                               _label: (v.name || "版本") + (root.versionSubLabel(v) !== "" ? "  ·  " + root.versionSubLabel(v) : "") })
+                                }
+                                return out
+                            }
+                            onPicked: function (entry) { root.selectVersion(entry.id) }
+                        }
+                        // ---- 音频行(当前源有音频才显示) ----
+                        OptRow {
+                            sectionKey: "audio"
+                            icon: "♪"
+                            rowWidth: playOptsCol.width
+                            visible: true
+                            mainText: root.currentAudioLabel()
+                            listModel: {
+                                const ss = root.audioOptions()
+                                const out = []
+                                for (let i = 0; i < ss.length; ++i) {
+                                    const e = ss[i]
+                                    out.push({ index: e.index, _sel: e.index === root.selAudioIndex,
+                                               _label: root.trackOptionLabel("Audio", e) })
+                                }
+                                return out
+                            }
+                            onPicked: function (entry) { root.selAudioIndex = entry.index }
+                        }
+                        // ---- 字幕行(常显;含 关闭字幕/默认/各轨) ----
+                        OptRow {
+                            sectionKey: "subtitle"
+                            icon: "󰨗"
+                            rowWidth: playOptsCol.width
+                            visible: true
+                            mainText: root.currentSubtitleLabel()
+                            listModel: {
+                                const ss = root.subtitleOptionsFull()
+                                const out = []
+                                for (let i = 0; i < ss.length; ++i) {
+                                    const e = ss[i]
+                                    out.push({ index: e.index, _sel: e.index === root.selSubtitleIndex,
+                                               _label: root.trackOptionLabel("Subtitle", e) })
+                                }
+                                return out
+                            }
+                            onPicked: function (entry) { root.selSubtitleIndex = entry.index }
+                        }
+                    }
                     // ================= 简介 =================
                     Column {
                         anchors.left: parent.left

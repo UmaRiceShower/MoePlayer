@@ -1023,7 +1023,8 @@ void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &token
 
 void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &token,
                                    const QString &userId, const QString &itemId,
-                                   const QString &mediaSourceId, const QString &seriesId)
+                                   const QString &mediaSourceId, const QString &seriesId,
+                                   int audioStreamIndex, int subtitleStreamIndex)
 {
     const QString key = serverUrl.trimmed();
     QJsonObject dp;
@@ -1059,11 +1060,17 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     body.insert(QStringLiteral("EnableDirectPlay"), true);
     body.insert(QStringLiteral("EnableDirectStream"), true);
     body.insert(QStringLiteral("EnableTranscoding"), true);
+    // UI 选择的音轨/字幕轨:>=0 时写入请求体,服务器按所选轨协商
+    // (转码路径下输出流即含所选轨);-1 表示用服务器默认轨。
+    if (audioStreamIndex >= 0)
+        body.insert(QStringLiteral("AudioStreamIndex"), audioStreamIndex);
+    if (subtitleStreamIndex >= 0)
+        body.insert(QStringLiteral("SubtitleStreamIndex"), subtitleStreamIndex);
     // 不请求 MediaSourceId,让服务器返回所有可用版本;客户端按目标 id 挑选。
     // 若带 MediaSourceId,响应 MediaSources 会被过滤,版本列表将只剩一项。
 
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
-             [this, key, token, userId, itemId, mediaSourceId, seriesId](const QJsonDocument &doc) {
+             [this, key, token, userId, itemId, mediaSourceId, seriesId, audioStreamIndex, subtitleStreamIndex](const QJsonDocument &doc) {
                  const QJsonObject o = doc.object();
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
@@ -1105,6 +1112,18 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  // 解析音轨/字幕轨。
                  QVariantList audioStreams;
                  QVariantList subtitleStreams;
+                 // 所选轨以「同类序号 ordinal」传给 mpv:track-list 内封轨顺序 ==
+                 // 容器顺序 == Emby MediaStreams 同类顺序,ordinal 跨两端稳定对应。
+                 // ★ 不依赖响应流级 IsDefault 翻转——实测(4.9.5)服务器只更新源级
+                 //   DefaultXxxStreamIndex,流级 IsDefault 保持容器原始标记。故记
+                 //   index→ordinal 映射,请求 index>=0 时按它取 ordinal,否则回退
+                 //   IsDefault 捕获(未显式选时即服务器默认轨)。
+                 int selAudioOrdinal = -1;
+                 int selSubOrdinal = -1;
+                 QString selSubUrl;
+                 QHash<int, int> audioOrdinalByIndex;   // 容器 Index → 同类 ordinal
+                 QHash<int, int> subOrdinalByIndex;
+                 QHash<int, QString> subUrlByIndex;      // 外挂字幕 Index → deliveryUrl
                  const QJsonArray streams = src.value(QLatin1String("MediaStreams")).toArray();
                  for (const QJsonValue &v : streams) {
                      const QJsonObject s = v.toObject();
@@ -1118,16 +1137,38 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      m.insert(QStringLiteral("codec"), s.value(QLatin1String("Codec")).toString());
                      m.insert(QStringLiteral("isDefault"), s.value(QLatin1String("IsDefault")).toBool());
                      m.insert(QStringLiteral("isForced"), s.value(QLatin1String("IsForced")).toBool());
+                     const int contIndex = m.value(QStringLiteral("index")).toInt();
                      if (type == QLatin1String("Audio")) {
                          m.insert(QStringLiteral("channels"), s.value(QLatin1String("Channels")).toInt());
                          m.insert(QStringLiteral("channelLayout"), s.value(QLatin1String("ChannelLayout")).toString());
+                         audioOrdinalByIndex.insert(contIndex, audioStreams.size());
+                         if (m.value(QStringLiteral("isDefault")).toBool())
+                             selAudioOrdinal = audioStreams.size(); // 默认轨兜底
                          audioStreams.append(m);
                      } else if (type == QLatin1String("Subtitle")) {
                          m.insert(QStringLiteral("isExternal"), s.value(QLatin1String("IsExternal")).toBool());
                          m.insert(QStringLiteral("deliveryUrl"), s.value(QLatin1String("DeliveryUrl")).toString());
                          m.insert(QStringLiteral("isTextSubtitleStream"), s.value(QLatin1String("IsTextSubtitleStream")).toBool());
+                         // 图形字幕(pgs/dvdsub 等非文本)在 mpv 中不计入 sid 序号。
+                         m.insert(QStringLiteral("isImageBased"),
+                                  !s.value(QLatin1String("IsTextSubtitleStream")).toBool());
+                         subOrdinalByIndex.insert(contIndex, subtitleStreams.size());
+                         if (m.value(QStringLiteral("isExternal")).toBool())
+                             subUrlByIndex.insert(contIndex, m.value(QStringLiteral("deliveryUrl")).toString());
+                         if (m.value(QStringLiteral("isDefault")).toBool()) {
+                             selSubOrdinal = subtitleStreams.size();
+                             if (m.value(QStringLiteral("isExternal")).toBool())
+                                 selSubUrl = m.value(QStringLiteral("deliveryUrl")).toString();
+                         }
                          subtitleStreams.append(m);
                      }
+                 }
+                 // 显式选择优先:按请求 index 查映射定 ordinal(覆盖 IsDefault 兜底)。
+                 if (audioStreamIndex >= 0 && audioOrdinalByIndex.contains(audioStreamIndex))
+                     selAudioOrdinal = audioOrdinalByIndex.value(audioStreamIndex);
+                 if (subtitleStreamIndex >= 0 && subOrdinalByIndex.contains(subtitleStreamIndex)) {
+                     selSubOrdinal = subOrdinalByIndex.value(subtitleStreamIndex);
+                     selSubUrl = subUrlByIndex.value(subtitleStreamIndex); // 非外挂则空
                  }
 
                  // 补全 server 前缀,并在 URL 中附带 api_key,使 mpv 拉流无需自定义请求头。
@@ -1177,6 +1218,19 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  meta.insert(QStringLiteral("playMethod"), playMethod);
                  // 回传按源路由:凭据随 meta 携带,播放窗口直接使用。
                  meta.insert(QStringLiteral("serverUrl"), key);
+                 // UI 选择的轨以「同类序号 ordinal」传入 meta:mpv track-list 内封轨
+                 // 顺序 == Emby MediaStreams 同类顺序,ordinal 跨两端稳定对应
+                 // (不依赖容器 Index/ff-index/src-id/title,转码重排/demuxer 差异
+                 // 均不受影响)。mpv file-loaded 后按 ordinal 取同类第 N 条的数字 id
+                 // 选轨。selectedSubtitleOrdinal:-2=显式关;-1=未选(服务器默认)。
+                 // 外挂字幕以 selectedSubtitleUrl 经 loadfile sub-file 挂,排内封后。
+                 // 音轨 -2=显式关(aid no);否则用解析所得 ordinal(默认/所选)。
+                 meta.insert(QStringLiteral("selectedAudioOrdinal"),
+                             audioStreamIndex == -2 ? -2 : selAudioOrdinal);
+                 meta.insert(QStringLiteral("selectedSubtitleOrdinal"),
+                             subtitleStreamIndex == -2 ? -2 : selSubOrdinal);
+                 meta.insert(QStringLiteral("selectedSubtitleUrl"),
+                             selSubUrl.isEmpty() ? selSubUrl : withApiKey(absUrl(selSubUrl)));
                  meta.insert(QStringLiteral("token"), token);
                  meta.insert(QStringLiteral("userId"), userId);
                  // 剧集信息,供播放窗口切集。

@@ -100,6 +100,9 @@ private:
     void handleEvent(Session *s, const QJsonObject &ev);
     void observe(Session *s);
     void flush(Session *s);
+    // 文件加载后按 meta 所选轨(Emby index/title/lang/codec)在 track-list
+    // 中匹配出 mpv 数字 id,set aid/sid;字幕 -2 显式关。
+    void applyTrackSelection(Session *s, const QJsonArray &trackList);
     void enqueueLoad(Session *s, const QString &url, const QVariantList &headers);
     void reportStart(Session *s);
     void reportProgress(Session *s, bool force);

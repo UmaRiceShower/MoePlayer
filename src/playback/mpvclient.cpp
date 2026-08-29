@@ -29,6 +29,8 @@ constexpr qint64 kPingMs = 600000;
 constexpr double kTicksPerSecond = 1e7;
 // ping 就绪探测的 request_id(无业务含义)。
 constexpr int kReadyRequestId = 999;
+// 查询 track-list 的 request_id(file-loaded 后发,用于所选轨匹配)。
+constexpr int kTrackListRequestId = 998;
 } // namespace
 
 MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
@@ -266,11 +268,13 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
     if (pe.error != QJsonParseError::NoError || !doc.isObject())
         return;
     const QJsonObject obj = doc.object();
-
     if (obj.contains(QStringLiteral("request_id"))) {
-        if (obj.value(QStringLiteral("request_id")).toInt() == kReadyRequestId) {
+        const int rid = obj.value(QStringLiteral("request_id")).toInt();
+        if (rid == kReadyRequestId) {
             s->ready = true;
             flush(s);
+        } else if (rid == kTrackListRequestId) {
+            applyTrackSelection(s, obj.value(QStringLiteral("data")).toArray());
         }
         return;
     }
@@ -309,6 +313,14 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                            QStringLiteral("absolute")}},
                             });
         }
+        // 文件就绪后查 track-list,匹配 Emby 所选轨(标题/语言/编码/序号)
+        // 得到 mpv 数字 id 再 set aid/sid(aid/sid 仅接受数字 id)。
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("get_property"),
+                                    QStringLiteral("track-list")}},
+                        {QStringLiteral("request_id"), kTrackListRequestId},
+                    });
         emit playbackStarted(s->key);
         return;
     }
@@ -357,11 +369,31 @@ void MpvClient::flush(Session *s)
                                         fields.join(QLatin1Char(','))}},
                         });
         }
-        sendJson(s, QJsonObject{
-                        {QStringLiteral("command"),
-                         QJsonArray{QStringLiteral("loadfile"), s->url,
-                                    QStringLiteral("replace")}},
-                    });
+        // 外挂字幕:随 loadfile 第 4 参 options 挂 sub-file(文件加载时生效,
+        // 避免 loadfile 前 sub-add 无文件可挂)。官方:第 3 参是 insertion
+        // index,用第 4 参时必须占位 -1(mpv 0.38+);options 经 IPC 为
+        // MPV_FORMAT_NODE_MAP,值须为字符串。无字幕时省略 index/options 传 3 参。
+        // 加载后由 applyTrackSelection 按 ordinal 取 track-list 数字 id 选中。
+        const QString subUrl =
+            s->meta.value(QStringLiteral("selectedSubtitleUrl")).toString();
+        const int subOrd =
+            s->meta.contains(QStringLiteral("selectedSubtitleOrdinal"))
+                ? s->meta.value(QStringLiteral("selectedSubtitleOrdinal")).toInt() : -1;
+        if (subOrd >= 0 && !subUrl.isEmpty()) {
+            QJsonObject loadOpts;
+            loadOpts.insert(QStringLiteral("sub-file"), subUrl);
+            sendJson(s, QJsonObject{
+                            {QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("loadfile"), s->url,
+                                        QStringLiteral("replace"), -1, loadOpts}},
+                        });
+        } else {
+            sendJson(s, QJsonObject{
+                            {QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("loadfile"), s->url,
+                                        QStringLiteral("replace")}},
+                        });
+        }
         s->loadIssued = true;
     }
 }
@@ -406,6 +438,67 @@ void MpvClient::reportStart(Session *s)
                 });
         s->pingTimer->start();
     }
+}
+
+// 文件加载后按所选轨选 mpv 数字 id。
+// 不依赖容器 Index/ff-index/src-id/title,转码重排/demuxer 差异均不影响。
+void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
+{
+    if (trackList.isEmpty())
+        return;
+    // QVariant::toInt 无默认参数(QJsonValue::toInt 才有);缺失键回退 -1。
+    const auto metaInt = [&](const char *k) -> int {
+        const QString key = QString::fromUtf8(k);
+        return s->meta.contains(key) ? s->meta.value(key).toInt() : -1;
+    };
+
+    // 字幕显式关闭(-2):直接 sid no。
+    const int subOrdinal = metaInt("selectedSubtitleOrdinal");
+    if (subOrdinal == -2) {
+        sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("set_property"),
+                                            QStringLiteral("sid"),
+                                            QStringLiteral("no")}}});
+    }
+
+    // 取某类型("audio"/"sub")同类第 ordinal 条的 mpv 数字 id。
+    // 外挂字幕(external=true)经 sub-file 挂上,在 track-list 中排内封后,
+    // 与详情页「内封+外挂」的 ordinal 序列一致。
+    const auto idAtOrdinal = [&](const QString &type, int ordinal) -> int {
+        if (ordinal < 0)
+            return -1;
+        int n = 0;
+        for (const QJsonValue &v : trackList) {
+            const QJsonObject t = v.toObject();
+            if (t.value(QStringLiteral("type")).toString() != type)
+                continue;
+            if (n == ordinal)
+                return t.value(QStringLiteral("id")).toInt(-1);
+            ++n;
+        }
+        return -1;
+    };
+
+    const int audioOrdinal = metaInt("selectedAudioOrdinal");
+    // 音轨显式关闭(-2):aid no;否则按 ordinal 选(>=0 才有目标)。
+    if (audioOrdinal == -2)
+        sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("set_property"),
+                                            QStringLiteral("aid"),
+                                            QStringLiteral("no")}}});
+    const int wantAid = audioOrdinal >= 0 ? idAtOrdinal(QStringLiteral("audio"), audioOrdinal) : -1;
+    const int wantSid = subOrdinal == -2 ? -1
+                                         : idAtOrdinal(QStringLiteral("sub"), subOrdinal);
+    if (wantAid >= 0)
+        sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("set_property"),
+                                            QStringLiteral("aid"),
+                                            QString::number(wantAid)}}});
+    if (wantSid >= 0)
+        sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("set_property"),
+                                            QStringLiteral("sid"),
+                                            QString::number(wantSid)}}});
 }
 
 void MpvClient::reportProgress(Session *s, bool force)
