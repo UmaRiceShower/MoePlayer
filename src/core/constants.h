@@ -26,9 +26,11 @@ inline constexpr int kHomePerLibraryLimit = 20;
 inline constexpr int kHomeSuggestLimit = 10;
 // 搜索返回条数上限。
 inline constexpr int kSearchLimit = 40;
-inline constexpr int kPosterMaxWidth = 320;
-// 背景图(Backdrop)取图宽度:Hero 全宽背景需要大图。
-inline constexpr int kBackdropMaxWidth = 1920;
+// 图片请求固定厚档(服务器端缩放并缓存缩略图;与显示尺寸解耦,URL 恒定
+// 窗口缩放不重拉;客户端 sourceSize 负责显示缩放)。海报/缩略图 512,
+// 背景(Backdrop)1600。
+inline constexpr int kPosterMaxWidth = 512;
+inline constexpr int kBackdropMaxWidth = 1600;
 // Emby 时间单位:100ns ticks 换算秒。
 inline constexpr double kTicksPerSecond = 1e7;
 // 列表请求 Fields:已看/进度/收藏/未看集数/评分/年份随列表返回,零额外请求。
