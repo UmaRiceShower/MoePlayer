@@ -99,44 +99,84 @@ Item {
             anchors.rightMargin: Constants.homeNavMarginR
             anchors.verticalCenter: parent.verticalCenter
             spacing: Constants.homeNavSpacing
-            GlassBar {
+            FrostedGlass {
                 width: Constants.homeNavBtnSize
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                thickness: 22
+                ior: 1.5
+                frostAmount: 0.35
+                edgeLight: 0.55
+                saturation: 0.4
+                blurRadius: 5
+                sampleMargin: 48
+                elevation: 4
+                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
+                borderColor: Qt.rgba(1, 1, 1, 0.32)
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "search"
                     onClicked: root.openSearch()
                 }
             }
-            GlassBar {
+            FrostedGlass {
                 width: Constants.homeNavBtnSize
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                thickness: 22
+                ior: 1.5
+                frostAmount: 0.35
+                edgeLight: 0.55
+                saturation: 0.4
+                blurRadius: 5
+                sampleMargin: 48
+                elevation: 4
+                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
+                borderColor: Qt.rgba(1, 1, 1, 0.32)
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "history"
                     // 播放历史页未做,点击暂不响应
                 }
             }
-            GlassBar {
+            FrostedGlass {
                 width: Constants.homeNavBtnSize
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                thickness: 22
+                ior: 1.5
+                frostAmount: 0.35
+                edgeLight: 0.55
+                saturation: 0.4
+                blurRadius: 5
+                sampleMargin: 48
+                elevation: 4
+                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
+                borderColor: Qt.rgba(1, 1, 1, 0.32)
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "server"
                     onClicked: root.openServerManager()
                 }
             }
-            GlassBar {
+            FrostedGlass {
                 width: Constants.homeNavBtnSize
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                thickness: 22
+                ior: 1.5
+                frostAmount: 0.35
+                edgeLight: 0.55
+                saturation: 0.4
+                blurRadius: 5
+                sampleMargin: 48
+                elevation: 4
+                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
+                borderColor: Qt.rgba(1, 1, 1, 0.32)
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "settings"
@@ -370,6 +410,7 @@ Item {
             width: ListView.view.width
         }
     }
+
 
     // 未登录提示条:无账号时提供服务器管理入口。
     Rectangle {

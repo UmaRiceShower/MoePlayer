@@ -64,6 +64,7 @@ qt_add_qml_module(MoePlayer
         qml/theme/CrossfadeImage.qml
         qml/theme/MoeBackground.qml
         qml/theme/GlassPanel.qml
+        qml/theme/FrostedGlass.qml
         qml/theme/BokehOrb.qml
         qml/views/Home.qml
         qml/views/Library.qml
@@ -88,6 +89,7 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     FILES shaders/aurora.frag
           shaders/crossfade.frag
           shaders/episode-fade.frag
+          shaders/glass-refract.frag
           shaders/hero-fade.frag
           shaders/hero.vert
           shaders/hero.frag
