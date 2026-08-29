@@ -1372,10 +1372,10 @@ Item {
                             // 摘要行玻璃:采样 detailBg(页面底色+hero,无自采样),
                             // 透出背景 + 选中时 accent 描边。
                             blurSource: detailBg
-                                scrollSource: overview
+                                scrollParent: overview
                             glassColor: Qt.rgba(1, 1, 1, 0.06)
                             borderColor: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.15)
-                            thickness: 16
+                            thickness: 0
                             frostAmount: 0.45
                             edgeLight: 0.4
                             saturation: 0.3
@@ -1594,10 +1594,10 @@ Item {
                             height: overviewBoxText.implicitHeight + 24
                             radius: 12
                             blurSource: detailBg
-                                scrollSource: overview
+                                scrollParent: overview
                             glassColor: Qt.rgba(0, 0, 0, 0.20)
                             borderColor: Qt.rgba(1, 1, 1, 0.12)
-                            thickness: 18
+                            thickness: 0
                             frostAmount: 0.5
                             edgeLight: 0.35
                             saturation: 0.3
@@ -1750,10 +1750,10 @@ Item {
                                 radius: 12
                                 // 媒体信息卡玻璃:透出背景,微折射。
                                 blurSource: detailBg
-                                scrollSource: overview
+                                scrollParent: overview
                                 glassColor: Qt.rgba(1, 1, 1, 0.05)
                                 borderColor: Qt.rgba(1, 1, 1, 0.12)
-                                thickness: 18
+                                thickness: 0
                                 frostAmount: 0.45
                                 edgeLight: 0.35
                                 saturation: 0.3
