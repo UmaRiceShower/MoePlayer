@@ -88,29 +88,31 @@ void main() {
     // ---- 参考2 精确模型:SDF 屏幕导数法线 + cos 高度剖面 + (h+base)/-z 折射 ----
     // 隆起带 = 到边缘的绝对像素距离 ∈ [-thickness, 0]:当 thickness ≥ 短边一半,
     // 整个截面都隆起(参考2 size.y=0 的效果——整条都是弧面,无平面中心)。
-    vec3 normal = glassNormal(d, u_thickness);
-    vec3 incident = vec3(0.0, 0.0, -1.0);
-
-    // Snell 折射。
-    vec3 refr = refract(incident, normal, 1.0 / u_ior);
-    if (dot(refr, refr) < 1e-6)
-        refr = vec3(normal.xy, -normal.z);
-
-    // 折射长度(参考2 精确式):(隆起高 + 基准高) / 折射向量 -z 分量。
-    // 隆起高 cos 剖面:中心(d≤-thickness)满厚,边缘(d→0)降 0。
-    float h = glassHeight(d, u_thickness);
-    float base_h = u_thickness * 8.0;          // 参考2:base = thickness*8
-    float rz = max(0.05, -refr.z);
-    float refractLen = (h + base_h) / rz;
-
-    // 折射命中点(控件像素):fragCoord 等价 = px+half_;折射向量 xy × 长度。
-    // 边缘法线外倾 → 采样点外移 → 背景被压向中心(凸透镜放大感)。
-    vec2 hitPx = px + half_ + refr.xy * refractLen;
-    vec2 ruv = toTexUV(hitPx);
+    // thickness ≤ 0 = 纯磨砂(无折射):法线 +z、不折射,采样原地;只留模糊。
+    // thickness > 0 = 凸透镜折射(SDF 法线 + Snell + 厚度变倍率)。
+    vec3 normal = vec3(0.0, 0.0, 1.0);
+    vec2 ruv = toTexUV(px + half_);
+    float reflW = 0.0;
+    if (u_thickness > 0.5) {
+        normal = glassNormal(d, u_thickness);
+        vec3 incident = vec3(0.0, 0.0, -1.0);
+        // Snell 折射。
+        vec3 refr = refract(incident, normal, 1.0 / u_ior);
+        if (dot(refr, refr) < 1e-6)
+            refr = vec3(normal.xy, -normal.z);
+        // 折射长度:(隆起高 + 基准高) / 折射向量 -z 分量。
+        float h = glassHeight(d, u_thickness);
+        float base_h = u_thickness * 8.0;
+        float rz = max(0.05, -refr.z);
+        float refractLen = (h + base_h) / rz;
+        // 折射命中点(控件像素):边缘法线外倾 → 采样点外移(凸透镜放大感)。
+        vec2 hitPx = px + half_ + refr.xy * refractLen;
+        ruv = toTexUV(hitPx);
+        reflW = clamp((1.0 - normal.z) * 2.0, 0.0, 1.0);
+    }
     vec4 sharp = texture(source, ruv);
 
-    // 反射项:边缘法线平时混入。
-    float reflW = clamp((1.0 - normal.z) * 2.0, 0.0, 1.0);
+    // 反射项已在上方折射分支内计算(reflW,纯磨砂时为 0)。
 
     // 磨砂:清晰折射与模糊按 frost 混合。
     vec4 blurred = blurSample(ruv, u_blurRadius);
