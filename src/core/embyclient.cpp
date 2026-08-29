@@ -1149,9 +1149,6 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                          m.insert(QStringLiteral("isExternal"), s.value(QLatin1String("IsExternal")).toBool());
                          m.insert(QStringLiteral("deliveryUrl"), s.value(QLatin1String("DeliveryUrl")).toString());
                          m.insert(QStringLiteral("isTextSubtitleStream"), s.value(QLatin1String("IsTextSubtitleStream")).toBool());
-                         // 图形字幕(pgs/dvdsub 等非文本)在 mpv 中不计入 sid 序号。
-                         m.insert(QStringLiteral("isImageBased"),
-                                  !s.value(QLatin1String("IsTextSubtitleStream")).toBool());
                          subOrdinalByIndex.insert(contIndex, subtitleStreams.size());
                          if (m.value(QStringLiteral("isExternal")).toBool())
                              subUrlByIndex.insert(contIndex, m.value(QStringLiteral("deliveryUrl")).toString());

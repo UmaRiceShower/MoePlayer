@@ -527,12 +527,6 @@ Item {
         const loc = root.subtitleLocationLabel(s)
         return loc ? t + " · " + loc : t
     }
-    // 字幕选项:服务器字幕轨前置"关闭字幕"项(index -2 显式关)。
-    function subtitleOptions() {
-        const subs = root.streamsOfKind("Subtitle").slice()
-        subs.unshift({ index: -2, displayTitle: "关闭字幕", "_off": true })
-        return subs
-    }
     // 音轨选项(常显):前置 关闭音轨(-2);有轨接各实际轨,无轨补「默认」(-1)。
     function audioOptions() {
         const out = [{ index: -2, "_off": true }]
@@ -804,7 +798,10 @@ Item {
     }
 
 
+    // 页面底色 + Hero 背景:正文玻璃控件的采样源(在 overview 之下,不含
+    // 正文控件 → 无自采样)。
     Rectangle {
+        id: detailBg
         anchors.fill: parent
         color: Theme.bg
 
@@ -1191,10 +1188,20 @@ Item {
                                     height: 44
                                     font.pixelSize: 16
                                     onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
-                                    background: Rectangle {
+                                    background: FrostedGlass {
                                         radius: height / 2
-                                        color: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                    root.accentColor.b, 0.85)
+                                        blurSource: heroBackdrop
+                                        // 主按钮:accent 色调玻璃(透出背景 + 主题色),边缘隆起折射。
+                                        glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                           root.accentColor.b, 0.45)
+                                        borderColor: Qt.rgba(1, 1, 1, 0.30)
+                                        thickness: 20
+                                        frostAmount: 0.4
+                                        edgeLight: 0.5
+                                        saturation: 0.4
+                                        blurRadius: 6
+                                        sampleMargin: 48
+                                        elevation: 6
                                     }
                                     contentItem: AppText {
                                         text: playBtn.text
@@ -1210,12 +1217,20 @@ Item {
                                     width: 44
                                     height: 44
                                     onClicked: root.toggleFavorite()
-                                    background: Rectangle {
+                                    background: FrostedGlass {
                                         radius: height / 2
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                    root.complementColor.b, 0.28)
-                                        border.width: 1
-                                        border.color: root.complementColor
+                                        blurSource: heroBackdrop
+                                        // 次要按钮:complement 色调玻璃,透出背景折射。
+                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                           root.complementColor.b, 0.30)
+                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                        thickness: 20
+                                        frostAmount: 0.4
+                                        edgeLight: 0.5
+                                        saturation: 0.4
+                                        blurRadius: 6
+                                        sampleMargin: 48
+                                        elevation: 5
                                     }
                                     contentItem: Item {
                                         anchors.fill: parent
@@ -1249,12 +1264,20 @@ Item {
                                     width: 44
                                     height: 44
                                     onClicked: root.toggleWatched()
-                                    background: Rectangle {
+                                    background: FrostedGlass {
                                         radius: height / 2
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                    root.complementColor.b, 0.28)
-                                        border.width: 1
-                                        border.color: root.complementColor
+                                        blurSource: heroBackdrop
+                                        // 次要按钮:complement 色调玻璃,透出背景折射。
+                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                           root.complementColor.b, 0.30)
+                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                        thickness: 20
+                                        frostAmount: 0.4
+                                        edgeLight: 0.5
+                                        saturation: 0.4
+                                        blurRadius: 6
+                                        sampleMargin: 48
+                                        elevation: 5
                                     }
                                     contentItem: Item {
                                         anchors.fill: parent
@@ -1292,12 +1315,20 @@ Item {
                                     width: 110
                                     height: 44
                                     onClicked: root.startPlayback(false)
-                                    background: Rectangle {
+                                    background: FrostedGlass {
                                         radius: height / 2
-                                        color: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                    root.complementColor.b, 0.28)
-                                        border.width: 1
-                                        border.color: root.complementColor
+                                        blurSource: heroBackdrop
+                                        // 次要按钮:complement 色调玻璃,透出背景折射。
+                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                           root.complementColor.b, 0.30)
+                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                        thickness: 20
+                                        frostAmount: 0.4
+                                        edgeLight: 0.5
+                                        saturation: 0.4
+                                        blurRadius: 6
+                                        sampleMargin: 48
+                                        elevation: 5
                                     }
                                     contentItem: AppText {
                                         text: replayBtn.text
@@ -1326,7 +1357,7 @@ Item {
 
                         // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
                         // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
-                        component OptRow: Rectangle {
+                        component OptRow: FrostedGlass {
                             id: optRow
                             property string sectionKey: ""
                             property string icon: ""
@@ -1338,9 +1369,19 @@ Item {
                             width: rowWidth
                             height: subText !== "" ? 52 : 40
                             radius: 10
-                            color: Qt.rgba(1, 1, 1, 0.04)
-                            border.width: 1
-                            border.color: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.10)
+                            // 摘要行玻璃:采样 detailBg(页面底色+hero,无自采样),
+                            // 透出背景 + 选中时 accent 描边。
+                            blurSource: detailBg
+                                scrollSource: overview
+                            glassColor: Qt.rgba(1, 1, 1, 0.06)
+                            borderColor: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.15)
+                            thickness: 16
+                            frostAmount: 0.45
+                            edgeLight: 0.4
+                            saturation: 0.3
+                            blurRadius: 5
+                            sampleMargin: 32
+                            elevation: 3
 
                             Row {
                                 id: headRow
@@ -1546,15 +1587,23 @@ Item {
                             font.pixelSize: 18
                             font.bold: true
                         }
-                        // 简介文字框:同媒体信息框(略暗底 + 白字),完整显示不截断。
-                        Rectangle {
+                        // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
+                        FrostedGlass {
                             id: overviewBox
                             width: parent.width
                             height: overviewBoxText.implicitHeight + 24
                             radius: 12
-                            color: Qt.rgba(0, 0, 0, 0.26)
-                            border.width: 1
-                            border.color: Qt.rgba(1, 1, 1, 0.10)
+                            blurSource: detailBg
+                                scrollSource: overview
+                            glassColor: Qt.rgba(0, 0, 0, 0.20)
+                            borderColor: Qt.rgba(1, 1, 1, 0.12)
+                            thickness: 18
+                            frostAmount: 0.5
+                            edgeLight: 0.35
+                            saturation: 0.3
+                            blurRadius: 6
+                            sampleMargin: 32
+                            elevation: 3
                             AppText {
                                 id: overviewBoxText
                                 anchors.fill: parent
@@ -1691,7 +1740,7 @@ Item {
                         Repeater {
                             model: root.detail.mediaSources
                             // 每版本一整块:头部版本名+徽章,下方流卡片横排。
-                            delegate: Rectangle {
+                            delegate: FrostedGlass {
                                 id: verBlock
                                 required property var modelData
                                 required property int index
@@ -1699,9 +1748,18 @@ Item {
                                 width: parent ? parent.width : 0
                                 height: verCol.implicitHeight + 28
                                 radius: 12
-                                color: Qt.rgba(1, 1, 1, 0.04)
-                                border.width: 1
-                                border.color: Qt.rgba(1, 1, 1, 0.10)
+                                // 媒体信息卡玻璃:透出背景,微折射。
+                                blurSource: detailBg
+                                scrollSource: overview
+                                glassColor: Qt.rgba(1, 1, 1, 0.05)
+                                borderColor: Qt.rgba(1, 1, 1, 0.12)
+                                thickness: 18
+                                frostAmount: 0.45
+                                edgeLight: 0.35
+                                saturation: 0.3
+                                blurRadius: 6
+                                sampleMargin: 32
+                                elevation: 3
 
                                 // 本版本视频流(头部徽章取分辨率/动态范围)。
                                 readonly property var videoStream: {
