@@ -166,11 +166,15 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                               const QSize &requestedSize)
 {
     Q_UNUSED(requestedSize)
-    // 直接请求原图(不带 maxWidth);缩放全部在客户端 sourceSize 解码完成。
-    // URL 恒定(id/tag/kind 固定)→ 网络缓存命中,窗口缩放不重新请求
-    // (此前 maxWidth 随档位变化,跨档即重拉致空图/闪烁)。
+    // 固定厚档请求(服务器缩放并缓存缩略图,Emby 官方"web 客户端"行为):
+    // 海报/缩略图 512、背景 1600(kind 上限常量)。与显示尺寸解耦——
+    // URL 恒定,窗口缩放不重拉;客户端 sourceSize 负责显示缩放。
+    // 较原图请求省流量与本地/服务器缓存空间。
     // URL 不含 api_key,重登换 token 不失效;认证经请求头。
     QUrlQuery q;
+    const int kindMax = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
+                                                          : MoePlayer::kPosterMaxWidth;
+    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(kindMax));
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
     return QUrl(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")
