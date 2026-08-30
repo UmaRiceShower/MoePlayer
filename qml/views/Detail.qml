@@ -2273,22 +2273,14 @@ Item {
                     id: episodeItem
                     // 同上:required 声明识别 C++ 模型角色。
                     required property var model
+                    // 详情/播放中的当前集:选中态(莫奈边框/白色标题)。
+                    readonly property bool selected: model.id === root.itemId
                     width: episodeList.width
                     height: Constants.detailEpisodeRowH
                     // hover 放大(基础样式)
                     scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
                     Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
 
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 6
-                        color: episodeItem.model.id === root.itemId
-                               ? Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                         root.accentColor.b, 0.75)
-                               : (episodeHover.hovered || ListView.isCurrentItem) ? root.surfaceTint
-                               : "transparent"
-                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
-                    }
                     // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方)。
                     // 缩略图高 = 行高 - 上下外边距 - 列间距 - 集名行高,总高恒填满行。
                     Column {
@@ -2318,12 +2310,26 @@ Item {
                                 duration: 500
                                 cache: true
                             }
+                            // 选中/悬停边框:透明覆盖层(同尺寸描边)。border 画在
+                            // 矩形自身边缘内侧,会被平铺的缩略图子项盖住,故置于
+                            // 图片之上;选中常显莫奈色,hover 放大 + 变浅。
+                            Rectangle {
+                                anchors.fill: parent
+                                radius: 18
+                                color: "transparent"
+                                border.width: (episodeItem.selected || episodeHover.hovered) ? 2 : 0
+                                border.color: episodeItem.selected && !episodeHover.hovered
+                                              ? root.accentColor
+                                              : Qt.lighter(root.accentColor, 1.35)
+                                Behavior on border.width { NumberAnimation { duration: Constants.animMinMs } }
+                                Behavior on border.color { ColorAnimation { duration: Constants.animMinMs } }
+                            }
                             // 无海报且无父级背景(都拿不到图)或加载失败回退:Canvas 播放图标。
                             Canvas {
                                 anchors.centerIn: parent
                                 width: 28
                                 height: 28
-                                property color iconColor: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
+                                property color iconColor: episodeItem.selected ? "white" : Theme.textMuted
                                 onIconColorChanged: requestPaint()
                                 visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
                                           || thumb.status === Image.Error
@@ -2401,7 +2407,7 @@ Item {
                             id: episodeTitle
                             width: thumbBox.width
                             text: episodeItem.model.name
-                            color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
+                            color: episodeItem.selected ? "white" : Theme.textPrimary
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             elide: Text.ElideRight
