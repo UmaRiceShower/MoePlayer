@@ -122,7 +122,6 @@ Item {
     // 摘要行当前展开段:""/"version"/"audio"/"subtitle"(三段互斥,开新收旧)。
     property string expandedSection: ""
     property bool _ready: false
-
     signal playWindowRequested(var meta)
     signal playbackDelivered(string url, var headers, var meta)
     signal playbackFailed(string itemId, string message)
@@ -870,1543 +869,6 @@ Item {
             }
         }
 
-        Row {
-            anchors.fill: parent
-            visible: root.loaded
-            z: 2
-            // 选季栏左/右:只镜像本 positioner 的子项顺序(官方 RTL 机制,
-            // 不 childrenInherit,overview/sidebar 内部布局不受影响)。
-            LayoutMirroring.enabled: ConfigManager.detailSidebarLeft
-
-            // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
-            Flickable {
-                id: overview
-                width: parent.width - (sidebar.visible ? Constants.detailSidebarW : 0)
-                height: parent.height
-                clip: true
-                contentHeight: overviewColumn.implicitHeight
-                // 滚轮步进走配置(页级 detailWheelStep,0=全局)。
-                WheelStepHandler {
-                    targetItem: overview
-                    pageStep: ConfigManager.detailWheelStep
-                }
-
-                Column {
-                    id: overviewColumn
-                    width: parent.width
-
-                    // ================= Hero =================
-                    Item {
-                        id: heroItem
-                        width: parent.width
-                        // 内容区与背景图同高(16:9 随窗口):bottom-* 位置即
-                        // 背景图底部,海报/文字/按钮相对背景图定位成立。
-                        height: root.width * 9 / 16
-                        // ===== 定位代理(slot):三个槽各自用 states +
-                        // AnchorChanges(官方推荐的条件锚切换机制,自动处理
-                        // 解锚/设锚顺序,免手动坐标计算)。poster/text 槽按
-                        // 9 宫格锚定,参考 heroItem 内容区(背景图 heroBackdrop
-                        // 在槽的祖父级,Qt 锚仅限兄弟/直接父项,故以 heroItem
-                        // 为参考——右侧位置天然避开选集栏);按钮槽按
-                        // poster/text/backdrop 三模式。=====
-
-                        // 海报槽:posterPos 9 宫格(边距 32/24)。AnchorChanges
-                        // 只支持锚线(margin 属性不存在),边距走槽上的普通
-                        // 绑定——仅对应边被锚定时生效,其余态惰性。
-                        Item {
-                            id: posterSlot
-                            width: Constants.detailPosterW
-                            height: Constants.detailPosterH
-                            anchors.leftMargin: 32
-                            anchors.rightMargin: 32
-                            anchors.topMargin: 24
-                            anchors.bottomMargin: 24
-                            state: ConfigManager.detailPosterPos
-                            states: [
-                                State { name: "top-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
-                                State { name: "top-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
-                                State { name: "top-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
-                                State { name: "middle-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "middle-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "middle-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "bottom-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
-                                State { name: "bottom-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
-                                State { name: "bottom-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } }
-                            ]
-                        }
-                        // 文字槽:textPos 9 宫格(相对 heroItem,边距 32/24);
-                        // followPoster → 跟随海报:水平贴海报外侧(海报左/中 →
-                        // 右侧,海报右 → 左侧,边距 24),垂直底缘对齐海报底
-                        // (按钮组跟随海报时上缩 60 避让)。边距绑定实时算。
-                        Item {
-                            id: textSlot
-                            width: ConfigManager.detailTextWidth
-                            height: ConfigManager.detailTextHeight
-                            anchors.leftMargin: ConfigManager.detailTextPos === "followPoster"
-                                                 && root.textSide() !== "right" ? 24 : 32
-                            anchors.rightMargin: ConfigManager.detailTextPos === "followPoster"
-                                                  && root.textSide() === "right" ? 24 : 32
-                            anchors.topMargin: 24
-                            anchors.bottomMargin: ConfigManager.detailTextPos === "followPoster"
-                                                   && ConfigManager.detailButtonsPos === "poster" ? 60 : 24
-                            state: {
-                                const t = ConfigManager.detailTextPos
-                                if (t !== "followPoster")
-                                    return t
-                                return "follow-" + (root.posterSide() === "right" ? "right" : "left")
-                            }
-                            states: [
-                                State { name: "top-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
-                                State { name: "top-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
-                                State { name: "top-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
-                                State { name: "middle-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "middle-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "middle-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
-                                State { name: "bottom-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
-                                State { name: "bottom-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
-                                State { name: "bottom-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } },
-                                State { name: "follow-left"; AnchorChanges { target: textSlot; anchors.left: posterSlot.right; anchors.bottom: posterSlot.bottom } },
-                                State { name: "follow-right"; AnchorChanges { target: textSlot; anchors.right: posterSlot.left; anchors.bottom: posterSlot.bottom } }
-                            ]
-                        }
-                        // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
-                        // 决定,内容不再计算坐标)。
-                        Rectangle {
-                            width: Constants.detailPosterW
-                            height: Constants.detailPosterH
-                            color: root.surfaceTint
-                            radius: 18
-                            clip: true
-                            anchors.fill: posterSlot
-                            CrossfadeImage {
-                                id: posterFx
-                                anchors.fill: parent
-                                // 圆角在绘制层裁切(Item::clip 只裁矩形)。
-                                cornerRadius: 18
-                                source: root.heroPosterSource()
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                                duration: 800
-                            }
-                        }
-
-                        // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
-                        // 全部由 textSlot 决定(静态锚定,判断在槽内)。
-                        Item {
-                            id: heroTextArea
-                            anchors.fill: textSlot
-
-                            Item {
-                                id: heroOldTree
-                                anchors.right: heroTextArea.right
-                                width: heroTextArea.width * root.textReveal
-                                // Item 的 implicitHeight 默认 0(不随子项传播),
-                                // 显式取列高,否则 clip 后文字被裁没。
-                                height: heroTextArea.height
-                                clip: true
-                                opacity: root.oldTextOpacity
-                                visible: root.oldTextOpacity > 0
-                                Column {
-                                    id: heroOldCol
-                                    // 右缘贴容器右缘:容器右缘固定、宽度收缩时
-                                    // 列原点恒 0,裁剪落在列右半(左先消失)。
-                                    anchors.right: heroOldTree.right
-                                    width: heroTextArea.width
-                                    // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                    // bottom/followPoster 沉底——简介文字底缘
-                                    // 对齐文字槽底(槽底随锚定 = 海报下缘)。
-                                    y: root.textSlotVertical() === "top"
-                                        ? 0 : (root.textSlotVertical() === "middle"
-                                                ? (parent.height - implicitHeight) / 2
-                                                : parent.height - implicitHeight)
-                                    spacing: 8
-                                    Row {
-                                        width: parent.width
-                                        spacing: 12
-                                        AppText {
-                                            text: root.heroOldTitle
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 30
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                            width: parent.width
-                                            horizontalAlignment: root.heroTextAlign
-                                        }
-                                    }
-                                    AppText {
-                                        text: root.heroOldEpisode
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 18
-                                        elide: Text.ElideRight
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        visible: text !== ""
-                                    }
-                                    AppText {
-                                        text: root.heroOldMeta
-                                        color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                        font.pixelSize: 14
-                                        // 显式宽 + 对齐跟随:文字区靠右时评分/
-                                        // 时间行右对齐(隐式宽下对齐无效)。
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 100 } }
-                                    }
-                                }
-                            }
-                            Item {
-                                id: heroNewTree
-                                anchors.left: heroTextArea.left
-                                width: heroTextArea.width * (1 - root.textReveal)
-                                height: heroTextArea.height
-                                clip: true
-                                opacity: root.newTextOpacity
-                                Column {
-                                    id: heroNewCol
-                                    width: heroTextArea.width
-                                    // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                    // bottom/followPoster 沉底(简介文字底缘
-                                    // 对齐文字槽底,同 heroOldCol)。
-                                    y: root.textSlotVertical() === "top"
-                                        ? 0 : (root.textSlotVertical() === "middle"
-                                                ? (parent.height - implicitHeight) / 2
-                                                : parent.height - implicitHeight)
-                                    spacing: 8
-                                    Row {
-                                        width: parent.width
-                                        spacing: 12
-                                        AppText {
-                                            id: heroNewTitle
-                                            text: root.heroTitle()
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 30
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                            width: parent.width
-                                            horizontalAlignment: root.heroTextAlign
-                                        }
-                                    }
-                                    AppText {
-                                        text: root.heroEpisodeLine()
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 18
-                                        elide: Text.ElideRight
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        visible: text !== ""
-                                    }
-                                    AppText {
-                                        text: root.metaLine()
-                                        color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                        font.pixelSize: 14
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                        opacity: text !== "" ? 1 : 0
-                                        Behavior on opacity { NumberAnimation { duration: 100 } }
-                                    }
-                                }
-                            }
-                        }
-                        Item {
-                            id: btnHolder
-                            // 按钮行锚定容器:锚点放这里(自身无 LayoutMirroring,
-                            // anchors 不反转);宽 = 行隐式宽(单向绑定,无环),
-                            // 右锚时整块从参考点向左展开。行在内部只做子项
-                            // 镜像(播放键贴参考端),不受锚点影响。
-                            width: btnRow.width
-                            height: btnRow.height
-                            anchors.leftMargin: ConfigManager.detailButtonsPos === "backdrop"
-                                                 ? (ConfigManager.detailSidebarLeft
-                                                        ? Constants.detailSidebarW + 32 : 32)
-                                                 : 24
-                            anchors.rightMargin: 24
-                            state: {
-                                const b = ConfigManager.detailButtonsPos
-                                if (b === "backdrop")
-                                    return "backdrop"
-                                if (b === "poster")
-                                    return "poster-" + (root.posterSide() === "right" ? "right" : "left")
-                                return "text-" + (root.textSide() === "right" ? "right" : "left")
-                            }
-                            states: [
-                                State { name: "poster-left"; AnchorChanges { target: btnHolder; anchors.left: posterSlot.right } },
-                                State { name: "poster-right"; AnchorChanges { target: btnHolder; anchors.right: posterSlot.left } },
-                                State { name: "text-left"; AnchorChanges { target: btnHolder; anchors.left: textSlot.right } },
-                                State { name: "text-right"; AnchorChanges { target: btnHolder; anchors.right: textSlot.left } },
-                                State { name: "backdrop"; AnchorChanges { target: btnHolder; anchors.left: heroItem.left } }
-                            ]
-                            // 左锚参考距(弹性播放键宽用):poster → 海报外侧
-                            // 256;text → 标题区外侧;backdrop → 左缘。
-                            readonly property real _ref: {
-                                const b = ConfigManager.detailButtonsPos
-                                if (b === "backdrop")
-                                    return ConfigManager.detailSidebarLeft ? Constants.detailSidebarW + 32 : 32
-                                if (b === "poster")
-                                    return 32 + Constants.detailPosterW + 24
-                                return root.textSide() === "right"
-                                       ? parent.width - textSlot.x + 24
-                                       : textSlot.x + textSlot.width + 24
-                            }
-                            readonly property bool _leftSide: {
-                                const b = ConfigManager.detailButtonsPos
-                                if (b === "backdrop")
-                                    return true
-                                if (b === "poster")
-                                    return root.posterSide() !== "right"
-                                return root.textSide() !== "right"
-                            }
-                            // 播放键弹性宽:锚距内放不下时压缩(下限 120 保可点)。
-                            readonly property real _playW: Math.min(220, Math.max(120,
-                                parent.width - _ref - 16 - 44 - 20))
-                            // 垂直:backdrop → 背景 16:9 底缘(背景高 = 宽*9/16,
-                            // 与 heroBackdrop 同式);poster → 海报底对齐;
-                            // text → 标题行顶(与标题对齐;标题在揭示树深处
-                            // 不可锚,故 y 用绑定,与水平锚不同轴不冲突)。
-                            y: ConfigManager.detailButtonsPos === "backdrop"
-                                ? root.width * 9 / 16 - 44 - 24
-                                : (ConfigManager.detailButtonsPos === "poster"
-                                       ? posterSlot.y + posterSlot.height - 44
-                                       : textSlot.y + heroNewCol.y)
-
-
-                            Row {
-                                id: btnRow
-                                // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
-                                // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
-                                // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
-                                // LayoutMirroring 只反转子项,按钮内容不镜像;
-                                LayoutMirroring.enabled: !btnHolder._leftSide
-                                spacing: 10
-                                opacity: root.textFade
-                                Button {
-                                    id: playBtn
-                                    text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
-                                    // 弹性宽由 _playW 决定(锚距内放不下时压缩,
-                                    // 下限 120 保可点区域)。
-                                    width: btnHolder._playW
-                                    height: 44
-                                    font.pixelSize: 16
-                                    onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
-                                    background: FrostedGlass {
-                                        radius: height / 2
-                                        blurSource: heroBackdrop
-                                        // 主按钮:accent 色调玻璃(透出背景 + 主题色),边缘隆起折射。
-                                        glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                           root.accentColor.b, 0.45)
-                                        borderColor: Qt.rgba(1, 1, 1, 0.30)
-                                        thickness: 20
-                                        frostAmount: 0.4
-                                        edgeLight: 0.5
-                                        saturation: 0.4
-                                        blurRadius: 6
-                                        sampleMargin: 48
-                                        elevation: 6
-                                    }
-                                    contentItem: AppText {
-                                        text: playBtn.text
-                                        color: "white"
-                                        font.pixelSize: 16
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                }
-                                // 收藏:Canvas 绘制爱心。未收藏藏白实心,已收藏粉实心。
-                                Button {
-                                    id: favBtn
-                                    width: 44
-                                    height: 44
-                                    onClicked: root.toggleFavorite()
-                                    background: FrostedGlass {
-                                        radius: height / 2
-                                        blurSource: heroBackdrop
-                                        // 次要按钮:complement 色调玻璃,透出背景折射。
-                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                           root.complementColor.b, 0.30)
-                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
-                                        thickness: 20
-                                        frostAmount: 0.4
-                                        edgeLight: 0.5
-                                        saturation: 0.4
-                                        blurRadius: 6
-                                        sampleMargin: 48
-                                        elevation: 5
-                                    }
-                                    contentItem: Item {
-                                        anchors.fill: parent
-                                        Canvas {
-                                            anchors.centerIn: parent
-                                            width: 22
-                                            height: 22
-                                            property color fillColor: root.isFavorite ? Constants.moePink : root.iconWhite
-                                            onFillColorChanged: requestPaint()
-                                            onPaint: {
-                                                const ctx = getContext("2d")
-                                                ctx.clearRect(0, 0, width, height)
-                                                ctx.beginPath()
-                                                ctx.moveTo(11, 19)
-                                                ctx.bezierCurveTo(11, 19, 3, 13, 3, 8)
-                                                ctx.bezierCurveTo(3, 5, 6, 3, 9, 5)
-                                                ctx.bezierCurveTo(10, 5, 11, 6, 11, 7)
-                                                ctx.bezierCurveTo(11, 6, 12, 5, 13, 5)
-                                                ctx.bezierCurveTo(16, 3, 19, 5, 19, 8)
-                                                ctx.bezierCurveTo(19, 13, 11, 19, 11, 19)
-                                                ctx.closePath()
-                                                ctx.fillStyle = fillColor
-                                                ctx.fill()
-                                            }
-                                        }
-                                    }
-                                }
-                                // 已看/未看:Canvas 绘制圆圈 + 勾。已看绿色,未看藏白。
-                                Button {
-                                    id: watchedBtn
-                                    width: 44
-                                    height: 44
-                                    onClicked: root.toggleWatched()
-                                    background: FrostedGlass {
-                                        radius: height / 2
-                                        blurSource: heroBackdrop
-                                        // 次要按钮:complement 色调玻璃,透出背景折射。
-                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                           root.complementColor.b, 0.30)
-                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
-                                        thickness: 20
-                                        frostAmount: 0.4
-                                        edgeLight: 0.5
-                                        saturation: 0.4
-                                        blurRadius: 6
-                                        sampleMargin: 48
-                                        elevation: 5
-                                    }
-                                    contentItem: Item {
-                                        anchors.fill: parent
-                                        Canvas {
-                                            anchors.centerIn: parent
-                                            width: 22
-                                            height: 22
-                                            property color strokeColor: root.detail.played ? Theme.success : root.iconWhite
-                                            onStrokeColorChanged: requestPaint()
-                                            onPaint: {
-                                                const ctx = getContext("2d")
-                                                ctx.clearRect(0, 0, width, height)
-                                                ctx.lineCap = "round"
-                                                ctx.lineJoin = "round"
-                                                ctx.lineWidth = 2.5
-                                                ctx.strokeStyle = strokeColor
-                                                // 圆圈
-                                                ctx.beginPath()
-                                                ctx.arc(width / 2, height / 2, 8, 0, Math.PI * 2)
-                                                ctx.stroke()
-                                                // 勾
-                                                ctx.beginPath()
-                                                ctx.moveTo(7, 11)
-                                                ctx.lineTo(10, 14)
-                                                ctx.lineTo(15, 8)
-                                                ctx.stroke()
-                                            }
-                                        }
-                                    }
-                                }
-                                Button {
-                                    id: replayBtn
-                                    text: "从头播放"
-                                    visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
-                                    width: 110
-                                    height: 44
-                                    onClicked: root.startPlayback(false)
-                                    background: FrostedGlass {
-                                        radius: height / 2
-                                        blurSource: heroBackdrop
-                                        // 次要按钮:complement 色调玻璃,透出背景折射。
-                                        glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                           root.complementColor.b, 0.30)
-                                        borderColor: Qt.rgba(1, 1, 1, 0.28)
-                                        thickness: 20
-                                        frostAmount: 0.4
-                                        edgeLight: 0.5
-                                        saturation: 0.4
-                                        blurRadius: 6
-                                        sampleMargin: 48
-                                        elevation: 5
-                                    }
-                                    contentItem: AppText {
-                                        text: replayBtn.text
-                                        color: "white"
-                                        font.pixelSize: 14
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                }
-                            }
-                        }                    
-                    }
-
-                    // ================= 播放选项(版本/音频/字幕) =================
-                    // 正文流一节(Hero 与简介之间),占自有空间不与 hero 标题/播放键重叠。
-                    // 三段摘要行常显当前选中;点行弹出该行下方的下拉浮层(Popup 覆盖
-                    // 在上层,点外/Esc 自动收起)。选中存 root.sel*,点播放带入协商。
-                    Column {
-                        id: playOptsCol
-                        anchors.left: parent.left
-                        anchors.leftMargin: Constants.detailSectionMargin
-                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
-                        spacing: 6
-                        visible: (root.detail.mediaSources || []).length > 0
-                        opacity: root.textFade
-
-                        // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
-                        // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
-                        component OptRow: FrostedGlass {
-                            id: optRow
-                            property string sectionKey: ""
-                            property string icon: ""
-                            property string mainText: ""
-                            property string subText: ""
-                            property var listModel: []
-                            property real rowWidth: 100
-                            signal picked(var entry)
-                            width: rowWidth
-                            height: subText !== "" ? 52 : 40
-                            radius: 10
-                            // 摘要行玻璃:采样 detailBg(页面底色+hero,无自采样),
-                            // 透出背景 + 选中时 accent 描边。
-                            blurSource: detailBg
-                                scrollParent: overview
-                            glassColor: Qt.rgba(1, 1, 1, 0.06)
-                            borderColor: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.15)
-                            thickness: 0
-                            frostAmount: 0.45
-                            edgeLight: 0.4
-                            saturation: 0.3
-                            blurRadius: 5
-                            sampleMargin: 32
-                            elevation: 3
-
-                            Row {
-                                id: headRow
-                                anchors.fill: parent
-                                spacing: 10
-                                AppText {
-                                    width: 28
-                                    height: parent.height
-                                    text: optRow.icon
-                                    color: Theme.textMuted
-                                    font.pixelSize: 16
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                Column {
-                                    width: parent.width - 28 - 24 - 10 * 3
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: 2
-                                    AppText {
-                                        width: parent.width
-                                        text: optRow.mainText
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 13
-                                        elide: Text.ElideRight
-                                    }
-                                    AppText {
-                                        width: parent.width
-                                        visible: optRow.subText !== ""
-                                        text: optRow.subText
-                                        color: Theme.textMuted
-                                        font.pixelSize: 11
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                AppText {
-                                    width: 24
-                                    height: parent.height
-                                    text: drop.opened ? "▴" : "▾"
-                                    color: Theme.textMuted
-                                    font.pixelSize: 13
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: drop.opened ? drop.close() : drop.open()
-                            }
-
-                            // 下拉浮层:贴行下方弹出,覆盖在上层内容之上;
-                            // modal+CloseOnPressOutside:点行外任意处/Esc 收起;点行头 toggle。
-                            Popup {
-                                id: drop
-                                y: optRow.height + 4
-                                width: optRow.width
-                                height: Math.min(optListCol.implicitHeight + 8, 288)
-                                padding: 4
-                                // modal:true 使打开时行头 press 被 modal 消费(只关不重开),非 modal
-                                // 时 outside 事件透传行头会收起又重开。dim:false 不遮暗背景。
-                                // 代价:下拉开着时点其他行只关不切(需二次点击),属预期。
-                                modal: true
-                                dim: false
-                                focus: true
-                                closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
-                                background: Rectangle {
-                                    radius: 10
-                                    color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.98)
-                                    border.width: 1
-                                    border.color: Qt.rgba(1, 1, 1, 0.12)
-                                }
-                                contentItem: Flickable {
-                                    contentWidth: width
-                                    contentHeight: optListCol.implicitHeight
-                                    clip: true
-                                    Column {
-                                        id: optListCol
-                                        width: drop.width - 8
-                                        spacing: 2
-                                        Repeater {
-                                            model: optRow.listModel
-                                            delegate: Rectangle {
-                                                id: optEntry
-                                                required property var modelData
-                                                width: optListCol.width
-                                                height: 34
-                                                radius: 8
-                                                property bool sel: modelData._sel === true
-                                                color: sel ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
-                                                           : (entryMa.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
-                                                Rectangle {
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 12
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    width: 8
-                                                    height: 8
-                                                    radius: 4
-                                                    color: root.accentColor
-                                                    visible: optEntry.sel
-                                                }
-                                                AppText {
-                                                    anchors.left: parent.left
-                                                    anchors.leftMargin: 28
-                                                    anchors.right: parent.right
-                                                    anchors.rightMargin: 10
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    text: optEntry.modelData._label || ""
-                                                    color: optEntry.sel ? Theme.textPrimary : Theme.textMuted
-                                                    font.pixelSize: 13
-                                                    elide: Text.ElideRight
-                                                }
-                                                MouseArea {
-                                                    id: entryMa
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        optRow.picked(optEntry.modelData)
-                                                        drop.close()
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        // ---- 版本行(多版本才显示) ----
-                        OptRow {
-                            sectionKey: "version"
-                            icon: "🎞"
-                            rowWidth: playOptsCol.width
-                            visible: (root.detail.mediaSources || []).length > 0
-                            mainText: root.currentVersionLabel()
-                            subText: root.versionSubLabel(root.selVersion())
-                            listModel: {
-                                const ms = root.detail.mediaSources || []
-                                const out = []
-                                for (let i = 0; i < ms.length; ++i) {
-                                    const v = ms[i]
-                                    out.push({ id: v.id, _sel: v.id === root.selMediaSourceId,
-                                               _label: (v.name || "版本") + (root.versionSubLabel(v) !== "" ? "  ·  " + root.versionSubLabel(v) : "") })
-                                }
-                                return out
-                            }
-                            onPicked: function (entry) { root.selectVersion(entry.id) }
-                        }
-                        // ---- 音频行(当前源有音频才显示) ----
-                        OptRow {
-                            sectionKey: "audio"
-                            icon: "♪"
-                            rowWidth: playOptsCol.width
-                            visible: true
-                            mainText: root.currentAudioLabel()
-                            listModel: {
-                                const ss = root.audioOptions()
-                                const out = []
-                                for (let i = 0; i < ss.length; ++i) {
-                                    const e = ss[i]
-                                    out.push({ index: e.index, _sel: e.index === root.selAudioIndex,
-                                               _label: root.trackOptionLabel("Audio", e) })
-                                }
-                                return out
-                            }
-                            onPicked: function (entry) { root.selAudioIndex = entry.index }
-                        }
-                        // ---- 字幕行(常显;含 关闭字幕/默认/各轨) ----
-                        OptRow {
-                            sectionKey: "subtitle"
-                            icon: "󰨗"
-                            rowWidth: playOptsCol.width
-                            visible: true
-                            mainText: root.currentSubtitleLabel()
-                            listModel: {
-                                const ss = root.subtitleOptionsFull()
-                                const out = []
-                                for (let i = 0; i < ss.length; ++i) {
-                                    const e = ss[i]
-                                    out.push({ index: e.index, _sel: e.index === root.selSubtitleIndex,
-                                               _label: root.trackOptionLabel("Subtitle", e) })
-                                }
-                                return out
-                            }
-                            onPicked: function (entry) { root.selSubtitleIndex = entry.index }
-                        }
-                    }
-                    // ================= 简介 =================
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Constants.detailSectionMargin
-                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
-                        spacing: 8
-                        // 空/缺失简介不显示该节。
-                        visible: !!root.detail.overview && root.detail.overview.length > 0
-                        opacity: root.textFade * visible
-                        Behavior on opacity { NumberAnimation { duration: 200 } }
-
-                        AppText {
-                            text: "简介"
-                            color: Theme.textPrimary
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                        // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
-                        FrostedGlass {
-                            id: overviewBox
-                            width: parent.width
-                            height: overviewBoxText.implicitHeight + 24
-                            radius: 12
-                            blurSource: detailBg
-                                scrollParent: overview
-                            glassColor: Qt.rgba(0, 0, 0, 0.20)
-                            borderColor: Qt.rgba(1, 1, 1, 0.12)
-                            thickness: 0
-                            frostAmount: 0.5
-                            edgeLight: 0.35
-                            saturation: 0.3
-                            blurRadius: 6
-                            sampleMargin: 32
-                            elevation: 3
-                            AppText {
-                                id: overviewBoxText
-                                anchors.fill: parent
-                                anchors.margins: 12
-                                text: root.detail.overview || ""
-                                color: "white"
-                                font.pixelSize: 14
-                                wrapMode: Text.Wrap
-                            }
-                        }
-                    }
-
-                    // ================= 演职人员 =================
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Constants.detailSectionMargin
-                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
-                        spacing: 8
-                        visible: !!root.detail.people && root.detail.people.length > 0
-                        opacity: root.textFade * visible
-                        Behavior on opacity { NumberAnimation { duration: 200 } }
-
-                        AppText {
-                            text: "演职人员"
-                            color: Theme.textPrimary
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                        Flickable {
-                            width: parent.width
-                            height: 110
-                            clip: true
-                            contentWidth: peopleRow.implicitWidth
-                            Row {
-                                id: peopleRow
-                                spacing: 16
-                                Repeater {
-                                    model: root.detail.people
-                                    delegate: Item {
-                                        id: peopleCard
-                                        // Repeater 注入的元素;显式 required 声明让 qmllint
-                                        // 静态识别 modelData(否则复杂文件内注入失效报 unqualified)。
-                                        required property var modelData
-                                        width: 72
-                                        height: 100
-                                        property bool hovered: false
-                                        HoverHandler {
-                                            onHoveredChanged: peopleCard.hovered = hovered
-                                        }
-                                        Column {
-                                            anchors.horizontalCenter: parent.horizontalCenter
-                                            anchors.top: parent.top
-                                            anchors.topMargin: 6
-                                            spacing: 4
-                                            Item {
-                                                width: 60
-                                                height: 60
-                                                anchors.horizontalCenter: parent.horizontalCenter
-                                                Rectangle {
-                                                    anchors.fill: parent
-                                                    radius: 30
-                                                    clip: true
-                                                    color: root.surfaceTint
-                                                    CrossfadeImage {
-                                                        anchors.fill: parent
-                                                        // 60x60 卡:半径=短边一半,呈圆形。
-                                                        cornerRadius: 30
-                                                        source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
-                                                        fillMode: Image.PreserveAspectCrop
-                                                        asynchronous: true
-                                                        duration: 500
-                                                        cache: true
-                                                    }
-                                                    AppText {
-                                                        anchors.centerIn: parent
-                                                        text: peopleCard.modelData.name ? peopleCard.modelData.name.charAt(0) : ""
-                                                        color: Theme.textMuted
-                                                        font.pixelSize: 20
-                                                        visible: !(peopleCard.modelData.posterId)
-                                                    }
-                                                }
-                                                // hover 粉色细环。
-                                                Rectangle {
-                                                    anchors.centerIn: parent
-                                                    width: 66
-                                                    height: 66
-                                                    radius: 33
-                                                    color: "transparent"
-                                                    border.width: peopleCard.hovered ? 2 : 0
-                                                    border.color: Constants.moePink
-                                                    opacity: peopleCard.hovered ? 1 : 0
-                                                    Behavior on opacity { NumberAnimation { duration: 160 } }
-                                                }
-                                            }
-                                            AppText {
-                                                text: peopleCard.modelData.name || ""
-                                                color: Theme.textPrimary
-                                                font.pixelSize: 12
-                                                elide: Text.ElideRight
-                                                width: 72
-                                                horizontalAlignment: Text.AlignHCenter
-                                            }
-                                            AppText {
-                                                text: peopleCard.modelData.role || peopleCard.modelData.type || ""
-                                                color: Theme.textMuted
-                                                font.pixelSize: 11
-                                                elide: Text.ElideRight
-                                                width: 72
-                                                horizontalAlignment: Text.AlignHCenter
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ================= 媒体信息 =================
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Constants.detailSectionMargin
-                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
-                        spacing: 8
-                        visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
-                        opacity: root.textFade * visible
-                        Behavior on opacity { NumberAnimation { duration: 200 } }
-
-                        AppText {
-                            text: "媒体信息"
-                            color: Theme.textPrimary
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                        Repeater {
-                            model: root.detail.mediaSources
-                            // 每版本一整块:头部版本名+徽章,下方流卡片横排。
-                            delegate: FrostedGlass {
-                                id: verBlock
-                                required property var modelData
-                                required property int index
-                                // 销毁期间 parent 会被置 null(换集重建媒体源时),空防。
-                                width: parent ? parent.width : 0
-                                height: verCol.implicitHeight + 28
-                                radius: 12
-                                // 媒体信息卡玻璃:透出背景,微折射。
-                                blurSource: detailBg
-                                scrollParent: overview
-                                glassColor: Qt.rgba(1, 1, 1, 0.05)
-                                borderColor: Qt.rgba(1, 1, 1, 0.12)
-                                thickness: 0
-                                frostAmount: 0.45
-                                edgeLight: 0.35
-                                saturation: 0.3
-                                blurRadius: 6
-                                sampleMargin: 32
-                                elevation: 3
-
-                                // 本版本视频流(头部徽章取分辨率/动态范围)。
-                                readonly property var videoStream: {
-                                    const ss = verBlock.modelData.streams || []
-                                    for (let i = 0; i < ss.length; ++i) {
-                                        if (root.streamKind(ss[i]) === "Video")
-                                            return ss[i]
-                                    }
-                                    return null
-                                }
-                                // 头部徽章:容器/大小/时长/总码率/分辨率/动态范围(空值不占位)。
-                                readonly property var headBadges: {
-                                    const out = []
-                                    const m = verBlock.modelData
-                                    if (m.container)
-                                        out.push(m.container.toUpperCase())
-                                    if (m.sizeBytes > 0)
-                                        out.push(root.formatSize(m.sizeBytes))
-                                    if (m.runTimeTicks > 0)
-                                        out.push(root.formatTime(m.runTimeTicks / Constants.ticksPerSecond))
-                                    if (m.bitrate > 0)
-                                        out.push(root.formatBitrate(m.bitrate))
-                                    const vs = verBlock.videoStream
-                                    if (vs && vs.height > 0)
-                                        out.push(vs.height >= 2160 ? "4K" : vs.height + "p")
-                                    const rg = vs ? root.rangeLabel(vs) : ""
-                                    if (rg)
-                                        out.push(rg)
-                                    return out
-                                }
-                                // 流卡片模型:视频 + 音频×n + 字幕×n + 附件×n;空值行不出。
-                                // 文件级信息(容器/大小/时长/总码率/路径)在版本块头部,不占卡。
-                                readonly property var cardModels: {
-                                    const out = []
-                                    const m = verBlock.modelData
-                                    const ss = m.streams || []
-                                    const vs = verBlock.videoStream
-                                    if (vs) {
-                                        const rows = []
-                                        rows.push({ k: "编码", v: root.codecLabel(vs.codec) + (vs.profile ? " · " + vs.profile : "") })
-                                        if (vs.width > 0 && vs.height > 0)
-                                            rows.push({ k: "分辨率", v: vs.width + "×" + vs.height })
-                                        const rg = root.rangeLabel(vs)
-                                        if (rg)
-                                            rows.push({ k: "动态范围", v: rg })
-                                        if (vs.frameRate > 0)
-                                            rows.push({ k: "帧率", v: vs.frameRate.toFixed(3) })
-                                        if (vs.bitDepth > 0)
-                                            rows.push({ k: "位深", v: vs.bitDepth + "bit" })
-                                        const cl = root.colorLabel(vs)
-                                        if (cl)
-                                            rows.push({ k: "色彩", v: cl })
-                                        if (vs.bitrate > 0)
-                                            rows.push({ k: "码率", v: root.formatBitrate(vs.bitrate) })
-                                        out.push({ cap: root.streamTypeLabel("Video"), tag: false, rows: rows })
-                                    }
-                                    let an = 0
-                                    let sn = 0
-                                    // 附件(ASS 字体等)逐条信息量低且数量多,汇总一卡不逐条铺。
-                                    let attCount = 0
-                                    let attSize = 0
-                                    const attFormats = {}
-                                    for (let i = 0; i < ss.length; ++i) {
-                                        const s = ss[i]
-                                        const kind = root.streamKind(s)
-                                        if (kind === "Audio") {
-                                            an += 1
-                                            const rows = []
-                                            rows.push({ k: "编码", v: root.codecLabel(s.codec) + (s.profile ? " · " + s.profile : "") })
-                                            const ch = s.channelLayout || (s.channels > 0 ? s.channels + "ch" : "")
-                                            if (ch)
-                                                rows.push({ k: "声道", v: ch })
-                                            const lang = s.displayLanguage || s.language
-                                            if (lang)
-                                                rows.push({ k: "语言", v: lang })
-                                            const sr = root.formatSampleRate(s.sampleRate)
-                                            if (sr)
-                                                rows.push({ k: "采样率", v: sr })
-                                            if (s.bitDepth > 0)
-                                                rows.push({ k: "位深", v: s.bitDepth + "bit" })
-                                            if (s.bitrate > 0)
-                                                rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
-                                            out.push({ cap: root.streamTypeLabel(s.type) + " " + an, tag: !!s.isDefault, rows: rows })
-                                        } else if (kind === "Subtitle") {
-                                            sn += 1
-                                            const rows = []
-                                            rows.push({ k: "格式", v: root.codecLabel(s.codec) })
-                                            const st = s.displayTitle || s.title
-                                            if (st)
-                                                rows.push({ k: "标题", v: st })
-                                            const sl = s.displayLanguage || s.language
-                                            if (sl)
-                                                rows.push({ k: "语言", v: sl })
-                                            rows.push({ k: "位置", v: root.subtitleLocationLabel(s) })
-                                            if (s.isForced)
-                                                rows.push({ k: "强制", v: "是" })
-                                            out.push({ cap: root.streamTypeLabel(s.type) + " " + sn, tag: !!s.isDefault, rows: rows })
-                                        } else if (kind === "Attachment") {
-                                            attCount += 1
-                                            attSize += s.attachmentSize || 0
-                                            const f = root.codecLabel(s.codec)
-                                            attFormats[f] = (attFormats[f] || 0) + 1
-                                        } else if (kind !== "Video") {
-                                            // 未知类型(Type/codec 均无映射):通用卡,cap 回退原始 Type。
-                                            const rows = []
-                                            rows.push({ k: "编码", v: root.codecLabel(s.codec) })
-                                            const gl = s.displayLanguage || s.language
-                                            if (gl)
-                                                rows.push({ k: "语言", v: gl })
-                                            if (s.bitrate > 0)
-                                                rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
-                                            out.push({ cap: root.streamTypeLabel(s.type || "未知"), tag: !!s.isDefault, rows: rows })
-                                        }
-                                    }
-                                    if (attCount > 0) {
-                                        const rows = [{ k: "数量", v: String(attCount) }]
-                                        if (attSize > 0)
-                                            rows.push({ k: "总大小", v: root.formatSize(attSize) })
-                                        rows.push({ k: "格式", v: Object.keys(attFormats).map(function (f) { return f + "×" + attFormats[f] }).join(" · ") })
-                                        out.push({ cap: root.streamTypeLabel("Attachment"), tag: false, rows: rows })
-                                    }
-                                    // 时间卡(添加/修改,条目级):每个版本块都出。
-                                    const dc = (root.detail.dateCreated || "").slice(0, 10)
-                                    const dm = (root.detail.dateModified || "").slice(0, 10)
-                                    if (dc || dm) {
-                                        const rows = []
-                                        if (dc)
-                                            rows.push({ k: "添加", v: dc })
-                                        if (dm)
-                                            rows.push({ k: "修改", v: dm })
-                                        out.push({ cap: "时间", tag: false, rows: rows })
-                                    }
-                                    return out
-                                }
-
-                                Column {
-                                    id: verCol
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.top: parent.top
-                                    anchors.margins: 14
-                                    spacing: 12
-                                    // 头部:版本名 + 徽章。
-                                    Item {
-                                        width: parent.width
-                                        height: 24
-                                        AppText {
-                                            anchors.left: parent.left
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 14
-                                            font.bold: true
-                                        }
-                                        Row {
-                                            anchors.right: parent.right
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            spacing: 6
-                                            Repeater {
-                                                model: verBlock.headBadges
-                                                delegate: Rectangle {
-                                                    required property var modelData
-                                                    height: 22
-                                                    width: badgeText.implicitWidth + 14
-                                                    radius: 11
-                                                    color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
-                                                    border.width: 1
-                                                    border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
-                                                    AppText {
-                                                        id: badgeText
-                                                        anchors.centerIn: parent
-                                                        text: modelData
-                                                        color: Theme.textPrimary
-                                                        font.pixelSize: 12
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    // 流卡片横排(超出可横向拖动)。
-                                    ListView {
-                                        width: parent.width
-                                        height: 224
-                                        orientation: ListView.Horizontal
-                                        spacing: 12
-                                        clip: true
-                                        model: verBlock.cardModels
-                                        delegate: Rectangle {
-                                            id: miCard
-                                            required property var modelData
-                                            width: 190
-                                            height: 224
-                                            radius: 11
-                                            color: Theme.surface
-                                            border.width: 1
-                                            border.color: Qt.rgba(1, 1, 1, 0.10)
-                                            Column {
-                                                anchors.fill: parent
-                                                anchors.margins: 13
-                                                spacing: 4
-                                                // 卡头:流名(粉色小字)+ 默认标记。
-                                                Item {
-                                                    width: parent.width
-                                                    height: 16
-                                                    AppText {
-                                                        anchors.left: parent.left
-                                                        text: miCard.modelData.cap
-                                                        color: Constants.moePink
-                                                        font.pixelSize: 11
-                                                        font.bold: true
-                                                        font.letterSpacing: 1.2
-                                                    }
-                                                    Rectangle {
-                                                        visible: miCard.modelData.tag
-                                                        anchors.right: parent.right
-                                                        height: 15
-                                                        width: tagText.implicitWidth + 10
-                                                        radius: 4
-                                                        color: "transparent"
-                                                        border.width: 1
-                                                        border.color: Qt.rgba(1, 1, 1, 0.25)
-                                                        AppText {
-                                                            id: tagText
-                                                            anchors.centerIn: parent
-                                                            text: "默认"
-                                                            color: Theme.textMuted
-                                                            font.pixelSize: 10
-                                                        }
-                                                    }
-                                                }
-                                                // KV 行:键左值右,行间细分隔线(首行无)。
-                                                Repeater {
-                                                    model: miCard.modelData.rows
-                                                    delegate: Item {
-                                                        id: kvRow
-                                                        required property var modelData
-                                                        required property int index
-                                                        // 销毁期间 parent 会被置 null(换集重建米卡时),空防。
-                                                        width: parent ? parent.width : 0
-                                                        height: 22
-                                                        Rectangle {
-                                                            visible: kvRow.index > 0
-                                                            anchors.top: parent.top
-                                                            width: kvRow.width
-                                                            height: 1
-                                                            color: Qt.rgba(1, 1, 1, 0.07)
-                                                        }
-                                                        AppText {
-                                                            anchors.left: parent.left
-                                                            anchors.verticalCenter: parent.verticalCenter
-                                                            text: kvRow.modelData.k
-                                                            color: Theme.textMuted
-                                                            font.pixelSize: 12
-                                                        }
-                                                        AppText {
-                                                            anchors.right: parent.right
-                                                            anchors.verticalCenter: parent.verticalCenter
-                                                            width: Math.min(implicitWidth, parent ? parent.width - 60 : 0)
-                                                            horizontalAlignment: Text.AlignRight
-                                                            text: kvRow.modelData.v
-                                                            color: Theme.textPrimary
-                                                            font.pixelSize: 12
-                                                            elide: Text.ElideRight
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ================= 相似推荐 =================
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: Constants.detailSectionMargin
-                        width: parent.width - Constants.detailSidebarW - Constants.detailSectionMargin * 2
-                        spacing: 8
-                        visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
-                        opacity: root.textFade * visible
-                        Behavior on opacity { NumberAnimation { duration: 200 } }
-
-                        AppText {
-                            text: "相似推荐"
-                            color: Theme.textPrimary
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                        ListView {
-                            width: parent.width
-                            height: Constants.detailCardH + 40
-                            orientation: ListView.Horizontal
-                            spacing: 12
-                            clip: true
-                            model: EmbyClient.similarModelFor(root.serverUrl)
-                            delegate: Item {
-                                id: similarCard
-                                // 同上:required 声明让 qmllint 识别 C++ 模型的 model 角色访问。
-                                required property var model
-                                width: Constants.detailCardW
-                                // 上下各留 20px 边距,hover 放大时不被 ListView 裁剪。
-                                height: Constants.detailCardH + 40
-                                property bool hovered: false
-                                scale: hovered ? 1.05 : 1.0
-                                Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
-                                Rectangle {
-                                    anchors.centerIn: parent
-                                    width: Constants.detailCardW
-                                    height: Constants.detailCardH
-                                    color: root.surfaceTint
-                                    radius: 14
-                                    clip: true
-                                    CrossfadeImage {
-                                        anchors.fill: parent
-                                        // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
-                                        cornerRadius: 14
-                                        source: similarCard.model.posterId ? "image://emby/" + similarCard.model.posterId : ""
-                                        fillMode: Image.PreserveAspectCrop
-                                        asynchronous: true
-                                        duration: 500
-                                        cache: true
-                                    }
-                                    AppText {
-                                        anchors.bottom: parent.bottom
-                                        anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        anchors.margins: 6
-                                        text: similarCard.model.name
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 12
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                HoverHandler {
-                                    onHoveredChanged: similarCard.hovered = hovered
-                                }
-                                // 点击进详情:TapHandler(替代 MouseArea)。
-                                TapHandler {
-                                    onTapped: root.openItemDetail(similarCard.model.id, similarCard.model.posterId,
-                                                                  similarCard.model.name, root.serverUrl)
-                                }
-                            }
-                        }
-                    }
-
-                    // 底部留白
-                    Item { width: 1; height: 32 }
-                }
-            }
-
-            // ---- 右栏:竖向选集条(剧集/集详情) ----
-            Column {
-                id: sidebar
-                width: Constants.detailSidebarW
-                height: parent.height
-                spacing: 10
-                visible: root.detail.type === "Series" || root.detail.type === "Episode"
-                opacity: visible ? 1 : 0
-                Behavior on opacity { NumberAnimation { duration: 220 } }
-
-                // 选季条:显示当前季,悬停时仅数字区变化(候选数字原位放大 +
-                // 上下邻季淡入),条本身高度/背景/描边保持固定。
-                // 背景用莫奈取色的 surfaceTint 半透明,与选集栏 scrim 同源。
-                Rectangle {
-                    id: seasonStrip
-                    property bool stripHovered: seasonMa.containsMouse
-                    width: parent.width
-                    height: 96
-                    radius: 0
-                    color: "transparent"
-                    border.width: 0
-                    clip: true
-
-                    // "第"/"季":锚定数字牌两侧(右/左缘贴牌边 8px 间隙),
-                    // 往数字牌靠近且随其位置跟随,不再贴条边缘。
-                    AppText {
-                        text: "第"
-                        color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
-                        font.pixelSize: 14
-                        anchors.right: digitCol.left
-                        anchors.rightMargin: 8
-                        anchors.top: parent.top
-                        anchors.topMargin: 42
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                    }
-                    // 数字区:行高固定(上 16 + 候选牌 62 + 下 16),每行内容
-                    // 垂直居中 → 候选牌原位缩放,不上下移动;上下邻季行
-                    // 始终占位,折叠时仅透明(淡入淡出)。
-                    Column {
-                        id: digitCol
-                        anchors.top: parent.top
-                        anchors.topMargin: 2
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: 66
-                        height: 94
-                        spacing: 0
-                        // 上一季(列表内实际存在的季;无则隐藏)。
-                        AppText {
-                            id: upText
-                            width: 66
-                            height: 16
-                            verticalAlignment: Text.AlignVCenter
-                            text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
-                                  ? root.pad2(root.seasonPrevNo()) : ""
-                            color: Theme.textMuted
-                            font.pixelSize: 12
-                            horizontalAlignment: Text.AlignHCenter
-                            opacity: seasonStrip.stripHovered
-                                     && root.seasonPrevNo() > 0 ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: 160 } }
-                        }
-                        // 候选季号:两位 Counter Girls 牌(十位/个位),牌原位
-                        // 放大(中心不动),牌上的数字随季号切换。
-                        Item {
-                            width: 66
-                            height: 62
-                            Row {
-                                anchors.centerIn: parent
-                                spacing: 2
-                                Repeater {
-                                    model: 2
-                                    AnimatedImage {
-                                        required property int index
-                                        readonly property int digit: index === 0
-                                                                   ? Math.floor(root.seasonCandidate / 10) % 10
-                                                                   : root.seasonCandidate % 10
-                                        source: "qrc:/counter/" + digit + ".gif"
-                                        width: seasonStrip.stripHovered ? 28 : 22
-                                        height: seasonStrip.stripHovered ? 62 : 48
-                                        smooth: true
-                                        Behavior on width { NumberAnimation { duration: 160 } }
-                                        Behavior on height { NumberAnimation { duration: 160 } }
-                                    }
-                                }
-                            }
-                        }
-                        // 下一季(列表内实际存在的季;无则隐藏)。
-                        AppText {
-                            id: downText
-                            width: 66
-                            height: 16
-                            verticalAlignment: Text.AlignVCenter
-                            text: seasonStrip.stripHovered && root.seasonNextNo() > 0
-                                  ? root.pad2(root.seasonNextNo()) : ""
-                            color: Theme.textMuted
-                            font.pixelSize: 12
-                            horizontalAlignment: Text.AlignHCenter
-                            opacity: seasonStrip.stripHovered
-                                     && root.seasonNextNo() > 0 ? 1 : 0
-                            Behavior on opacity { NumberAnimation { duration: 160 } }
-                        }
-                    }
-                    // "季" 同样锚定数字牌(左缘贴牌边 8px)。
-                    AppText {
-                        text: "季"
-                        color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
-                        font.pixelSize: 14
-                        anchors.left: digitCol.right
-                        anchors.leftMargin: 8
-                        anchors.top: parent.top
-                        anchors.topMargin: 42
-                        Behavior on color { ColorAnimation { duration: 160 } }
-                    }
-                    MouseArea {
-                        id: seasonMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onEntered: {
-                            root.refreshSeasonNos()
-                            root.resetSeasonCandidate()
-                        }
-                        onExited: root.resetSeasonCandidate()
-                        onWheel: root.stepCandidate(wheel.angleDelta.y > 0 ? -1 : 1)
-                        onClicked: root.confirmSeason()
-                    }
-                }
-
-                ListView {
-                    id: episodeList
-                    width: parent.width
-                    height: parent.height - seasonStrip.height - sidebar.spacing
-                    clip: true
-                    focus: true
-                    keyNavigationWraps: true
-                    model: EmbyClient.episodesModelFor(root.serverUrl)
-                    layer.enabled: true
-                    layer.effect: ShaderEffect {
-                        property real u_margin: Constants.detailEpisodeRowMargin / episodeList.height
-                        fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/episode-fade.frag.qsb"
-                    }
-                    delegate: Item {
-                        id: episodeItem
-                        // 同上:required 声明识别 C++ 模型角色。
-                        required property var model
-                        width: episodeList.width
-                        height: Constants.detailEpisodeRowH
-                        // hover 放大(基础样式)
-                        scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
-                        Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 6
-                            color: episodeItem.model.id === root.itemId
-                                   ? Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                             root.accentColor.b, 0.75)
-                                   : (episodeHover.hovered || ListView.isCurrentItem) ? root.surfaceTint
-                                   : "transparent"
-                            Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
-                        }
-                        // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方)。
-                        // 缩略图高 = 行高 - 上下外边距 - 列间距 - 集名行高,总高恒填满行。
-                        Column {
-                            id: cardCol
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            anchors.top: parent.top
-                            anchors.topMargin: Constants.detailEpisodeRowMargin
-                            spacing: 6
-                            // 海报缩略图(16:9 剧照)
-                            Rectangle {
-                                id: thumbBox
-                                height: Constants.detailEpisodeRowH - Constants.detailEpisodeRowMargin*2
-                                       - cardCol.spacing - episodeTitle.implicitHeight
-                                width: height/9*16
-                                color: Theme.bg
-                                radius: 18
-                                clip: true
-                                CrossfadeImage {
-                                    id: thumb
-                                    anchors.fill: parent
-                                    cornerRadius: 18
-                                    // 无海报回退:父级(剧集)背景图;两者都无则为空(显示播放图标)。
-                                    source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId
-                                          : (episodeItem.model.parentBackdropId ? "image://emby/" + episodeItem.model.parentBackdropId : "")
-                                    fillMode: Image.PreserveAspectCrop
-                                    asynchronous: true
-                                    duration: 500
-                                    cache: true
-                                }
-                                // 无海报且无父级背景(都拿不到图)或加载失败回退:Canvas 播放图标。
-                                Canvas {
-                                    anchors.centerIn: parent
-                                    width: 28
-                                    height: 28
-                                    property color iconColor: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
-                                    onIconColorChanged: requestPaint()
-                                    visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
-                                              || thumb.status === Image.Error
-                                    onPaint: {
-                                        const ctx = getContext("2d")
-                                        ctx.clearRect(0, 0, width, height)
-                                        ctx.fillStyle = iconColor
-                                        ctx.beginPath()
-                                        ctx.moveTo(8, 5)
-                                        ctx.lineTo(22, 14)
-                                        ctx.lineTo(8, 23)
-                                        ctx.closePath()
-                                        ctx.fill()
-                                    }
-                                }
-                                // 已看徽标:缩略图右上角实心圆(莫奈强调色),中央镂空
-                                // 透明勾(Canvas destination-out 擦成洞,透出缩略图)。
-                                Canvas {
-                                    id: watchedBadge
-                                    // 颜色随莫奈取色更新(Canvas 不随外部属性自动重绘)。
-                                    property color badgeColor: root.accentColor
-                                    onBadgeColorChanged: requestPaint()
-                                    width: 22
-                                    height: 22
-                                    anchors.top: parent.top
-                                    anchors.right: parent.right
-                                    anchors.margins: 6
-                                    visible: episodeItem.model.played
-                                    onPaint: {
-                                        const ctx = getContext("2d")
-                                        ctx.reset()
-                                        const w = width, h = height
-                                        // 实心圆(内缩 0.5 防边缘锯齿切角)。
-                                        ctx.beginPath()
-                                        ctx.arc(w / 2, h / 2, w / 2 - 0.5, 0, Math.PI * 2)
-                                        ctx.fillStyle = badgeColor
-                                        ctx.fill()
-                                        // 镂空勾:勾笔画区域擦成透明。
-                                        ctx.globalCompositeOperation = "destination-out"
-                                        ctx.beginPath()
-                                        ctx.moveTo(w * 0.28, h * 0.52)
-                                        ctx.lineTo(w * 0.44, h * 0.68)
-                                        ctx.lineTo(w * 0.74, h * 0.34)
-                                        ctx.lineWidth = Math.max(2, w * 0.13)
-                                        ctx.lineCap = "round"
-                                        ctx.lineJoin = "round"
-                                        ctx.stroke()
-                                    }
-                                }
-                                // 观看进度条:居中,悬于缩略图底部上方(不与底边
-                                // 重合);宽 = 缩略图宽 - 圆角(18),圆角区不再
-                                // 构成干扰;填充莫奈互补色,轨道半透明黑压暗。
-                                Item {
-                                    anchors.horizontalCenter: parent.horizontalCenter
-                                    anchors.bottom: parent.bottom
-                                    anchors.bottomMargin: 3
-                                    width: parent.width - thumbBox.radius
-                                    height: 5
-                                    visible: episodeItem.model.positionTicks > 0 && !episodeItem.model.played && episodeItem.model.runtimeTicks > 0
-                                    Rectangle {
-                                        anchors.fill: parent
-                                        radius: 2.5
-                                        color: Qt.rgba(0, 0, 0, 0.45)
-                                    }
-                                    Rectangle {
-                                        width: parent.width * Math.min(1, episodeItem.model.positionTicks / episodeItem.model.runtimeTicks)
-                                        height: parent.height
-                                        radius: 2.5
-                                        color: root.complementColor
-                                    }
-                                }
-                            }
-                            // 集名:缩略图下方,单行省略,居中。
-                            AppText {
-                                id: episodeTitle
-                                width: thumbBox.width
-                                text: episodeItem.model.name
-                                color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
-                                font.pixelSize: 14
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                                opacity: root.textFade
-                            }
-                        }
-                        // 悬停高亮/点击选集:Pointer Handler 组合(替代
-                        // MouseArea hover+click)。
-                        HoverHandler {
-                            id: episodeHover
-                        }
-                        TapHandler {
-                            onTapped: {
-                                // 选集条点集:原地替换(剧集页与集详情页一致,栈深恒为 1)。
-                                root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name, true)
-                            }
-                        }
-                    }
-                }
-            }
-        }
         // 莫奈色纵向延伸:顶部氛围色保持到 35%,中部平滑渐入带海报色相的
         // 极暗底色(bgTint),底部与正文底色衔接;不引入互补藏色(异色相在
         // 暗底上显脏)。
@@ -2415,6 +877,1550 @@ Item {
             GradientStop { position: 0.35; color: root.heroFrom }
             GradientStop { position: 0.70; color: root.bgTint }
             GradientStop { position: 1.0; color: root.bgTint }
+        }
+    }
+    Row {
+        anchors.fill: parent
+        visible: root.loaded
+        z: 2
+        // 选季栏左/右:只镜像本 positioner 的子项顺序(官方 RTL 机制,
+        // 不 childrenInherit,overview/sidebar 内部布局不受影响)。
+        LayoutMirroring.enabled: ConfigManager.detailSidebarLeft
+
+        // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
+        Flickable {
+            id: overview
+            width: parent.width - (sidebar.visible ? Constants.detailSidebarW : 0)
+            height: parent.height
+            clip: true
+            contentHeight: overviewColumn.implicitHeight
+            // 滚轮步进走配置(页级 detailWheelStep,0=全局)。
+            WheelStepHandler {
+                targetItem: overview
+                pageStep: ConfigManager.detailWheelStep
+            }
+
+            Column {
+                id: overviewColumn
+                width: parent.width
+
+                // ================= Hero =================
+                Item {
+                    id: heroItem
+                    width: parent.width
+                    // 内容区与背景图同高(16:9 随窗口):bottom-* 位置即
+                    // 背景图底部,海报/文字/按钮相对背景图定位成立。
+                    height: root.width * 9 / 16
+                    // ===== 定位代理(slot):三个槽各自用 states +
+                    // AnchorChanges(官方推荐的条件锚切换机制,自动处理
+                    // 解锚/设锚顺序,免手动坐标计算)。poster/text 槽按
+                    // 9 宫格锚定,参考 heroItem 内容区(背景图 heroBackdrop
+                    // 在槽的祖父级,Qt 锚仅限兄弟/直接父项,故以 heroItem
+                    // 为参考——右侧位置天然避开选集栏);按钮槽按
+                    // poster/text/backdrop 三模式。=====
+
+                    // 海报槽:posterPos 9 宫格(边距 32/24)。AnchorChanges
+                    // 只支持锚线(margin 属性不存在),边距走槽上的普通
+                    // 绑定——仅对应边被锚定时生效,其余态惰性。
+                    Item {
+                        id: posterSlot
+                        width: Constants.detailPosterW
+                        height: Constants.detailPosterH
+                        anchors.leftMargin: 32
+                        anchors.rightMargin: 32
+                        anchors.topMargin: 24
+                        anchors.bottomMargin: 24
+                        state: ConfigManager.detailPosterPos
+                        states: [
+                            State { name: "top-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
+                            State { name: "top-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                            State { name: "top-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
+                            State { name: "middle-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "middle-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "middle-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "bottom-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
+                            State { name: "bottom-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
+                            State { name: "bottom-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } }
+                        ]
+                    }
+                    // 文字槽:textPos 9 宫格(相对 heroItem,边距 32/24);
+                    // followPoster → 跟随海报:水平贴海报外侧(海报左/中 →
+                    // 右侧,海报右 → 左侧,边距 24),垂直底缘对齐海报底
+                    // (按钮组跟随海报时上缩 60 避让)。边距绑定实时算。
+                    Item {
+                        id: textSlot
+                        width: ConfigManager.detailTextWidth
+                        height: ConfigManager.detailTextHeight
+                        anchors.leftMargin: ConfigManager.detailTextPos === "followPoster"
+                                             && root.textSide() !== "right" ? 24 : 32
+                        anchors.rightMargin: ConfigManager.detailTextPos === "followPoster"
+                                              && root.textSide() === "right" ? 24 : 32
+                        anchors.topMargin: 24
+                        anchors.bottomMargin: ConfigManager.detailTextPos === "followPoster"
+                                               && ConfigManager.detailButtonsPos === "poster" ? 60 : 24
+                        state: {
+                            const t = ConfigManager.detailTextPos
+                            if (t !== "followPoster")
+                                return t
+                            return "follow-" + (root.posterSide() === "right" ? "right" : "left")
+                        }
+                        states: [
+                            State { name: "top-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
+                            State { name: "top-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                            State { name: "top-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
+                            State { name: "middle-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "middle-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "middle-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
+                            State { name: "bottom-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
+                            State { name: "bottom-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
+                            State { name: "bottom-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } },
+                            State { name: "follow-left"; AnchorChanges { target: textSlot; anchors.left: posterSlot.right; anchors.bottom: posterSlot.bottom } },
+                            State { name: "follow-right"; AnchorChanges { target: textSlot; anchors.right: posterSlot.left; anchors.bottom: posterSlot.bottom } }
+                        ]
+                    }
+                    // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
+                    // 决定,内容不再计算坐标)。
+                    Rectangle {
+                        width: Constants.detailPosterW
+                        height: Constants.detailPosterH
+                        color: root.surfaceTint
+                        radius: 18
+                        clip: true
+                        anchors.fill: posterSlot
+                        CrossfadeImage {
+                            id: posterFx
+                            anchors.fill: parent
+                            // 圆角在绘制层裁切(Item::clip 只裁矩形)。
+                            cornerRadius: 18
+                            source: root.heroPosterSource()
+                            fillMode: Image.PreserveAspectCrop
+                            asynchronous: true
+                            duration: 800
+                        }
+                    }
+
+                    // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
+                    // 全部由 textSlot 决定(静态锚定,判断在槽内)。
+                    Item {
+                        id: heroTextArea
+                        anchors.fill: textSlot
+
+                        Item {
+                            id: heroOldTree
+                            anchors.right: heroTextArea.right
+                            width: heroTextArea.width * root.textReveal
+                            // Item 的 implicitHeight 默认 0(不随子项传播),
+                            // 显式取列高,否则 clip 后文字被裁没。
+                            height: heroTextArea.height
+                            clip: true
+                            opacity: root.oldTextOpacity
+                            visible: root.oldTextOpacity > 0
+                            Column {
+                                id: heroOldCol
+                                // 右缘贴容器右缘:容器右缘固定、宽度收缩时
+                                // 列原点恒 0,裁剪落在列右半(左先消失)。
+                                anchors.right: heroOldTree.right
+                                width: heroTextArea.width
+                                // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                // bottom/followPoster 沉底——简介文字底缘
+                                // 对齐文字槽底(槽底随锚定 = 海报下缘)。
+                                y: root.textSlotVertical() === "top"
+                                    ? 0 : (root.textSlotVertical() === "middle"
+                                            ? (parent.height - implicitHeight) / 2
+                                            : parent.height - implicitHeight)
+                                spacing: 8
+                                Row {
+                                    width: parent.width
+                                    spacing: 12
+                                    AppText {
+                                        text: root.heroOldTitle
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 30
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                    }
+                                }
+                                AppText {
+                                    text: root.heroOldEpisode
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 18
+                                    elide: Text.ElideRight
+                                    width: parent.width
+                                    horizontalAlignment: root.heroTextAlign
+                                    visible: text !== ""
+                                }
+                                AppText {
+                                    text: root.heroOldMeta
+                                    color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                    font.pixelSize: 14
+                                    // 显式宽 + 对齐跟随:文字区靠右时评分/
+                                    // 时间行右对齐(隐式宽下对齐无效)。
+                                    width: parent.width
+                                    horizontalAlignment: root.heroTextAlign
+                                    opacity: text !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 100 } }
+                                }
+                            }
+                        }
+                        Item {
+                            id: heroNewTree
+                            anchors.left: heroTextArea.left
+                            width: heroTextArea.width * (1 - root.textReveal)
+                            height: heroTextArea.height
+                            clip: true
+                            opacity: root.newTextOpacity
+                            Column {
+                                id: heroNewCol
+                                width: heroTextArea.width
+                                // 内容垂直:top 顶部对齐;middle 垂直居中;
+                                // bottom/followPoster 沉底(简介文字底缘
+                                // 对齐文字槽底,同 heroOldCol)。
+                                y: root.textSlotVertical() === "top"
+                                    ? 0 : (root.textSlotVertical() === "middle"
+                                            ? (parent.height - implicitHeight) / 2
+                                            : parent.height - implicitHeight)
+                                spacing: 8
+                                Row {
+                                    width: parent.width
+                                    spacing: 12
+                                    AppText {
+                                        id: heroNewTitle
+                                        text: root.heroTitle()
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 30
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        width: parent.width
+                                        horizontalAlignment: root.heroTextAlign
+                                    }
+                                }
+                                AppText {
+                                    text: root.heroEpisodeLine()
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 18
+                                    elide: Text.ElideRight
+                                    width: parent.width
+                                    horizontalAlignment: root.heroTextAlign
+                                    visible: text !== ""
+                                }
+                                AppText {
+                                    text: root.metaLine()
+                                    color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                    font.pixelSize: 14
+                                    width: parent.width
+                                    horizontalAlignment: root.heroTextAlign
+                                    opacity: text !== "" ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 100 } }
+                                }
+                            }
+                        }
+                    }
+                    Item {
+                        id: btnHolder
+                        // 按钮行锚定容器:锚点放这里(自身无 LayoutMirroring,
+                        // anchors 不反转);宽 = 行隐式宽(单向绑定,无环),
+                        // 右锚时整块从参考点向左展开。行在内部只做子项
+                        // 镜像(播放键贴参考端),不受锚点影响。
+                        width: btnRow.width
+                        height: btnRow.height
+                        anchors.leftMargin: ConfigManager.detailButtonsPos === "backdrop"
+                                             ? (ConfigManager.detailSidebarLeft
+                                                    ? Constants.detailSidebarW + 32 : 32)
+                                             : 24
+                        anchors.rightMargin: 24
+                        state: {
+                            const b = ConfigManager.detailButtonsPos
+                            if (b === "backdrop")
+                                return "backdrop"
+                            if (b === "poster")
+                                return "poster-" + (root.posterSide() === "right" ? "right" : "left")
+                            return "text-" + (root.textSide() === "right" ? "right" : "left")
+                        }
+                        states: [
+                            State { name: "poster-left"; AnchorChanges { target: btnHolder; anchors.left: posterSlot.right } },
+                            State { name: "poster-right"; AnchorChanges { target: btnHolder; anchors.right: posterSlot.left } },
+                            State { name: "text-left"; AnchorChanges { target: btnHolder; anchors.left: textSlot.right } },
+                            State { name: "text-right"; AnchorChanges { target: btnHolder; anchors.right: textSlot.left } },
+                            State { name: "backdrop"; AnchorChanges { target: btnHolder; anchors.left: heroItem.left } }
+                        ]
+                        // 左锚参考距(弹性播放键宽用):poster → 海报外侧
+                        // 256;text → 标题区外侧;backdrop → 左缘。
+                        readonly property real _ref: {
+                            const b = ConfigManager.detailButtonsPos
+                            if (b === "backdrop")
+                                return ConfigManager.detailSidebarLeft ? Constants.detailSidebarW + 32 : 32
+                            if (b === "poster")
+                                return 32 + Constants.detailPosterW + 24
+                            return root.textSide() === "right"
+                                   ? parent.width - textSlot.x + 24
+                                   : textSlot.x + textSlot.width + 24
+                        }
+                        readonly property bool _leftSide: {
+                            const b = ConfigManager.detailButtonsPos
+                            if (b === "backdrop")
+                                return true
+                            if (b === "poster")
+                                return root.posterSide() !== "right"
+                            return root.textSide() !== "right"
+                        }
+                        // 播放键弹性宽:锚距内放不下时压缩(下限 120 保可点)。
+                        readonly property real _playW: Math.min(220, Math.max(120,
+                            parent.width - _ref - 16 - 44 - 20))
+                        // 垂直:backdrop → 背景 16:9 底缘(背景高 = 宽*9/16,
+                        // 与 heroBackdrop 同式);poster → 海报底对齐;
+                        // text → 标题行顶(与标题对齐;标题在揭示树深处
+                        // 不可锚,故 y 用绑定,与水平锚不同轴不冲突)。
+                        y: ConfigManager.detailButtonsPos === "backdrop"
+                            ? root.width * 9 / 16 - 44 - 24
+                            : (ConfigManager.detailButtonsPos === "poster"
+                                   ? posterSlot.y + posterSlot.height - 44
+                                   : textSlot.y + heroNewCol.y)
+
+
+                        Row {
+                            id: btnRow
+                            // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
+                            // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
+                            // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
+                            // LayoutMirroring 只反转子项,按钮内容不镜像;
+                            LayoutMirroring.enabled: !btnHolder._leftSide
+                            spacing: 10
+                            opacity: root.textFade
+                            Button {
+                                id: playBtn
+                                text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
+                                // 弹性宽由 _playW 决定(锚距内放不下时压缩,
+                                // 下限 120 保可点区域)。
+                                width: btnHolder._playW
+                                height: 44
+                                font.pixelSize: 16
+                                onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
+                                background: FrostedGlass {
+                                    radius: height / 2
+                                    blurSource: detailBg
+                                    scrollParent: overview
+                                    // 主按钮:accent 色调玻璃(透出背景磨砂 + 主题色)。纯磨砂下
+                                    // 0.45 太实会盖住模糊透出,降 0.30 留色调又透亮。
+                                    glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                       root.accentColor.b, 0.30)
+                                    borderColor: Qt.rgba(1, 1, 1, 0.30)
+                                    thickness: 0
+                                    frostAmount: 0.15
+                                    edgeLight: 0.5
+                                    saturation: 0.4
+                                    blurRadius: 6
+                                    sampleMargin: 48
+                                    elevation: 6
+                                }
+                                contentItem: AppText {
+                                    text: playBtn.text
+                                    color: "white"
+                                    font.pixelSize: 16
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                            // 收藏:Canvas 绘制爱心。未收藏藏白实心,已收藏粉实心。
+                            Button {
+                                id: favBtn
+                                width: 44
+                                height: 44
+                                onClicked: root.toggleFavorite()
+                                background: FrostedGlass {
+                                    radius: height / 2
+                                    blurSource: detailBg
+                                    scrollParent: overview
+                                    // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                       root.complementColor.b, 0.22)
+                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                    thickness: 0
+                                    frostAmount: 0.15
+                                    edgeLight: 0.5
+                                    saturation: 0.4
+                                    blurRadius: 6
+                                    sampleMargin: 48
+                                    elevation: 5
+                                }
+                                contentItem: Item {
+                                    anchors.fill: parent
+                                    Canvas {
+                                        anchors.centerIn: parent
+                                        width: 22
+                                        height: 22
+                                        property color fillColor: root.isFavorite ? Constants.moePink : root.iconWhite
+                                        onFillColorChanged: requestPaint()
+                                        onPaint: {
+                                            const ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.beginPath()
+                                            ctx.moveTo(11, 19)
+                                            ctx.bezierCurveTo(11, 19, 3, 13, 3, 8)
+                                            ctx.bezierCurveTo(3, 5, 6, 3, 9, 5)
+                                            ctx.bezierCurveTo(10, 5, 11, 6, 11, 7)
+                                            ctx.bezierCurveTo(11, 6, 12, 5, 13, 5)
+                                            ctx.bezierCurveTo(16, 3, 19, 5, 19, 8)
+                                            ctx.bezierCurveTo(19, 13, 11, 19, 11, 19)
+                                            ctx.closePath()
+                                            ctx.fillStyle = fillColor
+                                            ctx.fill()
+                                        }
+                                    }
+                                }
+                            }
+                            // 已看/未看:Canvas 绘制圆圈 + 勾。已看绿色,未看藏白。
+                            Button {
+                                id: watchedBtn
+                                width: 44
+                                height: 44
+                                onClicked: root.toggleWatched()
+                                background: FrostedGlass {
+                                    radius: height / 2
+                                    blurSource: detailBg
+                                    scrollParent: overview
+                                    // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                       root.complementColor.b, 0.22)
+                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                    thickness: 0
+                                    frostAmount: 0.15
+                                    edgeLight: 0.5
+                                    saturation: 0.4
+                                    blurRadius: 6
+                                    sampleMargin: 48
+                                    elevation: 5
+                                }
+                                contentItem: Item {
+                                    anchors.fill: parent
+                                    Canvas {
+                                        anchors.centerIn: parent
+                                        width: 22
+                                        height: 22
+                                        property color strokeColor: root.detail.played ? Theme.success : root.iconWhite
+                                        onStrokeColorChanged: requestPaint()
+                                        onPaint: {
+                                            const ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.lineCap = "round"
+                                            ctx.lineJoin = "round"
+                                            ctx.lineWidth = 2.5
+                                            ctx.strokeStyle = strokeColor
+                                            // 圆圈
+                                            ctx.beginPath()
+                                            ctx.arc(width / 2, height / 2, 8, 0, Math.PI * 2)
+                                            ctx.stroke()
+                                            // 勾
+                                            ctx.beginPath()
+                                            ctx.moveTo(7, 11)
+                                            ctx.lineTo(10, 14)
+                                            ctx.lineTo(15, 8)
+                                            ctx.stroke()
+                                        }
+                                    }
+                                }
+                            }
+                            Button {
+                                id: replayBtn
+                                text: "从头播放"
+                                visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
+                                width: 110
+                                height: 44
+                                onClicked: root.startPlayback(false)
+                                background: FrostedGlass {
+                                    radius: height / 2
+                                    blurSource: detailBg
+                                    scrollParent: overview
+                                    // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                       root.complementColor.b, 0.22)
+                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                    thickness: 0
+                                    frostAmount: 0.15
+                                    edgeLight: 0.5
+                                    saturation: 0.4
+                                    blurRadius: 6
+                                    sampleMargin: 48
+                                    elevation: 5
+                                }
+                                contentItem: AppText {
+                                    text: replayBtn.text
+                                    color: "white"
+                                    font.pixelSize: 14
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                            }
+                        }
+                    }                    
+                }
+
+                // ================= 播放选项(版本/音频/字幕) =================
+                // 正文流一节(Hero 与简介之间),占自有空间不与 hero 标题/播放键重叠。
+                // 三段摘要行常显当前选中;点行弹出该行下方的下拉浮层(Popup 覆盖
+                // 在上层,点外/Esc 自动收起)。选中存 root.sel*,点播放带入协商。
+                Column {
+                    id: playOptsCol
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.detailSectionMargin
+                    width: parent.width - Constants.detailSectionMargin * 2
+                    spacing: 6
+                    visible: (root.detail.mediaSources || []).length > 0
+                    opacity: root.textFade
+
+                    // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
+                    // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
+                    component OptRow: FrostedGlass {
+                        id: optRow
+                        property string sectionKey: ""
+                        property string icon: ""
+                        property string mainText: ""
+                        property string subText: ""
+                        property var listModel: []
+                        property real rowWidth: 100
+                        signal picked(var entry)
+                        width: rowWidth
+                        height: subText !== "" ? 52 : 40
+                        radius: 10
+                        // 摘要行玻璃:采样 detailBg(页面底色+hero,无自采样),
+                        // 透出背景 + 选中时 accent 描边。
+                        blurSource: detailBg
+                            scrollParent: overview
+                        glassColor: Qt.rgba(1, 1, 1, 0.06)
+                        borderColor: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.15)
+                        thickness: 0
+                        frostAmount: 0.15
+                        edgeLight: 0.4
+                        saturation: 0.3
+                        blurRadius: 5
+                        sampleMargin: 32
+                        elevation: 3
+
+                        Row {
+                            id: headRow
+                            anchors.fill: parent
+                            spacing: 10
+                            AppText {
+                                width: 28
+                                height: parent.height
+                                text: optRow.icon
+                                color: Theme.textMuted
+                                font.pixelSize: 16
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            Column {
+                                width: parent.width - 28 - 24 - 10 * 3
+                                anchors.verticalCenter: parent.verticalCenter
+                                spacing: 2
+                                AppText {
+                                    width: parent.width
+                                    text: optRow.mainText
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 13
+                                    elide: Text.ElideRight
+                                }
+                                AppText {
+                                    width: parent.width
+                                    visible: optRow.subText !== ""
+                                    text: optRow.subText
+                                    color: Theme.textMuted
+                                    font.pixelSize: 11
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            AppText {
+                                width: 24
+                                height: parent.height
+                                text: drop.opened ? "▴" : "▾"
+                                color: Theme.textMuted
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: drop.opened ? drop.close() : drop.open()
+                        }
+
+                        // 下拉浮层:贴行下方弹出,覆盖在上层内容之上;
+                        // modal+CloseOnPressOutside:点行外任意处/Esc 收起;点行头 toggle。
+                        Popup {
+                            id: drop
+                            y: optRow.height + 4
+                            width: optRow.width
+                            height: Math.min(optListCol.implicitHeight + 8, 288)
+                            padding: 4
+                            // modal:true 使打开时行头 press 被 modal 消费(只关不重开),非 modal
+                            // 时 outside 事件透传行头会收起又重开。dim:false 不遮暗背景。
+                            // 代价:下拉开着时点其他行只关不切(需二次点击),属预期。
+                            modal: true
+                            dim: false
+                            focus: true
+                            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+                            background: Rectangle {
+                                radius: 10
+                                color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.98)
+                                border.width: 1
+                                border.color: Qt.rgba(1, 1, 1, 0.12)
+                            }
+                            contentItem: Flickable {
+                                contentWidth: width
+                                contentHeight: optListCol.implicitHeight
+                                clip: true
+                                Column {
+                                    id: optListCol
+                                    width: drop.width - 8
+                                    spacing: 2
+                                    Repeater {
+                                        model: optRow.listModel
+                                        delegate: Rectangle {
+                                            id: optEntry
+                                            required property var modelData
+                                            width: optListCol.width
+                                            height: 34
+                                            radius: 8
+                                            property bool sel: modelData._sel === true
+                                            color: sel ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
+                                                       : (entryMa.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 12
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                width: 8
+                                                height: 8
+                                                radius: 4
+                                                color: root.accentColor
+                                                visible: optEntry.sel
+                                            }
+                                            AppText {
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 28
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 10
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: optEntry.modelData._label || ""
+                                                color: optEntry.sel ? Theme.textPrimary : Theme.textMuted
+                                                font.pixelSize: 13
+                                                elide: Text.ElideRight
+                                            }
+                                            MouseArea {
+                                                id: entryMa
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    optRow.picked(optEntry.modelData)
+                                                    drop.close()
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // ---- 版本行(多版本才显示) ----
+                    OptRow {
+                        sectionKey: "version"
+                        icon: "🎞"
+                        rowWidth: playOptsCol.width
+                        visible: (root.detail.mediaSources || []).length > 0
+                        mainText: root.currentVersionLabel()
+                        subText: root.versionSubLabel(root.selVersion())
+                        listModel: {
+                            const ms = root.detail.mediaSources || []
+                            const out = []
+                            for (let i = 0; i < ms.length; ++i) {
+                                const v = ms[i]
+                                out.push({ id: v.id, _sel: v.id === root.selMediaSourceId,
+                                           _label: (v.name || "版本") + (root.versionSubLabel(v) !== "" ? "  ·  " + root.versionSubLabel(v) : "") })
+                            }
+                            return out
+                        }
+                        onPicked: function (entry) { root.selectVersion(entry.id) }
+                    }
+                    // ---- 音频行(当前源有音频才显示) ----
+                    OptRow {
+                        sectionKey: "audio"
+                        icon: "♪"
+                        rowWidth: playOptsCol.width
+                        visible: true
+                        mainText: root.currentAudioLabel()
+                        listModel: {
+                            const ss = root.audioOptions()
+                            const out = []
+                            for (let i = 0; i < ss.length; ++i) {
+                                const e = ss[i]
+                                out.push({ index: e.index, _sel: e.index === root.selAudioIndex,
+                                           _label: root.trackOptionLabel("Audio", e) })
+                            }
+                            return out
+                        }
+                        onPicked: function (entry) { root.selAudioIndex = entry.index }
+                    }
+                    // ---- 字幕行(常显;含 关闭字幕/默认/各轨) ----
+                    OptRow {
+                        sectionKey: "subtitle"
+                        icon: "󰨗"
+                        rowWidth: playOptsCol.width
+                        visible: true
+                        mainText: root.currentSubtitleLabel()
+                        listModel: {
+                            const ss = root.subtitleOptionsFull()
+                            const out = []
+                            for (let i = 0; i < ss.length; ++i) {
+                                const e = ss[i]
+                                out.push({ index: e.index, _sel: e.index === root.selSubtitleIndex,
+                                           _label: root.trackOptionLabel("Subtitle", e) })
+                            }
+                            return out
+                        }
+                        onPicked: function (entry) { root.selSubtitleIndex = entry.index }
+                    }
+                }
+                // ================= 简介 =================
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.detailSectionMargin
+                    width: parent.width - Constants.detailSectionMargin * 2
+                    spacing: 8
+                    // 空/缺失简介不显示该节。
+                    visible: !!root.detail.overview && root.detail.overview.length > 0
+                    opacity: root.textFade * visible
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                    AppText {
+                        text: "简介"
+                        color: Theme.textPrimary
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                    // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
+                    FrostedGlass {
+                        id: overviewBox
+                        width: parent.width
+                        height: overviewBoxText.implicitHeight + 24
+                        radius: 12
+                        blurSource: detailBg
+                        scrollParent: overview
+                        // 玻璃底色淡一点(白底微透,非黑底)——黑色太深会盖住
+                        // 磨砂模糊的透亮感,淡色透出下方模糊内容才显玻璃质感。
+                        glassColor: Qt.rgba(1, 1, 1, 0.06)
+                        borderColor: Qt.rgba(1, 1, 1, 0.12)
+                        thickness: 0
+                        frostAmount: 0.15
+                        edgeLight: 0.35
+                        saturation: 0.3
+                        blurRadius: 6
+                        sampleMargin: 32
+                        elevation: 3
+                        AppText {
+                            id: overviewBoxText
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            text: root.detail.overview || ""
+                            color: "white"
+                            font.pixelSize: 14
+                            wrapMode: Text.Wrap
+                        }
+                    }
+                }
+
+                // ================= 演职人员 =================
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.detailSectionMargin
+                    width: parent.width - Constants.detailSectionMargin * 2
+                    spacing: 8
+                    visible: !!root.detail.people && root.detail.people.length > 0
+                    opacity: root.textFade * visible
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                    AppText {
+                        text: "演职人员"
+                        color: Theme.textPrimary
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                    Flickable {
+                        width: parent.width
+                        height: 110
+                        clip: true
+                        contentWidth: peopleRow.implicitWidth
+                        Row {
+                            id: peopleRow
+                            spacing: 16
+                            Repeater {
+                                model: root.detail.people
+                                delegate: Item {
+                                    id: peopleCard
+                                    // Repeater 注入的元素;显式 required 声明让 qmllint
+                                    // 静态识别 modelData(否则复杂文件内注入失效报 unqualified)。
+                                    required property var modelData
+                                    width: 72
+                                    height: 100
+                                    property bool hovered: false
+                                    HoverHandler {
+                                        onHoveredChanged: peopleCard.hovered = hovered
+                                    }
+                                    Column {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        anchors.top: parent.top
+                                        anchors.topMargin: 6
+                                        spacing: 4
+                                        Item {
+                                            width: 60
+                                            height: 60
+                                            anchors.horizontalCenter: parent.horizontalCenter
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                radius: 30
+                                                clip: true
+                                                color: root.surfaceTint
+                                                CrossfadeImage {
+                                                    anchors.fill: parent
+                                                    // 60x60 卡:半径=短边一半,呈圆形。
+                                                    cornerRadius: 30
+                                                    source: peopleCard.modelData.posterId ? "image://emby/" + peopleCard.modelData.posterId : ""
+                                                    fillMode: Image.PreserveAspectCrop
+                                                    asynchronous: true
+                                                    duration: 500
+                                                    cache: true
+                                                }
+                                                AppText {
+                                                    anchors.centerIn: parent
+                                                    text: peopleCard.modelData.name ? peopleCard.modelData.name.charAt(0) : ""
+                                                    color: Theme.textMuted
+                                                    font.pixelSize: 20
+                                                    visible: !(peopleCard.modelData.posterId)
+                                                }
+                                            }
+                                            // hover 粉色细环。
+                                            Rectangle {
+                                                anchors.centerIn: parent
+                                                width: 66
+                                                height: 66
+                                                radius: 33
+                                                color: "transparent"
+                                                border.width: peopleCard.hovered ? 2 : 0
+                                                border.color: Constants.moePink
+                                                opacity: peopleCard.hovered ? 1 : 0
+                                                Behavior on opacity { NumberAnimation { duration: 160 } }
+                                            }
+                                        }
+                                        AppText {
+                                            text: peopleCard.modelData.name || ""
+                                            color: Theme.textPrimary
+                                            font.pixelSize: 12
+                                            elide: Text.ElideRight
+                                            width: 72
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        AppText {
+                                            text: peopleCard.modelData.role || peopleCard.modelData.type || ""
+                                            color: Theme.textMuted
+                                            font.pixelSize: 11
+                                            elide: Text.ElideRight
+                                            width: 72
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ================= 媒体信息 =================
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.detailSectionMargin
+                    width: parent.width - Constants.detailSectionMargin * 2
+                    spacing: 8
+                    visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
+                    opacity: root.textFade * visible
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                    AppText {
+                        text: "媒体信息"
+                        color: Theme.textPrimary
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                    Repeater {
+                        model: root.detail.mediaSources
+                        // 每版本一整块:头部版本名+徽章,下方流卡片横排。
+                        delegate: FrostedGlass {
+                            id: verBlock
+                            required property var modelData
+                            required property int index
+                            // 销毁期间 parent 会被置 null(换集重建媒体源时),空防。
+                            width: parent ? parent.width : 0
+                            height: verCol.implicitHeight + 28
+                            radius: 12
+                            // 媒体信息卡玻璃:透出背景,微折射。
+                            blurSource: detailBg
+                            scrollParent: overview
+                            glassColor: Qt.rgba(1, 1, 1, 0.05)
+                            borderColor: Qt.rgba(1, 1, 1, 0.12)
+                            thickness: 0
+                            frostAmount: 0.15
+                            edgeLight: 0.35
+                            saturation: 0.3
+                            blurRadius: 6
+                            sampleMargin: 32
+                            elevation: 3
+
+                            // 本版本视频流(头部徽章取分辨率/动态范围)。
+                            readonly property var videoStream: {
+                                const ss = verBlock.modelData.streams || []
+                                for (let i = 0; i < ss.length; ++i) {
+                                    if (root.streamKind(ss[i]) === "Video")
+                                        return ss[i]
+                                }
+                                return null
+                            }
+                            // 头部徽章:容器/大小/时长/总码率/分辨率/动态范围(空值不占位)。
+                            readonly property var headBadges: {
+                                const out = []
+                                const m = verBlock.modelData
+                                if (m.container)
+                                    out.push(m.container.toUpperCase())
+                                if (m.sizeBytes > 0)
+                                    out.push(root.formatSize(m.sizeBytes))
+                                if (m.runTimeTicks > 0)
+                                    out.push(root.formatTime(m.runTimeTicks / Constants.ticksPerSecond))
+                                if (m.bitrate > 0)
+                                    out.push(root.formatBitrate(m.bitrate))
+                                const vs = verBlock.videoStream
+                                if (vs && vs.height > 0)
+                                    out.push(vs.height >= 2160 ? "4K" : vs.height + "p")
+                                const rg = vs ? root.rangeLabel(vs) : ""
+                                if (rg)
+                                    out.push(rg)
+                                return out
+                            }
+                            // 流卡片模型:视频 + 音频×n + 字幕×n + 附件×n;空值行不出。
+                            // 文件级信息(容器/大小/时长/总码率/路径)在版本块头部,不占卡。
+                            readonly property var cardModels: {
+                                const out = []
+                                const m = verBlock.modelData
+                                const ss = m.streams || []
+                                const vs = verBlock.videoStream
+                                if (vs) {
+                                    const rows = []
+                                    rows.push({ k: "编码", v: root.codecLabel(vs.codec) + (vs.profile ? " · " + vs.profile : "") })
+                                    if (vs.width > 0 && vs.height > 0)
+                                        rows.push({ k: "分辨率", v: vs.width + "×" + vs.height })
+                                    const rg = root.rangeLabel(vs)
+                                    if (rg)
+                                        rows.push({ k: "动态范围", v: rg })
+                                    if (vs.frameRate > 0)
+                                        rows.push({ k: "帧率", v: vs.frameRate.toFixed(3) })
+                                    if (vs.bitDepth > 0)
+                                        rows.push({ k: "位深", v: vs.bitDepth + "bit" })
+                                    const cl = root.colorLabel(vs)
+                                    if (cl)
+                                        rows.push({ k: "色彩", v: cl })
+                                    if (vs.bitrate > 0)
+                                        rows.push({ k: "码率", v: root.formatBitrate(vs.bitrate) })
+                                    out.push({ cap: root.streamTypeLabel("Video"), tag: false, rows: rows })
+                                }
+                                let an = 0
+                                let sn = 0
+                                // 附件(ASS 字体等)逐条信息量低且数量多,汇总一卡不逐条铺。
+                                let attCount = 0
+                                let attSize = 0
+                                const attFormats = {}
+                                for (let i = 0; i < ss.length; ++i) {
+                                    const s = ss[i]
+                                    const kind = root.streamKind(s)
+                                    if (kind === "Audio") {
+                                        an += 1
+                                        const rows = []
+                                        rows.push({ k: "编码", v: root.codecLabel(s.codec) + (s.profile ? " · " + s.profile : "") })
+                                        const ch = s.channelLayout || (s.channels > 0 ? s.channels + "ch" : "")
+                                        if (ch)
+                                            rows.push({ k: "声道", v: ch })
+                                        const lang = s.displayLanguage || s.language
+                                        if (lang)
+                                            rows.push({ k: "语言", v: lang })
+                                        const sr = root.formatSampleRate(s.sampleRate)
+                                        if (sr)
+                                            rows.push({ k: "采样率", v: sr })
+                                        if (s.bitDepth > 0)
+                                            rows.push({ k: "位深", v: s.bitDepth + "bit" })
+                                        if (s.bitrate > 0)
+                                            rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
+                                        out.push({ cap: root.streamTypeLabel(s.type) + " " + an, tag: !!s.isDefault, rows: rows })
+                                    } else if (kind === "Subtitle") {
+                                        sn += 1
+                                        const rows = []
+                                        rows.push({ k: "格式", v: root.codecLabel(s.codec) })
+                                        const st = s.displayTitle || s.title
+                                        if (st)
+                                            rows.push({ k: "标题", v: st })
+                                        const sl = s.displayLanguage || s.language
+                                        if (sl)
+                                            rows.push({ k: "语言", v: sl })
+                                        rows.push({ k: "位置", v: root.subtitleLocationLabel(s) })
+                                        if (s.isForced)
+                                            rows.push({ k: "强制", v: "是" })
+                                        out.push({ cap: root.streamTypeLabel(s.type) + " " + sn, tag: !!s.isDefault, rows: rows })
+                                    } else if (kind === "Attachment") {
+                                        attCount += 1
+                                        attSize += s.attachmentSize || 0
+                                        const f = root.codecLabel(s.codec)
+                                        attFormats[f] = (attFormats[f] || 0) + 1
+                                    } else if (kind !== "Video") {
+                                        // 未知类型(Type/codec 均无映射):通用卡,cap 回退原始 Type。
+                                        const rows = []
+                                        rows.push({ k: "编码", v: root.codecLabel(s.codec) })
+                                        const gl = s.displayLanguage || s.language
+                                        if (gl)
+                                            rows.push({ k: "语言", v: gl })
+                                        if (s.bitrate > 0)
+                                            rows.push({ k: "码率", v: root.formatBitrate(s.bitrate) })
+                                        out.push({ cap: root.streamTypeLabel(s.type || "未知"), tag: !!s.isDefault, rows: rows })
+                                    }
+                                }
+                                if (attCount > 0) {
+                                    const rows = [{ k: "数量", v: String(attCount) }]
+                                    if (attSize > 0)
+                                        rows.push({ k: "总大小", v: root.formatSize(attSize) })
+                                    rows.push({ k: "格式", v: Object.keys(attFormats).map(function (f) { return f + "×" + attFormats[f] }).join(" · ") })
+                                    out.push({ cap: root.streamTypeLabel("Attachment"), tag: false, rows: rows })
+                                }
+                                // 时间卡(添加/修改,条目级):每个版本块都出。
+                                const dc = (root.detail.dateCreated || "").slice(0, 10)
+                                const dm = (root.detail.dateModified || "").slice(0, 10)
+                                if (dc || dm) {
+                                    const rows = []
+                                    if (dc)
+                                        rows.push({ k: "添加", v: dc })
+                                    if (dm)
+                                        rows.push({ k: "修改", v: dm })
+                                    out.push({ cap: "时间", tag: false, rows: rows })
+                                }
+                                return out
+                            }
+
+                            Column {
+                                id: verCol
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 14
+                                spacing: 12
+                                // 头部:版本名 + 徽章。
+                                Item {
+                                    width: parent.width
+                                    height: 24
+                                    AppText {
+                                        anchors.left: parent.left
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                    }
+                                    Row {
+                                        anchors.right: parent.right
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        spacing: 6
+                                        Repeater {
+                                            model: verBlock.headBadges
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                height: 22
+                                                width: badgeText.implicitWidth + 14
+                                                radius: 11
+                                                color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                                border.width: 1
+                                                border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                                AppText {
+                                                    id: badgeText
+                                                    anchors.centerIn: parent
+                                                    text: modelData
+                                                    color: Theme.textPrimary
+                                                    font.pixelSize: 12
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // 流卡片横排(超出可横向拖动)。
+                                ListView {
+                                    width: parent.width
+                                    height: 224
+                                    orientation: ListView.Horizontal
+                                    spacing: 12
+                                    clip: true
+                                    model: verBlock.cardModels
+                                    delegate: Rectangle {
+                                        id: miCard
+                                        required property var modelData
+                                        width: 190
+                                        height: 224
+                                        radius: 11
+                                        color: Theme.surface
+                                        border.width: 1
+                                        border.color: Qt.rgba(1, 1, 1, 0.10)
+                                        Column {
+                                            anchors.fill: parent
+                                            anchors.margins: 13
+                                            spacing: 4
+                                            // 卡头:流名(粉色小字)+ 默认标记。
+                                            Item {
+                                                width: parent.width
+                                                height: 16
+                                                AppText {
+                                                    anchors.left: parent.left
+                                                    text: miCard.modelData.cap
+                                                    color: Constants.moePink
+                                                    font.pixelSize: 11
+                                                    font.bold: true
+                                                    font.letterSpacing: 1.2
+                                                }
+                                                Rectangle {
+                                                    visible: miCard.modelData.tag
+                                                    anchors.right: parent.right
+                                                    height: 15
+                                                    width: tagText.implicitWidth + 10
+                                                    radius: 4
+                                                    color: "transparent"
+                                                    border.width: 1
+                                                    border.color: Qt.rgba(1, 1, 1, 0.25)
+                                                    AppText {
+                                                        id: tagText
+                                                        anchors.centerIn: parent
+                                                        text: "默认"
+                                                        color: Theme.textMuted
+                                                        font.pixelSize: 10
+                                                    }
+                                                }
+                                            }
+                                            // KV 行:键左值右,行间细分隔线(首行无)。
+                                            Repeater {
+                                                model: miCard.modelData.rows
+                                                delegate: Item {
+                                                    id: kvRow
+                                                    required property var modelData
+                                                    required property int index
+                                                    // 销毁期间 parent 会被置 null(换集重建米卡时),空防。
+                                                    width: parent ? parent.width : 0
+                                                    height: 22
+                                                    Rectangle {
+                                                        visible: kvRow.index > 0
+                                                        anchors.top: parent.top
+                                                        width: kvRow.width
+                                                        height: 1
+                                                        color: Qt.rgba(1, 1, 1, 0.07)
+                                                    }
+                                                    AppText {
+                                                        anchors.left: parent.left
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        text: kvRow.modelData.k
+                                                        color: Theme.textMuted
+                                                        font.pixelSize: 12
+                                                    }
+                                                    AppText {
+                                                        anchors.right: parent.right
+                                                        anchors.verticalCenter: parent.verticalCenter
+                                                        width: Math.min(implicitWidth, parent ? parent.width - 60 : 0)
+                                                        horizontalAlignment: Text.AlignRight
+                                                        text: kvRow.modelData.v
+                                                        color: Theme.textPrimary
+                                                        font.pixelSize: 12
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ================= 相似推荐 =================
+                Column {
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.detailSectionMargin
+                    width: parent.width - Constants.detailSectionMargin * 2
+                    spacing: 8
+                    visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
+                    opacity: root.textFade * visible
+                    Behavior on opacity { NumberAnimation { duration: 200 } }
+
+                    AppText {
+                        text: "相似推荐"
+                        color: Theme.textPrimary
+                        font.pixelSize: 18
+                        font.bold: true
+                    }
+                    ListView {
+                        width: parent.width
+                        height: Constants.detailCardH + 40
+                        orientation: ListView.Horizontal
+                        spacing: 12
+                        clip: true
+                        model: EmbyClient.similarModelFor(root.serverUrl)
+                        delegate: Item {
+                            id: similarCard
+                            // 同上:required 声明让 qmllint 识别 C++ 模型的 model 角色访问。
+                            required property var model
+                            width: Constants.detailCardW
+                            // 上下各留 20px 边距,hover 放大时不被 ListView 裁剪。
+                            height: Constants.detailCardH + 40
+                            property bool hovered: false
+                            scale: hovered ? 1.05 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: Constants.detailCardW
+                                height: Constants.detailCardH
+                                color: root.surfaceTint
+                                radius: 14
+                                clip: true
+                                CrossfadeImage {
+                                    anchors.fill: parent
+                                    // 不内缩(同 PosterCard):内缩露出深色卡片底,观感黑框。
+                                    cornerRadius: 14
+                                    source: similarCard.model.posterId ? "image://emby/" + similarCard.model.posterId : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    asynchronous: true
+                                    duration: 500
+                                    cache: true
+                                }
+                                AppText {
+                                    anchors.bottom: parent.bottom
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.margins: 6
+                                    text: similarCard.model.name
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            HoverHandler {
+                                onHoveredChanged: similarCard.hovered = hovered
+                            }
+                            // 点击进详情:TapHandler(替代 MouseArea)。
+                            TapHandler {
+                                onTapped: root.openItemDetail(similarCard.model.id, similarCard.model.posterId,
+                                                              similarCard.model.name, root.serverUrl)
+                            }
+                        }
+                    }
+                }
+
+                // 底部留白
+                Item { width: 1; height: 32 }
+            }
+        }
+
+        // ---- 右栏:竖向选集条(剧集/集详情) ----
+        Column {
+            id: sidebar
+            width: Constants.detailSidebarW
+            height: parent.height
+            spacing: 10
+            visible: root.detail.type === "Series" || root.detail.type === "Episode"
+            opacity: visible ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 220 } }
+
+            // 选季条:显示当前季,悬停时仅数字区变化(候选数字原位放大 +
+            // 上下邻季淡入),条本身高度/背景/描边保持固定。
+            // 背景用莫奈取色的 surfaceTint 半透明,与选集栏 scrim 同源。
+            Rectangle {
+                id: seasonStrip
+                property bool stripHovered: seasonMa.containsMouse
+                width: parent.width
+                height: 96
+                radius: 0
+                color: "transparent"
+                border.width: 0
+                clip: true
+
+                // "第"/"季":锚定数字牌两侧(右/左缘贴牌边 8px 间隙),
+                // 往数字牌靠近且随其位置跟随,不再贴条边缘。
+                AppText {
+                    text: "第"
+                    color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
+                    font.pixelSize: 14
+                    anchors.right: digitCol.left
+                    anchors.rightMargin: 8
+                    anchors.top: parent.top
+                    anchors.topMargin: 42
+                    Behavior on color { ColorAnimation { duration: 160 } }
+                }
+                // 数字区:行高固定(上 16 + 候选牌 62 + 下 16),每行内容
+                // 垂直居中 → 候选牌原位缩放,不上下移动;上下邻季行
+                // 始终占位,折叠时仅透明(淡入淡出)。
+                Column {
+                    id: digitCol
+                    anchors.top: parent.top
+                    anchors.topMargin: 2
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    width: 66
+                    height: 94
+                    spacing: 0
+                    // 上一季(列表内实际存在的季;无则隐藏)。
+                    AppText {
+                        id: upText
+                        width: 66
+                        height: 16
+                        verticalAlignment: Text.AlignVCenter
+                        text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
+                              ? root.pad2(root.seasonPrevNo()) : ""
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        opacity: seasonStrip.stripHovered
+                                 && root.seasonPrevNo() > 0 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                    }
+                    // 候选季号:两位 Counter Girls 牌(十位/个位),牌原位
+                    // 放大(中心不动),牌上的数字随季号切换。
+                    Item {
+                        width: 66
+                        height: 62
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 2
+                            Repeater {
+                                model: 2
+                                AnimatedImage {
+                                    required property int index
+                                    readonly property int digit: index === 0
+                                                               ? Math.floor(root.seasonCandidate / 10) % 10
+                                                               : root.seasonCandidate % 10
+                                    source: "qrc:/counter/" + digit + ".gif"
+                                    width: seasonStrip.stripHovered ? 28 : 22
+                                    height: seasonStrip.stripHovered ? 62 : 48
+                                    smooth: true
+                                    Behavior on width { NumberAnimation { duration: 160 } }
+                                    Behavior on height { NumberAnimation { duration: 160 } }
+                                }
+                            }
+                        }
+                    }
+                    // 下一季(列表内实际存在的季;无则隐藏)。
+                    AppText {
+                        id: downText
+                        width: 66
+                        height: 16
+                        verticalAlignment: Text.AlignVCenter
+                        text: seasonStrip.stripHovered && root.seasonNextNo() > 0
+                              ? root.pad2(root.seasonNextNo()) : ""
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
+                        opacity: seasonStrip.stripHovered
+                                 && root.seasonNextNo() > 0 ? 1 : 0
+                        Behavior on opacity { NumberAnimation { duration: 160 } }
+                    }
+                }
+                // "季" 同样锚定数字牌(左缘贴牌边 8px)。
+                AppText {
+                    text: "季"
+                    color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
+                    font.pixelSize: 14
+                    anchors.left: digitCol.right
+                    anchors.leftMargin: 8
+                    anchors.top: parent.top
+                    anchors.topMargin: 42
+                    Behavior on color { ColorAnimation { duration: 160 } }
+                }
+                MouseArea {
+                    id: seasonMa
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onEntered: {
+                        root.refreshSeasonNos()
+                        root.resetSeasonCandidate()
+                    }
+                    onExited: root.resetSeasonCandidate()
+                    onWheel: root.stepCandidate(wheel.angleDelta.y > 0 ? -1 : 1)
+                    onClicked: root.confirmSeason()
+                }
+            }
+
+            ListView {
+                id: episodeList
+                width: parent.width
+                height: parent.height - seasonStrip.height - sidebar.spacing
+                clip: true
+                focus: true
+                keyNavigationWraps: true
+                model: EmbyClient.episodesModelFor(root.serverUrl)
+                layer.enabled: true
+                layer.effect: ShaderEffect {
+                    property real u_margin: Constants.detailEpisodeRowMargin / episodeList.height
+                    fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/episode-fade.frag.qsb"
+                }
+                delegate: Item {
+                    id: episodeItem
+                    // 同上:required 声明识别 C++ 模型角色。
+                    required property var model
+                    width: episodeList.width
+                    height: Constants.detailEpisodeRowH
+                    // hover 放大(基础样式)
+                    scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
+                    Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 6
+                        color: episodeItem.model.id === root.itemId
+                               ? Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                         root.accentColor.b, 0.75)
+                               : (episodeHover.hovered || ListView.isCurrentItem) ? root.surfaceTint
+                               : "transparent"
+                        Behavior on color { ColorAnimation { duration: Constants.animMinMs } }
+                    }
+                    // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方)。
+                    // 缩略图高 = 行高 - 上下外边距 - 列间距 - 集名行高,总高恒填满行。
+                    Column {
+                        id: cardCol
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.topMargin: Constants.detailEpisodeRowMargin
+                        spacing: 6
+                        // 海报缩略图(16:9 剧照)
+                        Rectangle {
+                            id: thumbBox
+                            height: Constants.detailEpisodeRowH - Constants.detailEpisodeRowMargin*2
+                                   - cardCol.spacing - episodeTitle.implicitHeight
+                            width: height/9*16
+                            color: Theme.bg
+                            radius: 18
+                            clip: true
+                            CrossfadeImage {
+                                id: thumb
+                                anchors.fill: parent
+                                cornerRadius: 18
+                                // 无海报回退:父级(剧集)背景图;两者都无则为空(显示播放图标)。
+                                source: episodeItem.model.posterId ? "image://emby/" + episodeItem.model.posterId
+                                      : (episodeItem.model.parentBackdropId ? "image://emby/" + episodeItem.model.parentBackdropId : "")
+                                fillMode: Image.PreserveAspectCrop
+                                asynchronous: true
+                                duration: 500
+                                cache: true
+                            }
+                            // 无海报且无父级背景(都拿不到图)或加载失败回退:Canvas 播放图标。
+                            Canvas {
+                                anchors.centerIn: parent
+                                width: 28
+                                height: 28
+                                property color iconColor: episodeItem.model.id === root.itemId ? "white" : Theme.textMuted
+                                onIconColorChanged: requestPaint()
+                                visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
+                                          || thumb.status === Image.Error
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.fillStyle = iconColor
+                                    ctx.beginPath()
+                                    ctx.moveTo(8, 5)
+                                    ctx.lineTo(22, 14)
+                                    ctx.lineTo(8, 23)
+                                    ctx.closePath()
+                                    ctx.fill()
+                                }
+                            }
+                            // 已看徽标:缩略图右上角实心圆(莫奈强调色),中央镂空
+                            // 透明勾(Canvas destination-out 擦成洞,透出缩略图)。
+                            Canvas {
+                                id: watchedBadge
+                                // 颜色随莫奈取色更新(Canvas 不随外部属性自动重绘)。
+                                property color badgeColor: root.accentColor
+                                onBadgeColorChanged: requestPaint()
+                                width: 22
+                                height: 22
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.margins: 6
+                                visible: episodeItem.model.played
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.reset()
+                                    const w = width, h = height
+                                    // 实心圆(内缩 0.5 防边缘锯齿切角)。
+                                    ctx.beginPath()
+                                    ctx.arc(w / 2, h / 2, w / 2 - 0.5, 0, Math.PI * 2)
+                                    ctx.fillStyle = badgeColor
+                                    ctx.fill()
+                                    // 镂空勾:勾笔画区域擦成透明。
+                                    ctx.globalCompositeOperation = "destination-out"
+                                    ctx.beginPath()
+                                    ctx.moveTo(w * 0.28, h * 0.52)
+                                    ctx.lineTo(w * 0.44, h * 0.68)
+                                    ctx.lineTo(w * 0.74, h * 0.34)
+                                    ctx.lineWidth = Math.max(2, w * 0.13)
+                                    ctx.lineCap = "round"
+                                    ctx.lineJoin = "round"
+                                    ctx.stroke()
+                                }
+                            }
+                            // 观看进度条:居中,悬于缩略图底部上方(不与底边
+                            // 重合);宽 = 缩略图宽 - 圆角(18),圆角区不再
+                            // 构成干扰;填充莫奈互补色,轨道半透明黑压暗。
+                            Item {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 3
+                                width: parent.width - thumbBox.radius
+                                height: 5
+                                visible: episodeItem.model.positionTicks > 0 && !episodeItem.model.played && episodeItem.model.runtimeTicks > 0
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 2.5
+                                    color: Qt.rgba(0, 0, 0, 0.45)
+                                }
+                                Rectangle {
+                                    width: parent.width * Math.min(1, episodeItem.model.positionTicks / episodeItem.model.runtimeTicks)
+                                    height: parent.height
+                                    radius: 2.5
+                                    color: root.complementColor
+                                }
+                            }
+                        }
+                        // 集名:缩略图下方,单行省略,居中。
+                        AppText {
+                            id: episodeTitle
+                            width: thumbBox.width
+                            text: episodeItem.model.name
+                            color: episodeItem.model.id === root.itemId ? "white" : Theme.textPrimary
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
+                            opacity: root.textFade
+                        }
+                    }
+                    // 悬停高亮/点击选集:Pointer Handler 组合(替代
+                    // MouseArea hover+click)。
+                    HoverHandler {
+                        id: episodeHover
+                    }
+                    TapHandler {
+                        onTapped: {
+                            // 选集条点集:原地替换(剧集页与集详情页一致,栈深恒为 1)。
+                            root.replaceItem(episodeItem.model.id, episodeItem.model.posterId, episodeItem.model.name, true)
+                        }
+                    }
+                }
+            }
         }
     }
 
