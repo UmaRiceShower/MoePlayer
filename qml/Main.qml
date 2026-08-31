@@ -58,6 +58,14 @@ ApplicationWindow {
         })
     }
     // 打开媒体库页:记录浏览服务器与账号。
+    function toggleSearch() {
+        if (searchOverlay.visible) {
+            searchOverlay.close()
+            return
+        }
+        // 搜索目标由浮窗内「目标」下拉决定(默认全部),与页面上下文无关。
+        searchOverlay.open()
+    }
     function pushLibrary(viewId, serverUrl, viewName, accountId) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
@@ -85,12 +93,12 @@ ApplicationWindow {
         id: searchOverlay
         anchors.fill: parent
         visible: false
-        serverUrl: root.currentServerUrl
-        accountId: root.currentAccountId
         backgroundSource: stackView
-        onShowDetail: function (itemId, posterId, title, serverUrl) {
+        onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
             searchOverlay.close()
-            root.pushDetail(itemId, posterId, title, serverUrl, root.currentAccountId)
+            // 聚合搜索:结果来自多账号,必须带结果所属账号(单服时为空,
+            // 回退当前账号)。
+            root.pushDetail(itemId, posterId, title, serverUrl, accountId || root.currentAccountId)
         }
     }
     // 设置浮层(Ctrl+S / 首页设置按钮):左分类右设置项的两级面板。
@@ -113,7 +121,7 @@ ApplicationWindow {
             }
             onOpenServerManager: stackView.push(serverManagerPage)
             onOpenSettings: settingsOverlay.visible ? settingsOverlay.close() : settingsOverlay.open()
-            onOpenSearch: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
+            onOpenSearch: root.toggleSearch()
         }
     }
 
@@ -180,7 +188,7 @@ ApplicationWindow {
     }
     Shortcut {
         sequences: ["Ctrl+K"]
-        onActivated: searchOverlay.visible ? searchOverlay.close() : searchOverlay.open()
+        onActivated: root.toggleSearch()
     }
     // Esc 收敛到主窗口单一处理器:两个浮层各自注册同键 Esc 会在
     // QShortcutMap 里按注册顺序冲突(先注册的 SearchOverlay 覆盖 SettingsOverlay)。

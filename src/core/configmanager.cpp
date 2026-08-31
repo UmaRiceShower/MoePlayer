@@ -60,7 +60,8 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
                    const QString &detailTextPos, const QString &detailButtonsPos,
                    int detailTextWidth, int detailTextHeight, const QString &proxy,
                    int wheelStep, int homeWheelStep, int detailWheelStep,
-                   int searchWheelStep, int settingsWheelStep, int libraryWheelStep)
+                   int searchWheelStep, int settingsWheelStep, int libraryWheelStep,
+                   int searchLimitPerAccount)
 {
     return QStringLiteral(
                "# MoePlayer \u7528\u6237\u914d\u7f6e(TOML)\n"
@@ -102,7 +103,8 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
                "detailWheelStep = %13  # \u8be6\u60c5\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
                "searchWheelStep = %14  # \u641c\u7d22\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
                "settingsWheelStep = %15 # \u8bbe\u7f6e\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
-               "libraryWheelStep = %16 # \u5e93\u6d4f\u89c8\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n")
+               "libraryWheelStep = %16 # \u5e93\u6d4f\u89c8\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
+               "searchLimitPerAccount = %17 # \u641c\u7d22\u6bcf\u8d26\u53f7\u7ed3\u679c\u6761\u6570(\u4e00\u6b21\u4e0a\u9650,\u4e0d\u5206\u9875)\n")
         .arg(monetEnabled ? QStringLiteral("true") : QStringLiteral("false"))
         .arg(sortBy, sortOrder)
         .arg(detailSidebarLeft ? QStringLiteral("true") : QStringLiteral("false"))
@@ -117,7 +119,8 @@ QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sort
         .arg(detailWheelStep)
         .arg(searchWheelStep)
         .arg(settingsWheelStep)
-        .arg(libraryWheelStep);
+        .arg(libraryWheelStep)
+        .arg(searchLimitPerAccount);
 }
 
 } // namespace
@@ -287,6 +290,15 @@ void ConfigManager::setSearchWheelStep(int v)
     commit();
 }
 
+void ConfigManager::setSearchLimitPerAccount(int v)
+{
+    if (v < 1 || v > 100 || v == m_searchLimitPerAccount)
+        return;
+    m_searchLimitPerAccount = v;
+    emit searchLimitPerAccountChanged();
+    commit();
+}
+
 void ConfigManager::setSettingsWheelStep(int v)
 {
     if (v < 0 || v == m_settingsWheelStep)
@@ -338,6 +350,7 @@ void ConfigManager::resetToDefaults()
     m_searchWheelStep = 0;
     m_settingsWheelStep = 0;
     m_libraryWheelStep = 0;
+    m_searchLimitPerAccount = 10;
     emit monetEnabledChanged();
     emit librarySortByChanged();
     emit librarySortOrderChanged();
@@ -354,6 +367,7 @@ void ConfigManager::resetToDefaults()
     emit searchWheelStepChanged();
     emit settingsWheelStepChanged();
     emit libraryWheelStepChanged();
+    emit searchLimitPerAccountChanged();
     commit();
 }
 
@@ -407,6 +421,9 @@ void ConfigManager::loadFromFile()
             m_searchWheelStep = scroll["searchWheelStep"].value_or(m_searchWheelStep);
             m_settingsWheelStep = scroll["settingsWheelStep"].value_or(m_settingsWheelStep);
             m_libraryWheelStep = scroll["libraryWheelStep"].value_or(m_libraryWheelStep);
+            m_searchLimitPerAccount = scroll["searchLimitPerAccount"].value_or(m_searchLimitPerAccount);
+            if (m_searchLimitPerAccount < 1 || m_searchLimitPerAccount > 100)
+                m_searchLimitPerAccount = 10; // 非法值回退默认
         }
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
@@ -426,6 +443,7 @@ void ConfigManager::loadFromFile()
         emit searchWheelStepChanged();
         emit settingsWheelStepChanged();
         emit libraryWheelStepChanged();
+        emit searchLimitPerAccountChanged();
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
                              << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));
@@ -442,7 +460,8 @@ void ConfigManager::commit()
                               m_detailSidebarLeft, m_detailPosterPos, m_detailTextPos,
                               m_detailButtonsPos, m_detailTextWidth, m_detailTextHeight,
                               m_proxy, m_wheelStep, m_homeWheelStep, m_detailWheelStep,
-                              m_searchWheelStep, m_settingsWheelStep, m_libraryWheelStep)
+                              m_searchWheelStep, m_settingsWheelStep, m_libraryWheelStep,
+                              m_searchLimitPerAccount)
                        .toUtf8());
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();

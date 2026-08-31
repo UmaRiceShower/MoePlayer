@@ -57,6 +57,10 @@ class ConfigManager : public QObject
     Q_PROPERTY(int searchWheelStep READ searchWheelStep WRITE setSearchWheelStep NOTIFY searchWheelStepChanged)
     Q_PROPERTY(int settingsWheelStep READ settingsWheelStep WRITE setSettingsWheelStep NOTIFY settingsWheelStepChanged)
     Q_PROPERTY(int libraryWheelStep READ libraryWheelStep WRITE setLibraryWheelStep NOTIFY libraryWheelStepChanged)
+    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
+    Q_PROPERTY(int searchLimitPerAccount READ searchLimitPerAccount WRITE setSearchLimitPerAccount NOTIFY searchLimitPerAccountChanged)
+    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
+    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
     // 配置文件绝对路径(只读,供 UI 展示/排障)。
     Q_PROPERTY(QString configPath READ configPath CONSTANT)
 public:
@@ -94,6 +98,8 @@ public:
     void setSettingsWheelStep(int v);
     int libraryWheelStep() const { return m_libraryWheelStep; }
     void setLibraryWheelStep(int v);
+    int searchLimitPerAccount() const { return m_searchLimitPerAccount; }
+    void setSearchLimitPerAccount(int v);
     // 当前代理(按 proxy 串解析;空/非法 = NoProxy)。网络层每请求现取,
     // 热重载后新请求自动用新代理。
     QNetworkProxy proxyObject() const;
@@ -121,6 +127,7 @@ signals:
     void searchWheelStepChanged();
     void settingsWheelStepChanged();
     void libraryWheelStepChanged();
+    void searchLimitPerAccountChanged();
 
 private:
     // 解析文件并应用(缺失/类型不合法回退默认值;解析失败仅告警不崩溃)。
@@ -156,4 +163,5 @@ private:
     int m_searchWheelStep = 0;
     int m_settingsWheelStep = 0;
     int m_libraryWheelStep = 0;
+    int m_searchLimitPerAccount = 10; // 搜索每账号条数,默认 10
 };

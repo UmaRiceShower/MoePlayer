@@ -12,13 +12,60 @@ import MoePlayer.Core
 Item {
     id: root
 
-    // 搜索目标服务器(主窗口按最近浏览的页面注入;空则不可搜索)。
-    property string serverUrl: ""
-    // 浏览用账号 id(搜索凭据精确定位)。
-    property string accountId: ""
-    // 该服务器的搜索结果模型(serverUrl 就绪后一次性取引用)。
-    property var sm: null
-    readonly property bool canSearch: root.serverUrl !== "" && root.creds().token !== ""
+    // 搜索目标服务器(serverUrl 数组;空 = 全部)。用户显式选择,不依赖页面
+    // 上下文;与"全部"互斥由 UI 层保证(点全部清空选择,勾选取消全部)。
+    property var selectedServers: []
+    // 服务器可选项(按账号出现顺序去重,跳过失效账号):[{serverUrl, name},...]。
+    readonly property var serverOptions: {
+        const list = AccountManager.accounts
+        const seen = []
+        let out = []
+        for (let i = 0; i < list.length; ++i) {
+            const a = list[i]
+            if (a.authStatus === "invalid")
+                continue
+            if (seen.indexOf(a.serverUrl) >= 0)
+                continue
+            seen.push(a.serverUrl)
+            out.push({ serverUrl: a.serverUrl, name: a.name })
+        }
+        return out
+    }
+    // 目标账号集:selectedServers 空 = 全部可用账号;否则所选服务器的全部
+    // 可用账号。同服务器多账号各一条——库权限/已看状态按用户上下文隔离,
+    // 不可合并(官方 UserPolicy)。
+    readonly property var aggTargets: {
+        const list = AccountManager.accounts
+        const out = []
+        for (let i = 0; i < list.length; ++i) {
+            const a = list[i]
+            if (a.authStatus === "invalid")
+                continue
+            if (root.selectedServers.length > 0 && root.selectedServers.indexOf(a.serverUrl) < 0)
+                continue
+            const c = AccountManager.credsForAccount(a.id)
+            if (c.token === "")
+                continue
+            out.push({ serverUrl: a.serverUrl, accountId: a.id, name: a.name,
+                       userName: a.userName, token: c.token, userId: c.userId })
+        }
+        return out
+    }
+    // 目标 chip 摘要:全部 / 服务器名 / N 台。
+    readonly property string targetLabel: {
+        if (root.selectedServers.length === 0)
+            return "全部"
+        if (root.selectedServers.length === 1) {
+            const opts = root.serverOptions
+            for (let i = 0; i < opts.length; ++i)
+                if (opts[i].serverUrl === root.selectedServers[0])
+                    return opts[i].name
+        }
+        return root.selectedServers.length + " 台"
+    }
+    // 在途账号数(>0 显示"搜索中",归零 = 全部返回)。
+    property int pendingAccounts: 0
+    readonly property bool canSearch: root.aggTargets.length > 0
     readonly property int searchFilterCount: (root.yearFrom > 0 || root.yearTo > 0 ? 1 : 0) + root.activeFilters.length
 
     // ---- 过滤状态(直接映射 API 查询参数) ----
@@ -46,7 +93,7 @@ Item {
     readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
 
     // 点击结果进详情(携带所在服务器)。
-    signal showDetail(string itemId, string posterId, string title, string serverUrl)
+    signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
 
     // 需要模糊的背景内容(主窗口传入 StackView,避免把浮层自身也模糊)。
     property Item backgroundSource: null
@@ -58,15 +105,6 @@ Item {
     readonly property int cardH: Constants.gridCardH(root.cardW)
     readonly property real cellW: Constants.gridCellW(Math.max(1, gridContainer.width), Constants.searchCellMinW, Constants.searchCellMaxW)
     readonly property int cellH: Constants.gridCellH(root.cardW)
-
-    onServerUrlChanged: {
-        if (root.serverUrl !== "")
-            root.sm = EmbyClient.searchModelFor(root.serverUrl)
-    }
-
-    function creds() {
-        return AccountManager.credsForAccount(root.accountId)
-    }
 
     // 类型多选 → 逗号拼接的 IncludeItemTypes 参数(空 = 不传)。
     function typesParam() {
@@ -100,48 +138,43 @@ Item {
         return out.join(",")
     }
 
-    // 按当前过滤状态发起(或重置后发起)一次搜索;resetPage 为真时从头翻页。
-    function searchNow(resetPage) {
+    // 按当前过滤状态发起一次搜索:每账号一次请求(上限
+    // ConfigManager.searchLimitPerAccount,不分页);全部在途返回后
+    // searching=false(失败也发空结果,计数不悬)。
+    function searchNow() {
         if (!root.canSearch)
             return
-        if (resetPage)
-            root.startIndex = 0
-        root.searching = resetPage
-        root.loadingMore = !resetPage
-        const c = root.creds()
-        EmbyClient.search(root.serverUrl, c.token, c.userId, searchField.text,
-                          root.typesParam(),
-                          root.yearsParam(),
-                          root.filtersParam(),
-                          root.startIndex, Constants.searchPageSize)
+        root.searching = true
+        root.pendingAccounts = root.aggTargets.length
+        for (let i = 0; i < root.aggTargets.length; ++i) {
+            const t = root.aggTargets[i]
+            EmbyClient.search(t.serverUrl, t.token, t.userId, searchField.text,
+                              root.typesParam(), root.yearsParam(), root.filtersParam(),
+                              0, ConfigManager.searchLimitPerAccount, t.accountId)
+        }
+        if (root.aggTargets.length === 0) {
+            root.searching = false
+            root.pendingAccounts = 0
+        }
     }
 
-    // 加载下一页(滚动到底触发;hasMore/loadingMore/searching 守卫)。
-    function loadMore() {
-        if (!root.canSearch || !root.sm || !root.sm.hasMore)
-            return
-        if (root.loadingMore || root.searching || searchField.text.length === 0)
-            return
-        root.startIndex += Constants.searchPageSize
-        root.searchNow(false)
-    }
-
-    // 打开:重置过滤为默认,清空结果并聚焦输入框。
+    // 打开:保留上次输入/过滤/目标与结果模型(不自动重搜);仅清理失效
+    // 目标(所选服务器已不存在 → 回退"全部"并按当前关键词重搜)。
     function open() {
         root.visible = true
-        root.activeTypes = ["Movie", "Series"]
-        root.yearFrom = 0
-        root.yearTo = 0
-        root.activeFilters = []
-        yearFromField.text = ""
-        yearToField.text = ""
-        root.startIndex = 0
-        root.loadingMore = false
-        searchField.text = ""
-        if (root.canSearch) {
-            const c = root.creds()
-            EmbyClient.search(root.serverUrl, c.token, c.userId, "",
-                              "", "", "", 0, Constants.searchPageSize)
+        const opts = root.serverOptions
+        if (root.selectedServers.length > 0) {
+            const urls = []
+            for (let i = 0; i < opts.length; ++i)
+                urls.push(opts[i].serverUrl)
+            const valid = []
+            for (let i = 0; i < root.selectedServers.length; ++i)
+                if (urls.indexOf(root.selectedServers[i]) >= 0)
+                    valid.push(root.selectedServers[i])
+            if (valid.length !== root.selectedServers.length) {
+                root.selectedServers = valid
+                root.searchNow()
+            }
         }
         searchField.forceActiveFocus()
     }
@@ -152,15 +185,16 @@ Item {
     // 搜索响应(主窗口内所有服务器的信号都经过这里,只处理本浮窗目标)。
     Connections {
         target: EmbyClient
-        function onSearchResultsReady(serverUrl) {
-            if (serverUrl !== root.serverUrl)
-                return
-            root.searching = false
-            root.loadingMore = false
-            // 结果不足一屏且还有更多时自动补页(与滚动到底等价,逐页
-            // 加载直到填满或 hasMore=false,安全终止)。
-            if (resultGrid.atYEnd && root.sm && root.sm.hasMore && root.sm.count > 0)
-                root.loadMore()
+        function onSearchResultsReady(serverUrl, accountId) {
+            for (let i = 0; i < root.aggTargets.length; ++i) {
+                const t = root.aggTargets[i]
+                if (t.serverUrl === serverUrl && t.accountId === accountId) {
+                    root.pendingAccounts = Math.max(0, root.pendingAccounts - 1)
+                    if (root.pendingAccounts === 0)
+                        root.searching = false
+                    return
+                }
+            }
         }
     }
 
@@ -305,7 +339,7 @@ Item {
                                 else
                                     a.push(modelData.value)
                                 root.activeTypes = a
-                                root.searchNow(true)
+                                root.searchNow()
                             }
                         }
                     }
@@ -404,7 +438,7 @@ Item {
                                                     root.activeFilters = []
                                                 else
                                                     root.activeFilters = [modelData.filter]
-                                                root.searchNow(true)
+                                                root.searchNow()
                                             }
                                         }
                                     }
@@ -434,7 +468,7 @@ Item {
                                         validator: IntValidator { bottom: 1900; top: 2100 }
                                         onEditingFinished: {
                                             root.yearFrom = yearFromField.text.length > 0 ? parseInt(yearFromField.text) : 0
-                                            root.searchNow(true)
+                                            root.searchNow()
                                         }
                                         background: Rectangle {
                                             radius: 6
@@ -461,7 +495,7 @@ Item {
                                         validator: IntValidator { bottom: 1900; top: 2100 }
                                         onEditingFinished: {
                                             root.yearTo = yearToField.text.length > 0 ? parseInt(yearToField.text) : 0
-                                            root.searchNow(true)
+                                            root.searchNow()
                                         }
                                         background: Rectangle {
                                             radius: 6
@@ -498,7 +532,128 @@ Item {
                                     root.yearFrom = 0
                                     root.yearTo = 0
                                     root.activeFilters = []
-                                    root.searchNow(true)
+                                    root.searchNow()
+                                }
+                            }
+                        }
+                    }
+                }
+                // 目标选择:服务器多选(与"全部"互斥)。切换目标按当前关键词
+                // 立即重搜,不清输入;目标有效性由 open() 清理。
+                FilterChip {
+                    id: serverChip
+                    label: "目标 · " + root.targetLabel
+                    active: root.selectedServers.length > 0
+                    enabled: root.canSearch
+                    onClicked: serverPopup.open()
+
+                    Popup {
+                        id: serverPopup
+                        parent: serverChip
+                        y: serverChip.height + 4
+                        x: -width + serverChip.width
+                        width: 220
+                        padding: 8
+                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                        enter: Transition {
+                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+                        }
+                        exit: Transition {
+                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                        }
+                        background: Rectangle {
+                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            radius: 8
+                            border.width: 1
+                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                        }
+                        contentItem: Column {
+                            width: parent.width - 16
+                            spacing: 2
+                            // "全部":点它清空具体选择(与具体选项互斥)。
+                            ItemDelegate {
+                                id: allItem
+                                readonly property bool allOn: root.selectedServers.length === 0
+                                width: parent.width
+                                height: 30
+                                padding: 0
+                                contentItem: Item {
+                                    AppText {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "全部"
+                                        color: "white"
+                                        font.pixelSize: 13
+                                    }
+                                    Rectangle {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 6
+                                        height: 6
+                                        radius: 3
+                                        color: Constants.moePink
+                                        visible: allItem.allOn
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 4
+                                    color: parent.hovered
+                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        : "transparent"
+                                }
+                                onClicked: {
+                                    root.selectedServers = []
+                                    root.searchNow()
+                                }
+                            }
+                            // 服务器多选:勾选任意项即脱离"全部"。
+                            Repeater {
+                                model: root.serverOptions
+                                delegate: ItemDelegate {
+                                    required property var modelData
+                                    readonly property bool isOn: root.selectedServers.indexOf(modelData.serverUrl) >= 0
+                                    width: parent.width
+                                    height: 30
+                                    padding: 0
+                                    contentItem: Item {
+                                        AppText {
+                                            anchors.left: parent.left
+                                            anchors.leftMargin: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: modelData.name
+                                            color: "white"
+                                            font.pixelSize: 13
+                                        }
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 4
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 6
+                                            height: 6
+                                            radius: 3
+                                            color: Constants.moePink
+                                            visible: parent.parent.isOn
+                                        }
+                                    }
+                                    background: Rectangle {
+                                        radius: 4
+                                        color: parent.hovered
+                                            ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                            : "transparent"
+                                    }
+                                    onClicked: {
+                                        // 原地 splice/push 不触发 var 通知,整体重赋值。
+                                        let a = root.selectedServers.slice()
+                                        const i = a.indexOf(modelData.serverUrl)
+                                        if (i >= 0)
+                                            a.splice(i, 1)
+                                        else
+                                            a.push(modelData.serverUrl)
+                                        root.selectedServers = a
+                                        root.searchNow()
+                                    }
                                 }
                             }
                         }
@@ -528,13 +683,17 @@ Item {
                         if (!root.canSearch)
                             return ""
                         if (searchField.text.length === 0)
-                            return "输入关键词,搜索当前服务器的全部媒体库"
-                        if (root.searching && (!root.sm || root.sm.count === 0))
+                            return root.selectedServers.length > 0 ? "输入关键词,搜索所选服务器"
+                                                                   : "输入关键词,跨全部账号聚合搜索"
+                        if (root.searching)
                             return "搜索中…"
-                        if (!root.sm || root.sm.count === 0)
-                            return "无匹配结果"
-                        return "已加载 " + root.sm.count + " 条"
-                               + (root.sm.hasMore ? " · 上滑加载更多" : "")
+                        let n = 0
+                        for (let i = 0; i < root.aggTargets.length; ++i) {
+                            const t = root.aggTargets[i]
+                            n += EmbyClient.searchModelFor(t.serverUrl, t.accountId).count
+                        }
+                        return n === 0 ? "无匹配结果"
+                                       : "已加载 " + n + " 条 · " + root.aggTargets.length + " 个账号"
                     }
                 }
             }
@@ -547,63 +706,120 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 clip: true
-                GridView {
-                    id: resultGrid
-                    // 复用 cell 减少滚动重建;cacheBuffer 预备离屏项。
-                    reuseItems: true
-                    cacheBuffer: 600
+
+                // 聚合结果:每账号一组(组头 + 网格),外层 Flickable 整组滚动。
+                // 组模型 = 该账号的搜索模型(复合键,同服多账号互不覆盖)。
+                Flickable {
+                    id: aggFlick
                     anchors.fill: parent
-                    cellWidth: root.cellW
-                    cellHeight: root.cellH
                     clip: true
-                    model: root.sm
-                    // 滚轮步进走配置(页级 searchWheelStep,0=全局)。
+                    contentHeight: aggCol.implicitHeight
                     WheelStepHandler {
-                        targetItem: resultGrid
+                        targetItem: aggFlick
                         pageStep: ConfigManager.searchWheelStep
                     }
-                    // 结果项入场动画:淡入 + 轻微缩放,萌系轻盈感。
-                    add: Transition {
-                        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 180 }
-                        NumberAnimation { property: "scale"; from: 0.92; to: 1.0; duration: 180; easing.type: Easing.OutQuad }
-                    }
-                    // 滚动到底自动加载下一页(内容不满一屏时持续加载直到填满或到底)。
-                    onAtYEndChanged: {
-                        if (atYEnd)
-                            root.loadMore()
-                    }
-                    // 搜索结果轻量卡片:无需悬停操作按钮,点击进详情。
-                    // 卡居中铺满 cell(同 Library):cell 内 gap/2 是 hover
-                    // 放大余量;delegate 根提 z 让放大卡盖住相邻 cell。
-                    delegate: Item {
-                        required property var model
-                        required property int index
-                        width: resultGrid.cellWidth
-                        height: resultGrid.cellHeight
-                        z: card.hovered ? 2 : 0
-                        PosterCard {
-                            id: card
-                            anchors.centerIn: parent
-                            width: root.cardW
-                            height: root.cardH
-                            model: parent.model
-                            index: parent.index
-                            showActions: false
-                            itemId: model.id
-                            posterId: model.posterId
-                            title: model.name
-                            year: model.year
-                            rating: model.rating
-                            played: model.played
-                            favorite: model.favorite
-                            positionTicks: model.positionTicks
-                            runtimeTicks: model.runtimeTicks
-                            unplayedCount: model.unplayedCount
-                            itemType: model.type
-                            onClicked: root.showDetail(model.id, model.posterId, model.name, root.serverUrl)
+                    Column {
+                        id: aggCol
+                        width: parent.width
+                        spacing: 16
+                        Repeater {
+                            model: root.aggTargets
+                            delegate: Column {
+                                id: aggGroup
+                                required property var modelData
+                                required property int index
+                                readonly property var gmodel: EmbyClient.searchModelFor(
+                                    modelData.serverUrl, modelData.accountId)
+                                // 同服务器多账号时组头附加用户名区分。
+                                readonly property bool multiAccount: {
+                                    let n = 0
+                                    for (let k = 0; k < root.aggTargets.length; ++k)
+                                        if (root.aggTargets[k].serverUrl === modelData.serverUrl)
+                                            ++n
+                                    return n > 1
+                                }
+                                width: parent.width
+                                visible: gmodel.count > 0
+                                spacing: 8
+
+                                // 组头:服务器/账号名 + 条数。
+                                Row {
+                                    width: parent.width
+                                    spacing: 6
+                                    AppText {
+                                        text: "♥"
+                                        color: Constants.moePink
+                                        font.pixelSize: 14
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    AppText {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: "white"
+                                        font.pixelSize: 14
+                                        font.bold: true
+                                        text: aggGroup.multiAccount
+                                              ? modelData.name + " · " + modelData.userName
+                                              : modelData.name
+                                    }
+                                    AppText {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        color: Theme.textMuted
+                                        font.pixelSize: 12
+                                        text: gmodel.count + " 条"
+                                    }
+                                }
+
+                                // 网格:列数同根卡片计算(基于外层宽);高度 = 行数 ×
+                                // cellH,固定高不滚动(整组随外层 Flickable 滚)。
+                                GridView {
+                                    id: aggGrid
+                                    width: parent.width
+                                    height: Math.max(root.cellH,
+                                        Math.ceil(gmodel.count / Math.max(1, Math.floor(parent.width / root.cellW)))
+                                        * root.cellH)
+                                    cellWidth: root.cellW
+                                    cellHeight: root.cellH
+                                    clip: true
+                                    reuseItems: true
+                                    cacheBuffer: 600
+                                    model: aggGroup.gmodel
+                                    delegate: Item {
+                                        required property var model
+                                        required property int index
+                                        width: aggGrid.cellWidth
+                                        height: aggGrid.cellHeight
+                                        z: card.hovered ? 2 : 0
+                                        PosterCard {
+                                            id: card
+                                            anchors.centerIn: parent
+                                            width: root.cardW
+                                            height: root.cardH
+                                            model: parent.model
+                                            index: parent.index
+                                            showActions: false
+                                            itemId: model.id
+                                            posterId: model.posterId
+                                            title: model.name
+                                            year: model.year
+                                            rating: model.rating
+                                            played: model.played
+                                            favorite: model.favorite
+                                            positionTicks: model.positionTicks
+                                            runtimeTicks: model.runtimeTicks
+                                            unplayedCount: model.unplayedCount
+                                            itemType: model.type
+                                            onClicked: root.showDetail(model.id, model.posterId,
+                                                                       model.name, modelData.serverUrl,
+                                                                       modelData.accountId)
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
+
+
             }
         }
     }
@@ -614,7 +830,7 @@ Item {
         interval: Constants.searchDebounceMs
         onTriggered: {
             if (root.canSearch)
-                root.searchNow(true)
+                root.searchNow()
         }
     }
 }

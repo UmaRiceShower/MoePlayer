@@ -156,5 +156,5 @@ QtObject {
 
     readonly property int searchCellMinW: 156            // 搜索网格卡宽下限(比库网格更小)
     readonly property int searchCellMaxW: 172            // 搜索网格卡宽上限
-    readonly property int searchPageSize: 40             // 搜索每页条数(与 C++ kSearchLimit 一致)
+    // 搜索每账号条数在 ConfigManager.searchLimitPerAccount(设置浮窗可改)。
 }
