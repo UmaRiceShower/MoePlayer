@@ -32,7 +32,8 @@ public:
     Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *seasonsModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl);
+    Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl,
+                                               const QString &accountId = QString());
     Q_INVOKABLE MediaItemModel *similarModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *allEpisodesModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *genresModelFor(const QString &serverUrl);
@@ -116,7 +117,8 @@ public:
                             const QString &years = QString(),
                             const QString &filters = QString(),
                             int startIndex = 0,
-                            int limit = MoePlayer::kSearchLimit);
+                            int limit = MoePlayer::kSearchLimit,
+                            const QString &accountId = QString());
     // 剧集分季列表(/Shows/{id}/Seasons),填充该服务器的 seasonsModel。
     Q_INVOKABLE void fetchSeasons(const QString &serverUrl, const QString &token,
                                   const QString &userId, const QString &seriesId);
@@ -187,7 +189,7 @@ signals:
     // 浏览结果按服务器路由(页面据此判断是否自己的请求)。
     void viewsReceived(const QString &serverUrl);
     void itemsReceived(const QString &serverUrl);
-    void searchResultsReady(const QString &serverUrl);
+    void searchResultsReady(const QString &serverUrl, const QString &accountId = QString());
     void seasonsReceived(const QString &serverUrl);
     void episodesReceived(const QString &serverUrl);
     void similarReady(const QString &serverUrl);
@@ -280,6 +282,14 @@ private:
                     const QString &url, std::function<void(bool ok)> onDone);
     // 按显式凭据构造 X-Emby-Authorization 头(官方 "Emby ..." 格式)。
     QString authHeaderFor(const QString &userId, const QString &token) const;
+    // 搜索模型复合键:serverUrl(+accountId 时以 \n 连接尾缀)。
+    // 同服务器多账号各一部模型/序号,聚合搜索按账号隔离(服务端库权限
+    // 与已看状态均按用户上下文过滤,账号间不可合并)。
+    static QString searchKeyFor(const QString &serverUrl, const QString &accountId);
+    // 复合键还原服务器地址(模型图片前缀、信号路由都用真实 URL)。
+    static QString searchKeyServerUrl(const QString &key);
+    // 按复合键取/建模型(内部统一入口,公开 searchModelFor 只做键编码)。
+    MediaItemModel *searchModelForKey(const QString &key);
     // 解析 HTML 的图标 link 标签:apple-touch-icon 优先(192x192),其次
     // rel 含 icon 的标签;href 相对路径按 baseHtmlUrl 解析,返回绝对 URL。
     static QString parseFaviconLink(const QString &html, const QString &baseHtmlUrl);

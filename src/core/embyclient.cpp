@@ -261,11 +261,30 @@ MediaItemModel *EmbyClient::episodesModelFor(const QString &serverUrl)
     return m_episodesModels.value(key);
 }
 
-MediaItemModel *EmbyClient::searchModelFor(const QString &serverUrl)
+QString EmbyClient::searchKeyFor(const QString &serverUrl, const QString &accountId)
 {
-    const QString key = serverUrl.trimmed();
-    if (!m_searchModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_searchModels.insert(key, m); }
+    const QString url = serverUrl.trimmed();
+    return accountId.isEmpty() ? url : url + QLatin1Char('\n') + accountId;
+}
+
+QString EmbyClient::searchKeyServerUrl(const QString &key)
+{
+    const int i = key.indexOf(QLatin1Char('\n'));
+    return i < 0 ? key : key.left(i);
+}
+
+MediaItemModel *EmbyClient::searchModelFor(const QString &serverUrl, const QString &accountId)
+{
+    return searchModelForKey(searchKeyFor(serverUrl, accountId));
+}
+
+MediaItemModel *EmbyClient::searchModelForKey(const QString &key)
+{
+    if (!m_searchModels.contains(key)) {
+        auto *m = new MediaItemModel(this);
+        m->setServerPrefix(AccountManager::encodeServerKey(searchKeyServerUrl(key)));
+        m_searchModels.insert(key, m);
+    }
     return m_searchModels.value(key);
 }
 
@@ -631,15 +650,18 @@ void EmbyClient::setFavorite(const QString &serverUrl, const QString &token, con
 
 void EmbyClient::search(const QString &serverUrl, const QString &token, const QString &userId,
                         const QString &term, const QString &itemTypes, const QString &years,
-                        const QString &filters, int startIndex, int limit)
+                        const QString &filters, int startIndex, int limit,
+                        const QString &accountId)
 {
-    const QString key = serverUrl.trimmed();
+    // 复合键:同服务器多账号各一部模型/序号;空 accountId = 单服旧行为。
+    const QString key = searchKeyFor(serverUrl, accountId);
+    const QString url = searchKeyServerUrl(key);
     if (term.trimmed().isEmpty()) {
         ++m_searchSeq[key]; // 使在途响应过期
-        auto *m = searchModelFor(key);
+        auto *m = searchModelForKey(key);
         m->clear();
         m->setHasMore(false);
-        emit searchResultsReady(key);
+        emit searchResultsReady(url, accountId);
         return;
     }
     QUrlQuery q;
@@ -660,8 +682,8 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
     // Limit+1 探针:多出的 1 条说明还有更多,截断并标记 hasMore。
     q.addQueryItem(QStringLiteral("Limit"), QString::number(limit + 1));
     const int seq = ++m_searchSeq[key];
-    get(key, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, key, seq, startIndex, limit](const QJsonDocument &doc) {
+    get(url, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
+        [this, key, seq, startIndex, limit, url, accountId](const QJsonDocument &doc) {
             // 输入防抖窗口内的旧请求结果直接丢弃。
             if (seq != m_searchSeq.value(key))
                 return;
@@ -673,14 +695,22 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
                     trimmed.append(arr.at(i));
                 arr = trimmed;
             }
-            auto *m = searchModelFor(key);
+            auto *m = searchModelForKey(key);
             if (startIndex == 0)
                 m->setItems(arr, true);
             else
                 m->appendItems(arr, true);
             m->setHasMore(hasMore);
-            emit searchResultsReady(key);
-        }, nullptr, QStringLiteral("搜索"));
+            emit searchResultsReady(url, accountId);
+        }, [this, key, seq, url, accountId] {
+            // 失败也发空结果:聚合按账号计数,缺此回调会永久"搜索中"。
+            if (seq != m_searchSeq.value(key))
+                return;
+            auto *m = searchModelForKey(key);
+            m->clear();
+            m->setHasMore(false);
+            emit searchResultsReady(url, accountId);
+        }, QStringLiteral("搜索"));
 }
 
 void EmbyClient::fetchSeasons(const QString &serverUrl, const QString &token, const QString &userId,

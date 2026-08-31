@@ -481,6 +481,11 @@ Item {
                             SettingField { configKey: "wheelStep"; intOnly: true }
                         }
                         SettingRow {
+                            label: "搜索每账号条数"
+                            description: "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。"
+                            SettingField { configKey: "searchLimitPerAccount"; intOnly: true }
+                        }
+                        SettingRow {
                             label: "海报莫奈取色"
                             description: "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。"
                             SettingSwitch { configKey: "monetEnabled" }
