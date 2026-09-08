@@ -2255,7 +2255,8 @@ Item {
                         root.resetSeasonCandidate()
                     }
                     onExited: root.resetSeasonCandidate()
-                    onWheel: root.stepCandidate(wheel.angleDelta.y > 0 ? -1 : 1)
+                    // 滚轮切季(不影响下方分集列表滚动,不拦截事件)
+                    onWheel: (event) => root.stepCandidate(event.angleDelta.y > 0 ? -1 : 1)
                     onClicked: root.confirmSeason()
                 }
             }
