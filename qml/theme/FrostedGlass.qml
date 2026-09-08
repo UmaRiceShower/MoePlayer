@@ -41,8 +41,8 @@ Rectangle {
     // ---- 边缘折射(液体玻璃凸透镜,SDF 法线 + Snell) ----
     // 玻璃边缘隆起厚度(px):≥短边一半时整个截面隆起(参考胶囊玻璃);0≈平面。
     property real thickness: 14
-    // 折射率(玻璃 1.5):越大折射越夸张。
-    property real ior: 1.5
+    // 边缘折射强度(0..1):边缘带采样点沿径向向外偏移 = 半径 × 该值。
+    property real bend: 0.2
     // 边缘高光强度:法线越平(边缘)越亮。
     property real edgeLight: 0.5
     // 磨砂模糊量:0=清晰玻璃(折射锐利),1=强磨砂(软化底色)。
@@ -146,7 +146,7 @@ Rectangle {
         property vector2d u_texSize: Qt.vector2d(root._texW, root._texH)
         property real u_radius: root.radius
         property real u_thickness: root.thickness
-        property real u_ior: root.ior
+        property real u_bend: root.bend
         property real u_edgeLight: root.edgeLight
         property real u_hoverGlow: root.hoverGlow
         property real u_frost: root.frostAmount

@@ -1,13 +1,13 @@
 #version 440
 
-// 磨砂玻璃(液体玻璃凸透镜):整块玻璃是一个微凸的透镜表面,整个面都折射
-// (中心微凸放大、边缘强弯折),而非仅边缘窄带。参考凸透镜玻璃按钮。
+// 磨砂玻璃(液体玻璃,edge lensing):光沿玻璃边缘弯曲、折射周围环境——
+// 中心直透,仅外侧边缘带沿径向向外偏移采样(采到玻璃外的背景),玻璃
+// 边缘"包裹"周围内容;叠加磨砂、边缘高光与投影,营造浮起的通透玻璃感。
 // 物理模型:
-//   - 玻璃是中心微凸、边缘陡弯的圆角矩形透镜(厚度剖面为平滑凸面)。
-//   - 法线由「到中心的归一化径向距离」经凸面剖面(cos/幂曲线)得出:
-//     中心法线近 +z(微凸轻折),向边缘法线渐倾(弯折渐强)——整个面都折射。
-//   - 折射采样 = uv + 折射向量 xy × 折射长度(随凸面高度/折射角变化),
-//     中心放大、边缘拉向边缘,产生透镜体积感。
+//   - 归一化半径 t 由 SDF 圆角矩形距离求出(0 中心 → 1 边缘)。
+//   - 边缘带权重 edge = smoothstep(0.45, 1, t);采样点 = 显示点 + 径向
+//     单位向量 × 半径 × bend × edge——中心不动,边缘外移幅度渐强,与
+//     玻璃外内容连续(偏移小,扩边内)。
 //   - 边缘高光 + 反射:法线越平(边缘)越亮。
 //   - 磨砂 = 折射结果与多 tap 模糊按 frost 混合(独立叠加)。
 layout(location = 0) in vec2 qt_TexCoord0;
@@ -21,7 +21,7 @@ layout(std140, binding = 0) uniform buf {
     vec2 u_texSize;      // 采样纹理的像素尺寸
     float u_radius;      // 圆角半径(px)
     float u_thickness;   // 玻璃中心凸起厚度(px):越大中心放大/边缘弯折越强
-    float u_ior;         // 折射率(玻璃 1.5)
+    float u_bend;        // 边缘折射强度(0..1):边缘采样外移 = 半径 × bend
     float u_edgeLight;   // 边缘高光强度
     float u_frost;       // 磨砂模糊量(0=清晰,1=强磨砂)
     float u_blurRadius;  // 磨砂模糊半径(px)
@@ -46,17 +46,6 @@ vec3 glassNormal(float sd, float thickness) {
     float len = length(n);
     return len > 1e-5 ? n / len : vec3(0.0, 0.0, 1.0);
 }
-
-// 玻璃隆起表面高度(cos 剖面,参考 height):sd<0 内部,边缘→0。
-float glassHeight(float sd, float thickness) {
-    if (sd >= 0.0)
-        return 0.0;
-    if (sd < -thickness)
-        return thickness;
-    float x = thickness + sd;
-    return sqrt(max(0.0, thickness * thickness - x * x));
-}
-
 
 vec2 toTexUV(vec2 controlPx) {
     return (u_srcOrigin + controlPx) / u_texSize;
@@ -85,28 +74,26 @@ void main() {
         return;
     }
 
-    // ---- 参考2 精确模型:SDF 屏幕导数法线 + cos 高度剖面 + (h+base)/-z 折射 ----
-    // 隆起带 = 到边缘的绝对像素距离 ∈ [-thickness, 0]:当 thickness ≥ 短边一半,
-    // 整个截面都隆起(参考2 size.y=0 的效果——整条都是弧面,无平面中心)。
-    // thickness ≤ 0 = 纯磨砂(无折射):法线 +z、不折射,采样原地;只留模糊。
-    // thickness > 0 = 凸透镜折射(SDF 法线 + Snell + 厚度变倍率)。
+    // 边缘折射(edge lensing):中心直透,仅外侧边缘带沿径向向外偏移采样
+    // (采到玻璃外的背景,玻璃边缘"包裹"周围内容);偏移随半径平滑上升,
+    // 与玻璃外内容连续。thickness ≤ 0.5 = 纯磨砂(无折射):采样原地。
     vec3 normal = vec3(0.0, 0.0, 1.0);
     vec2 ruv = toTexUV(px + half_);
     float reflW = 0.0;
     if (u_thickness > 0.5) {
         normal = glassNormal(d, u_thickness);
-        vec3 incident = vec3(0.0, 0.0, -1.0);
-        // Snell 折射。
-        vec3 refr = refract(incident, normal, 1.0 / u_ior);
-        if (dot(refr, refr) < 1e-6)
-            refr = vec3(normal.xy, -normal.z);
-        // 折射长度:(隆起高 + 基准高) / 折射向量 -z 分量。
-        float h = glassHeight(d, u_thickness);
-        float base_h = u_thickness * 8.0;
-        float rz = max(0.05, -refr.z);
-        float refractLen = (h + base_h) / rz;
-        // 折射命中点(控件像素):边缘法线外倾 → 采样点外移(凸透镜放大感)。
-        vec2 hitPx = px + half_ + refr.xy * refractLen;
+        float t = clamp((d + u_thickness) / max(u_thickness, 0.5), 0.0, 1.0);  // 0 中心 → 1 边缘
+        float edge = smoothstep(0.45, 1.0, t);                                 // 边缘带权重
+        vec2 dir = length(px) > 1e-3 ? normalize(px) : vec2(0.0, 0.0);
+        // 方向自适应偏移上限:沿 dir 到纹理边界的可用空间(扣掉玻璃半径与
+        // 磨砂半径)。贴近窗口边缘的方向自动减弱,避免越界取边界列(clamp
+        // 拉伸);远离边缘的方向保持完整折射。
+        vec2 centerTex = u_srcOrigin + half_;
+        vec2 room = mix(centerTex, u_texSize - centerTex, step(vec2(0.0), dir))
+                    / max(abs(dir), vec2(1e-4));
+        float avail = min(room.x, room.y) - max(half_.x, half_.y) - u_blurRadius;
+        float bendPx = min(min(half_.x, half_.y) * u_bend, max(0.0, avail));
+        vec2 hitPx = px + half_ + dir * (bendPx * edge);
         ruv = toTexUV(hitPx);
         reflW = clamp((1.0 - normal.z) * 2.0, 0.0, 1.0);
     }
