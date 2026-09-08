@@ -105,7 +105,7 @@ Item {
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 thickness: 22
-                ior: 1.5
+                bend: 1.8
                 frostAmount: 0.35
                 edgeLight: 0.55
                 saturation: 0.4
@@ -126,7 +126,7 @@ Item {
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 thickness: 22
-                ior: 1.5
+                bend: 1.8
                 frostAmount: 0.35
                 edgeLight: 0.55
                 saturation: 0.4
@@ -147,7 +147,7 @@ Item {
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 thickness: 22
-                ior: 1.5
+                bend: 1.8
                 frostAmount: 0.35
                 edgeLight: 0.55
                 saturation: 0.4
@@ -168,7 +168,7 @@ Item {
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
                 thickness: 22
-                ior: 1.5
+                bend: 1.8
                 frostAmount: 0.35
                 edgeLight: 0.55
                 saturation: 0.4
