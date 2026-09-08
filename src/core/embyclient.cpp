@@ -860,6 +860,35 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
         QStringLiteral("获取首页行"));
 }
 
+void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,
+                             const QString &userId, const QString &seriesId, int limit)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("UserId"), userId);
+    q.addQueryItem(QStringLiteral("SeriesId"), seriesId);
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 20)));
+    get(serverUrl, token, userId, QStringLiteral("/Shows/NextUp?%1").arg(q.toString()),
+        [this, serverUrl, seriesId](const QJsonDocument &doc) {
+            QVariantList out;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
+                const QJsonObject o = v.toObject();
+                QVariantMap m;
+                m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+                m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+                m.insert(QStringLiteral("seasonNo"),
+                         o.value(QLatin1String("ParentIndexNumber")).toInt(0));
+                m.insert(QStringLiteral("episodeNo"),
+                         o.value(QLatin1String("IndexNumber")).toInt(0));
+                out.append(m);
+            }
+            qInfo() << "Emby: nextUp =" << out.size() << "on" << serverUrl << "series" << seriesId;
+            emit nextUpReceived(serverUrl, seriesId, out);
+        },
+        // 失败:发空列表,详情页回退第一季(原因经 serverRequestFailed 通知)。
+        [this, serverUrl, seriesId] { emit nextUpReceived(serverUrl, seriesId, QVariantList()); },
+        QStringLiteral("获取续播集"));
+}
+
 void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString &accountId,
                                         const QString &token, const QString &userId, int limit)
 {
