@@ -826,7 +826,7 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
 
 void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accountId,
                                   const QString &token, const QString &userId,
-                                  const QString &viewId, int limit)
+                                  const QString &viewId, const QString &viewName, int limit)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
@@ -840,11 +840,19 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, serverUrl, viewId, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, viewId, viewName, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 items.append(parseHomeItem(v.toObject(), serverUrl));
-            qInfo() << "Emby: serverItems =" << items.size() << "on" << serverUrl;
+            // 正常路径(有条目)记 debug(默认滤,避免聚合刷屏);空结果记
+            // info——多账号/多库聚合时空行常指向库权限或空库,需定位到
+            // 账号与库(同服多账号可见库不同)。
+            if (items.isEmpty())
+                qInfo() << "Emby: serverItems = 0 on" << serverUrl << "account" << accountId
+                        << "view" << viewName << "id" << viewId;
+            else
+                qDebug() << "Emby: serverItems =" << items.size() << "on" << serverUrl
+                         << "account" << accountId << "view" << viewName << "id" << viewId;
             emit serverItemsReceived(serverUrl, accountId, viewId, items);
         },
         // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
