@@ -15,9 +15,25 @@ namespace {
 constexpr qint64 kRotateBytes = 1024 * 1024;
 
 QFile *g_logFile = nullptr;
-// 级别过滤:低于该级别的消息(数值 QtDebugMsg < QtInfoMsg < ...)直接丢弃。
+// 级别过滤:按严重度(DEBUG < INFO < WARN < ERROR < FATAL)丢弃低于
+// g_minLevel 的消息。注意 QtMsgType 数值不是严重度顺序(QtDebugMsg=0,
+// QtWarningMsg=1, QtCriticalMsg=2, QtFatalMsg=3, QtInfoMsg=4——Info 数值
+// 最高),必须经 severity() 映射,不能直接数值比较。
 // 默认 QtInfoMsg:滤 qDebug/console.debug 调试噪音;流程(qInfo)与错误保留。
 QtMsgType g_minLevel = QtInfoMsg;
+
+// QtMsgType → 严重度序(数值无关;默认值取 QtInfoMsg 即保留 Info 及以上)。
+int severity(QtMsgType type)
+{
+    switch (type) {
+    case QtDebugMsg: return 0;
+    case QtInfoMsg: return 1;
+    case QtWarningMsg: return 2;
+    case QtCriticalMsg: return 3;
+    case QtFatalMsg: return 4;
+    }
+    return 1;
+}
 
 const char *levelName(QtMsgType type)
 {
@@ -35,7 +51,7 @@ const char *levelName(QtMsgType type)
 // 本 handler)。QFile 写入/flush 本身不产生日志。
 void messageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
 {
-    if (type < g_minLevel)
+    if (severity(type) < severity(g_minLevel))
         return;
     // 状态行(消息以 \r 开头,mpv 进度行):终端回 \r 单行原位覆盖,
     // 文件仍逐行(去掉 \r 前缀)——与 mpv 在 tty 上的官方表现一致。
