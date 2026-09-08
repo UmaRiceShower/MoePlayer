@@ -289,12 +289,6 @@ private:
     // 发送播放状态回传(失败仅记日志,不阻断播放)。
     void postReport(const QString &serverUrl, const QString &token, const QString &userId,
                     const QString &endpoint, const QJsonObject &body);
-    // 探测播放地址支持的路径前缀(见 probeRange);WS 多路为后续工作。
-    void probeSeekableUrl(const QString &serverUrl, const QString &token, const QString &userId,
-                          const QString &url, std::function<void(const QString &)> onDone);
-    // 发送 Range: bytes=0-0 探测请求,onDone(是否返回 206)。
-    void probeRange(const QString &serverUrl, const QString &token, const QString &userId,
-                    const QString &url, std::function<void(bool ok)> onDone);
     // 按显式凭据构造 X-Emby-Authorization 头(官方 "Emby ..." 格式)。
     QString authHeaderFor(const QString &userId, const QString &token) const;
     // 搜索模型复合键:serverUrl(+accountId 时以 \n 连接尾缀)。
@@ -321,7 +315,6 @@ private:
     QHash<QString, MediaItemModel *> m_allEpisodesModels;
     QHash<QString, MediaItemModel *> m_genresModels;
     QHash<QString, MediaItemModel *> m_foldersModels;
-    QHash<QString, QString> m_rangePrefix; // serverUrl -> "" | "/emby"(Range 前缀探测缓存)
     // 请求序号按服务器隔离,丢弃过期响应(视图快速切换/输入防抖窗口内旧请求)。
     QHash<QString, int> m_itemsSeq;
     QHash<QString, int> m_searchSeq;

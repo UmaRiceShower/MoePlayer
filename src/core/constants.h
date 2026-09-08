@@ -16,8 +16,6 @@ inline const QString kAppName = QStringLiteral(MOEPLAYER_NAME);
 inline const QString kDefaultServerUrl = QStringLiteral("http://127.0.0.1:8096");
 // 常规网络请求超时(ms)。
 inline constexpr int kNetworkTimeoutMs = 10000;
-// 播放地址 Range 探测超时(ms)。
-inline constexpr int kProbeTimeoutMs = 5000;
 // 分页上限(Emby 单页上限 200)。
 inline constexpr int kMaxPageSize = 200;
 // 首页聚合每库条目上限。
