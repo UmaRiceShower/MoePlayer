@@ -131,10 +131,11 @@ public:
     Q_INVOKABLE void fetchServerViews(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId);
     // 拉取指定库按更新时间倒序的前 limit 条(首页聚合,结果经 serverItemsReceived)。
-    // accountId 为触发账号,回调按 id 准确归位。
+    // accountId 为触发账号,回调按 id 准确归位;viewName 仅用于日志标识。
     Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId,
-                                      const QString &viewId, int limit);
+                                      const QString &viewId, const QString &viewName,
+                                      int limit);
     // 拉取服务器建议(/Users/{id}/Suggestions,首页 hero 轮播数据源;结果经
     // serverSuggestionsReceived 返回)。suggestion 由服务器按混合类型排序
     // (继续观看/最新/热门等,不受客户端控制);失败发空列表,连同

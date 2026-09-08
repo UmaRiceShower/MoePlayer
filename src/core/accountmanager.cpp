@@ -276,6 +276,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                     ++m_homePending; // 每库一个条目请求
                     m_client->fetchServerItems(serverUrl, accountId, a->token, a->userId,
                                                v.toMap().value(QStringLiteral("id")).toString(),
+                                               v.toMap().value(QStringLiteral("name")).toString(),
                                                m_homeLimit);
                 }
                 maybeAssembleHomeRows();

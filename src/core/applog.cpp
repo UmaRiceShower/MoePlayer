@@ -7,8 +7,12 @@
 #include <QStandardPaths>
 
 #include <QtCore/qlogging.h>
+#include <QtGlobal>
 
 #include <cstdio>
+#if defined(Q_OS_UNIX)
+#include <unistd.h>
+#endif
 
 namespace {
 // 轮转阈值:单文件超过 1MB 时启动轮转(旧文件顺延 .old,留 1 份)。
@@ -21,6 +25,20 @@ QFile *g_logFile = nullptr;
 // 最高),必须经 severity() 映射,不能直接数值比较。
 // 默认 QtInfoMsg:滤 qDebug/console.debug 调试噪音;流程(qInfo)与错误保留。
 QtMsgType g_minLevel = QtInfoMsg;
+// stderr 是否连接到终端(install 时缓存):重定向到文件/管道时终端输出也带
+// 时间戳(事后可分析时序),交互终端保持简洁。
+bool g_stderrTty = true;
+
+bool stderrIsTty()
+{
+#if defined(Q_OS_UNIX)
+    return ::isatty(::fileno(stderr)) != 0;
+#elif defined(Q_OS_WIN)
+    return ::_isatty(::_fileno(stderr)) != 0;
+#else
+    return true;
+#endif
+}
 
 // QtMsgType → 严重度序(数值无关;默认值取 QtInfoMsg 即保留 Info 及以上)。
 int severity(QtMsgType type)
@@ -53,33 +71,32 @@ void messageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString
 {
     if (severity(type) < severity(g_minLevel))
         return;
-    // 状态行(消息以 \r 开头,mpv 进度行):终端回 \r 单行原位覆盖,
-    // 文件仍逐行(去掉 \r 前缀)——与 mpv 在 tty 上的官方表现一致。
-    // 其余消息:默认格式,stderr 与文件一致。
+    // 时间戳只算一次:终端(重定向时)与日志文件共用,时序一致。
+    const QString ts = QDateTime::currentDateTime()
+                           .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
+    const QLatin1String lvl(levelName(type));
+    // 状态行(消息以 \r 开头,mpv 进度行):终端回 \r 单行原位覆盖(不加
+    // 时间戳,否则破坏覆盖),文件仍逐行(去掉 \r 前缀)。
     if (msg.startsWith(QLatin1Char('\r'))) {
         const QString body = msg.mid(1);
         fprintf(stderr, "\r%s", qPrintable(body));
         if (g_logFile) {
-            const QString line = QStringLiteral("%1 %2 %3\n")
-                .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")))
-                .arg(QLatin1String(levelName(type)))
-                .arg(body);
-            g_logFile->write(line.toUtf8());
+            g_logFile->write(QStringLiteral("%1 %2 %3\n").arg(ts, lvl, body).toUtf8());
             g_logFile->flush();
         }
         return;
     }
-    // 默认格式(含 file:line/类别),stderr 与文件一致,定位信息不丢失。
+    // 默认格式(QT_MESSAGE_PATTERN 未设时为「类别: 内容」,不含 file:line)。
     const QString formatted = qFormatLogMessage(type, ctx, msg);
-    // stderr 保留(终端启动调试);终端不存在时 Qt 忽略该写。
-    fprintf(stderr, "%s\n", qPrintable(formatted));
+    // 终端:交互 tty 只输出内容(简洁);重定向到文件/管道时补时间戳与
+    // 级别,与日志文件格式一致。
+    if (g_stderrTty)
+        fprintf(stderr, "%s\n", qPrintable(formatted));
+    else
+        fprintf(stderr, "%s %s %s\n", qPrintable(ts), lvl.data(), qPrintable(formatted));
     if (!g_logFile)
         return;
-    const QString line = QStringLiteral("%1 %2 %3\n")
-        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")))
-        .arg(QLatin1String(levelName(type)))
-        .arg(formatted);
-    g_logFile->write(line.toUtf8());
+    g_logFile->write(QStringLiteral("%1 %2 %3\n").arg(ts, lvl, formatted).toUtf8());
     g_logFile->flush();
 }
 } // namespace
@@ -108,6 +125,7 @@ void AppLog::install()
                 qPrintable(file->errorString()));
         delete file;
     }
+    g_stderrTty = stderrIsTty();
     qInstallMessageHandler(messageHandler);
 }
 
