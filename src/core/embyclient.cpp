@@ -12,6 +12,7 @@
 #include <QUuid>
 #include <QDebug>
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QRegularExpression>
 
 namespace {
@@ -1195,8 +1196,12 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
     // 不请求 MediaSourceId,让服务器返回所有可用版本;客户端按目标 id 挑选。
     // 若带 MediaSourceId,响应 MediaSources 会被过滤,版本列表将只剩一项。
 
+    // 协商耗时:起播延迟诊断(网络/服务器各占多少)。
+    const qint64 reqStartMs = QDateTime::currentMSecsSinceEpoch();
     postJson(key, token, userId, QStringLiteral("/Items/%1/PlaybackInfo").arg(itemId), body,
-             [this, key, token, userId, itemId, mediaSourceId, seriesId, audioStreamIndex, subtitleStreamIndex](const QJsonDocument &doc) {
+             [this, key, token, userId, itemId, mediaSourceId, seriesId, audioStreamIndex, subtitleStreamIndex, reqStartMs](const QJsonDocument &doc) {
+                 qInfo() << "Emby: PlaybackInfo 耗时"
+                         << (QDateTime::currentMSecsSinceEpoch() - reqStartMs) << "ms on" << key;
                  const QJsonObject o = doc.object();
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
@@ -1309,17 +1314,14 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
 
                  QString url;
                  QString playMethod = QStringLiteral("DirectStream");
-                 bool probeRange = false;
                  if (!direct.isEmpty()) {
                      url = absUrl(direct);
-                     probeRange = true;
                  } else if (!transcode.isEmpty()) {
                      url = absUrl(transcode);
                      playMethod = QStringLiteral("Transcode");
                  } else if (directPlay) {
                      url = key + QStringLiteral("/Videos/%1/stream?static=true&MediaSourceId=%2")
                                       .arg(itemId, selectedMediaSourceId);
-                     probeRange = true;
                  } else {
                      const QString msg = QStringLiteral("该条目无可用直连/转码方案");
                      qWarning() << "Emby: 播放协商无直连/转码方案" << itemId << "on" << key;
@@ -1362,13 +1364,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      qInfo() << "Emby: playback url =" << finalUrl << "method =" << meta.value("playMethod").toString();
                      emit playbackReady(key, finalUrl, QVariantList(headers.begin(), headers.end()), meta);
                  };
-                 if (probeRange) {
-                     // 反代服务器可能只在 /emby/ 前缀正确处理 Range —— 探测一次并缓存。
-                     // 探测失败绝不挡起播(回原 URL)。
-                     probeSeekableUrl(key, token, userId, url, emitReady);
-                 } else {
-                     emitReady(url);
-                 }
+                 emitReady(url);
              }, QStringLiteral("播放协商"),
              [this, key, itemId] {
                  emit playbackFailed(key, itemId, QStringLiteral("播放协商请求失败"));
@@ -1455,69 +1451,3 @@ void EmbyClient::reportPlaybackPing(const QString &serverUrl, const QString &tok
     postReport(serverUrl, token, userId, QStringLiteral("/Sessions/Playing/Ping"), b);
 }
 
-// ---------- Range 探测(播放地址反代前缀兼容) ----------
-
-void EmbyClient::probeRange(const QString &serverUrl, const QString &token, const QString &userId,
-                            const QString &url, std::function<void(bool ok)> onDone)
-{
-    QNetworkRequest req(url);
-    req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
-    req.setRawHeader("Range", "bytes=0-0"); // 只取一个字节,探测代价可忽略
-    req.setRawHeader(MoePlayer::kHeaderAuth, authHeaderFor(userId, token).toUtf8());
-    if (!token.isEmpty())
-        req.setRawHeader(MoePlayer::kHeaderToken, token.toUtf8());
-    req.setTransferTimeout(MoePlayer::kProbeTimeoutMs);
-    QNetworkReply *reply = m_nam.get(req);
-    connect(reply, &QNetworkReply::finished, this, [reply, onDone]() {
-        const bool ok = reply->error() == QNetworkReply::NoError
-                        && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 206;
-        reply->deleteLater();
-        onDone(ok);
-    });
-}
-
-void EmbyClient::probeSeekableUrl(const QString &serverUrl, const QString &token,
-                                  const QString &userId, const QString &url,
-                                  std::function<void(const QString &)> onDone)
-{
-    const QString key = serverUrl.trimmed();
-    const QUrl u(url);
-    const QString path = u.path();
-    // 绝对地址、已带 /emby 前缀、或路径为空 → 无第二个候选
-    const bool hasAlt = url.startsWith(QLatin1String("http"))
-                        && !path.startsWith(QLatin1String("/emby"))
-                        && path.startsWith(QLatin1Char('/'));
-
-    if (m_rangePrefix.contains(key)) {
-        const QString pre = m_rangePrefix.value(key);
-        qDebug() << "Emby: Range 前缀缓存" << (pre.isEmpty() ? QStringLiteral("原样") : pre) << "on" << key;
-        if (pre.isEmpty())
-            onDone(url);
-        else
-            onDone(QStringLiteral("/emby") + url); // pre 为 "/emby" 时插在根路径前
-        return;
-    }
-    // 原地址就没问题 → 别白探第二次
-    probeRange(key, token, userId, url, [this, key, token, userId, url, hasAlt, onDone](bool plainOk) {
-        if (plainOk) {
-            m_rangePrefix.insert(key, QString());
-            onDone(url);
-            return;
-        }
-        if (!hasAlt) {
-            m_rangePrefix.insert(key, QString());
-            onDone(url);
-            return;
-        }
-        const QUrl u(url);
-        const QString alt = url.left(url.indexOf(u.path()))
-                            + QStringLiteral("/emby") + u.path()
-                            + (u.query().isEmpty() ? QString() : QStringLiteral("?") + u.query());
-        probeRange(key, token, userId, alt, [this, key, url, alt, onDone](bool embyOk) {
-            // 两条都不认 → 保持原样(换前缀只是换一种坏法)
-            qDebug() << "Emby: Range 探测定案" << (embyOk ? QStringLiteral("/emby 前缀") : QStringLiteral("原样")) << "on" << key;
-            m_rangePrefix.insert(key, embyOk ? QStringLiteral("/emby") : QString());
-            onDone(embyOk ? alt : url);
-        });
-    });
-}

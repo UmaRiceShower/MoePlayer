@@ -141,6 +141,7 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
     s->meta = meta;
     s->delivered = true;
     reportStart(s);
+    qInfo() << "MpvClient: deliver" << key << (s->listSet ? QStringLiteral("列表") : QStringLiteral("单条"));
     if (s->listSet) {
         // 全集播放列表模式:setEpisodeList 的 loadlist replace 已播第 0 条
         // (当前集真 URL);无需再 loadfile。
@@ -272,6 +273,7 @@ void MpvClient::spawnMpv(Session *s)
     connect(s->proc, &QProcess::errorOccurred, this, [key = s->key, this](QProcess::ProcessError err) {
         qWarning() << "MpvClient: mpv 启动失败" << int(err) << "key" << key;
     });
+    qInfo() << "MpvClient: 启动 mpv 进程" << s->key;
     s->proc->start();
 
     // QLocalSocket 连接(--input-ipc-server 是 unix socket 文件)。mpv 建
@@ -349,6 +351,7 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
         const int rid = obj.value(QStringLiteral("request_id")).toInt();
         if (rid == kReadyRequestId) {
             s->ready = true;
+            qInfo() << "MpvClient: IPC 就绪" << s->key;
             flush(s);
         } else if (rid == kTrackListRequestId) {
             applyTrackSelection(s, obj.value(QStringLiteral("data")).toArray());
@@ -540,6 +543,7 @@ void MpvClient::flush(Session *s)
                         });
         }
         s->loadIssued = true;
+        qInfo() << "MpvClient: 下发 loadfile" << s->key;
     }
 }
 
@@ -612,6 +616,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                                 QStringLiteral("replace")}},
                 });
     s->listSet = true;
+    qInfo() << "MpvClient: 下发 loadlist" << s->key;
 }
 
 void MpvClient::deliverEpisodeUrl(const QString &itemId, const QString &url,
