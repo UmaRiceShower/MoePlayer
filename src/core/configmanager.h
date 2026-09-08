@@ -2,10 +2,119 @@
 
 #include <QNetworkProxy>
 #include <QObject>
+#include <QSet>
 #include <QString>
+#include <QVariantList>
+#include <QVariantMap>
+
+#include <functional>
 
 class QFileSystemWatcher;
 class QTimer;
+
+//! 配置项单一真相表(表驱动 schema + 运行时 map 内核 + 属性外壳)。
+//! 每项一行 X-macro(名字/类型/默认/TOML section/注释/UI 元数据/控件/选项/校验),
+//! 由不同宏变体展开到:Q_PROPERTY 外壳、访问器、信号、元数据表、load/render/reset、
+//! items 导出。**默认值/校验/注释/UI 文案的一切真相在此表**,加配置项 = 表 1 行。
+//!
+//! 存储:运行时 QVariantMap(唯一真相,数据化/导入导出/多 profile 的内核);
+//! 暴露:生成属性(getter 读 map、typed setter 转发 setValue)——QML 绑定读
+//! 保持强类型与名称检查;setValue/value 为统一读写通道。
+//! 文件:QStandardPaths::AppConfigLocation/config.toml(toml++ 读;QSaveFile
+//! 原子写回;外部修改热重载)。敏感数据(凭据/账号)仍归 QSettings,不进 TOML。
+namespace MoeConfig {
+
+enum class Type { Bool, String, Int };
+enum class Widget { Switch, Combo, Field, Hidden };
+
+struct Item {
+    const char *name;      // 属性名/QML 键(元数据表索引)
+    const char *tomlKey;   // TOML 文件键(与 name 可不同:旧模板键名沿用,不破坏用户文件)
+    Type type;
+    QVariant def;          // 编译期默认值
+    const char *section;   // TOML section
+    const char *comment;   // 写回注释(单行)
+    const char *uiSection; // 设置浮窗分类(Hidden 项为空)
+    const char *uiLabel;
+    const char *uiDesc;
+    Widget widget;
+    std::function<QVariantList()> options;               // Combo 选项 {label,key}
+    std::function<bool(const QVariant &)> validate;      // 类型外的追加校验
+};
+
+// 选项/校验钩子(宏行引用名字;实现于 configmanager.cpp)。
+QVariantList optionsLibrarySortBy();
+QVariantList optionsLibrarySortOrder();
+QVariantList optionsDetailPosterPos();
+QVariantList optionsDetailTextPos();
+QVariantList optionsDetailButtonsPos();
+bool validatePosterPos(const QVariant &v);
+bool validateTextPos(const QVariant &v);
+bool validateButtonsPos(const QVariant &v);
+bool validateProxy(const QVariant &v);
+bool validateWheelStep(const QVariant &v);
+bool validatePageWheelStep(const QVariant &v);
+bool validateSearchLimit(const QVariant &v);
+
+#define MoeConfig_Type_bool MoeConfig::Type::Bool
+#define MoeConfig_Type_QString MoeConfig::Type::String
+#define MoeConfig_Type_int MoeConfig::Type::Int
+
+// 配置项一行真相表:name, tomlKey(TOML 文件键), Qt 类型, 默认值,
+// TOML section, 写回注释, UI 分类, UI 标签, UI 描述, 控件, 选项钩子, 校验钩子。
+// tomlKey 沿用旧模板键名(sortBy/sortOrder/sidebarLeft/posterPos/textPos/
+// buttonsPos/textWidth/textHeight)——属性名/QML 键用 name,两者解耦,
+// 不破坏用户磁盘 config.toml 与手改值。
+#define MOECONFIG_X(M) \
+    M(monetEnabled, "monetEnabled", bool, true, "theme", "海报莫奈动态取色(false 回退静态主题色)", "界面", "海报莫奈取色", "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。", Switch, nullptr, nullptr) \
+    M(librarySortBy, "sortBy", QString, "DateModified", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
+    M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
+    M(detailSidebarLeft, "sidebarLeft", bool, false, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示;默认靠右。", Switch, nullptr, nullptr) \
+    M(detailPosterPos, "posterPos", QString, "bottom-left", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-left)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
+    M(detailTextPos, "textPos", QString, "followPoster", "detail", "标题+介绍位置:followPoster(跟随海报)/9 宫格", "详情页", "标题与介绍位置", "跟随海报,或固定于 hero 区九宫格位置(优先于海报)。", Combo, optionsDetailTextPos, validateTextPos) \
+    M(detailButtonsPos, "buttonsPos", QString, "poster", "detail", "播放/收藏/已看按钮组:text(标题)/poster(海报)/backdrop(背景左下)", "详情页", "按钮组位置", "播放/收藏/已看按钮组:跟随标题、跟随海报,或背景图左下角。", Combo, optionsDetailButtonsPos, validateButtonsPos) \
+    M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validateWheelStep) \
+    M(detailTextHeight, "textHeight", int, 140, "detail", "标题+介绍区固定高度(像素,不随内容自适应;默认 140)", "详情页", "文字区高度", "标题+介绍区固定高度(px),默认 140。", Field, nullptr, validateWheelStep) \
+    M(proxy, "proxy", QString, "", "network", "全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,https 目标走 CONNECT 隧道;可带 user:pass@ 认证;仅支持 HTTP,播放经 mpv --http-proxy)", "代理", "代理地址", "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连。", Field, nullptr, validateProxy) \
+    M(wheelStep, "wheelStep", int, 80, "scroll", "滚轮每格滚动距离(像素);页面级键 0 = 跟随全局", "界面", "滚轮步进", "鼠标滚轮每格滚动距离(px);所有页面默认,页面级可手改 config.toml(homeWheelStep 等)。", Field, nullptr, validateWheelStep) \
+    M(homeWheelStep, "homeWheelStep", int, 0, "scroll", "首页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
+    M(detailWheelStep, "detailWheelStep", int, 0, "scroll", "详情页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
+    M(searchWheelStep, "searchWheelStep", int, 0, "scroll", "搜索浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
+    M(settingsWheelStep, "settingsWheelStep", int, 0, "scroll", "设置浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
+    M(libraryWheelStep, "libraryWheelStep", int, 0, "scroll", "媒体库页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
+    M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "scroll", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit)
+
+// 表构建行(元数据;宏行即真相)。
+#define MOECONFIG_ITEM_ROW(n, tk, t, d, s, c, us, l, ds, w, o, v) \
+    { #n, tk, MoeConfig_Type_##t, QVariant(d), s, c, us, l, ds, MoeConfig::Widget::w, o, v },
+
+// 类内展开:属性外壳 / 访问器 / 信号 / emit 链。
+#define MOECONFIG_PROP(n, tk, t, ...) Q_PROPERTY(t n READ n WRITE set##n NOTIFY n##Changed)
+#define MOECONFIG_ACCESSOR(n, tk, t, d, ...) \
+    t n() const { return m_values.value(QStringLiteral(#n), QVariant(d)).value<t>(); } \
+    void set##n(t v) { setValue(QStringLiteral(#n), QVariant(v)); }
+#define MOECONFIG_SIGNAL(n, ...) void n##Changed();
+#define MOECONFIG_EMIT(n, ...) if (key == QLatin1String(#n)) { emit n##Changed(); return; }
+#define MOECONFIG_EMIT_ALL(n, ...) emit n##Changed();
+
+// 元数据表(静态;编译期默认值真相)。
+inline const QVector<Item> &items()
+{
+    static const QVector<Item> t = {
+        MOECONFIG_X(MOECONFIG_ITEM_ROW)
+    };
+    return t;
+}
+
+// 按键取表项,未知键返回 nullptr。
+inline const Item *itemFor(const QString &key)
+{
+    for (const Item &it : items())
+        if (QString::fromUtf8(it.name) == key)
+            return &it;
+    return nullptr;
+}
+} // namespace MoeConfig
 
 //! TOML 用户配置(QML 单例 "MoePlayer.Core ConfigManager")。
 //!
@@ -23,145 +132,56 @@ class QTimer;
 class ConfigManager : public QObject
 {
     Q_OBJECT
-    // 海报莫奈动态取色开关(默认开,与接入前的行为一致)。
-    Q_PROPERTY(bool monetEnabled READ monetEnabled WRITE setMonetEnabled NOTIFY monetEnabledChanged)
-    // 媒体库默认排序字段(Emby SortBy 值;仅在无浏览状态恢复时生效)。
-    Q_PROPERTY(QString librarySortBy READ librarySortBy WRITE setLibrarySortBy NOTIFY librarySortByChanged)
-    // 媒体库默认排序方向(Emby SortOrder 值)。
-    Q_PROPERTY(QString librarySortOrder READ librarySortOrder WRITE setLibrarySortOrder NOTIFY librarySortOrderChanged)
-    // 详情页选集/季栏靠左(默认 false = 靠右,现状)。
-    Q_PROPERTY(bool detailSidebarLeft READ detailSidebarLeft WRITE setDetailSidebarLeft NOTIFY detailSidebarLeftChanged)
-    // 详情页海报位置:9 宫格 top/middle/bottom × left/center/right
-    // (默认 bottom-left = 左下,原"靠左+沉底")。
-    Q_PROPERTY(QString detailPosterPos READ detailPosterPos WRITE setDetailPosterPos NOTIFY detailPosterPosChanged)
-    // 详情页"标题+介绍"区位置:followPoster(跟随海报,默认)/9 宫格
-    // (相对 hero 内容区,优先级高于海报)。
-    Q_PROPERTY(QString detailTextPos READ detailTextPos WRITE setDetailTextPos NOTIFY detailTextPosChanged)
-    // 详情页播放/收藏/已看按钮组位置:text(跟随标题,上下与标题对齐)/
-    // poster(跟随海报,底部与海报底对齐,默认)/backdrop(背景图左下角,
-    // 优先于另两组)。
-    Q_PROPERTY(QString detailButtonsPos READ detailButtonsPos WRITE setDetailButtonsPos NOTIFY detailButtonsPosChanged)
-    // 详情页标题+介绍区固定宽度/高度(不随内容自适应,不占剩余宽度)。
-    Q_PROPERTY(int detailTextWidth READ detailTextWidth WRITE setDetailTextWidth NOTIFY detailTextWidthChanged)
-    Q_PROPERTY(int detailTextHeight READ detailTextHeight WRITE setDetailTextHeight NOTIFY detailTextHeightChanged)
-    // 全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,
-    // https 目标走 CONNECT 隧道),可带 user:pass@ 认证。仅支持 HTTP(SOCKS
-    // 不支持:mpv 播放流无 SOCKS;mihomo mixed-port 同端口说 HTTP 方言,
-    // 填 http:// 即可)。非法值忽略回退直连。
-    Q_PROPERTY(QString proxy READ proxy WRITE setProxy NOTIFY proxyChanged)
-    // 滚轮步进(px/格):各滚动页面默认使用;页面级键(如 homeWheelStep)
-    // >0 时覆盖。默认 150。设置浮窗只暴露此项,页面级靠手改 config。
-    Q_PROPERTY(int wheelStep READ wheelStep WRITE setWheelStep NOTIFY wheelStepChanged)
-    Q_PROPERTY(int homeWheelStep READ homeWheelStep WRITE setHomeWheelStep NOTIFY homeWheelStepChanged)
-    Q_PROPERTY(int detailWheelStep READ detailWheelStep WRITE setDetailWheelStep NOTIFY detailWheelStepChanged)
-    Q_PROPERTY(int searchWheelStep READ searchWheelStep WRITE setSearchWheelStep NOTIFY searchWheelStepChanged)
-    Q_PROPERTY(int settingsWheelStep READ settingsWheelStep WRITE setSettingsWheelStep NOTIFY settingsWheelStepChanged)
-    Q_PROPERTY(int libraryWheelStep READ libraryWheelStep WRITE setLibraryWheelStep NOTIFY libraryWheelStepChanged)
-    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
-    Q_PROPERTY(int searchLimitPerAccount READ searchLimitPerAccount WRITE setSearchLimitPerAccount NOTIFY searchLimitPerAccountChanged)
-    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
-    // 搜索每账号结果条数(一次上限,不分页):聚合/单服混合搜索共用。默认 10。
+    // 17 个配置属性(单一真相在 MoeConfig 表;getter/setter 由宏生成)。
+    MOECONFIG_X(MOECONFIG_PROP)
     // 配置文件绝对路径(只读,供 UI 展示/排障)。
     Q_PROPERTY(QString configPath READ configPath CONSTANT)
+    // 设置浮窗枚举(可见配置项;条目含 UI 元数据/控件类型/选项)。
+    Q_PROPERTY(QVariantList items READ items CONSTANT)
 public:
     explicit ConfigManager(QObject *parent = nullptr);
 
-    bool monetEnabled() const { return m_monetEnabled; }
-    void setMonetEnabled(bool v);
-    QString librarySortBy() const { return m_librarySortBy; }
-    void setLibrarySortBy(const QString &v);
-    QString librarySortOrder() const { return m_librarySortOrder; }
-    void setLibrarySortOrder(const QString &v);
-    bool detailSidebarLeft() const { return m_detailSidebarLeft; }
-    void setDetailSidebarLeft(bool v);
-    QString detailPosterPos() const { return m_detailPosterPos; }
-    void setDetailPosterPos(const QString &v);
-    QString detailTextPos() const { return m_detailTextPos; }
-    void setDetailTextPos(const QString &v);
-    QString detailButtonsPos() const { return m_detailButtonsPos; }
-    void setDetailButtonsPos(const QString &v);
-    int detailTextWidth() const { return m_detailTextWidth; }
-    void setDetailTextWidth(int v);
-    int detailTextHeight() const { return m_detailTextHeight; }
-    void setDetailTextHeight(int v);
-    QString proxy() const { return m_proxy; }
-    void setProxy(const QString &v);
-    int wheelStep() const { return m_wheelStep; }
-    void setWheelStep(int v);
-    int homeWheelStep() const { return m_homeWheelStep; }
-    void setHomeWheelStep(int v);
-    int detailWheelStep() const { return m_detailWheelStep; }
-    void setDetailWheelStep(int v);
-    int searchWheelStep() const { return m_searchWheelStep; }
-    void setSearchWheelStep(int v);
-    int settingsWheelStep() const { return m_settingsWheelStep; }
-    void setSettingsWheelStep(int v);
-    int libraryWheelStep() const { return m_libraryWheelStep; }
-    void setLibraryWheelStep(int v);
-    int searchLimitPerAccount() const { return m_searchLimitPerAccount; }
-    void setSearchLimitPerAccount(int v);
+    // 生成属性访问器:getter 读 map(缺键回默认);setter 转发 setValue。
+    MOECONFIG_X(MOECONFIG_ACCESSOR)
+
     // 当前代理(按 proxy 串解析;空/非法 = NoProxy)。网络层每请求现取,
     // 热重载后新请求自动用新代理。
     QNetworkProxy proxyObject() const;
     QString configPath() const { return m_path; }
 
+    // 统一读写通道(数据化/脚本/调试);绑定读仍走属性(setValue 在绑定
+    // 中不追踪,value 仅限非绑定调用)。
+    Q_INVOKABLE bool setValue(const QString &key, const QVariant &v);
+    Q_INVOKABLE QVariant value(const QString &key) const;
     // 从磁盘重读配置(丢弃内存未落盘改动;热重载内部也走这里)。
     Q_INVOKABLE void reload();
     // 恢复默认值并立即写回。
     Q_INVOKABLE void resetToDefaults();
+    // 设置浮窗枚举(见 Q_PROPERTY items)。
+    QVariantList items() const;
 
 signals:
-    void monetEnabledChanged();
-    void librarySortByChanged();
-    void librarySortOrderChanged();
-    void detailSidebarLeftChanged();
-    void detailPosterPosChanged();
-    void detailTextPosChanged();
-    void detailButtonsPosChanged();
-    void detailTextWidthChanged();
-    void detailTextHeightChanged();
-    void proxyChanged();
-    void wheelStepChanged();
-    void homeWheelStepChanged();
-    void detailWheelStepChanged();
-    void searchWheelStepChanged();
-    void settingsWheelStepChanged();
-    void libraryWheelStepChanged();
-    void searchLimitPerAccountChanged();
+    MOECONFIG_X(MOECONFIG_SIGNAL)
+    // 任意配置变化(含热重载/恢复默认;key 空串 = 全量)。UI 同步/脚本用,
+    // 属性级信号(NOTIFY)仍单独发,保持 QML 绑定粒度。
+    void configChanged(const QString &key);
 
 private:
     // 解析文件并应用(缺失/类型不合法回退默认值;解析失败仅告警不崩溃)。
     void loadFromFile();
-    // 以当前内存值重写文件(带注释模板;原子写)。
+    // 以当前内存值重写文件(表生成注释模板;原子写)。
     void commit();
     // 外部修改入队:防抖后重载(自写回经 m_suppressReload 跳过)。
     void scheduleReload();
+    // 按 key 发对应属性信号(宏展开 if-链)。
+    void emitChangedFor(const QString &key);
 
-    bool m_monetEnabled = true;
-    QString m_librarySortBy = QStringLiteral("DateModified");
-    QString m_librarySortOrder = QStringLiteral("Descending");
-    bool m_detailSidebarLeft = false;
-    QString m_detailPosterPos = QStringLiteral("bottom-left");
-    QString m_detailTextPos = QStringLiteral("followPoster");
-    QString m_detailButtonsPos = QStringLiteral("poster");
-    // 默认 280 = 原实现文字区下限(hero 有选季栏时宽 550,280+海报 200+
-    // margin 才放得下;更大值需拉宽窗口)。
-    int m_detailTextWidth = 280;
-    // 默认 140:容纳 标题30+元数据14+简介2行40+间距 的内容高(~100)有余。
-    int m_detailTextHeight = 140;
-    // 空 = 直连。
-    QString m_proxy;
+    QVariantMap m_values;      // 运行时值(map,唯一真相;缺键时访问器回默认)
+    // 用户显式配置的键(值≠默认);写回只写这些键,其余用默认。
+    QSet<QString> m_overrides;
     QString m_path;
     QFileSystemWatcher *m_watcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
     // 自己 commit 触发 fileChanged 时置位,避免自触发重载。
     bool m_suppressReload = false;
-    // 滚轮步进:全局默认 80;页面级 0 = 跟随全局(手改 config 覆盖)。
-    int m_wheelStep = 80;
-    int m_homeWheelStep = 0;
-    int m_detailWheelStep = 0;
-    int m_searchWheelStep = 0;
-    int m_settingsWheelStep = 0;
-    int m_libraryWheelStep = 0;
-    int m_searchLimitPerAccount = 10; // 搜索每账号条数,默认 10
 };

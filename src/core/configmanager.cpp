@@ -7,15 +7,15 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
-#include <QUrl>
+
+#include <cmath>
 
 // toml++ 单头(third_party/tomlplusplus,已加入 include 路径)。
 #include <toml.hpp>
 
 namespace {
 
-// 配置文件相对 AppConfigLocation 的文件名。
-constexpr auto kConfigFileName = "config.toml";
+const QString kConfigFileName = QStringLiteral("config.toml");
 
 // 9 宫格位置枚举(海报/文字 grid 态共用)。
 const QStringList kGrid9 = {
@@ -54,87 +54,204 @@ QNetworkProxy parseProxy(const QString &spec)
     return p;
 }
 
-// 写回模板:注释对用户手改友好(键/顺序/注释一次生成)。
-QString renderToml(bool monetEnabled, const QString &sortBy, const QString &sortOrder,
-                   bool detailSidebarLeft, const QString &detailPosterPos,
-                   const QString &detailTextPos, const QString &detailButtonsPos,
-                   int detailTextWidth, int detailTextHeight, const QString &proxy,
-                   int wheelStep, int homeWheelStep, int detailWheelStep,
-                   int searchWheelStep, int settingsWheelStep, int libraryWheelStep,
-                   int searchLimitPerAccount)
+// {label, key} 对列表 → QVariantList(Combo 选项)。
+QVariantList optionsFrom(const QList<QPair<QString, QString>> &pairs)
 {
-    return QStringLiteral(
-               "# MoePlayer \u7528\u6237\u914d\u7f6e(TOML)\n"
-               "# \u542f\u52a8\u65f6\u8bfb\u53d6;\u5916\u90e8\u4fee\u6539\u540e\u81ea\u52a8\u70ed\u91cd\u8f7d(\u7acb\u5373\u751f\u6548)\u3002\n"
-               "# \u7f3a\u5931\u6216\u7c7b\u578b\u4e0d\u5408\u6cd5\u7684\u952e\u56de\u9000\u9ed8\u8ba4\u503c;\u5220\u9664\u672c\u6587\u4ef6\u5373\u6062\u590d\u51fa\u5382\u3002\n"
-               "# \u654f\u611f\u6570\u636e(\u8d26\u53f7\u5bc6\u7801/\u51ed\u636e)\u4e0d\u5b58\u4e8e\u6b64,\u4ecd\u7531 QSettings \u7ba1\u7406\u3002\n"
-               "\n"
-               "[theme]\n"
-               "monetEnabled = %1    # \u6d77\u62a5\u83ab\u5948\u52a8\u6001\u53d6\u8272(false \u56de\u9000\u9759\u6001\u4e3b\u9898\u8272)\n"
-               "\n"
-               "[library]\n"
-               "sortBy = \"%2\"      # \u9ed8\u8ba4\u6392\u5e8f\u5b57\u6bb5(Emby SortBy \u503c)\n"
-               "sortOrder = \"%3\"   # \u9ed8\u8ba4\u6392\u5e8f\u65b9\u5411(Ascending/Descending)\n"
-               "\n"
-               "[detail]\n"
-               "sidebarLeft = %4   # \u8be6\u60c5\u9875\u9009\u96c6/\u5b63\u680f\u9760\u5de6(true)/\u9760\u53f3(false,\u9ed8\u8ba4)\n"
-               "posterPos = \"%5\" # \u6d77\u62a5\u4f4d\u7f6e 9 \u5bab\u683c:top/middle/bottom \u00d7 left/center/right\n"
-               "                  #   bottom-left(\u9ed8\u8ba4,\u5de6\u4e0b)/bottom-center/bottom-right/...\n"
-               "textPos = \"%6\"   # \u6807\u9898+\u4ecb\u7ecd:followPoster(\u9ed8\u8ba4,\u8ddf\u968f\u6d77\u62a5)/9 \u5bab\u683c\n"
-               "                  #   (top-left/top-center/top-right/middle-left/middle-center/...)\n"
-               "buttonsPos = \"%7\"# \u64ad\u653e/\u6536\u85cf/\u5df2\u770b\u6309\u94ae\u7ec4:poster(\u6d77\u62a5,\u9ed8\u8ba4)/\n"
-               "                  #   text(\u8ddf\u968f\u6807\u9898)/backdrop(\u80cc\u666f\u56fe\u5de6\u4e0b\u89d2,\u4f18\u5148)\n"
-               "textWidth = %8     # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u5bbd\u5ea6(\u4e0d\u5360\u5269\u4f59\u5bbd\u5ea6,\u50cf\u7d20)\n"
-               "textHeight = %9    # \u6807\u9898+\u4ecb\u7ecd\u533a\u56fa\u5b9a\u9ad8\u5ea6(\u4e0d\u968f\u5185\u5bb9\u81ea\u9002\u5e94,\u50cf\u7d20)\n"
-               "\n"
-               "[network]\n"
-               "proxy = \"%10\"   # \u5168\u5c40\u4ee3\u7406(\u7a7a=\u76f4\u8fde):http://host:port \u6216\n"
-               "                # https://host:port(HTTP \u4ee3\u7406,https \u76ee\u6807\u8d70\n"
-               "                # CONNECT \u96a7\u9053);\u53ef\u5e26 user:pass@ \u8ba4\u8bc1\u3002\n"
-               "                # \u4ec5\u652f\u6301 HTTP(SOCKS \u4e0d\u652f\u6301:mpv \u64ad\u653e\u6d41\u65e0\n"
-               "                # SOCKS);mihomo mixed-port \u540c\u7aef\u53e3\u8bf4 HTTP \u65b9\u8a00,\n"
-               "                # \u586b http:// \u5373\u53ef\u3002\u914d\u7f6e\u540e\u6d4f\u89c8/\u56fe\u7247/\u56fe\u6807\n"
-               "                # \u5747\u8d70\u4ee3\u7406;\u64ad\u653e\u7ecf mpv --http-proxy(\u672c\u673a\n"
-               "                # \u5b9e\u6d4b https \u4ea6 CONNECT \u96a7\u9053,\u5176\u5b83\u7248\u672c\u672a\u9a8c\u8bc1)\u3002\n"
-               "\n"
-               "[scroll]\n"
-               "wheelStep = %11        # \u6eda\u8f6e\u6bcf\u683c\u6eda\u52a8\u8ddd\u79bb(\u50cf\u7d20/\u683c)\uff0c\u8bbe\u7f6e\u6d6e\u7a97\u5c31\u662f\u8fd9\u4e2a\uff1b\u9ed8\u8ba4 80\u3002\u5176\u4f59\u9875\u9762\u7ea7\u952e 0 = \u8ddf\u968f\u5168\u5c40\n"
-               "homeWheelStep = %12    # \u9996\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40 (wheelStep)\n"
-               "detailWheelStep = %13  # \u8be6\u60c5\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
-               "searchWheelStep = %14  # \u641c\u7d22\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
-               "settingsWheelStep = %15 # \u8bbe\u7f6e\u6d6e\u7a97\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
-               "libraryWheelStep = %16 # \u5e93\u6d4f\u89c8\u9875\u8986\u76d6\uff0c0 = \u5168\u5c40\n"
-               "searchLimitPerAccount = %17 # \u641c\u7d22\u6bcf\u8d26\u53f7\u7ed3\u679c\u6761\u6570(\u4e00\u6b21\u4e0a\u9650,\u4e0d\u5206\u9875)\n")
-        .arg(monetEnabled ? QStringLiteral("true") : QStringLiteral("false"))
-        .arg(sortBy, sortOrder)
-        .arg(detailSidebarLeft ? QStringLiteral("true") : QStringLiteral("false"))
-        .arg(detailPosterPos)
-        .arg(detailTextPos)
-        .arg(detailButtonsPos)
-        .arg(detailTextWidth)
-        .arg(detailTextHeight)
-        .arg(proxy)
-        .arg(wheelStep)
-        .arg(homeWheelStep)
-        .arg(detailWheelStep)
-        .arg(searchWheelStep)
-        .arg(settingsWheelStep)
-        .arg(libraryWheelStep)
-        .arg(searchLimitPerAccount);
+    QVariantList out;
+    for (const auto &p : pairs) {
+        QVariantMap m;
+        m.insert(QStringLiteral("label"), p.first);
+        m.insert(QStringLiteral("key"), p.second);
+        out.append(m);
+    }
+    return out;
+}
+
+// 值 → TOML 字面量(Bool/String/Int;字符串转义引号/反斜杠/换行)。
+QString tomlValue(MoeConfig::Type type, const QVariant &v)
+{
+    switch (type) {
+    case MoeConfig::Type::Bool:
+        return v.toBool() ? QStringLiteral("true") : QStringLiteral("false");
+    case MoeConfig::Type::Int:
+        return QString::number(v.toInt());
+    case MoeConfig::Type::String: {
+        QString s = v.toString();
+        s.replace(QStringLiteral("\\"), QStringLiteral("\\\\"))
+         .replace(QStringLiteral("\n"), QStringLiteral("\\n"))
+         .replace(QStringLiteral("\""), QStringLiteral("\\\""));
+        return QLatin1Char('"') + s + QLatin1Char('"');
+    }
+    }
+    return {};
+}
+
+// section 引言(写回模板注释,按分组提示)。
+QString sectionIntro(const QString &section)
+{
+    if (section == QLatin1String("theme"))
+        return QStringLiteral("# 主题\n");
+    if (section == QLatin1String("library"))
+        return QStringLiteral("# 媒体库\n");
+    if (section == QLatin1String("detail"))
+        return QStringLiteral("# 详情页\n");
+    if (section == QLatin1String("network"))
+        return QStringLiteral("# 网络(代理仅 HTTP;播放经 mpv --http-proxy)\n");
+    if (section == QLatin1String("scroll"))
+        return QStringLiteral("# 滚轮(页面级 0 = 跟随全局 wheelStep)\n");
+    return {};
+}
+
+// 值类型匹配(Int 接受 QML parseInt 产生的整数 double)。
+bool typeOk(const MoeConfig::Item *it, const QVariant &v)
+{
+    switch (it->type) {
+    case MoeConfig::Type::Bool:
+        return v.metaType().id() == QMetaType::Bool;
+    case MoeConfig::Type::String:
+        return v.metaType().id() == QMetaType::QString;
+    case MoeConfig::Type::Int:
+        if (v.metaType().id() == QMetaType::Int)
+            return true;
+        if (v.metaType().id() == QMetaType::Double) {
+            const double d = v.toDouble();
+            return std::floor(d) == d; // 整数 double(QML parseInt)才接受
+        }
+        return false;
+    }
+    return false;
 }
 
 } // namespace
 
+// ---------- MoeConfig 钩子(选项/校验;宏表引用) ----------
+
+namespace MoeConfig {
+
+QVariantList optionsLibrarySortBy()
+{
+    return optionsFrom({
+        { QStringLiteral("最近添加"), QStringLiteral("DateLastContentAdded") },
+        { QStringLiteral("加入时间"), QStringLiteral("DateCreated") },
+        { QStringLiteral("上映日期"), QStringLiteral("PremiereDate") },
+        { QStringLiteral("名称"), QStringLiteral("SortName") },
+        { QStringLiteral("出品年份"), QStringLiteral("ProductionYear") },
+        { QStringLiteral("社区评分"), QStringLiteral("CommunityRating") },
+        { QStringLiteral("影评评分"), QStringLiteral("CriticRating") },
+        { QStringLiteral("随机"), QStringLiteral("Random") },
+        { QStringLiteral("修改时间"), QStringLiteral("DateModified") },
+    });
+}
+
+QVariantList optionsLibrarySortOrder()
+{
+    return optionsFrom({
+        { QStringLiteral("降序"), QStringLiteral("Descending") },
+        { QStringLiteral("升序"), QStringLiteral("Ascending") },
+    });
+}
+
+QVariantList optionsDetailPosterPos()
+{
+    return optionsFrom({{ QStringLiteral("左上"), QStringLiteral("top-left") },
+                        { QStringLiteral("上中"), QStringLiteral("top-center") },
+                        { QStringLiteral("右上"), QStringLiteral("top-right") },
+                        { QStringLiteral("左中"), QStringLiteral("middle-left") },
+                        { QStringLiteral("正中"), QStringLiteral("middle-center") },
+                        { QStringLiteral("右中"), QStringLiteral("middle-right") },
+                        { QStringLiteral("左下"), QStringLiteral("bottom-left") },
+                        { QStringLiteral("下中"), QStringLiteral("bottom-center") },
+                        { QStringLiteral("右下"), QStringLiteral("bottom-right") }});
+}
+
+QVariantList optionsDetailTextPos()
+{
+    return optionsFrom({
+        { QStringLiteral("跟随海报"), QStringLiteral("followPoster") },
+        { QStringLiteral("左上"), QStringLiteral("top-left") },
+        { QStringLiteral("上中"), QStringLiteral("top-center") },
+        { QStringLiteral("右上"), QStringLiteral("top-right") },
+        { QStringLiteral("左中"), QStringLiteral("middle-left") },
+        { QStringLiteral("正中"), QStringLiteral("middle-center") },
+        { QStringLiteral("右中"), QStringLiteral("middle-right") },
+        { QStringLiteral("左下"), QStringLiteral("bottom-left") },
+        { QStringLiteral("下中"), QStringLiteral("bottom-center") },
+        { QStringLiteral("右下"), QStringLiteral("bottom-right") },
+    });
+}
+
+QVariantList optionsDetailButtonsPos()
+{
+    return optionsFrom({
+        { QStringLiteral("跟随标题"), QStringLiteral("text") },
+        { QStringLiteral("跟随海报"), QStringLiteral("poster") },
+        { QStringLiteral("背景图左下"), QStringLiteral("backdrop") },
+    });
+}
+
+bool validatePosterPos(const QVariant &v)
+{
+    return kGrid9.contains(v.toString());
+}
+
+bool validateTextPos(const QVariant &v)
+{
+    return kTextPos.contains(v.toString());
+}
+
+bool validateButtonsPos(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("text") || s == QLatin1String("poster")
+           || s == QLatin1String("backdrop");
+}
+
+bool validateProxy(const QVariant &v)
+{
+    const QString s = v.toString();
+    // 空 = 直连(合法);非空需能解析为 HTTP 代理。
+    return s.isEmpty() || parseProxy(s).type() != QNetworkProxy::NoProxy;
+}
+
+bool validateWheelStep(const QVariant &v)
+{
+    return v.toInt() >= 1;
+}
+
+bool validatePageWheelStep(const QVariant &v)
+{
+    return v.toInt() >= 0;
+}
+
+bool validateSearchLimit(const QVariant &v)
+{
+    const int i = v.toInt();
+    return i >= 1 && i <= 100;
+}
+
+} // namespace MoeConfig
+
+// ---------- ConfigManager ----------
+
 ConfigManager::ConfigManager(QObject *parent)
     : QObject(parent)
 {
-    m_path = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation) + QLatin1Char('/') + QString::fromLatin1(kConfigFileName);
+    m_path = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
+             + QLatin1Char('/') + kConfigFileName;
     // AppConfigLocation 目录(Qt 不保证存在)须自建,QSaveFile 写回才可打开。
     QDir().mkpath(QFileInfo(m_path).absolutePath());
 
-    // 首次启动:文件不存在则生成默认模板(便于用户直接编辑)。
-    if (!QFile::exists(m_path))
+    // 先填默认值表(commit 渲染/首启生成模板的前提;访问器另有缺键兜底)。
+    for (const auto &it : MoeConfig::items())
+        m_values.insert(QString::fromUtf8(it.name), it.def);
+
+    // 首次启动:文件不存在则生成完整默认模板(便于用户直接编辑/参考),
+    // 模板全部键写入 m_overrides(下次写回保持全键)。
+    if (!QFile::exists(m_path)) {
+        for (const auto &it : MoeConfig::items())
+            m_overrides.insert(QString::fromUtf8(it.name));
         commit();
+    }
 
     loadFromFile();
 
@@ -148,218 +265,75 @@ ConfigManager::ConfigManager(QObject *parent)
     connect(m_reloadTimer, &QTimer::timeout, this, &ConfigManager::reload);
 }
 
-void ConfigManager::setMonetEnabled(bool v)
-{
-    if (v == m_monetEnabled)
-        return;
-    m_monetEnabled = v;
-    emit monetEnabledChanged();
-    commit();
-}
-
-void ConfigManager::setLibrarySortBy(const QString &v)
-{
-    if (v == m_librarySortBy)
-        return;
-    m_librarySortBy = v;
-    emit librarySortByChanged();
-    commit();
-}
-
-void ConfigManager::setLibrarySortOrder(const QString &v)
-{
-    if (v == m_librarySortOrder)
-        return;
-    m_librarySortOrder = v;
-    emit librarySortOrderChanged();
-    commit();
-}
-
-void ConfigManager::setDetailSidebarLeft(bool v)
-{
-    if (v == m_detailSidebarLeft)
-        return;
-    m_detailSidebarLeft = v;
-    emit detailSidebarLeftChanged();
-    commit();
-}
-
-void ConfigManager::setDetailPosterPos(const QString &v)
-{
-    // 仅接受 9 宫格枚举(非法值忽略,防手误写坏布局)。
-    if (!kGrid9.contains(v)) {
-        qWarning() << "ConfigManager: 忽略非法 detailPosterPos" << v;
-        return;
-    }
-    if (v == m_detailPosterPos)
-        return;
-    m_detailPosterPos = v;
-    emit detailPosterPosChanged();
-    commit();
-}
-
-void ConfigManager::setDetailTextPos(const QString &v)
-{
-    // followPoster + 9 宫格(非法值忽略,防手误写坏布局)。
-    if (!kTextPos.contains(v)) {
-        qWarning() << "ConfigManager: 忽略非法 detailTextPos" << v;
-        return;
-    }
-    if (v == m_detailTextPos)
-        return;
-    m_detailTextPos = v;
-    emit detailTextPosChanged();
-    commit();
-}
-
-void ConfigManager::setDetailButtonsPos(const QString &v)
-{
-    // text/poster/backdrop 三态(非法值忽略)。
-    if (v != QStringLiteral("text") && v != QStringLiteral("poster")
-        && v != QStringLiteral("backdrop")) {
-        qWarning() << "ConfigManager: 忽略非法 detailButtonsPos" << v;
-        return;
-    }
-    if (v == m_detailButtonsPos)
-        return;
-    m_detailButtonsPos = v;
-    emit detailButtonsPosChanged();
-    commit();
-}
-
-void ConfigManager::setDetailTextWidth(int v)
-{
-    if (v == m_detailTextWidth)
-        return;
-    if (v <= 0) {
-        qWarning() << "ConfigManager: 忽略非法 detailTextWidth" << v;
-        return;
-    }
-    m_detailTextWidth = v;
-    emit detailTextWidthChanged();
-    commit();
-}
-
-void ConfigManager::setDetailTextHeight(int v)
-{
-    if (v == m_detailTextHeight)
-        return;
-    if (v <= 0) {
-        qWarning() << "ConfigManager: 忽略非法 detailTextHeight" << v;
-        return;
-    }
-    m_detailTextHeight = v;
-    emit detailTextHeightChanged();
-    commit();
-}
-
-void ConfigManager::setProxy(const QString &v)
-{
-    // 非法值忽略(防手误写坏网络配置;回退直连见 proxyObject)。
-    if (parseProxy(v).type() == QNetworkProxy::NoProxy && !v.trimmed().isEmpty())
-        return;
-    if (v == m_proxy)
-        return;
-    m_proxy = v;
-    emit proxyChanged();
-    commit();
-}
-void ConfigManager::setWheelStep(int v)
-{
-    // 非法值忽略(页面级 0 = 跟随全局,全局须 ≥1)。
-    if (v < 1) {
-        qWarning() << "ConfigManager: 忽略非法 wheelStep" << v;
-        return;
-    }
-    if (v == m_wheelStep)
-        return;
-    m_wheelStep = v;
-    emit wheelStepChanged();
-    commit();
-}
-
-// 页面级步进:0 = 跟随全局(值合法即接受,不设下限)。
-void ConfigManager::setHomeWheelStep(int v)
-{
-    if (v < 0) {
-        qWarning() << "ConfigManager: 忽略非法 homeWheelStep" << v;
-        return;
-    }
-    if (v == m_homeWheelStep)
-        return;
-    m_homeWheelStep = v;
-    emit homeWheelStepChanged();
-    commit();
-}
-
-void ConfigManager::setDetailWheelStep(int v)
-{
-    if (v < 0) {
-        qWarning() << "ConfigManager: 忽略非法 detailWheelStep" << v;
-        return;
-    }
-    if (v == m_detailWheelStep)
-        return;
-    m_detailWheelStep = v;
-    emit detailWheelStepChanged();
-    commit();
-}
-
-void ConfigManager::setSearchWheelStep(int v)
-{
-    if (v < 0) {
-        qWarning() << "ConfigManager: 忽略非法 searchWheelStep" << v;
-        return;
-    }
-    if (v == m_searchWheelStep)
-        return;
-    m_searchWheelStep = v;
-    emit searchWheelStepChanged();
-    commit();
-}
-
-void ConfigManager::setSearchLimitPerAccount(int v)
-{
-    if (v < 1 || v > 100) {
-        qWarning() << "ConfigManager: 忽略非法 searchLimitPerAccount" << v;
-        return;
-    }
-    if (v == m_searchLimitPerAccount)
-        return;
-    m_searchLimitPerAccount = v;
-    emit searchLimitPerAccountChanged();
-    commit();
-}
-
-void ConfigManager::setSettingsWheelStep(int v)
-{
-    if (v < 0) {
-        qWarning() << "ConfigManager: 忽略非法 settingsWheelStep" << v;
-        return;
-    }
-    if (v == m_settingsWheelStep)
-        return;
-    m_settingsWheelStep = v;
-    emit settingsWheelStepChanged();
-    commit();
-}
-
-void ConfigManager::setLibraryWheelStep(int v)
-{
-    if (v < 0) {
-        qWarning() << "ConfigManager: 忽略非法 libraryWheelStep" << v;
-        return;
-    }
-    if (v == m_libraryWheelStep)
-        return;
-    m_libraryWheelStep = v;
-    emit libraryWheelStepChanged();
-    commit();
-}
-
 QNetworkProxy ConfigManager::proxyObject() const
 {
-    return parseProxy(m_proxy);
+    return parseProxy(m_values.value(QStringLiteral("proxy")).toString());
+}
+
+bool ConfigManager::setValue(const QString &key, const QVariant &v)
+{
+    const MoeConfig::Item *it = MoeConfig::itemFor(key);
+    if (!it) {
+        qWarning() << "ConfigManager: 未知配置键" << key;
+        return false;
+    }
+    if (!typeOk(it, v) || (it->validate && !it->validate(v))) {
+        qWarning() << "ConfigManager: 忽略非法值(回退直连/保持当前)" << key << v;
+        return false;
+    }
+    if (m_values.value(key) == v)
+        return true; // 幂等:值相同不发信号不写盘
+    m_values.insert(key, v);
+    // 值≠默认 → 记为用户覆盖(写回);=默认 → 移除(等效删键,下次写回不含)。
+    if (v == it->def)
+        m_overrides.remove(key);
+    else
+        m_overrides.insert(key);
+    emitChangedFor(key);
+    commit();
+    return true;
+}
+
+QVariant ConfigManager::value(const QString &key) const
+{
+    const MoeConfig::Item *it = MoeConfig::itemFor(key);
+    if (!it)
+        return {};
+    return m_values.value(key, it->def);
+}
+
+QVariantList ConfigManager::items() const
+{
+    QVariantList out;
+    for (const auto &it : MoeConfig::items()) {
+        if (it.widget == MoeConfig::Widget::Hidden)
+            continue;
+        QVariantMap m;
+        m.insert(QStringLiteral("uiSection"), QString::fromUtf8(it.uiSection));
+        m.insert(QStringLiteral("key"), QString::fromUtf8(it.name));
+        m.insert(QStringLiteral("label"), QString::fromUtf8(it.uiLabel));
+        m.insert(QStringLiteral("description"), QString::fromUtf8(it.uiDesc));
+        // 全部可见项都带 intOnly(SettingItem 无条件绑定,缺失=undefined 赋 bool 报错)。
+        m.insert(QStringLiteral("intOnly"),
+                 it.type == MoeConfig::Type::Int);
+        switch (it.widget) {
+        case MoeConfig::Widget::Switch:
+            m.insert(QStringLiteral("widget"), QStringLiteral("switch"));
+            break;
+        case MoeConfig::Widget::Combo:
+            m.insert(QStringLiteral("widget"), QStringLiteral("combo"));
+            m.insert(QStringLiteral("options"),
+                     it.options ? it.options() : QVariantList());
+            break;
+        case MoeConfig::Widget::Field:
+            m.insert(QStringLiteral("widget"), QStringLiteral("field"));
+            break;
+        case MoeConfig::Widget::Hidden:
+            break;
+        }
+        out.append(m);
+    }
+    return out;
 }
 
 void ConfigManager::reload()
@@ -375,40 +349,13 @@ void ConfigManager::reload()
 
 void ConfigManager::resetToDefaults()
 {
-    m_monetEnabled = true;
-    m_librarySortBy = QStringLiteral("DateModified");
-    m_librarySortOrder = QStringLiteral("Descending");
-    m_detailSidebarLeft = false;
-    m_detailPosterPos = QStringLiteral("bottom-left");
-    m_detailTextPos = QStringLiteral("followPoster");
-    m_detailButtonsPos = QStringLiteral("poster");
-    m_detailTextWidth = 280;
-    m_detailTextHeight = 140;
-    m_proxy = QString();
-    m_wheelStep = 80;
-    m_homeWheelStep = 0;
-    m_detailWheelStep = 0;
-    m_searchWheelStep = 0;
-    m_settingsWheelStep = 0;
-    m_libraryWheelStep = 0;
-    m_searchLimitPerAccount = 10;
-    emit monetEnabledChanged();
-    emit librarySortByChanged();
-    emit librarySortOrderChanged();
-    emit detailSidebarLeftChanged();
-    emit detailPosterPosChanged();
-    emit detailTextPosChanged();
-    emit detailButtonsPosChanged();
-    emit detailTextWidthChanged();
-    emit detailTextHeightChanged();
-    emit proxyChanged();
-    emit wheelStepChanged();
-    emit homeWheelStepChanged();
-    emit detailWheelStepChanged();
-    emit searchWheelStepChanged();
-    emit settingsWheelStepChanged();
-    emit libraryWheelStepChanged();
-    emit searchLimitPerAccountChanged();
+    for (const auto &it : MoeConfig::items())
+        m_values.insert(QString::fromUtf8(it.name), it.def);
+    // 恢复默认:清空用户覆盖(commit 写回空 diff——仅首启/初次模板仍在时
+    // 有覆盖键;此处 m_overrides 清空 = 无键 diff,与"删除文件"等价)。
+    m_overrides.clear();
+    MOECONFIG_X(MOECONFIG_EMIT_ALL)
+    emit configChanged(QString());
     qInfo() << "ConfigManager: 恢复默认配置";
     commit();
 }
@@ -417,89 +364,74 @@ void ConfigManager::loadFromFile()
 {
     try {
         const toml::table cfg = toml::parse_file(m_path.toStdString());
-
-        const auto theme = cfg["theme"];
-        if (theme.is_table())
-            m_monetEnabled = theme["monetEnabled"].value_or(m_monetEnabled);
-
-        const auto library = cfg["library"];
-        if (library.is_table()) {
-            m_librarySortBy = QString::fromStdString(library["sortBy"].value_or(m_librarySortBy.toStdString()));
-            m_librarySortOrder = QString::fromStdString(library["sortOrder"].value_or(m_librarySortOrder.toStdString()));
+        // 起始 = 全默认,再 merge 文件覆盖;否则用户热重载删键会残留旧值,
+        // 删键应归默认。
+        for (const auto &it : MoeConfig::items())
+            m_values.insert(QString::fromUtf8(it.name), it.def);
+        // 收集用户显式配置键(值≠默认);缺键用默认,写回只写这些键。
+        QSet<QString> fileOverrides;
+        for (const auto &it : MoeConfig::items()) {
+            const auto tb = cfg[it.section];
+            if (!tb.is_table())
+                continue;
+            const auto node = tb[it.tomlKey];
+            if (!node)
+                continue; // 缺键:保持当前(默认)值
+            QVariant v;
+            bool ok = false;
+            switch (it.type) {
+            case MoeConfig::Type::Bool: {
+                const auto r = node.value<bool>();
+                if (r) {
+                    v = QVariant(*r);
+                    ok = true;
+                }
+                break;
+            }
+            case MoeConfig::Type::String: {
+                const auto r = node.value<std::string>();
+                if (r) {
+                    v = QVariant(QString::fromStdString(*r));
+                    ok = true;
+                }
+                break;
+            }
+            case MoeConfig::Type::Int: {
+                const auto r = node.value<int64_t>();
+                if (r) {
+                    v = QVariant(int(*r));
+                    ok = true;
+                }
+                break;
+            }
+            }
+            if (!ok) {
+                qWarning() << "ConfigManager: 类型不合法,回退默认(键" << it.tomlKey << ")";
+                // 记入 m_overrides:下次 commit 以默认值纠正该坏键(自愈删除)。
+                fileOverrides.insert(QString::fromUtf8(it.name));
+                continue;
+            }
+            if (it.validate && !it.validate(v)) {
+                qWarning() << "ConfigManager: 非法值,回退默认" << it.tomlKey << v;
+                fileOverrides.insert(QString::fromUtf8(it.name)); // 同上自愈
+                continue;
+            }
+            m_values.insert(QString::fromUtf8(it.name), v);
+            // 仅"值≠默认"的键记为用户覆盖;默认值键不写回(值=默认等效删键)。
+            if (m_values.value(QString::fromUtf8(it.name), it.def) != it.def)
+                fileOverrides.insert(QString::fromUtf8(it.name));
         }
-
-        const auto detail = cfg["detail"];
-        if (detail.is_table()) {
-            m_detailSidebarLeft = detail["sidebarLeft"].value_or(m_detailSidebarLeft);
-            const auto posterPos = detail["posterPos"].value_or(m_detailPosterPos.toStdString());
-            m_detailPosterPos = QString::fromStdString(posterPos);
-            if (!kGrid9.contains(m_detailPosterPos)) {
-                qWarning() << "ConfigManager: posterPos 非法,回退默认" << m_detailPosterPos;
-                m_detailPosterPos = QStringLiteral("bottom-left"); // 非法值回退默认
-            }
-            m_detailTextPos = QString::fromStdString(detail["textPos"].value_or(m_detailTextPos.toStdString()));
-            if (!kTextPos.contains(m_detailTextPos)) {
-                qWarning() << "ConfigManager: textPos 非法,回退默认" << m_detailTextPos;
-                m_detailTextPos = QStringLiteral("followPoster"); // 非法值回退默认
-            }
-            m_detailButtonsPos = QString::fromStdString(detail["buttonsPos"].value_or(m_detailButtonsPos.toStdString()));
-            if (m_detailButtonsPos != QStringLiteral("text") && m_detailButtonsPos != QStringLiteral("poster")
-                && m_detailButtonsPos != QStringLiteral("backdrop")) {
-                qWarning() << "ConfigManager: buttonsPos 非法,回退默认" << m_detailButtonsPos;
-                m_detailButtonsPos = QStringLiteral("poster"); // 非法值回退默认
-            }
-            m_detailTextWidth = detail["textWidth"].value_or(m_detailTextWidth);
-            m_detailTextHeight = detail["textHeight"].value_or(m_detailTextHeight);
-        }
-
-        const auto network = cfg["network"];
-        if (network.is_table()) {
-            m_proxy = QString::fromStdString(network["proxy"].value_or(m_proxy.toStdString()));
-            if (parseProxy(m_proxy).type() == QNetworkProxy::NoProxy && !m_proxy.trimmed().isEmpty())
-                m_proxy.clear(); // 非法值回退直连(与其它键一致)
-        }
-        const auto scroll = cfg["scroll"];
-        if (scroll.is_table()) {
-            // 页面级 0 = 跟随全局;全局非法值回退默认 150。
-            m_wheelStep = scroll["wheelStep"].value_or(m_wheelStep);
-            if (m_wheelStep < 1) {
-                qWarning() << "ConfigManager: wheelStep 非法,回退默认" << m_wheelStep;
-                m_wheelStep = 80;
-            }
-            m_homeWheelStep = scroll["homeWheelStep"].value_or(m_homeWheelStep);
-            m_detailWheelStep = scroll["detailWheelStep"].value_or(m_detailWheelStep);
-            m_searchWheelStep = scroll["searchWheelStep"].value_or(m_searchWheelStep);
-            m_settingsWheelStep = scroll["settingsWheelStep"].value_or(m_settingsWheelStep);
-            m_libraryWheelStep = scroll["libraryWheelStep"].value_or(m_libraryWheelStep);
-            m_searchLimitPerAccount = scroll["searchLimitPerAccount"].value_or(m_searchLimitPerAccount);
-            if (m_searchLimitPerAccount < 1 || m_searchLimitPerAccount > 100) {
-                qWarning() << "ConfigManager: searchLimitPerAccount 非法,回退默认" << m_searchLimitPerAccount;
-                m_searchLimitPerAccount = 10; // 非法值回退默认
-            }
-        }
+        // 用户覆盖 = 非默认键(热重载后新文件为准)。
+        m_overrides = fileOverrides;
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
-        emit monetEnabledChanged();
-        emit librarySortByChanged();
-        emit librarySortOrderChanged();
-        emit detailSidebarLeftChanged();
-        emit detailPosterPosChanged();
-        emit detailTextPosChanged();
-        emit detailButtonsPosChanged();
-        emit detailTextWidthChanged();
-        emit detailTextHeightChanged();
-        emit proxyChanged();
-        emit wheelStepChanged();
-        emit homeWheelStepChanged();
-        emit detailWheelStepChanged();
-        emit searchWheelStepChanged();
-        emit settingsWheelStepChanged();
-        emit libraryWheelStepChanged();
-        emit searchLimitPerAccountChanged();
+        MOECONFIG_X(MOECONFIG_EMIT_ALL)
+        emit configChanged(QString());
         qInfo().noquote() << "ConfigManager: 配置已加载" << m_path;
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
-                             << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));
+                             << QString::fromUtf8(e.description().data(),
+                                                  qsizetype(e.description().size()));
     }
 }
 
@@ -507,15 +439,31 @@ void ConfigManager::commit()
 {
     // 自写回不触发热重载(否则 fileChanged → reload → 无意义重解析)。
     m_suppressReload = true;
+    QString out = QStringLiteral("# MoePlayer 用户配置(TOML)\n"
+                                 "# 启动时读取;外部修改后自动热重载(立即生效)。\n"
+                                 "# 缺失或类型不合法的键回退默认值;删除本文件即恢复出厂。\n"
+                                 "# 敏感数据(账号密码/凭据)不存于此,仍由 QSettings 管理。\n"
+                                 "# 仅写用户显式配置过的键;未写的键=默认值\n");
+    QString cur;
+    for (const auto &it : MoeConfig::items()) {
+        // 只写用户显式配置过的键(m_overrides);未出现的键用默认,不补写。
+        if (!m_overrides.contains(QString::fromUtf8(it.name)))
+            continue;
+        const QString section = QString::fromUtf8(it.section);
+        if (section != cur) {
+            cur = section;
+            out += QStringLiteral("\n[%1]\n").arg(cur);
+            out += sectionIntro(cur);
+        }
+        out += QStringLiteral("# %1\n").arg(QString::fromUtf8(it.comment));
+        const QVariant v = m_values.value(QString::fromUtf8(it.name), it.def);
+        // 写回用 tomlKey(与磁盘旧键名一致,不破坏用户手改/模板)。
+        out += QStringLiteral("%1 = %2\n").arg(QString::fromUtf8(it.tomlKey),
+                                               tomlValue(it.type, v));
+    }
     QSaveFile file(m_path);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(renderToml(m_monetEnabled, m_librarySortBy, m_librarySortOrder,
-                              m_detailSidebarLeft, m_detailPosterPos, m_detailTextPos,
-                              m_detailButtonsPos, m_detailTextWidth, m_detailTextHeight,
-                              m_proxy, m_wheelStep, m_homeWheelStep, m_detailWheelStep,
-                              m_searchWheelStep, m_settingsWheelStep, m_libraryWheelStep,
-                              m_searchLimitPerAccount)
-                       .toUtf8());
+        file.write(out.toUtf8());
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();
     } else {
@@ -534,4 +482,11 @@ void ConfigManager::scheduleReload()
     m_watcher->removePath(m_path);
     m_watcher->addPath(m_path);
     m_reloadTimer->start();
+}
+
+void ConfigManager::emitChangedFor(const QString &key)
+{
+    MOECONFIG_X(MOECONFIG_EMIT)
+    // 未知键在 setValue 已拦截,到此不可达。
+    emit configChanged(key);
 }
