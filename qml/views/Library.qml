@@ -577,6 +577,7 @@ Item {
         // 置 busy:首屏加载期间不显示"暂无条目"空提示(空提示条件 !busy),
         // 由 onItemsReceived/onErrorOccurred 清除。
         root.busy = true
+        console.debug("Library: fetchPage", startIndex, "parent", root.currentParentId())
         const c = root.creds()
         EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentParentId(),
                               startIndex, Constants.pageSize,
@@ -1498,6 +1499,7 @@ Item {
                 || message.startsWith("获取子文件夹")
             if (!ours)
                 return
+            console.warn("Library: 页面请求失败", message, "on", root.serverUrl)
             root.busy = false
             statusText.text = "失败：" + message
             statusText.isError = true

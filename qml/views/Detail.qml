@@ -150,6 +150,7 @@ Item {
     function playItem(itemId, resume) {
         if (root.playbackPending || !itemId)
             return
+        console.info("Detail: 播放发起", itemId, resume > 0 ? "续播" : "从头")
         root.playbackPending = true
         root.pendingPlayItemId = itemId
         root.resumeTicks = resume
@@ -189,8 +190,11 @@ Item {
         }
         if (!target && model.count > 0)
             target = model.itemAt(0)
-        if (!target)
+        if (!target) {
+            console.info("Detail: 无可用剧集(模型空或全已看)")
             return
+        }
+        console.debug("Detail: 剧集续播定位", target.id)
         root.playItem(target.id, target.positionTicks > 0 && !target.played ? target.positionTicks : 0)
     }
     function playButtonText() {
@@ -2435,6 +2439,7 @@ Item {
         function onItemDetailReady(serverUrl, d) {
             if (serverUrl !== root.serverUrl || d.id !== root.itemId)
                 return
+            console.info("Detail: 详情数据到达", d.id, d.name || "")
             // 原地替换且旧正文在显示:先淡出旧内容,动画中落地数据再淡入;
             // 首次进入(加载动画中)直接落地渲染。
             if (root.replacing && root.loaded) {
@@ -2448,6 +2453,7 @@ Item {
         function onSeasonsReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
+            console.debug("Detail: 分季到达")
             const model = EmbyClient.seasonsModelFor(root.serverUrl)
             let seasonId = ""
             // 优先保持当前季(重拉/pop 回来不丢失用户选择),其次集详情的季,再第一季。
@@ -2471,6 +2477,7 @@ Item {
         function onEpisodesReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
+            console.debug("Detail: 分集到达")
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
             root.loaded = true
             root.refreshSeriesPlayText()
@@ -2484,6 +2491,7 @@ Item {
         function onPlaybackReady(serverUrl, url, headers, meta) {
             root.playbackPending = false
             if (serverUrl === root.serverUrl && meta.itemId === root.pendingPlayItemId) {
+                console.info("Detail: 播放协商就绪", meta.itemId)
                 const m = Object.assign({}, meta)
                 m.resumePositionTicks = root.resumeTicks || 0
                 root.playbackDelivered(url, headers, m)
@@ -2494,6 +2502,7 @@ Item {
         function onPlaybackFailed(serverUrl, itemId, message) {
             if (serverUrl !== root.serverUrl)
                 return
+            console.warn("Detail: 播放协商失败", itemId, message)
             root.playbackPending = false
             root.playbackFailed(itemId, message)
         }

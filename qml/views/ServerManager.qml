@@ -686,6 +686,7 @@ Item {
         const full = url.indexOf("://") < 0 ? "http://" + url : url
         root.errorMsg = ""
         root.adding = true
+        console.info("ServerManager: 登录发起", user, "@", full)
         AccountManager.addAccount(nameField.text, full, user, passField.text)
     }
 
@@ -1814,8 +1815,10 @@ Item {
         function onAccountLoginFinished(ok, message) {
             root.adding = false
             if (ok) {
+                console.info("ServerManager: 登录成功")
                 root.closeAddDialog()
             } else {
+                console.warn("ServerManager: 登录失败", message)
                 root.errorMsg = message
             }
         }

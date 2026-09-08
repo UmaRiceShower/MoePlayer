@@ -187,8 +187,10 @@ void ConfigManager::setDetailSidebarLeft(bool v)
 void ConfigManager::setDetailPosterPos(const QString &v)
 {
     // 仅接受 9 宫格枚举(非法值忽略,防手误写坏布局)。
-    if (!kGrid9.contains(v))
+    if (!kGrid9.contains(v)) {
+        qWarning() << "ConfigManager: 忽略非法 detailPosterPos" << v;
         return;
+    }
     if (v == m_detailPosterPos)
         return;
     m_detailPosterPos = v;
@@ -199,8 +201,10 @@ void ConfigManager::setDetailPosterPos(const QString &v)
 void ConfigManager::setDetailTextPos(const QString &v)
 {
     // followPoster + 9 宫格(非法值忽略,防手误写坏布局)。
-    if (!kTextPos.contains(v))
+    if (!kTextPos.contains(v)) {
+        qWarning() << "ConfigManager: 忽略非法 detailTextPos" << v;
         return;
+    }
     if (v == m_detailTextPos)
         return;
     m_detailTextPos = v;
@@ -212,8 +216,10 @@ void ConfigManager::setDetailButtonsPos(const QString &v)
 {
     // text/poster/backdrop 三态(非法值忽略)。
     if (v != QStringLiteral("text") && v != QStringLiteral("poster")
-        && v != QStringLiteral("backdrop"))
+        && v != QStringLiteral("backdrop")) {
+        qWarning() << "ConfigManager: 忽略非法 detailButtonsPos" << v;
         return;
+    }
     if (v == m_detailButtonsPos)
         return;
     m_detailButtonsPos = v;
@@ -223,8 +229,12 @@ void ConfigManager::setDetailButtonsPos(const QString &v)
 
 void ConfigManager::setDetailTextWidth(int v)
 {
-    if (v == m_detailTextWidth || v <= 0)
+    if (v == m_detailTextWidth)
         return;
+    if (v <= 0) {
+        qWarning() << "ConfigManager: 忽略非法 detailTextWidth" << v;
+        return;
+    }
     m_detailTextWidth = v;
     emit detailTextWidthChanged();
     commit();
@@ -232,8 +242,12 @@ void ConfigManager::setDetailTextWidth(int v)
 
 void ConfigManager::setDetailTextHeight(int v)
 {
-    if (v == m_detailTextHeight || v <= 0)
+    if (v == m_detailTextHeight)
         return;
+    if (v <= 0) {
+        qWarning() << "ConfigManager: 忽略非法 detailTextHeight" << v;
+        return;
+    }
     m_detailTextHeight = v;
     emit detailTextHeightChanged();
     commit();
@@ -253,8 +267,10 @@ void ConfigManager::setProxy(const QString &v)
 void ConfigManager::setWheelStep(int v)
 {
     // 非法值忽略(页面级 0 = 跟随全局,全局须 ≥1)。
-    if (v < 1)
+    if (v < 1) {
+        qWarning() << "ConfigManager: 忽略非法 wheelStep" << v;
         return;
+    }
     if (v == m_wheelStep)
         return;
     m_wheelStep = v;
@@ -265,7 +281,11 @@ void ConfigManager::setWheelStep(int v)
 // 页面级步进:0 = 跟随全局(值合法即接受,不设下限)。
 void ConfigManager::setHomeWheelStep(int v)
 {
-    if (v < 0 || v == m_homeWheelStep)
+    if (v < 0) {
+        qWarning() << "ConfigManager: 忽略非法 homeWheelStep" << v;
+        return;
+    }
+    if (v == m_homeWheelStep)
         return;
     m_homeWheelStep = v;
     emit homeWheelStepChanged();
@@ -274,7 +294,11 @@ void ConfigManager::setHomeWheelStep(int v)
 
 void ConfigManager::setDetailWheelStep(int v)
 {
-    if (v < 0 || v == m_detailWheelStep)
+    if (v < 0) {
+        qWarning() << "ConfigManager: 忽略非法 detailWheelStep" << v;
+        return;
+    }
+    if (v == m_detailWheelStep)
         return;
     m_detailWheelStep = v;
     emit detailWheelStepChanged();
@@ -283,7 +307,11 @@ void ConfigManager::setDetailWheelStep(int v)
 
 void ConfigManager::setSearchWheelStep(int v)
 {
-    if (v < 0 || v == m_searchWheelStep)
+    if (v < 0) {
+        qWarning() << "ConfigManager: 忽略非法 searchWheelStep" << v;
+        return;
+    }
+    if (v == m_searchWheelStep)
         return;
     m_searchWheelStep = v;
     emit searchWheelStepChanged();
@@ -292,7 +320,11 @@ void ConfigManager::setSearchWheelStep(int v)
 
 void ConfigManager::setSearchLimitPerAccount(int v)
 {
-    if (v < 1 || v > 100 || v == m_searchLimitPerAccount)
+    if (v < 1 || v > 100) {
+        qWarning() << "ConfigManager: 忽略非法 searchLimitPerAccount" << v;
+        return;
+    }
+    if (v == m_searchLimitPerAccount)
         return;
     m_searchLimitPerAccount = v;
     emit searchLimitPerAccountChanged();
@@ -301,7 +333,11 @@ void ConfigManager::setSearchLimitPerAccount(int v)
 
 void ConfigManager::setSettingsWheelStep(int v)
 {
-    if (v < 0 || v == m_settingsWheelStep)
+    if (v < 0) {
+        qWarning() << "ConfigManager: 忽略非法 settingsWheelStep" << v;
+        return;
+    }
+    if (v == m_settingsWheelStep)
         return;
     m_settingsWheelStep = v;
     emit settingsWheelStepChanged();
@@ -310,7 +346,11 @@ void ConfigManager::setSettingsWheelStep(int v)
 
 void ConfigManager::setLibraryWheelStep(int v)
 {
-    if (v < 0 || v == m_libraryWheelStep)
+    if (v < 0) {
+        qWarning() << "ConfigManager: 忽略非法 libraryWheelStep" << v;
+        return;
+    }
+    if (v == m_libraryWheelStep)
         return;
     m_libraryWheelStep = v;
     emit libraryWheelStepChanged();
@@ -326,6 +366,7 @@ void ConfigManager::reload()
 {
     // 文件被删除(用户 rm 重置):重挂监视(文件路径 watcher 已失效),保持当前值。
     if (!QFile::exists(m_path)) {
+        qInfo() << "ConfigManager: 配置文件被删除,保持当前值并重挂监视";
         m_watcher->addPath(m_path);
         return;
     }
@@ -368,6 +409,7 @@ void ConfigManager::resetToDefaults()
     emit settingsWheelStepChanged();
     emit libraryWheelStepChanged();
     emit searchLimitPerAccountChanged();
+    qInfo() << "ConfigManager: 恢复默认配置";
     commit();
 }
 
@@ -391,15 +433,21 @@ void ConfigManager::loadFromFile()
             m_detailSidebarLeft = detail["sidebarLeft"].value_or(m_detailSidebarLeft);
             const auto posterPos = detail["posterPos"].value_or(m_detailPosterPos.toStdString());
             m_detailPosterPos = QString::fromStdString(posterPos);
-            if (!kGrid9.contains(m_detailPosterPos))
+            if (!kGrid9.contains(m_detailPosterPos)) {
+                qWarning() << "ConfigManager: posterPos 非法,回退默认" << m_detailPosterPos;
                 m_detailPosterPos = QStringLiteral("bottom-left"); // 非法值回退默认
+            }
             m_detailTextPos = QString::fromStdString(detail["textPos"].value_or(m_detailTextPos.toStdString()));
-            if (!kTextPos.contains(m_detailTextPos))
+            if (!kTextPos.contains(m_detailTextPos)) {
+                qWarning() << "ConfigManager: textPos 非法,回退默认" << m_detailTextPos;
                 m_detailTextPos = QStringLiteral("followPoster"); // 非法值回退默认
+            }
             m_detailButtonsPos = QString::fromStdString(detail["buttonsPos"].value_or(m_detailButtonsPos.toStdString()));
             if (m_detailButtonsPos != QStringLiteral("text") && m_detailButtonsPos != QStringLiteral("poster")
-                && m_detailButtonsPos != QStringLiteral("backdrop"))
+                && m_detailButtonsPos != QStringLiteral("backdrop")) {
+                qWarning() << "ConfigManager: buttonsPos 非法,回退默认" << m_detailButtonsPos;
                 m_detailButtonsPos = QStringLiteral("poster"); // 非法值回退默认
+            }
             m_detailTextWidth = detail["textWidth"].value_or(m_detailTextWidth);
             m_detailTextHeight = detail["textHeight"].value_or(m_detailTextHeight);
         }
@@ -414,16 +462,20 @@ void ConfigManager::loadFromFile()
         if (scroll.is_table()) {
             // 页面级 0 = 跟随全局;全局非法值回退默认 150。
             m_wheelStep = scroll["wheelStep"].value_or(m_wheelStep);
-            if (m_wheelStep < 1)
+            if (m_wheelStep < 1) {
+                qWarning() << "ConfigManager: wheelStep 非法,回退默认" << m_wheelStep;
                 m_wheelStep = 80;
+            }
             m_homeWheelStep = scroll["homeWheelStep"].value_or(m_homeWheelStep);
             m_detailWheelStep = scroll["detailWheelStep"].value_or(m_detailWheelStep);
             m_searchWheelStep = scroll["searchWheelStep"].value_or(m_searchWheelStep);
             m_settingsWheelStep = scroll["settingsWheelStep"].value_or(m_settingsWheelStep);
             m_libraryWheelStep = scroll["libraryWheelStep"].value_or(m_libraryWheelStep);
             m_searchLimitPerAccount = scroll["searchLimitPerAccount"].value_or(m_searchLimitPerAccount);
-            if (m_searchLimitPerAccount < 1 || m_searchLimitPerAccount > 100)
+            if (m_searchLimitPerAccount < 1 || m_searchLimitPerAccount > 100) {
+                qWarning() << "ConfigManager: searchLimitPerAccount 非法,回退默认" << m_searchLimitPerAccount;
                 m_searchLimitPerAccount = 10; // 非法值回退默认
+            }
         }
         // 值全部来自文件:无条件发 NOTIFY(值相同的绑定更新是幂等的,
         // 避免手改后 QML 侧漏刷新)。
@@ -444,6 +496,7 @@ void ConfigManager::loadFromFile()
         emit settingsWheelStepChanged();
         emit libraryWheelStepChanged();
         emit searchLimitPerAccountChanged();
+        qInfo().noquote() << "ConfigManager: 配置已加载" << m_path;
     } catch (const toml::parse_error &e) {
         qWarning().noquote() << "ConfigManager: TOML parse failed, keeping current values:"
                              << QString::fromUtf8(e.description().data(), qsizetype(e.description().size()));

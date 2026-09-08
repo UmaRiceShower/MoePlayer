@@ -232,6 +232,7 @@ void MpvClient::spawnMpv(Session *s)
     s->proc->setProgram(mpvBin);
     s->proc->setArguments(args);
     connect(s->proc, &QProcess::finished, this, [key = s->key, this](int code, QProcess::ExitStatus) {
+        qInfo() << "MpvClient: mpv 进程退出,退出码" << code;
         stopAndConsiderEnd(key, code != 0);
     });
     // mpv 日志转发:逐行接进 MoePlayer 输出。实测 mpv 日志走 stdout 而非
@@ -251,9 +252,9 @@ void MpvClient::spawnMpv(Session *s)
                                     || t.contains(" A:V") || t.contains("Cache:");
             // 状态行:消息整体以 \r 开头(AppLog 识别后终端单行覆盖)。
             if (statusLine)
-                qDebug().noquote() << "\r[mpv] " + QString::fromUtf8(t);
+                qInfo().noquote() << "\r[mpv] " + QString::fromUtf8(t);
             else
-                qDebug().noquote() << "[mpv]" << QString::fromUtf8(t);
+                qInfo().noquote() << "[mpv]" << QString::fromUtf8(t);
         }
     };
     connect(s->proc, &QProcess::readyReadStandardOutput, this,
@@ -267,6 +268,9 @@ void MpvClient::spawnMpv(Session *s)
         Session *cur = sessionFor(key);
         if (cur && cur->proc)
             forwardLog(cur->proc->readAllStandardError());
+    });
+    connect(s->proc, &QProcess::errorOccurred, this, [key = s->key, this](QProcess::ProcessError err) {
+        qWarning() << "MpvClient: mpv 启动失败" << int(err) << "key" << key;
     });
     s->proc->start();
 
@@ -323,8 +327,10 @@ void MpvClient::spawnMpv(Session *s)
 
 void MpvClient::sendJson(Session *s, const QJsonObject &obj)
 {
-    if (!s || !s->sock || s->sock->state() != QLocalSocket::ConnectedState)
+    if (!s || !s->sock || s->sock->state() != QLocalSocket::ConnectedState) {
+        qDebug() << "MpvClient: IPC 未连接,命令丢弃" << (s ? s->key : QStringLiteral("无会话"));
         return;
+    }
     const QByteArray data = QJsonDocument(obj).toJson(QJsonDocument::Compact) + '\n';
     s->sock->write(data);
 }
@@ -333,8 +339,11 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
 {
     QJsonParseError pe;
     const QJsonDocument doc = QJsonDocument::fromJson(line, &pe);
-    if (pe.error != QJsonParseError::NoError || !doc.isObject())
+    if (pe.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "MpvClient: IPC JSON 解析失败" << pe.errorString()
+                   << QString::fromUtf8(line.left(160));
         return;
+    }
     const QJsonObject obj = doc.object();
     if (obj.contains(QStringLiteral("request_id"))) {
         const int rid = obj.value(QStringLiteral("request_id")).toInt();
@@ -429,6 +438,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                     QStringLiteral("track-list")}},
                         {QStringLiteral("request_id"), kTrackListRequestId},
                     });
+        qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
         emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
@@ -439,6 +449,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         if (reason == QLatin1String("error")) {
             // 不结束:占位条目加载失败(协商失败/网络)由 mpv 跳过继续,
             // 不再按"异常退出"整体终止会话。
+            qWarning() << "MpvClient: end-file error,跳过当前条目" << s->key;
             return;
         }
         if (reason == QLatin1String("eof")) {
@@ -548,8 +559,10 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                                const QVariantMap &meta)
 {
     Session *s = m_active;
-    if (!s || !s->ready || episodes.isEmpty())
+    if (!s || !s->ready || episodes.isEmpty()) {
+        qDebug() << "MpvClient: setEpisodeList 跳过(无会话/未就绪/空列表)";
         return;
+    }
     if (!meta.isEmpty())
         s->episodeMeta.insert(currentItemId, meta);
     // 写 m3u:条目标题(m3u EXTINF,mpv demux_playlist.c 解析为 playlist
@@ -607,8 +620,10 @@ void MpvClient::deliverEpisodeUrl(const QString &itemId, const QString &url,
                                   const QString &subtitleUrl)
 {
     Session *s = m_active;
-    if (!s || !s->ready)
+    if (!s || !s->ready) {
+        qDebug() << "MpvClient: deliverEpisodeUrl 跳过(无活跃会话/未就绪)" << itemId;
         return;
+    }
     if (!meta.isEmpty())
         s->episodeMeta.insert(itemId, meta);
     // 流头(可能跨服务器变化):切换全局头,后续加载生效。
@@ -623,6 +638,8 @@ void MpvClient::deliverEpisodeUrl(const QString &itemId, const QString &url,
                                     fields.join(QLatin1Char(','))}},
                     });
     }
+    if (url.isEmpty())
+        qWarning() << "MpvClient: 协商失败,放行占位条目" << itemId;
     // 应答 hook:lua 侧 set stream-open-filename(外挂字幕经
     // file-local-options/sub-file)后 cont;空 url = 协商失败(占位失败跳过)。
     // 脚本名 = 文件名去扩展并把非字母数字转下划线(scripting.c
@@ -642,8 +659,10 @@ void MpvClient::reportStart(Session *s)
         return;
     const QString sid = s->meta.value(QStringLiteral("playSessionId")).toString();
     const QString token = s->meta.value(QStringLiteral("token")).toString();
-    if (sid.isEmpty() || token.isEmpty())
+    if (sid.isEmpty() || token.isEmpty()) {
+        qDebug() << "MpvClient: 跳过起播回传(sid/token 空)" << s->key;
         return;
+    }
     const double pos =
         s->meta.value(QStringLiteral("resumePositionTicks")).toDouble() / kTicksPerSecond;
     m_emby->reportPlaybackStart(
@@ -703,6 +722,7 @@ void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
                 return t.value(QStringLiteral("id")).toInt(-1);
             ++n;
         }
+        qWarning() << "MpvClient: track-list 未找到" << type << "轨道 ordinal" << ordinal;
         return -1;
     };
 
@@ -746,8 +766,10 @@ void MpvClient::reportProgress(Session *s, bool force)
         return;
     const QString sid = s->meta.value(QStringLiteral("playSessionId")).toString();
     const QString token = s->meta.value(QStringLiteral("token")).toString();
-    if (sid.isEmpty() || token.isEmpty())
+    if (sid.isEmpty() || token.isEmpty()) {
+        qDebug() << "MpvClient: 跳过进度回传(sid/token 空)" << s->key;
         return;
+    }
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     if (!force && (now - s->lastReport < kProgressReportMs))
         return;
@@ -767,8 +789,10 @@ void MpvClient::reportStopped(Session *s)
         return;
     const QString sid = s->meta.value(QStringLiteral("playSessionId")).toString();
     const QString token = s->meta.value(QStringLiteral("token")).toString();
-    if (sid.isEmpty() || token.isEmpty())
+    if (sid.isEmpty() || token.isEmpty()) {
+        qDebug() << "MpvClient: 跳过停止回传(sid/token 空)" << s->key;
         return;
+    }
     m_emby->reportPlaybackStopped(
         s->meta.value(QStringLiteral("serverUrl")).toString(),
         token, s->meta.value(QStringLiteral("userId")).toString(),
@@ -830,36 +854,47 @@ void MpvClient::destroySession(Session *s, bool playEnded, bool errored)
 void MpvClient::seek(double seconds, const QString &itemId)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (s)
-        sendJson(s, QJsonObject{{QStringLiteral("command"),
-                                 QJsonArray{QStringLiteral("seek"),
-                                            QString::number(seconds),
-                                            QStringLiteral("absolute")}}});
+    if (!s) {
+        qDebug() << "MpvClient: 无会话,忽略 seek" << seconds;
+        return;
+    }
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("seek"),
+                                        QString::number(seconds),
+                                        QStringLiteral("absolute")}}});
 }
 
 void MpvClient::setPause(bool p, const QString &itemId)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (s)
-        sendJson(s, QJsonObject{{QStringLiteral("command"),
-                                 QJsonArray{QStringLiteral("set_property"),
-                                            QStringLiteral("pause"), p}}});
+    if (!s) {
+        qDebug() << "MpvClient: 无会话,忽略 setPause";
+        return;
+    }
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("set_property"),
+                                        QStringLiteral("pause"), p}}});
 }
 
 void MpvClient::setVolume(int v, const QString &itemId)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (s)
-        sendJson(s, QJsonObject{{QStringLiteral("command"),
-                                 QJsonArray{QStringLiteral("set_property"),
-                                            QStringLiteral("volume"), v}}});
+    if (!s) {
+        qDebug() << "MpvClient: 无会话,忽略 setVolume";
+        return;
+    }
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("set_property"),
+                                        QStringLiteral("volume"), v}}});
 }
 
 void MpvClient::command(const QVariantList &params, const QString &itemId)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (!s)
+    if (!s) {
+        qDebug() << "MpvClient: 无会话,忽略 command";
         return;
+    }
     QJsonArray arr;
     for (const QVariant &p : params)
         arr.append(QJsonValue::fromVariant(p));

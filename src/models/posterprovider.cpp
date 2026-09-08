@@ -18,6 +18,7 @@
 #include <QStandardPaths>
 #include <QThreadPool>
 #include <QUrlQuery>
+#include <QDebug>
 
 #include "core/accountmanager.h"
 #include "core/configmanager.h"
@@ -95,8 +96,10 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
 {
     Q_UNUSED(requestedSize)
     QString serverUrl, token, itemId, tag, kind;
-    if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind))
+    if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind)) {
+        qWarning().noquote() << "Poster: 图片地址无效" << id;
         return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
+    }
     const QUrl url = imageUrl(serverUrl, itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
@@ -191,7 +194,9 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     const QString path = cacheFilePath(key);
     if (QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs) {
         QFile f(path);
-        if (f.open(QIODevice::ReadOnly)) {
+        if (!f.open(QIODevice::ReadOnly)) {
+            qDebug().noquote() << "Poster: 磁盘缓存读取失败,回源" << path << f.errorString();
+        } else {
             QImage img;
             if (img.loadFromData(f.readAll())) {
                 {
@@ -200,6 +205,7 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
                 }
                 return img;
             }
+            qDebug().noquote() << "Poster: 磁盘缓存解码失败,回源" << path;
         }
     }
     // 2) 回源:占闸(后台阻塞无碍);QNAM 在本线程创建使用(线程亲和)。
@@ -228,10 +234,16 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
         *error = reply->errorString();
     reply->deleteLater();
     g_fetchGate.release();
-    if (!ok)
+    if (!ok) {
+        const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        qWarning().noquote() << "Poster: 图片回源失败" << url.toString()
+                             << reply->errorString() << "HTTP" << status;
         return QImage();
+    }
     QImage img;
     if (!img.loadFromData(data)) {
+        qWarning().noquote() << "Poster: 图片解码失败(非图片数据?)" << url.toString()
+                             << "字节数" << data.size();
         if (error)
             *error = QStringLiteral("图片解码失败");
         return QImage();
@@ -241,6 +253,8 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     QFile f(path);
     if (f.open(QIODevice::WriteOnly))
         f.write(data);
+    else
+        qDebug().noquote() << "Poster: 磁盘缓存写入失败(忽略)" << path << f.errorString();
     {
         QMutexLocker locker(&g_memMutex);
         g_memCache.insert(key, new QImage(img), img.sizeInBytes());

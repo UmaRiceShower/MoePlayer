@@ -145,6 +145,7 @@ Item {
         if (!root.canSearch)
             return
         root.searching = true
+        console.info("Search: 发起", JSON.stringify(searchField.text), "目标", root.aggTargets.length, "个")
         root.pendingAccounts = root.aggTargets.length
         for (let i = 0; i < root.aggTargets.length; ++i) {
             const t = root.aggTargets[i]
@@ -189,6 +190,7 @@ Item {
             for (let i = 0; i < root.aggTargets.length; ++i) {
                 const t = root.aggTargets[i]
                 if (t.serverUrl === serverUrl && t.accountId === accountId) {
+                    console.debug("Search: 响应", serverUrl, accountId)
                     root.pendingAccounts = Math.max(0, root.pendingAccounts - 1)
                     if (root.pendingAccounts === 0)
                         root.searching = false
