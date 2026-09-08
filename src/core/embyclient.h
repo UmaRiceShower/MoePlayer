@@ -245,9 +245,15 @@ signals:
     void errorOccurred(const QString &serverUrl, const QString &message);
 
 private:
-    // 构造 QNetworkRequest:按显式服务器/凭据拼接路径与认证头。
+    // 按显式服务器/凭据拼接路径与认证头。
     QNetworkRequest makeRequest(const QString &serverUrl, const QString &token,
                                 const QString &userId, const QString &path, bool json) const;
+    // 解析 Emby Items 响应的 "Items" 数组到模型(setItems 或 appendItems;
+    // withPosters 控制是否解析 ImageTags.Primary,文件夹等无海报类型传 false)。
+    static void fillItems(MediaItemModel *model, const QJsonDocument &doc,
+                          bool append, bool withPosters = true);
+    // 拼 "/Users/{userId}{rest}"(rest 须以 / 开头)。
+    static QString userPath(const QString &userId, const QString &rest);
     // 下载图标 URL 图片字节(无认证,Emby /web/ 静态资源):成功发字节、
     // 失败发空,均经 serverIconReceived 返回。fetchServerIcon 解析后调用。
     void downloadServerIconImage(const QString &serverUrl, const QString &iconUrl);
