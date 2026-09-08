@@ -24,6 +24,16 @@ Item {
             root.syncables[i].resync()
     }
 
+    // 按 UI 分类过滤可见配置项(表驱动枚举;新增配置项无需手写行)。
+    function itemsFor(section) {
+        const all = ConfigManager.items
+        const out = []
+        for (let i = 0; i < all.length; ++i)
+            if (all[i].uiSection === section)
+                out.push(all[i])
+        return out
+    }
+
     function open() {
         root.syncAll()
         root.visible = true
@@ -35,16 +45,9 @@ Item {
     // 热重载/恢复默认:任一配置变化统一回填(幂等,值相同无视觉变化)。
     Connections {
         target: ConfigManager
-        function onMonetEnabledChanged() { root.syncAll() }
-        function onLibrarySortByChanged() { root.syncAll() }
-        function onLibrarySortOrderChanged() { root.syncAll() }
-        function onDetailSidebarLeftChanged() { root.syncAll() }
-        function onDetailPosterPosChanged() { root.syncAll() }
-        function onDetailTextPosChanged() { root.syncAll() }
-        function onDetailButtonsPosChanged() { root.syncAll() }
-        function onDetailTextWidthChanged() { root.syncAll() }
-        function onDetailTextHeightChanged() { root.syncAll() }
-        function onProxyChanged() { root.syncAll() }
+        // 任一配置变化(热重载/恢复默认/设置写入)统一回填——新增配置项
+        // 无需在本文件加连接(属性级信号仅服务 QML 绑定粒度)。
+        function onConfigChanged(key) { root.syncAll() }
     }
 
     // ===================== 内部组件 =====================
@@ -131,8 +134,10 @@ Item {
 
         function resync() {
             const v = ConfigManager[scombo.configKey]
+            const md = scombo.model
             for (let i = 0; i < scombo.count; ++i) {
-                if (scombo.model.get(i).key === v) {
+                const it = md.get ? md.get(i) : md[i] // ListModel 或 JS 数组
+                if (it.key === v) {
                     scombo.currentIndex = i
                     return
                 }
@@ -143,7 +148,9 @@ Item {
             root.registerSyncable(scombo)
         }
         onActivated: function (index) {
-            ConfigManager[scombo.configKey] = scombo.model.get(index).key
+            const md = scombo.model
+            const it = md.get ? md.get(index) : md[index]
+            ConfigManager[scombo.configKey] = it.key
         }
 
         background: Rectangle {
@@ -274,6 +281,17 @@ Item {
             border.width: 1
             border.color: sfield.activeFocus ? Constants.moePink : Theme.textMuted
         }
+    }
+
+    // 表驱动设置行:label/description/控件按 items 元数据渲染;
+    // Repeater 注入 modelData(SettingItem 的 required 属性)。
+    component SettingItem: SettingRow {
+        required property var modelData
+        label: modelData.label
+        description: modelData.description
+        SettingSwitch { visible: modelData.widget === "switch"; configKey: modelData.key }
+        SettingCombo { visible: modelData.widget === "combo"; configKey: modelData.key; model: modelData.options }
+        SettingField { visible: modelData.widget === "field"; configKey: modelData.key; intOnly: modelData.intOnly === true }
     }
 
     // 设置页:纵向滚动容器,default 属性直写 Column。
@@ -472,138 +490,39 @@ Item {
                     Layout.fillHeight: true
                     currentIndex: catList.currentIndex
 
-                    // ---- 界面 ----
+                    // ---- 界面(配置项经 items 表枚举) ----
                     SettingsPage {
                         PageHeader { text: "界面" }
-                        SettingRow {
-                            label: "滚轮步进"
-                            description: "鼠标滚轮每格滚动距离(px);所有页面默认,页面级可手改 config.toml(homeWheelStep 等)。"
-                            SettingField { configKey: "wheelStep"; intOnly: true }
-                        }
-                        SettingRow {
-                            label: "搜索每账号条数"
-                            description: "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。"
-                            SettingField { configKey: "searchLimitPerAccount"; intOnly: true }
-                        }
-                        SettingRow {
-                            label: "海报莫奈取色"
-                            description: "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。"
-                            SettingSwitch { configKey: "monetEnabled" }
+                        Repeater {
+                            model: root.itemsFor("界面")
+                            delegate: SettingItem {}
                         }
                     }
 
-                    // ---- 媒体库 ----
+                    // ---- 媒体库(配置项经 items 表枚举) ----
                     SettingsPage {
                         PageHeader { text: "媒体库" }
-                        SettingRow {
-                            label: "默认排序"
-                            description: "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。"
-                            SettingCombo {
-                                configKey: "librarySortBy"
-                                model: ListModel {
-                                    ListElement { label: "最近添加"; key: "DateLastContentAdded" }
-                                    ListElement { label: "加入时间"; key: "DateCreated" }
-                                    ListElement { label: "上映日期"; key: "PremiereDate" }
-                                    ListElement { label: "名称"; key: "SortName" }
-                                    ListElement { label: "出品年份"; key: "ProductionYear" }
-                                    ListElement { label: "社区评分"; key: "CommunityRating" }
-                                    ListElement { label: "影评评分"; key: "CriticRating" }
-                                    ListElement { label: "随机"; key: "Random" }
-                                    ListElement { label: "修改时间"; key: "DateModified" }
-                                }
-                            }
-                        }
-                        SettingRow {
-                            label: "排序方向"
-                            SettingCombo {
-                                configKey: "librarySortOrder"
-                                model: ListModel {
-                                    ListElement { label: "降序"; key: "Descending" }
-                                    ListElement { label: "升序"; key: "Ascending" }
-                                }
-                            }
+                        Repeater {
+                            model: root.itemsFor("媒体库")
+                            delegate: SettingItem {}
                         }
                     }
 
-                    // ---- 详情页 ----
+                    // ---- 详情页(配置项经 items 表枚举) ----
                     SettingsPage {
                         PageHeader { text: "详情页" }
-                        SettingRow {
-                            label: "选集栏靠左"
-                            description: "开启后选季/选集栏靠左显示;默认靠右。"
-                            SettingSwitch { configKey: "detailSidebarLeft" }
-                        }
-                        SettingRow {
-                            label: "海报位置"
-                            description: "详情页海报在 hero 区的九宫格位置。"
-                            SettingCombo {
-                                configKey: "detailPosterPos"
-                                model: ListModel {
-                                    ListElement { label: "左上"; key: "top-left" }
-                                    ListElement { label: "上中"; key: "top-center" }
-                                    ListElement { label: "右上"; key: "top-right" }
-                                    ListElement { label: "左中"; key: "middle-left" }
-                                    ListElement { label: "正中"; key: "middle-center" }
-                                    ListElement { label: "右中"; key: "middle-right" }
-                                    ListElement { label: "左下"; key: "bottom-left" }
-                                    ListElement { label: "下中"; key: "bottom-center" }
-                                    ListElement { label: "右下"; key: "bottom-right" }
-                                }
-                            }
-                        }
-                        SettingRow {
-                            label: "标题与介绍位置"
-                            description: "跟随海报,或固定在 hero 区九宫格位置(优先于海报)。"
-                            SettingCombo {
-                                configKey: "detailTextPos"
-                                model: ListModel {
-                                    ListElement { label: "跟随海报"; key: "followPoster" }
-                                    ListElement { label: "左上"; key: "top-left" }
-                                    ListElement { label: "上中"; key: "top-center" }
-                                    ListElement { label: "右上"; key: "top-right" }
-                                    ListElement { label: "左中"; key: "middle-left" }
-                                    ListElement { label: "正中"; key: "middle-center" }
-                                    ListElement { label: "右中"; key: "middle-right" }
-                                    ListElement { label: "左下"; key: "bottom-left" }
-                                    ListElement { label: "下中"; key: "bottom-center" }
-                                    ListElement { label: "右下"; key: "bottom-right" }
-                                }
-                            }
-                        }
-                        SettingRow {
-                            label: "按钮组位置"
-                            description: "播放/收藏/已看按钮组:跟随标题、跟随海报,或背景图左下角。"
-                            SettingCombo {
-                                configKey: "detailButtonsPos"
-                                model: ListModel {
-                                    ListElement { label: "跟随标题"; key: "text" }
-                                    ListElement { label: "跟随海报"; key: "poster" }
-                                    ListElement { label: "背景图左下"; key: "backdrop" }
-                                }
-                            }
-                        }
-                        SettingRow {
-                            label: "文字区宽度"
-                            description: "标题+介绍区固定宽度(px),默认 280。"
-                            SettingField { configKey: "detailTextWidth"; intOnly: true }
-                        }
-                        SettingRow {
-                            label: "文字区高度"
-                            description: "标题+介绍区固定高度(px),默认 140。"
-                            SettingField { configKey: "detailTextHeight"; intOnly: true }
+                        Repeater {
+                            model: root.itemsFor("详情页")
+                            delegate: SettingItem {}
                         }
                     }
 
-                    // ---- 代理 ----
+                    // ---- 代理(配置项经 items 表枚举) ----
                     SettingsPage {
                         PageHeader { text: "代理" }
-                        SettingRow {
-                            label: "代理地址"
-                            description: "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连,新请求即时生效。"
-                            SettingField {
-                                configKey: "proxy"
-                                placeholderText: "http://host:port"
-                            }
+                        Repeater {
+                            model: root.itemsFor("代理")
+                            delegate: SettingItem {}
                         }
                         Column {
                             width: parent.width
