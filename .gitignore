@@ -59,6 +59,7 @@ compile_commands.json
 *_qmlcache.qrc
 
 test*
+tmp/
 
 AUDIT*
 

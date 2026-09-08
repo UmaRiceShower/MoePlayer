@@ -38,6 +38,9 @@ public:
     static QString findMpvBinary();
     // 查找 osc.lua:<appdir>/osc.lua(发版内封) → 源码 third_party/osc.lua(开发)。
     static QString findOscScript();
+    // 查找 moe-hook.lua(on_load 占位重定向):<appdir>/moe-hook.lua →
+    // 源码 third_party/moe-hook.lua(交付内置,与 osc 同款)。
+    static QString findMoeHookScript();
 
     // 先弹 mpv 空窗(协商期加载态);meta 含 itemId/serverUrl/...。成功返回 true。
     Q_INVOKABLE bool startPending(const QVariantMap &meta);
@@ -57,10 +60,32 @@ public:
     Q_INVOKABLE void setPause(bool p, const QString &itemId = {});
     Q_INVOKABLE void setVolume(int v, const QString &itemId = {});
     Q_INVOKABLE void command(const QVariantList &params, const QString &itemId = {});
+    // 全集进入 mpv 播放列表:写 m3u(EXTINF 标题;官方 demux_playlist.c
+    // 解析为条目 title,经 --osd-playlist-entry=title 显示),第 0 条 = 当前集
+    // 真 URL(标题一致),其余按「当前→其后→环绕前部」旋转顺序为占位
+    // moe://ep/<id>(经 on_load hook 重定向,见 moe-hook.lua)。deliver 后
+    // mpv 自动播第 0 条;点列表/上/下集/eof 连播都走 hook。
+    Q_INVOKABLE void setEpisodeList(const QVariantList &episodes,
+                                    const QString &currentItemId, int currentIndex,
+                                    const QString &url, const QVariantList &headers,
+                                    const QVariantMap &meta);
+    // on_load hook 应答:占位条目经 moe-url 请求,QML 协商后的真实地址、
+    // 流头、元数据与(可选)外挂字幕 URL;meta 供 file-loaded 归位/选轨。
+    // url 为空 = 协商失败:通知 hook 继续(占位加载失败,mpv 跳过该条)。
+    Q_INVOKABLE void deliverEpisodeUrl(const QString &itemId, const QString &url,
+                                       const QVariantList &headers,
+                                       const QVariantMap &meta,
+                                       const QString &subtitleUrl = {});
 
 signals:
     // 文件加载完成(可续播/seek)。
     void playbackStarted(const QString &itemId);
+    // 当前播放集上下文(连播:QML 据 meta 查全集序列、协商下一集再
+    // enqueueNext;meta.itemId 为实际播放中的集,可能不同于会话键)。
+    void playbackContextChanged(const QVariantMap &meta);
+    // 播放列表占位条目请求(moe-hook on_load):QML 协商该集真实地址后
+    // deliverEpisodeUrl 回发。
+    void episodeUrlRequested(const QString &itemId);
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
     void playbackFinished(const QString &itemId, bool error);
 
@@ -69,6 +94,15 @@ private:
     {
         QString key = {};          // itemId(缺失时生成的唯一键)
         QProcess *proc = nullptr;
+        // on_load hook 请求中的文件 id(script-message moe-url 记录;
+        // file-loaded 时以此把 QML 协商 meta 归位到本文件)。
+        QString pendingFileId;
+        // QML 协商结果缓存(id -> meta):file-loaded 按 pendingFileId 归位。
+        QHash<QString, QVariantMap> episodeMeta;
+        // eof 结束判定(playlist-pos → count 两次查询间的暂存)。
+        int pendingEofPos = -1;
+        // 全集列表已灌入(第 0 条 = 当前集真 URL,经播放列表播放)。
+        bool listSet = false;
         // --input-ipc-server 文件 socket(fd 继承的 --input-ipc-client 在 mpv
         // 侧不生效,改用文件 socket + QLocalSocket,稳定且跨平台)。
         QLocalSocket *sock = nullptr;

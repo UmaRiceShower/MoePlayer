@@ -88,6 +88,8 @@ local user_opts = {
     menu_mbtn_mid_command = "",
     menu_mbtn_right_command = "",
 
+    -- 官方行为:playlist 由 MoePlayer 按全集填充(标题),上/下集/播放列表
+    -- 菜单天然可用;条目经 on_load hook 重定向真实地址(见 moe-hook.lua)。
     playlist_prev_mbtn_left_command = "playlist-prev",
     playlist_prev_mbtn_mid_command = "show-text ${playlist} 3000",
     playlist_prev_mbtn_right_command = "script-binding select/select-playlist; script-message-to osc osc-hide",
@@ -3503,3 +3505,4 @@ visibility_mode(user_opts.visibility, true)
 set_virt_mouse_area(0, 0, 0, 0, "input")
 set_virt_mouse_area(0, 0, 0, 0, "window-controls")
 set_virt_mouse_area(0, 0, 0, 0, "window-controls-title")
+
