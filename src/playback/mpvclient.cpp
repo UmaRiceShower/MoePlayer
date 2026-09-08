@@ -31,6 +31,8 @@ constexpr double kTicksPerSecond = 1e7;
 constexpr int kReadyRequestId = 999;
 // 查询 track-list 的 request_id(file-loaded 后发,用于所选轨匹配)。
 constexpr int kTrackListRequestId = 998;
+// eof 后查询播放列表位置的 request_id(判定是否最后一项)。
+constexpr int kEofCheckRequestId = 997;
 } // namespace
 
 MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
@@ -85,6 +87,20 @@ QString MpvClient::findOscScript()
     return bundled; // 缺失时由 mpv --script 报错,兜底返回应用目录路径。
 }
 
+QString MpvClient::findMoeHookScript()
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QString bundled = QDir(appDir).filePath(QStringLiteral("moe-hook.lua"));
+    if (QFileInfo::exists(bundled))
+        return bundled;
+    // 开发:源码到 third_party/moe-hook.lua(构建目录在项目根下)。
+    const QString src =
+        QDir(appDir).filePath(QStringLiteral("../third_party/moe-hook.lua"));
+    if (QFileInfo::exists(src))
+        return src;
+    return bundled; // 缺失时由 mpv --script 报错,兜底返回应用目录路径。
+}
+
 MpvClient::Session *MpvClient::sessionFor(const QString &key) const
 {
     return m_sessions.value(key, nullptr);
@@ -125,6 +141,11 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
     s->meta = meta;
     s->delivered = true;
     reportStart(s);
+    if (s->listSet) {
+        // 全集播放列表模式:setEpisodeList 的 loadlist replace 已播第 0 条
+        // (当前集真 URL);无需再 loadfile。
+        return;
+    }
     enqueueLoad(s, url, headers);
 }
 
@@ -181,9 +202,22 @@ void MpvClient::spawnMpv(Session *s)
          << QStringLiteral("--idle=yes")
          << QStringLiteral("--osc=no")
          << QStringLiteral("--script=") + osc
+         << QStringLiteral("--script=") + findMoeHookScript()
+         // 播放列表面板显示条目标题(m3u EXTINF 解析的 title;官方
+         // --osd-playlist-entry,见 options.rst)。
+         << QStringLiteral("--osd-playlist-entry=title")
+         // 底栏自定义"选集"按钮:打开官方播放列表面板(全集标题,经 on_load
+         // hook 重定向到真实地址,不再依赖 MoePlayer 自造菜单)。
+         << QStringLiteral("--script-opts=osc-custom_button_1_content=\\\u2388|选集|")
+         << QStringLiteral("--script-opts=osc-custom_button_1_mbtn_left_command=script-binding select/select-playlist; script-message-to osc osc-hide")
          << QStringLiteral("--keep-open=yes")
-         << QStringLiteral("--terminal=no")
-         << QStringLiteral("--msg-level=all=warn")
+         // 日志:terminal=yes 保留 stdout/stderr(转发到 MoePlayer 输出);
+         // input-terminal=no 不从 stdin 读按键(控制走 IPC,防假 tty 阻塞)。
+         << QStringLiteral("--terminal=yes")
+         << QStringLiteral("--input-terminal=no")
+         // 状态行:级别 MSGL_STATUS(common/msg.c:update_loglevel),高于 INFO;
+         // all=info 会被过滤(非 tty 也无状态行输出),all=status 恢复。
+         << QStringLiteral("--msg-level=all=status")
          << QStringLiteral("--input-default-bindings=yes")
          << QStringLiteral("--input-cursor=yes")
          << QStringLiteral("--cache=yes")
@@ -199,6 +233,40 @@ void MpvClient::spawnMpv(Session *s)
     s->proc->setArguments(args);
     connect(s->proc, &QProcess::finished, this, [key = s->key, this](int code, QProcess::ExitStatus) {
         stopAndConsiderEnd(key, code != 0);
+    });
+    // mpv 日志转发:逐行接进 MoePlayer 输出。实测 mpv 日志走 stdout 而非
+    // stderr(--terminal=yes 时控制台输出在 stdout),两个通道都接防漏。
+    const auto forwardLog = [key = s->key, this](QByteArray data) {
+        Session *cur = sessionFor(key);
+        if (!cur || !cur->proc)
+            return;
+        const QList<QByteArray> lines = data.split('\n');
+        for (const QByteArray &line : lines) {
+            const QByteArray t = line.trimmed();
+            if (t.isEmpty())
+                continue;
+            // 状态行(官方仅 tty 单行重绘;非 tty 每帧一行)加 \r 前缀:
+            // 终端原地覆盖 = tty 效果;日志文件里为 \r 行,无损。
+            const bool statusLine = t.contains("AV:") || t.contains(" V:")
+                                    || t.contains(" A:V") || t.contains("Cache:");
+            // 状态行:消息整体以 \r 开头(AppLog 识别后终端单行覆盖)。
+            if (statusLine)
+                qDebug().noquote() << "\r[mpv] " + QString::fromUtf8(t);
+            else
+                qDebug().noquote() << "[mpv]" << QString::fromUtf8(t);
+        }
+    };
+    connect(s->proc, &QProcess::readyReadStandardOutput, this,
+            [this, key = s->key, forwardLog]() {
+        Session *cur = sessionFor(key);
+        if (cur && cur->proc)
+            forwardLog(cur->proc->readAllStandardOutput());
+    });
+    connect(s->proc, &QProcess::readyReadStandardError, this,
+            [this, key = s->key, forwardLog]() {
+        Session *cur = sessionFor(key);
+        if (cur && cur->proc)
+            forwardLog(cur->proc->readAllStandardError());
     });
     s->proc->start();
 
@@ -275,6 +343,37 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
             flush(s);
         } else if (rid == kTrackListRequestId) {
             applyTrackSelection(s, obj.value(QStringLiteral("data")).toArray());
+        } else if (rid == kEofCheckRequestId) {
+            // eof 后:最后一项才结束会话(playlist 无后续);否则 mpv 自动
+            // 载入下一项(占位 → on_load hook 重定向)。
+            const QJsonValue v = obj.value(QStringLiteral("data"));
+            if (v.isDouble()) {
+                const int pos = v.toInt();
+                // 先存 pos 再判断:stopAndConsiderEnd 会销毁会话,其后
+                // 不得再访问 s(否则 UAF)。
+                s->pendingEofPos = pos;
+                if (pos >= 0) {
+                    sendJson(s, QJsonObject{
+                                    {QStringLiteral("command"),
+                                     QJsonArray{QStringLiteral("get_property"),
+                                                QStringLiteral("playlist-count")}},
+                                    {QStringLiteral("request_id"), kEofCheckRequestId + 1},
+                                });
+                } else {
+                    // 无可查位置(空播放列表):正常结束。
+                    stopAndConsiderEnd(s->key, false);
+                }
+            } else {
+                stopAndConsiderEnd(s->key, false);
+            }
+        } else if (rid == kEofCheckRequestId + 1) {
+            // playlist-count 响应:与 eof 时的 pos 比对。
+            const QJsonValue v = obj.value(QStringLiteral("data"));
+            const int count = v.isDouble() ? v.toInt() : 0;
+            if (s->pendingEofPos < 0 || s->pendingEofPos >= count - 1)
+                stopAndConsiderEnd(s->key, false);
+            else
+                s->pendingEofPos = -1;
         }
         return;
     }
@@ -301,8 +400,17 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         return;
     }
     if (evName == QLatin1String("file-loaded")) {
+        // on_load hook 路径(playlist 占位):QML 协商 meta 按 pendingFileId 归位;
+        // 首集(用户点播)保持会话初值(pendingFileId 为空)。
+        if (!s->pendingFileId.isEmpty()) {
+            const QVariantMap pm = s->episodeMeta.value(s->pendingFileId);
+            if (!pm.isEmpty())
+                s->meta = pm;
+            s->pendingFileId.clear();
+        }
         s->loadIssued = true;
-        // 续播:文件就绪后 seek 到上次位置。
+        // 续播:仅用户点播的集(meta 带 resumePositionTicks)seek 到上次
+        // 位置;连播项协商不带该键,从零开始。
         if (s->meta.contains(QStringLiteral("resumePositionTicks"))) {
             const double ticks = s->meta.value(QStringLiteral("resumePositionTicks")).toDouble();
             if (ticks > 0.0)
@@ -321,14 +429,40 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                     QStringLiteral("track-list")}},
                         {QStringLiteral("request_id"), kTrackListRequestId},
                     });
-        emit playbackStarted(s->key);
+        emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
+        emit playbackContextChanged(s->meta);
         return;
     }
     if (evName == QLatin1String("end-file")) {
         const QString reason =
             ev.value(QStringLiteral("reason")).toString();
-        const bool errored = (reason == QLatin1String("error"));
-        stopAndConsiderEnd(s->key, errored);
+        if (reason == QLatin1String("error")) {
+            // 不结束:占位条目加载失败(协商失败/网络)由 mpv 跳过继续,
+            // 不再按"异常退出"整体终止会话。
+            return;
+        }
+        if (reason == QLatin1String("eof")) {
+            // 是否最后一项:查询播放位置异步判定(playlist 可能下一项已开始)。
+            sendJson(s, QJsonObject{
+                            {QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("playlist-pos")}},
+                            {QStringLiteral("request_id"), kEofCheckRequestId},
+                        });
+        }
+        // 其余(stop/quit 等):不结束(playlist 内部跳转/自动换集)。
+        return;
+    }
+    if (evName == QLatin1String("client-message")) {
+        // IPC 事件名 = client-message(MPV_EVENT_CLIENT_MESSAGE,序列化
+        // 无 name 字段):args[0] 是消息名,args[1..] 是参数。moe-hook.lua
+        // on_load 重定向请求:占位条目要真实地址。
+        const QJsonArray args = ev.value(QStringLiteral("args")).toArray();
+        if (args.size() >= 2 && args.at(0).toString() == QLatin1String("moe-url")) {
+            s->pendingFileId = args.at(1).toString();
+            qInfo() << "MpvClient: hook 请求" << s->pendingFileId;
+            emit episodeUrlRequested(s->pendingFileId);
+        }
         return;
     }
 }
@@ -407,6 +541,99 @@ void MpvClient::enqueueLoad(Session *s, const QString &url,
     // socket 已就绪则直接下发;否则等 flush。
     if (s->ready)
         flush(s);
+}
+void MpvClient::setEpisodeList(const QVariantList &episodes,
+                               const QString &currentItemId, int currentIndex,
+                               const QString &url, const QVariantList &headers,
+                               const QVariantMap &meta)
+{
+    Session *s = m_active;
+    if (!s || !s->ready || episodes.isEmpty())
+        return;
+    if (!meta.isEmpty())
+        s->episodeMeta.insert(currentItemId, meta);
+    // 写 m3u:条目标题(m3u EXTINF,mpv demux_playlist.c 解析为 playlist
+    // entry title,经 --osd-playlist-entry=title 显示)+ 占位地址
+    // moe://ep/<id>(on_load hook 重定向)。
+    const QString path = QDir::tempPath() + QStringLiteral("/moe-ep-") +
+                         QUuid::createUuid().toString(QUuid::WithoutBraces) +
+                         QStringLiteral(".m3u");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "MpvClient: 不能写 m3u" << path << f.errorString();
+        return;
+    }
+    // 旋转顺序:第 0 条 = 当前集(真 URL,标题一致);其后 = 当前集之后
+    // 全集(占位),最后 = 前部(第 0 集..当前集-1,占位)。此前集条目均
+    // 占位,经 on_load hook 重定向;本条真 URL passthrough。
+    const int n = episodes.size();
+    QByteArray body2 = "#EXTM3U\n";
+    for (int k = 0; k < n; ++k) {
+        const int i = (currentIndex + k) % n;
+        const QVariantMap m = episodes.at(i).toMap();
+        const QString id = m.value(QStringLiteral("id")).toString();
+        QString title = m.value(QStringLiteral("title")).toString();
+        if (title.isEmpty())
+            title = id;
+        body2 += "#EXTINF:0," + title.toUtf8() + "\n";
+        body2 += (k == 0 ? url.toUtf8() : ("moe://ep/" + id.toUtf8())) + "\n";
+    }
+    f.write(body2);
+    f.close();
+    if (!headers.isEmpty()) {
+        QStringList fields;
+        for (const QVariant &h : headers)
+            fields << h.toString();
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("set_property"),
+                                    QStringLiteral("http-header-fields"),
+                                    fields.join(QLatin1Char(','))}},
+                    });
+    }
+    // idle 时以 replace 灌入:mpv 直接播第 0 条(真 URL)。
+    // (播放中 loadlist 会报错,官方行为;本方法在 deliver 前调用为 idle。)
+    sendJson(s, QJsonObject{
+                    {QStringLiteral("command"),
+                     QJsonArray{QStringLiteral("loadlist"), path,
+                                QStringLiteral("replace")}},
+                });
+    s->listSet = true;
+}
+
+void MpvClient::deliverEpisodeUrl(const QString &itemId, const QString &url,
+                                  const QVariantList &headers,
+                                  const QVariantMap &meta,
+                                  const QString &subtitleUrl)
+{
+    Session *s = m_active;
+    if (!s || !s->ready)
+        return;
+    if (!meta.isEmpty())
+        s->episodeMeta.insert(itemId, meta);
+    // 流头(可能跨服务器变化):切换全局头,后续加载生效。
+    if (!headers.isEmpty()) {
+        QStringList fields;
+        for (const QVariant &h : headers)
+            fields << h.toString();
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("set_property"),
+                                    QStringLiteral("http-header-fields"),
+                                    fields.join(QLatin1Char(','))}},
+                    });
+    }
+    // 应答 hook:lua 侧 set stream-open-filename(外挂字幕经
+    // file-local-options/sub-file)后 cont;空 url = 协商失败(占位失败跳过)。
+    // 脚本名 = 文件名去扩展并把非字母数字转下划线(scripting.c
+    // script_name_from_filename:"moe-hook" → "moe_hook")。
+    sendJson(s, QJsonObject{
+                    {QStringLiteral("command"),
+                     QJsonArray{QStringLiteral("script-message-to"),
+                                QStringLiteral("moe_hook"),
+                                QStringLiteral("moe-url-ready"), itemId,
+                                url, subtitleUrl}},
+                });
 }
 
 void MpvClient::reportStart(Session *s)
@@ -489,12 +716,24 @@ void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
     const int wantAid = audioOrdinal >= 0 ? idAtOrdinal(QStringLiteral("audio"), audioOrdinal) : -1;
     const int wantSid = subOrdinal == -2 ? -1
                                          : idAtOrdinal(QStringLiteral("sub"), subOrdinal);
-    if (wantAid >= 0)
+    // 目标轨已是当前选中轨时跳过 set:mpv 对同值设置也打印 Track switched
+    // (src/player/command.c:6635 直接 mp_switch_track 无值比较),避免重复噪音。
+    const auto currentlySelected = [&](const QString &type) -> int {
+        for (const QJsonValue &v : trackList) {
+            const QJsonObject t = v.toObject();
+            if (t.value(QStringLiteral("type")).toString() != type)
+                continue;
+            if (t.value(QStringLiteral("selected")).toBool())
+                return t.value(QStringLiteral("id")).toInt(-1);
+        }
+        return -1;
+    };
+    if (wantAid >= 0 && wantAid != currentlySelected(QLatin1String("audio")))
         sendJson(s, QJsonObject{{QStringLiteral("command"),
                                  QJsonArray{QStringLiteral("set_property"),
                                             QStringLiteral("aid"),
                                             QString::number(wantAid)}}});
-    if (wantSid >= 0)
+    if (wantSid >= 0 && wantSid != currentlySelected(QLatin1String("sub")))
         sendJson(s, QJsonObject{{QStringLiteral("command"),
                                  QJsonArray{QStringLiteral("set_property"),
                                             QStringLiteral("sid"),

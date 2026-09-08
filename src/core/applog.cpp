@@ -32,6 +32,22 @@ const char *levelName(QtMsgType type)
 // 本 handler)。QFile 写入/flush 本身不产生日志。
 void messageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
 {
+    // 状态行(消息以 \r 开头,mpv 进度行):终端回 \r 单行原位覆盖,
+    // 文件仍逐行(去掉 \r 前缀)——与 mpv 在 tty 上的官方表现一致。
+    // 其余消息:默认格式,stderr 与文件一致。
+    if (msg.startsWith(QLatin1Char('\r'))) {
+        const QString body = msg.mid(1);
+        fprintf(stderr, "\r%s", qPrintable(body));
+        if (g_logFile) {
+            const QString line = QStringLiteral("%1 %2 %3\n")
+                .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")))
+                .arg(QLatin1String(levelName(type)))
+                .arg(body);
+            g_logFile->write(line.toUtf8());
+            g_logFile->flush();
+        }
+        return;
+    }
     // 默认格式(含 file:line/类别),stderr 与文件一致,定位信息不丢失。
     const QString formatted = qFormatLogMessage(type, ctx, msg);
     // stderr 保留(终端启动调试);终端不存在时 Qt 忽略该写。
