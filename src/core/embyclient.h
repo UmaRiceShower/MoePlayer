@@ -136,6 +136,10 @@ public:
                                       const QString &token, const QString &userId,
                                       const QString &viewId, const QString &viewName,
                                       int limit);
+    // 拉取剧集续播目标(服务器 NextUp:优先最近观看未看完的集,其次下一个未看集),
+    // 结果经 nextUpReceived 返回,用于详情页定位上次播放的季/集。
+    Q_INVOKABLE void fetchNextUp(const QString &serverUrl, const QString &token,
+                                 const QString &userId, const QString &seriesId, int limit);
     // 拉取服务器建议(/Users/{id}/Suggestions,首页 hero 轮播数据源;结果经
     // serverSuggestionsReceived 返回)。suggestion 由服务器按混合类型排序
     // (继续观看/最新/热门等,不受客户端控制);失败发空列表,连同
@@ -223,6 +227,10 @@ signals:
                              const QVariantList &views);
     void serverItemsReceived(const QString &serverUrl, const QString &accountId,
                              const QString &viewId, const QVariantList &items);
+    // 续播目标(见 fetchNextUp):items 字段 id/name/seasonNo/episodeNo;
+    // 失败/无目标发空列表。
+    void nextUpReceived(const QString &serverUrl, const QString &seriesId,
+                        const QVariantList &items);
     // 服务器建议结果(见 fetchServerSuggestions):serverUrl/accountId 归位,
     // items 字段与首页行条目一致(id/name/type/posterId/backdropId/year 等)。
     void serverSuggestionsReceived(const QString &serverUrl, const QString &accountId,

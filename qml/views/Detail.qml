@@ -108,6 +108,18 @@ Item {
     // 选季胶囊状态:候选季号(滚轮调整,按服务器实际季遍历)、实际季号列表。
     property int seasonCandidate: 1
     property var seasonNos: []
+    // ---- 进入剧集详情时定位上次播放的季/集
+    // 续播目标取自服务器 NextUp(优先最近观看未看完的集,其次下一个未看集),
+    // 经季号映射到季 id(集条目无 seasonId role)。
+    // _resumePending:等待 NextUp 与季模型就绪以定位;_nextUpReady:NextUp 已回。
+    // _resumeSeasonNo/_resumeEpisodeId:续播目标集;_userPickedSeason:用户手动
+    // 选过季,自动定位不再干预。
+    property bool _resumePending: false
+    property bool _nextUpReady: false
+    property int _resumeSeasonNo: 0
+    property int _resumeEpisodeNo: 0
+    property string _resumeEpisodeId: ""
+    property bool _userPickedSeason: false
 
     // ---- 播放:Series/Episode/Movie 统一走 playItem,按目标条目 id 协商。 ----
     property string pendingPlayItemId: ""
@@ -184,9 +196,18 @@ Item {
     function playSeries() {
         const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
         let target = null
-        for (let i = 0; i < model.count; i++) {
-            const it = model.itemAt(i)
-            if (it.positionTicks > 0 && !it.played) { target = it; break }
+        // 优先续播目标(NextUp,与详情定位/按钮文案同源)。
+        if (root._resumeEpisodeId) {
+            for (let i = 0; i < model.count; i++) {
+                if (model.itemAt(i).id === root._resumeEpisodeId) { target = model.itemAt(i); break }
+            }
+        }
+        // 回退:全集中第一条有进度未看完的集。
+        if (!target) {
+            for (let i = 0; i < model.count; i++) {
+                const it = model.itemAt(i)
+                if (it.positionTicks > 0 && !it.played) { target = it; break }
+            }
         }
         if (!target && model.count > 0)
             target = model.itemAt(0)
@@ -206,13 +227,11 @@ Item {
     // 缓存属性,在集数据/详情到达时刷新一次(onItemDetailReady/
     // onEpisodesReceived 见文件尾 Connections)。
     property string seriesPlayCache: ""
+    // 续播目标(NextUp)已知时显示「继续播放 SxxExx」,便于确认目标集;
+    // 未到/无目标时「播放」。
     function computeSeriesPlayText() {
-        const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
-        for (let i = 0; i < model.count; i++) {
-            const it = model.itemAt(i)
-            if (it.positionTicks > 0 && !it.played)
-                return "继续观看" + (it.seasonNo > 0 && it.episodeNo > 0 ? " S" + it.seasonNo + "E" + it.episodeNo : "")
-        }
+        if (root._resumeSeasonNo > 0 && root._resumeEpisodeNo > 0)
+            return "继续播放 S" + root._resumeSeasonNo + "E" + root._resumeEpisodeNo
         return "播放"
     }
     function refreshSeriesPlayText() {
@@ -246,6 +265,12 @@ Item {
         root.isFavorite = false
         root.seasonNos = []
         root.seasonCandidate = 1
+        root._resumePending = false
+        root._nextUpReady = false
+        root._resumeSeasonNo = 0
+        root._resumeEpisodeNo = 0
+        root._resumeEpisodeId = ""
+        root._userPickedSeason = false
         root.similarStale = true
         root.replacing = true
         root.replaceKeepScroll = !!keepScroll
@@ -300,9 +325,13 @@ Item {
         // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见
         // onEpisodesReceived),避免选集栏先渲染旧数据再跳新数据。
         if (d.type === "Series") {
+            // 续播目标(服务器 NextUp)与季模型就绪后定位上次播放的季/集。
+            root._resumePending = true
+            root._nextUpReady = false
             EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
             // 全部集(跨季),供"继续观看"按进度定位目标集。
             EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
+            EmbyClient.fetchNextUp(root.serverUrl, c.token, c.userId, d.id, 1)
         } else if (d.type === "Episode" && d.seriesId) {
             EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
         } else {
@@ -342,6 +371,40 @@ Item {
         // 明确换季才回顶(列表从头展示);原地换集触发的重拉链保留位置。
         if (resetScroll)
             episodeList.contentY = 0
+    }
+
+    // ---- 上次播放的季/集定位(进入详情时展示用,不自动播放)----
+    // 续播目标季 id:NextUp 已回且有目标、季模型就绪时返回,否则空
+    // (调用方据返回值决定是否等另一侧数据)。
+    function locateResume() {
+        if (!root._resumePending || root._userPickedSeason)
+            return ""
+        if (!root._nextUpReady || root._resumeSeasonNo <= 0 || !root._resumeEpisodeId)
+            return ""
+        return root.seasonIdByNo(root._resumeSeasonNo)
+    }
+    // 季号 → 季 id(集条目无 seasonId role,经季号在季模型中映射)。
+    function seasonIdByNo(no) {
+        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        for (let i = 0; i < m.count; i++) {
+            if (m.itemAt(i).seasonNo === no)
+                return m.itemAt(i).id
+        }
+        return ""
+    }
+    // 选集栏滚动到上次播放的集(成为首个可见项);仅展示,不改选中态。
+    function scrollToResumeEpisode() {
+        if (!root._resumeEpisodeId)
+            return
+        const m = EmbyClient.episodesModelFor(root.serverUrl)
+        for (let i = 0; i < m.count; i++) {
+            if (m.itemAt(i).id === root._resumeEpisodeId) {
+                const idx = i
+                Qt.callLater(() => episodeList.positionViewAtIndex(idx, ListView.Beginning))
+                root._resumeEpisodeId = ""
+                return
+            }
+        }
     }
 
     // ---- 选季胶囊 ----
@@ -412,6 +475,9 @@ Item {
                 break
             }
         }
+        // 用户手动确认季:自动定位不再干预。
+        root._userPickedSeason = true
+        root._resumePending = false
         if (bestId)
             root.selectSeason(bestId, true)
     }
@@ -2462,6 +2528,19 @@ Item {
                 for (let i = 0; i < model.count; i++) {
                     if (model.itemAt(i).id === root.currentSeasonId) { seasonId = root.currentSeasonId; break }
                 }
+                // 保留当前季 = 用户已选定/重拉保留:取消上次播放定位,避免
+                // allEpisodes 后到时把季切回 resume 季。
+                if (seasonId)
+                    root._resumePending = false
+            }
+            // 续播目标季(仅剧集;NextUp 未到时保持 pending,等其到达)。
+            if (!seasonId && root.detail.type === "Series" && root._resumePending) {
+                const rid = root.locateResume()
+                if (rid) {
+                    seasonId = rid
+                    root._resumePending = false
+                    console.debug("Detail: 定位续播 S" + root._resumeSeasonNo, root._resumeEpisodeId)
+                }
             }
             if (!seasonId && root.detail.type === "Episode" && root.detail.seasonId) {
                 for (let i = 0; i < model.count; i++) {
@@ -2475,6 +2554,35 @@ Item {
             else
                 root.loaded = true // 无季/无分集:选集就绪,直接渲染结构
         }
+        // 续播目标到达(seasons 先到时补定位;seasons 后到时由其处理)。
+        function onNextUpReceived(serverUrl, seriesId, items) {
+            const series = root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
+            if (serverUrl !== root.serverUrl || seriesId !== series)
+                return
+            root._nextUpReady = true
+            if (!items || items.length === 0) {
+                root._resumePending = false // 无续播目标(未看/全看完):保持第一季
+                return
+            }
+            const first = items[0]
+            root._resumeSeasonNo = first.seasonNo || 0
+            root._resumeEpisodeNo = first.episodeNo || 0
+            root._resumeEpisodeId = first.id || ""
+            root.refreshSeriesPlayText() // 按钮文案跟随续播目标
+            if (root._resumeSeasonNo <= 0 || !root._resumeEpisodeId) {
+                root._resumePending = false
+                return
+            }
+            const rid = root.locateResume()
+            if (!rid)
+                return // 季模型未到:由 onSeasonsReceived 处理
+            root._resumePending = false
+            console.debug("Detail: 定位续播(NextUp 后到) S" + root._resumeSeasonNo, root._resumeEpisodeId)
+            if (rid === root.currentSeasonId)
+                root.scrollToResumeEpisode() // 季已正确:直接滚动到目标集
+            else
+                root.selectSeason(rid, true) // 切到目标季,分集到达后滚动
+        }
         function onEpisodesReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
@@ -2482,6 +2590,8 @@ Item {
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
             root.loaded = true
             root.refreshSeriesPlayText()
+            // 上次播放的集滚到首个可见(仅展示,不自动播放)。
+            root.scrollToResumeEpisode()
         }
         function onSimilarReady(serverUrl) {
             if (serverUrl !== root.serverUrl)
