@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
+#include <QSaveFile>
 #include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
@@ -56,8 +57,8 @@ const QStringList kPresetFolderColors = {
     QStringLiteral("#EC407A"), // 粉
     QStringLiteral("#78909C"), // 蓝灰
 };
-// 首页聚合缓存文件名(CacheLocation 下)。
-const QString kHomeCacheFileName = QStringLiteral("/home-rows.json");
+// 首页聚合缓存名(PersistMap saveCache/loadCache 的 name,拼 CacheLocation/<name>.json)。
+const QString kHomeCacheName = QStringLiteral("home-rows");
 // 网络问题账号的定期重试间隔。
 constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
 } // namespace
@@ -65,6 +66,7 @@ constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
 AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     : QObject(parent)
     , m_client(client)
+    , m_persist(&m_settings, QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
 {
     m_homeRowsModel = new HomeRowsModel(this);
     load();
@@ -821,37 +823,28 @@ void AccountManager::setLayoutOrder(const QVariantList &order)
 
 void AccountManager::loadLayoutOrder()
 {
-    // 旧数据无 key → 合成默认(全部文件夹 + 全部未分组账号按 accounts
-    // 顺序),与升级前视觉一致;有 key → 读入经 setLayoutOrder 规范化
-    // (过滤已删账号/文件夹、重复项、成员账号项,补全缺失),持久化结果。
+    // 缺键 → 空序,setLayoutOrder 合成默认(全部文件夹 + 全部未分组账号
+    // 按 accounts 顺序),与升级前视觉一致;有 key → 读入经 setLayoutOrder
+    // 规范化(过滤已删账号/文件夹、重复项、成员账号项,补全缺失),持久化。
     QVariantList order;
-    const QString raw = m_settings.value(kLayoutOrderKey).toString();
-    if (!raw.isEmpty()) {
-        const QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
-        for (const auto &v : arr) {
-            const QJsonObject o = v.toObject();
-            const QString type = o.value(QLatin1String("type")).toString();
-            const QString id = o.value(QLatin1String("id")).toString();
-            if (type == QLatin1String("folder") || type == QLatin1String("account"))
-                order.append(makeLayoutEntry(type, id));
-        }
+    QVariant val;
+    if (m_persist.loadSettings(kLayoutOrderKey, val, QVariantList()))
+        order = val.toList();
+    QVariantList parsed;
+    for (const auto &v : order) {
+        const QVariantMap m = v.toMap();
+        const QString type = m.value(QLatin1String("type")).toString();
+        const QString id = m.value(QLatin1String("id")).toString();
+        if (type == QLatin1String("folder") || type == QLatin1String("account"))
+            parsed.append(makeLayoutEntry(type, id));
     }
-    setLayoutOrder(order);
+    setLayoutOrder(parsed);
 }
 
 void AccountManager::persistLayoutOrder()
 {
-    QJsonArray arr;
-    for (const auto &v : m_layoutOrder) {
-        const QVariantMap m = v.toMap();
-        QJsonObject o;
-        o.insert(QLatin1String("type"), m.value(QLatin1String("type")).toString());
-        o.insert(QLatin1String("id"), m.value(QLatin1String("id")).toString());
-        arr.append(o);
-    }
-    m_settings.setValue(kLayoutOrderKey,
-                        QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
+    // m_layoutOrder 即 QVariantList(每项 {type, id}),直接整体序列化。
+    m_persist.saveSettings(kLayoutOrderKey, m_layoutOrder);
 }
 
 void AccountManager::removeFromLayoutOrder(const QString &type, const QString &id)
@@ -1052,8 +1045,10 @@ AccountManager::FolderInfo *AccountManager::folderById(const QString &id)
 
 void AccountManager::loadFolders()
 {
-    const QJsonArray arr =
-        QJsonDocument::fromJson(m_settings.value(kFoldersKey).toString().toUtf8()).array();
+    QVariant val;
+    if (!m_persist.loadSettings(kFoldersKey, val, QVariantList()))
+        return; // 缺键/损坏:空文件夹(缺键静默,损坏已由 PersistMap 告警)
+    const QJsonArray arr = QJsonArray::fromVariantList(val.toList());
     for (const auto &v : arr) {
         const QJsonObject o = v.toObject();
         FolderInfo f;
@@ -1075,20 +1070,16 @@ void AccountManager::loadFolders()
 
 void AccountManager::saveFolders()
 {
-    QJsonArray arr;
+    QVariantList list;
     for (const auto &f : m_folders) {
-        QJsonObject o;
-        o.insert(QLatin1String("id"), f.id);
-        o.insert(QLatin1String("name"), f.name);
-        o.insert(QLatin1String("color"), f.color);
-        QJsonArray ids;
-        for (const auto &id : f.accountIds)
-            ids.append(id);
-        o.insert(QLatin1String("accountIds"), ids);
-        arr.append(o);
+        QVariantMap m;
+        m.insert(QLatin1String("id"), f.id);
+        m.insert(QLatin1String("name"), f.name);
+        m.insert(QLatin1String("color"), f.color);
+        m.insert(QLatin1String("accountIds"), f.accountIds); // QStringList 自动转 QVariantList
+        list.append(m);
     }
-    m_settings.setValue(kFoldersKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
+    m_persist.saveSettings(kFoldersKey, list);
 }
 
 // 设置图标:来源可为远程 URL(下载字节)或本地图片(file:///已有路径,
@@ -1174,28 +1165,17 @@ const AccountManager::AccountInfo *AccountManager::accountById(const QString &id
 // 首页聚合缓存:上次成功数据落盘(视图列表 + 每库最近条目),启动先展示。
 QVariantList AccountManager::loadHomeCache()
 {
-    const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                         + kHomeCacheFileName;
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly))
+    QVariant val;
+    if (!m_persist.loadCache(kHomeCacheName, val))
         return {};
-    return QJsonDocument::fromJson(f.readAll()).array().toVariantList();
+    return val.toList();
 }
 
 void AccountManager::saveHomeCache()
 {
     if (m_homeRows.isEmpty())
         return;
-    const QString path = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
-                         + kHomeCacheFileName;
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile f(path);
-    if (!f.open(QIODevice::WriteOnly)) {
-        qWarning().noquote() << "AccountManager: 首页缓存写入失败" << path << f.errorString();
-        return;
-    }
-    f.write(QJsonDocument(QJsonArray::fromVariantList(m_homeRows))
-                .toJson(QJsonDocument::Compact));
+    m_persist.saveCache(kHomeCacheName, m_homeRows);
 }
 
 QString AccountManager::serverPosterId(const QString &serverUrl, const QString &posterId)
@@ -1233,18 +1213,20 @@ QString AccountManager::writeIconCache(const QByteArray &imageData)
                          + QString::fromLatin1(QCryptographicHash::hash(
                              imageData, QCryptographicHash::Md5).toHex())
                          + QStringLiteral(".img");
-    QFile f(file);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+    QSaveFile f(file);
+    if (!f.open(QIODevice::WriteOnly)) {
         qWarning().noquote() << "AccountManager: 图标缓存写入失败" << file << f.errorString();
         return QString();
     }
     if (f.write(imageData) != imageData.size()) {
         qWarning().noquote() << "AccountManager: 图标缓存写短" << file;
-        f.close();
-        f.remove();
+        f.cancelWriting(); // 丢弃临时文件,保留原文件(内容寻址:同 MD5 即同内容)
         return QString();
     }
-    f.close();
+    if (!f.commit()) {
+        qWarning().noquote() << "AccountManager: 图标缓存提交失败" << file << f.errorString();
+        return QString();
+    }
     return QUrl::fromLocalFile(file).toString();
 }
 

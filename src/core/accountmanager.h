@@ -8,6 +8,7 @@
 #include <QVariantList>
 
 #include "core/constants.h"
+#include "core/persistmap.h"
 #include "homerowsmodel.h"
 
 class EmbyClient;
@@ -188,6 +189,9 @@ private:
 
     EmbyClient *m_client;
     QSettings m_settings;
+    // 程序文档持久化(配置键 JSON + 缓存文件 JSON),注入本实例的
+    // QSettings 与 CacheLocation(见 persistmap-design.md)。
+    PersistMap m_persist;
     QList<AccountInfo> m_accounts;
     QList<FolderInfo> m_folders;
     QVariantList m_layoutOrder; // 规范化后的视觉顺序 [{type, id}](见属性注释)
