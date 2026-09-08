@@ -105,6 +105,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 persistLayoutOrder();
                 save();
                 emit accountsChanged();
+                qInfo() << "AccountManager: 账号添加成功" << acc.id << "on" << acc.serverUrl;
                 emit accountLoginFinished(true, QString());
                 // 名称留空:登录成功后再拉 /System/Info/Public,用服务器端
                 // ServerName 回填账号名(见 serverPublicInfoReceived)。
@@ -133,6 +134,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                 const QString msg = message.contains(QLatin1String("401"))
                                         ? QStringLiteral("用户名或密码错误(HTTP 401)")
                                         : message;
+                qWarning() << "AccountManager: 登录失败" << pendingServer << msg;
                 emit accountLoginFinished(false, msg);
             });
 
@@ -176,7 +178,7 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
                         m_networkAccountIds.remove(accountId);
                         emit accountsChanged();
                     } else {
-                        qInfo() << "Emby: relogin ok on" << serverUrl;
+                        qInfo().noquote() << "AccountManager: relogin ok on" << serverUrl;
                         a.token = token;
                         if (!userId.isEmpty())
                             a.userId = userId;
@@ -380,9 +382,13 @@ QVariantMap AccountManager::credsForAccount(const QString &accountId) const
 // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info)。
 void AccountManager::validateTokens()
 {
+    int n = 0;
     for (const auto &a : m_accounts)
-        if (!a.token.isEmpty())
+        if (!a.token.isEmpty()) {
+            ++n;
             checkAccountToken(a.id);
+        }
+    qInfo() << "AccountManager: 启动 token 校验" << n << "个账号";
 }
 
 // 账号认证状态(invalid/network/ok;供 accounts() 暴露 authStatus)。
@@ -414,6 +420,7 @@ void AccountManager::onTokenChecked(const QString &accountId, int result)
     if (accountIndexById(accountId) < 0)
         return; // 账号已删,过期回调丢弃
     if (result == 0) {
+        qInfo() << "AccountManager: token 有效" << accountId;
         if (m_invalidAccountIds.remove(accountId) || m_networkAccountIds.remove(accountId))
             emit accountsChanged();
         if (m_networkAccountIds.isEmpty())
@@ -427,10 +434,12 @@ void AccountManager::onTokenChecked(const QString &accountId, int result)
             m_networkAccountIds.insert(accountId);
             emit accountsChanged();
         }
+        qWarning() << "AccountManager: token 校验网络/服务器错误" << accountId;
         ensureNetRetryTimer();
         return;
     }
     // 401:token 失效 → 账密重登;失败标 invalid(见 serverLoginFinished)。
+    qWarning() << "AccountManager: token 401 失效,发起账密重登" << accountId;
     m_networkAccountIds.remove(accountId);
     reloginFor(accountId);
 }
@@ -449,10 +458,13 @@ void AccountManager::reloginFor(const QString &accountId)
     const QString srv = a.serverUrl;
     if (m_reloginOwner.contains(srv)) {
         // 该服已有重登在途:排队等前一个完成,避免 owner 被覆盖。
-        if (!m_reloginQueue[srv].contains(accountId))
+        if (!m_reloginQueue[srv].contains(accountId)) {
+            qDebug() << "AccountManager: 重登在途,排队" << accountId;
             m_reloginQueue[srv].enqueue(accountId);
+        }
         return;
     }
+    qInfo() << "AccountManager: 自动重登发起" << srv;
     m_loggingInAccountIds.insert(accountId);
     m_reloginOwner.insert(srv, accountId); // 路由 serverLoginFinished 回账号
     m_client->loginFor(srv, a.userName, deobfuscate(a.password));
@@ -466,6 +478,7 @@ void AccountManager::retryNetworkAccounts()
         return;
     }
     const auto ids = m_networkAccountIds;
+    qDebug() << "AccountManager: 重试网络问题账号" << ids.size() << "个";
     for (const QString &id : ids)
         checkAccountToken(id);
 }
@@ -488,6 +501,7 @@ bool AccountManager::addAccount(const QString &name, const QString &serverUrl,
         { QStringLiteral("userName"), userName.trimmed() },
         { QStringLiteral("password"), password },
     };
+    qInfo() << "AccountManager: 登录发起" << userName.trimmed() << "on" << serverUrl.trimmed();
     m_client->login(serverUrl.trimmed(), userName.trimmed(), password,
                     m_pending.value(QStringLiteral("id")).toString());
     return true;
@@ -506,6 +520,7 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         return;
     }
     m_homeFetchActive = true;
+    qInfo() << "AccountManager: 首页聚合启动" << m_accounts.size() << "个账号,每库" << m_homeLimit << "条";
     // 重叠重拉(排序/增删快速操作)时旧代次的回调可能仍在途,其归位索引已
     // 失效,须按代次丢弃;否则会污染本次聚合的视图与计数。
     ++m_homeGen;
@@ -558,6 +573,7 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
 // 结束本轮聚合:释放串行标记;飞行中排队的触发(账号状态已变)重跑一次。
 void AccountManager::finishHomeFetch()
 {
+    qDebug() << "AccountManager: 首页聚合完成,行数" << m_homeRows.size();
     m_homeFetchActive = false;
     if (m_homeFetchQueued) {
         m_homeFetchQueued = false;
@@ -1174,8 +1190,10 @@ void AccountManager::saveHomeCache()
                          + kHomeCacheFileName;
     QDir().mkpath(QFileInfo(path).absolutePath());
     QFile f(path);
-    if (!f.open(QIODevice::WriteOnly))
+    if (!f.open(QIODevice::WriteOnly)) {
+        qWarning().noquote() << "AccountManager: 首页缓存写入失败" << path << f.errorString();
         return;
+    }
     f.write(QJsonDocument(QJsonArray::fromVariantList(m_homeRows))
                 .toJson(QJsonDocument::Compact));
 }
@@ -1207,16 +1225,21 @@ QString AccountManager::writeIconCache(const QByteArray &imageData)
         return QString();
     const QString iconDir = dir + QStringLiteral("/account-icons");
     QDir d;
-    if (!d.mkpath(iconDir))
+    if (!d.mkpath(iconDir)) {
+        qWarning().noquote() << "AccountManager: 图标缓存目录创建失败" << iconDir;
         return QString();
+    }
     const QString file = iconDir + QLatin1Char('/')
                          + QString::fromLatin1(QCryptographicHash::hash(
                              imageData, QCryptographicHash::Md5).toHex())
                          + QStringLiteral(".img");
     QFile f(file);
-    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning().noquote() << "AccountManager: 图标缓存写入失败" << file << f.errorString();
         return QString();
+    }
     if (f.write(imageData) != imageData.size()) {
+        qWarning().noquote() << "AccountManager: 图标缓存写短" << file;
         f.close();
         f.remove();
         return QString();
@@ -1241,8 +1264,10 @@ void AccountManager::removeAccount(const QString &id)
     }
     auto it = std::remove_if(m_accounts.begin(), m_accounts.end(),
                              [id](const AccountInfo &a) { return a.id == id; });
-    if (it == m_accounts.end())
+    if (it == m_accounts.end()) {
+        qDebug() << "AccountManager: removeAccount 未找到账号" << id;
         return;
+    }
     const QString serverUrl = it->serverUrl;
     m_accounts.erase(it, m_accounts.end());
     // 视觉顺序同步:未分组账号项移除(成员账号不在序列中;folder.accountIds
@@ -1310,6 +1335,8 @@ void AccountManager::save()
     }
     m_settings.setValue(kAccountsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
     m_settings.sync();
+    if (m_settings.status() != QSettings::NoError)
+        qWarning() << "AccountManager: 账号配置写入失败" << int(m_settings.status());
 }
 
 QString AccountManager::obfuscate(const QString &plain)

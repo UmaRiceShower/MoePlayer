@@ -79,6 +79,8 @@ int main(int argc, char *argv[])
     qInfo().noquote() << "RHI backend:"
                       << (api == QSGRendererInterface::OpenGL ? QStringLiteral("opengl")
                                                               : QStringLiteral("other"));
+    qInfo().noquote() << "QPA platform:" << QGuiApplication::platformName()
+                      << "version:" << app.applicationVersion();
 
     // 单实例锁:重复启动直接退出。
     QLockFile lock(QDir::temp().filePath(MoePlayer::kAppName + QStringLiteral(".lock")));
@@ -153,11 +155,15 @@ int main(int argc, char *argv[])
                      &QCoreApplication::quit);
 
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed, &app,
-                     []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
+                     []() {
+                         qCritical() << "QML 组件创建失败,应用退出";
+                         QCoreApplication::exit(-1);
+                     }, Qt::QueuedConnection);
 
     engine.loadFromModule(QStringLiteral("MoePlayer.Core"), QStringLiteral("Main"));
 
     const int ret = app.exec();
+    qInfo() << "MoePlayer 退出,事件循环返回值" << ret;
     mpvClient.shutdownAll();
     std::_Exit(ret);
 }

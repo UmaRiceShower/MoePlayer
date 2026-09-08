@@ -146,6 +146,7 @@ void EmbyClient::get(const QString &serverUrl, const QString &token, const QStri
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            qWarning() << "Emby:" << msg;
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
             if (onFail)
@@ -175,6 +176,7 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            qWarning() << "Emby:" << msg;
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
             if (onFail)
@@ -198,6 +200,7 @@ void EmbyClient::postJson(const QString &serverUrl, const QString &token, const 
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            qWarning() << "Emby:" << msg;
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
             if (onFail)
@@ -219,6 +222,7 @@ void EmbyClient::del(const QString &serverUrl, const QString &token, const QStri
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
             const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
+            qWarning() << "Emby:" << msg;
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
             return;
@@ -375,9 +379,10 @@ void EmbyClient::fetchServerPublicInfo(const QString &serverUrl)
 {
     get(serverUrl, QString(), QString(), QStringLiteral("/System/Info/Public"),
         [this, serverUrl](const QJsonDocument &doc) {
-            emit serverPublicInfoReceived(
-                serverUrl, doc.object().value(QLatin1String("ServerName")).toString(),
-                doc.object().value(QLatin1String("Version")).toString());
+            const QString serverName = doc.object().value(QLatin1String("ServerName")).toString();
+            const QString version = doc.object().value(QLatin1String("Version")).toString();
+            qInfo() << "Emby: server info" << serverName << version << "on" << serverUrl;
+            emit serverPublicInfoReceived(serverUrl, serverName, version);
         }, nullptr, QStringLiteral("获取服务器信息"));
 }
 
@@ -397,12 +402,15 @@ void EmbyClient::fetchServerIcon(const QString &serverUrl)
             [this, reply, serverUrl, htmlUrl]() {
                 reply->deleteLater();
                 if (reply->error() != QNetworkReply::NoError) {
+                    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    qWarning() << "Emby: 服务器图标页拉取失败" << htmlUrl << reply->errorString() << "HTTP" << status;
                     emit serverIconReceived(serverUrl, QString(), QByteArray());
                     return;
                 }
                 const QString iconUrl =
                     parseFaviconLink(QString::fromUtf8(reply->readAll()), htmlUrl);
                 if (iconUrl.isEmpty()) {
+                    qDebug() << "Emby: 服务器首页无图标 link 标签" << htmlUrl;
                     emit serverIconReceived(serverUrl, QString(), QByteArray());
                     return;
                 }
@@ -421,10 +429,13 @@ void EmbyClient::downloadServerIconImage(const QString &serverUrl, const QString
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, serverUrl, iconUrl]() {
                 reply->deleteLater();
-                const QByteArray data = reply->error() == QNetworkReply::NoError
-                                            ? reply->readAll()
-                                            : QByteArray();
-                emit serverIconReceived(serverUrl, iconUrl, data);
+                if (reply->error() != QNetworkReply::NoError) {
+                    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                    qWarning() << "Emby: 服务器图标下载失败" << iconUrl << reply->errorString() << "HTTP" << status;
+                    emit serverIconReceived(serverUrl, iconUrl, QByteArray());
+                    return;
+                }
+                emit serverIconReceived(serverUrl, iconUrl, reply->readAll());
             });
 }
 
@@ -498,14 +509,16 @@ void EmbyClient::validateToken(const QString &serverUrl, const QString &token,
     QNetworkReply *reply = m_nam.get(makeRequest(serverUrl, token, userId,
                                                  QStringLiteral("/System/Info"), false));
     connect(reply, &QNetworkReply::finished, this,
-            [reply, onDone = std::move(onDone)]() {
+            [this, reply, serverUrl, onDone = std::move(onDone)]() {
                 reply->deleteLater();
                 if (reply->error() == QNetworkReply::NoError) {
+                    qDebug() << "Emby: token 有效" << serverUrl;
                     onDone(0);
                     return;
                 }
                 const int status = reply->attribute(
                     QNetworkRequest::HttpStatusCodeAttribute).toInt();
+                qDebug() << "Emby: token 校验 401/网络错误" << status << serverUrl;
                 onDone(status == 401 ? 1 : 2);
             });
 }
@@ -682,11 +695,14 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
     // Limit+1 探针:多出的 1 条说明还有更多,截断并标记 hasMore。
     q.addQueryItem(QStringLiteral("Limit"), QString::number(limit + 1));
     const int seq = ++m_searchSeq[key];
+    qDebug() << "Emby: 搜索" << term << "startIndex" << startIndex << "on" << url;
     get(url, token, userId, QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
         [this, key, seq, startIndex, limit, url, accountId](const QJsonDocument &doc) {
             // 输入防抖窗口内的旧请求结果直接丢弃。
-            if (seq != m_searchSeq.value(key))
+            if (seq != m_searchSeq.value(key)) {
+                qDebug() << "Emby: 搜索响应过期丢弃" << url;
                 return;
+            }
             QJsonArray arr = doc.object().value(QLatin1String("Items")).toArray();
             const bool hasMore = arr.size() > limit;
             if (hasMore) {
@@ -701,11 +717,14 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
             else
                 m->appendItems(arr, true);
             m->setHasMore(hasMore);
+            qInfo() << "Emby: search =" << m->count() << "hasMore" << hasMore << "on" << url;
             emit searchResultsReady(url, accountId);
         }, [this, key, seq, url, accountId] {
             // 失败也发空结果:聚合按账号计数,缺此回调会永久"搜索中"。
-            if (seq != m_searchSeq.value(key))
+            if (seq != m_searchSeq.value(key)) {
+                qDebug() << "Emby: 搜索响应过期丢弃" << url;
                 return;
+            }
             auto *m = searchModelForKey(key);
             m->clear();
             m->setHasMore(false);
@@ -761,6 +780,7 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
                                              + QLatin1Char('~') + tag);
                 out.append(m);
             }
+            qInfo() << "Emby: serverViews =" << out.size() << "on" << serverUrl;
             emit serverViewsReceived(serverUrl, accountId, out);
         },
         // 失败:发空视图推进聚合计数,原因经 serverRequestFailed 通知。
@@ -788,6 +808,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 items.append(parseHomeItem(v.toObject(), serverUrl));
+            qInfo() << "Emby: serverItems =" << items.size() << "on" << serverUrl;
             emit serverItemsReceived(serverUrl, accountId, viewId, items);
         },
         // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
@@ -819,6 +840,7 @@ void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString 
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 items.append(parseHomeItem(v.toObject(), serverUrl));
+            qInfo() << "Emby: serverSuggestions =" << items.size() << "on" << serverUrl;
             emit serverSuggestionsReceived(serverUrl, accountId, items);
         },
         // 失败:发空列表(调用方回退本地聚合),原因经 serverRequestFailed 通知。
@@ -860,6 +882,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
     // 供剧集详情显示"剧名 + S/E"与选集条定位;Backdrop 标签供 Hero 背景。
     q.addQueryItem(QStringLiteral("Fields"),
                    QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId,DateCreated,DateModified,PrimaryImageAspectRatio"));
+    qDebug() << "Emby: 拉取条目详情" << itemId << "on" << key;
     get(key, token, userId, QStringLiteral("/Users/%1/Items/%2?%3").arg(userId, itemId, q.toString()),
         [this, key, token, userId](const QJsonDocument &doc) {
             const QJsonObject o = doc.object();
@@ -1105,6 +1128,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  const QJsonArray sources = o.value(QLatin1String("MediaSources")).toArray();
                  if (sources.isEmpty()) {
                      const QString msg = QStringLiteral("PlaybackInfo 未返回可用媒体源");
+                     qWarning() << "Emby: 播放协商无媒体源" << itemId << "on" << key;
                      emit errorOccurred(key, msg);
                      emit playbackFailed(key, itemId, msg);
                      return;
@@ -1135,8 +1159,10 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  const QString selectedMediaSourceId = src.value(QLatin1String("Id")).toString();
                  // 服务器生成的会话 id,播放回传三件套共用(缺省则本地兜底)。
                  QString playSessionId = o.value(QLatin1String("PlaySessionId")).toString();
-                 if (playSessionId.isEmpty())
+                 if (playSessionId.isEmpty()) {
                      playSessionId = QStringLiteral("%1-%2").arg(userId, itemId);
+                     qDebug() << "Emby: PlaySessionId 缺失,本地兜底" << itemId;
+                 }
                  const QStringList headers = requiredHeaders(src);
 
                  // 解析音轨/字幕轨。
@@ -1232,6 +1258,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      probeRange = true;
                  } else {
                      const QString msg = QStringLiteral("该条目无可用直连/转码方案");
+                     qWarning() << "Emby: 播放协商无直连/转码方案" << itemId << "on" << key;
                      emit errorOccurred(key, msg);
                      emit playbackFailed(key, itemId, msg);
                      return;
@@ -1399,6 +1426,7 @@ void EmbyClient::probeSeekableUrl(const QString &serverUrl, const QString &token
 
     if (m_rangePrefix.contains(key)) {
         const QString pre = m_rangePrefix.value(key);
+        qDebug() << "Emby: Range 前缀缓存" << (pre.isEmpty() ? QStringLiteral("原样") : pre) << "on" << key;
         if (pre.isEmpty())
             onDone(url);
         else
@@ -1423,6 +1451,7 @@ void EmbyClient::probeSeekableUrl(const QString &serverUrl, const QString &token
                             + (u.query().isEmpty() ? QString() : QStringLiteral("?") + u.query());
         probeRange(key, token, userId, alt, [this, key, url, alt, onDone](bool embyOk) {
             // 两条都不认 → 保持原样(换前缀只是换一种坏法)
+            qDebug() << "Emby: Range 探测定案" << (embyOk ? QStringLiteral("/emby 前缀") : QStringLiteral("原样")) << "on" << key;
             m_rangePrefix.insert(key, embyOk ? QStringLiteral("/emby") : QString());
             onDone(embyOk ? alt : url);
         });

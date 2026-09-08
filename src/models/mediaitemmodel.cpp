@@ -1,5 +1,6 @@
 #include "mediaitemmodel.h"
 
+#include <QDebug>
 #include <QJsonObject>
 
 MediaItemModel::MediaItemModel(QObject *parent)
@@ -109,6 +110,7 @@ void MediaItemModel::setItems(const QJsonArray &items, bool withPosters)
     // 行集相同(数量 + 逐位 id 相同)即原地刷新:仅对变化行发 dataChanged,
     // 列表定位保持(同剧换集重拉同季分集,已看/进度等用户数据照常更新)。
     if (sameRowSet(parsed)) {
+        qDebug() << "MediaItemModel: setItems 原地刷新" << parsed.size() << "行";
         for (int i = 0; i < parsed.size(); ++i) {
             if (!sameItem(m_items.at(i), parsed.at(i))) {
                 m_items[i] = parsed.at(i);
@@ -117,6 +119,7 @@ void MediaItemModel::setItems(const QJsonArray &items, bool withPosters)
         }
         return;
     }
+    qDebug() << "MediaItemModel: setItems 重置为" << parsed.size() << "行";
     beginResetModel();
     m_items = parsed;
     endResetModel();

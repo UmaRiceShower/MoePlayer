@@ -15,6 +15,9 @@ namespace {
 constexpr qint64 kRotateBytes = 1024 * 1024;
 
 QFile *g_logFile = nullptr;
+// 级别过滤:低于该级别的消息(数值 QtDebugMsg < QtInfoMsg < ...)直接丢弃。
+// 默认 QtInfoMsg:滤 qDebug/console.debug 调试噪音;流程(qInfo)与错误保留。
+QtMsgType g_minLevel = QtInfoMsg;
 
 const char *levelName(QtMsgType type)
 {
@@ -32,6 +35,8 @@ const char *levelName(QtMsgType type)
 // 本 handler)。QFile 写入/flush 本身不产生日志。
 void messageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString &msg)
 {
+    if (type < g_minLevel)
+        return;
     // 状态行(消息以 \r 开头,mpv 进度行):终端回 \r 单行原位覆盖,
     // 文件仍逐行(去掉 \r 前缀)——与 mpv 在 tty 上的官方表现一致。
     // 其余消息:默认格式,stderr 与文件一致。
@@ -75,12 +80,22 @@ void AppLog::install()
     const QFileInfo info(path);
     if (info.exists() && info.size() > kRotateBytes) {
         QFile::remove(path + QStringLiteral(".old"));
-        QFile::rename(path, path + QStringLiteral(".old"));
+        if (!QFile::rename(path, path + QStringLiteral(".old")))
+            fprintf(stderr, "AppLog: 日志轮转失败(无法重命名 %s)\n", qPrintable(path));
     }
     auto *file = new QFile(path);
     if (file->open(QIODevice::WriteOnly | QIODevice::Append))
         g_logFile = file;
-    else
+    else {
+        // handler 尚未安装,不能用 qWarning;直接写 stderr 告知。
+        fprintf(stderr, "AppLog: 无法打开日志文件 %s: %s\n", qPrintable(path),
+                qPrintable(file->errorString()));
         delete file;
+    }
     qInstallMessageHandler(messageHandler);
+}
+
+void AppLog::setLevel(QtMsgType level)
+{
+    g_minLevel = level;
 }

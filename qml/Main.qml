@@ -49,6 +49,7 @@ ApplicationWindow {
             return
         const model = EmbyClient.allEpisodesModelFor(meta.serverUrl)
         if (model.count === 0) {
+            console.info("Main: 全集序列未就绪,拉取后进链", meta.seriesId)
             // 集详情直达(未经过剧集详情时全集序列尚未拉取):拉一次,
             // 等 allEpisodesReady 再进链;避免"找不到下一集"静默断链。
             const c0 = AccountManager.credsForServer(meta.serverUrl)
@@ -66,8 +67,12 @@ ApplicationWindow {
                 break
             }
         }
-        if (nextId)
+        if (nextId) {
+            console.debug("Main: 预取下集", nextId)
             root.fetchEpisodeUrl(nextId) // 预取下集(命中 hook 时零等待)。
+        } else {
+            console.info("Main: 剧集末尾,无下一集", meta.itemId)
+        }
     }
 
     // 协商任意集:缓存命中直接应答;否则发起(防重)。
@@ -76,14 +81,18 @@ ApplicationWindow {
         if (!meta || meta.serverUrl === "")
             return
         if (root._epUrlCache[id]) {
+            console.debug("Main: 协商缓存命中", id)
             root.serveEpisodeUrl(id)
             return
         }
-        if (root._pendingUrls[id])
+        if (root._pendingUrls[id]) {
+            console.debug("Main: 协商在途,防重跳过", id)
             return
+        }
         root._pendingUrls[id] = true
         const c = AccountManager.credsForServer(meta.serverUrl)
         if (c.token === "") {
+            console.warn("Main: 协商凭据缺失,放行占位", id)
             delete root._pendingUrls[id]
             if (root._wantedUrls[id]) {
                 delete root._wantedUrls[id]
@@ -91,6 +100,7 @@ ApplicationWindow {
             }
             return
         }
+        console.debug("Main: 发起协商", id)
         // -1,-1:轨道不锁请求(默认协商);选择延续在响应后按 ordinal 覆盖。
         EmbyClient.fetchPlaybackInfo(meta.serverUrl, c.token, c.userId, id,
                                      "", meta.seriesId, -1, -1)
@@ -104,6 +114,7 @@ ApplicationWindow {
             return
         }
         if (root._wantedUrls[id]) {
+            console.debug("Main: 应答 hook", id)
             delete root._wantedUrls[id]
             MpvClient.deliverEpisodeUrl(id, e.url, e.headers, e.meta,
                                         e.meta.selectedSubtitleUrl || "")
@@ -116,8 +127,10 @@ ApplicationWindow {
         if (!meta || meta.seriesId === "" || meta.serverUrl === "")
             return false
         const model = EmbyClient.allEpisodesModelFor(meta.serverUrl)
-        if (model.count === 0)
+        if (model.count === 0) {
+            console.info("Main: 全集模型未就绪,播放列表待建")
             return false // 模型未就绪(_pendingChain 兜底重拉)
+        }
         const list = []
         let idx = -1
         for (let i = 0; i < model.count; ++i) {
@@ -126,9 +139,12 @@ ApplicationWindow {
             if (it.id === meta.itemId)
                 idx = i
         }
-        if (idx < 0)
+        if (idx < 0) {
+            console.warn("Main: 当前集不在全集序列", meta.itemId)
             return false
+        }
         const e = root._epUrlCache[meta.itemId]
+        console.info("Main: 灌入播放列表", list.length, "条,当前集", meta.itemId)
         MpvClient.setEpisodeList(list, meta.itemId, idx,
                                  e ? e.url : "", e ? e.headers : [],
                                  e ? e.meta : {})
@@ -158,9 +174,11 @@ ApplicationWindow {
     Connections {
         target: MpvClient
         function onPlaybackFinished(itemId, error) {
+            console.info("Main: 播放结束", itemId, "error:", error)
             root.refreshCurrentAfterPlayback()
         }
         function onPlaybackContextChanged(meta) {
+            console.info("Main: 切集", meta.itemId)
             root._curMeta = meta
             root._curAudioOrdinal = meta.selectedAudioOrdinal
             root._curSubtitleOrdinal = meta.selectedSubtitleOrdinal
@@ -173,6 +191,7 @@ ApplicationWindow {
         }
         // 播放列表面板点集/上/下集 → mpv on_load hook 请求真实地址。
         function onEpisodeUrlRequested(itemId) {
+            console.info("Main: hook 请求集", itemId)
             root._wantedUrls[itemId] = true
             root.serveEpisodeUrl(itemId)
         }
@@ -183,6 +202,7 @@ ApplicationWindow {
         function onAllEpisodesReady(serverUrl) {
             // 集详情直达场景:全集序列就绪后重试进链/重排列表。
             if (root._pendingChain && root._pendingChain.serverUrl === serverUrl) {
+                console.info("Main: 全集就绪,重建连播链")
                 const m = root._pendingChain
                 root._pendingChain = null
                 // 仅未建成时建(任一分支建成后 _listPrimed=true,防重复 replace)。
@@ -192,6 +212,7 @@ ApplicationWindow {
             }
             // 挂起的起播交付(直达集详情,模型就绪后建列表再播)。
             if (root._deliverPending) {
+                console.info("Main: 全集就绪,交付起播")
                 root._deliverPending = false
                 const meta = root._deliverMeta
                 root._deliverMeta = null
@@ -220,12 +241,14 @@ ApplicationWindow {
             if (m.selectedSubtitleOrdinal !== undefined && root._curSubtitleUrl === "")
                 m.selectedSubtitleOrdinal = root._curSubtitleOrdinal
             m.type = "Episode"
+            console.info("Main: 协商就绪入缓存", id)
             root._epUrlCache[id] = { url: url, headers: headers, meta: m }
             root.serveEpisodeUrl(id)
         }
         function onPlaybackFailed(serverUrl, itemId, message) {
             // 协商失败:hook 若在等,放行占位(加载失败,mpv 跳过该条)。
             if (root._pendingUrls[itemId]) {
+                console.warn("Main: 协商失败,放行占位", itemId, message)
                 delete root._pendingUrls[itemId]
                 if (root._wantedUrls[itemId]) {
                     delete root._wantedUrls[itemId]
