@@ -33,6 +33,11 @@ constexpr int kReadyRequestId = 999;
 constexpr int kTrackListRequestId = 998;
 // eof 后查询播放列表位置的 request_id(判定是否最后一项)。
 constexpr int kEofCheckRequestId = 997;
+// 播放列表查询(end-file 后判定失败条目是占位还是真实集)的 request_id。
+constexpr int kPlaylistCheckRequestId = 996;
+// 快速重试退避(ms):用完转慢速重试等待网络恢复(用户换代理/换网后自动继续)。
+constexpr int kFastRetryDelaysMs[] = {1000, 2000, 4000};
+constexpr int kSlowRetryDelayMs = 15000;
 } // namespace
 
 MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
@@ -183,6 +188,74 @@ void MpvClient::start(const QString &url, const QVariantList &headers,
     reportStart(s);
     spawnMpv(s);
     enqueueLoad(s, url, headers);
+}
+
+void MpvClient::scheduleRetry(Session *s)
+{
+    const int fastCount = int(sizeof(kFastRetryDelaysMs) / sizeof(kFastRetryDelaysMs[0]));
+    const bool slow = s->retryCount >= fastCount;
+    const int delayMs = slow ? kSlowRetryDelayMs : kFastRetryDelaysMs[s->retryCount];
+    ++s->retryCount;
+    // OSD 提示:让用户看出是"在重连"而非卡死;慢速阶段说明恢复方式。
+    sendJson(s, QJsonObject{
+                    {QStringLiteral("command"),
+                     QJsonArray{QStringLiteral("show-text"),
+                                slow ? QStringLiteral("网络中断,持续重连中(网络恢复后自动继续)")
+                                     : QStringLiteral("网络中断,正在重连…"),
+                                3000}},
+                });
+    qWarning() << "MpvClient: 加载失败,第" << s->retryCount << "次重试,延迟" << delayMs
+               << "ms 条目" << s->retryIndex << s->key;
+    if (!s->retryTimer) {
+        s->retryTimer = new QTimer(this);
+        s->retryTimer->setSingleShot(true);
+        connect(s->retryTimer, &QTimer::timeout, this, [this, key = s->key]() {
+            Session *cur = sessionFor(key);
+            if (!cur || cur->retryIndex < 0)
+                return;
+            // 播放列表模式:占位条目的 on_load hook 挂起时,mpv 会吞掉所有
+            // 播放列表操作(实测:playlist-pos 变了但不加载)——先清空列表
+            // (除当前)、放行挂起的占位,待 mpv 回到 idle 再重新灌入 m3u
+            // (第 0 条 = 当前集真实 URL),实现"重连当前集"。
+            if (cur->listSet && !cur->m3uPath.isEmpty()) {
+                sendJson(cur, QJsonObject{
+                                 {QStringLiteral("command"),
+                                  QJsonArray{QStringLiteral("playlist-clear")}},
+                             });
+                if (!cur->pendingFileId.isEmpty()) {
+                    const QString pending = cur->pendingFileId;
+                    cur->pendingFileId.clear();
+                    qInfo() << "MpvClient: 重试前放行挂起的占位" << pending << cur->key;
+                    sendJson(cur, QJsonObject{
+                                     {QStringLiteral("command"),
+                                      QJsonArray{QStringLiteral("script-message-to"),
+                                                 QStringLiteral("moe_hook"),
+                                                 QStringLiteral("moe-url-ready"),
+                                                 pending, QString()}},
+                                 });
+                }
+                QTimer::singleShot(400, this, [this, key]() {
+                    Session *c2 = sessionFor(key);
+                    if (c2 && !c2->m3uPath.isEmpty()) {
+                        qInfo() << "MpvClient: 重新灌入播放列表重试" << c2->key;
+                        sendJson(c2, QJsonObject{
+                                         {QStringLiteral("command"),
+                                          QJsonArray{QStringLiteral("loadlist"),
+                                                     c2->m3uPath, QStringLiteral("replace")}},
+                                     });
+                    }
+                });
+                return;
+            }
+            // 单条模式:直接重新加载(播放列表只有这一条)。
+            sendJson(cur, QJsonObject{
+                             {QStringLiteral("command"),
+                              QJsonArray{QStringLiteral("loadfile"), cur->url,
+                                         QStringLiteral("replace")}},
+                         });
+        });
+    }
+    s->retryTimer->start(delayMs);
 }
 
 void MpvClient::spawnMpv(Session *s)
@@ -355,6 +428,25 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
             flush(s);
         } else if (rid == kTrackListRequestId) {
             applyTrackSelection(s, obj.value(QStringLiteral("data")).toArray());
+        } else if (rid == kPlaylistCheckRequestId) {
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            QString filename;
+            int index = -1;
+            for (int i = 0; i < list.size(); ++i) {
+                const QJsonObject e = list.at(i).toObject();
+                if (e.value(QStringLiteral("id")).toInt(-1) == s->failedEntryId) {
+                    filename = e.value(QStringLiteral("filename")).toString();
+                    index = i;
+                    break;
+                }
+            }
+            if (filename.isEmpty() || filename.startsWith(QLatin1String("moe://"))) {
+                // 占位条目(或条目已不在列表):协商失败/网络,由 mpv 跳过继续。
+                qWarning() << "MpvClient: end-file error,跳过当前条目" << s->key;
+                return;
+            }
+            s->retryIndex = index;
+            scheduleRetry(s);
         } else if (rid == kEofCheckRequestId) {
             // eof 后:最后一项才结束会话(playlist 无后续);否则 mpv 自动
             // 载入下一项(占位 → on_load hook 重定向)。
@@ -442,6 +534,20 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                         {QStringLiteral("request_id"), kTrackListRequestId},
                     });
         qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
+        // 重试成功:恢复到失败前的位置,并复位重试状态。
+        if (s->retryCount > 0) {
+            if (s->retryPos > 0.5) {
+                qInfo() << "MpvClient: 重试成功,恢复到" << s->retryPos << "s" << s->key;
+                sendJson(s, QJsonObject{
+                                {QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("seek"), s->retryPos,
+                                            QStringLiteral("absolute")}},
+                            });
+            }
+            s->retryCount = 0;
+            s->retryIndex = -1;
+            s->retryPos = 0.0;
+        }
         emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
@@ -450,9 +556,17 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         const QString reason =
             ev.value(QStringLiteral("reason")).toString();
         if (reason == QLatin1String("error")) {
-            // 不结束:占位条目加载失败(协商失败/网络)由 mpv 跳过继续,
-            // 不再按"异常退出"整体终止会话。
-            qWarning() << "MpvClient: end-file error,跳过当前条目" << s->key;
+            // 加载失败:查询播放列表,按失败条目区分——占位条目(moe://ep/)
+            // 协商失败 → 跳过(现状);真实集失败(网络中断)→ 退避重试,
+            // 用户切好代理/网络后自动继续(见 scheduleRetry)。
+            s->failedEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
+            s->retryPos = s->position;
+            sendJson(s, QJsonObject{
+                            {QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("playlist")}},
+                            {QStringLiteral("request_id"), kPlaylistCheckRequestId},
+                        });
             return;
         }
         if (reason == QLatin1String("eof")) {
@@ -597,6 +711,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
     }
     f.write(body2);
     f.close();
+    s->m3uPath = path; // 网络中断重试时重新灌入(见 scheduleRetry)
     if (!headers.isEmpty()) {
         QStringList fields;
         for (const QVariant &h : headers)
@@ -833,6 +948,10 @@ void MpvClient::destroySession(Session *s, bool playEnded, bool errored)
     if (s->connectRetry) {
         s->connectRetry->stop();
         s->connectRetry->deleteLater();
+    }
+    if (s->retryTimer) {
+        s->retryTimer->stop();
+        s->retryTimer->deleteLater();
     }
     if (s->sock) {
         // 断开捕获 Session* 的 lambda,避免删除后再触发。
