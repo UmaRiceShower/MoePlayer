@@ -122,6 +122,15 @@ private:
         bool paused = false;
         double lastReport = 0.0;
         QTimer *pingTimer = nullptr;
+        // 加载失败重试(网络中断兜底):失败条目的播放列表 index、失败时
+        // 位置、已重试次数(超过快速重试次数后转慢速,等待网络恢复)。
+        int retryIndex = -1;
+        double retryPos = 0.0;
+        int retryCount = 0;
+        int failedEntryId = -1;
+        QTimer *retryTimer = nullptr;
+        QString m3uPath;           // 播放列表 m3u(重试时重新灌入)
+
     };
 
     Session *sessionFor(const QString &key) const;
@@ -129,6 +138,8 @@ private:
     // 结束并销毁会话;ended=true 表示因播放结束(需回传+信号),否则静默清理。
     void destroySession(Session *s, bool playEnded, bool errored);
     void spawnMpv(Session *s);
+    // 加载失败后按退避策略重试失败条目(快速几次后转慢速,等网络恢复)。
+    void scheduleRetry(Session *s);
     void sendJson(Session *s, const QJsonObject &obj);
     void handleLine(Session *s, const QByteArray &line);
     void handleEvent(Session *s, const QJsonObject &ev);

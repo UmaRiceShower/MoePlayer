@@ -12,6 +12,7 @@
 #include <clocale>
 
 #include "core/accountmanager.h"
+#include "core/watchhistory.h"
 #include "core/applog.h"
 #include "core/configmanager.h"
 #include "core/constants.h"
@@ -133,6 +134,12 @@ int main(int argc, char *argv[])
     MpvClient mpvClient(&embyClient, &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "MpvClient", &mpvClient);
+
+    // 本地观看记录:详情页定位"上次播放的季/集"的回退数据源(服务器
+    // NextUp 不可用时),并为后续跨服务器观看聚合留结构。须在 QML 引用前注入。
+    WatchHistory watchHistory;
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                 "WatchHistory", &watchHistory);
 
     // 启动日志:当前网络代理(直连/HTTP),便于确认配置生效。
     const QNetworkProxy appProxy = configManager.proxyObject();

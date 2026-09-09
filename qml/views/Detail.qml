@@ -163,6 +163,7 @@ Item {
         if (root.playbackPending || !itemId)
             return
         console.info("Detail: 播放发起", itemId, resume > 0 ? "续播" : "从头")
+        root.recordWatchHistory(itemId)
         root.playbackPending = true
         root.pendingPlayItemId = itemId
         root.resumeTicks = resume
@@ -405,6 +406,54 @@ Item {
                 return
             }
         }
+    }
+
+    // 记录播放目标到本地观看记录(定位回退与后续跨服观看聚合用)。
+    function recordWatchHistory(itemId) {
+        const d = root.detail
+        if (!d || !itemId)
+            return
+        let type = "Movie", seriesId = "", seriesName = "", seasonNo = 0, episodeNo = 0
+        if (d.type === "Series") {
+            // 剧集页播放按钮:目标集在全集模型中查季集号。
+            type = "Episode"
+            seriesId = d.id
+            seriesName = d.name || ""
+            const m = EmbyClient.allEpisodesModelFor(root.serverUrl)
+            for (let i = 0; i < m.count; ++i) {
+                const it = m.itemAt(i)
+                if (it.id === itemId) {
+                    seasonNo = it.seasonNo || 0
+                    episodeNo = it.episodeNo || 0
+                    break
+                }
+            }
+        } else if (d.type === "Episode") {
+            type = "Episode"
+            seriesId = d.seriesId || ""
+            seriesName = d.seriesName || ""
+            seasonNo = d.seasonNo || 0
+            episodeNo = d.episodeNo || 0
+        }
+        WatchHistory.record(root.serverUrl, root.accountId, itemId, type, seriesId, seriesName,
+                            seasonNo, episodeNo, 0, false)
+    }
+    // 设置续播目标并定位(NextUp 与本地观看记录两条来源共用);
+    // 返回 false = 季模型未到,由 onSeasonsReceived 的 locateResume 接手。
+    function applyResumeTarget(seasonNo, episodeNo, episodeId) {
+        root._resumeSeasonNo = seasonNo
+        root._resumeEpisodeNo = episodeNo
+        root._resumeEpisodeId = episodeId
+        root.refreshSeriesPlayText()
+        const rid = root.locateResume()
+        if (!rid)
+            return false
+        root._resumePending = false
+        if (rid === root.currentSeasonId)
+            root.scrollToResumeEpisode()
+        else
+            root.selectSeason(rid, true)
+        return true
     }
 
     // ---- 选季胶囊 ----
@@ -2561,27 +2610,22 @@ Item {
                 return
             root._nextUpReady = true
             if (!items || items.length === 0) {
-                root._resumePending = false // 无续播目标(未看/全看完):保持第一季
-                return
-            }
-            const first = items[0]
-            root._resumeSeasonNo = first.seasonNo || 0
-            root._resumeEpisodeNo = first.episodeNo || 0
-            root._resumeEpisodeId = first.id || ""
-            root.refreshSeriesPlayText() // 按钮文案跟随续播目标
-            if (root._resumeSeasonNo <= 0 || !root._resumeEpisodeId) {
+                // 服务器无续播目标(未看/全看完)或请求失败:回退本地观看记录
+                // (不依赖网络);仍无记录则保持第一季。
+                const rec = WatchHistory.lastEpisode(root.serverUrl, root.accountId, series)
+                if (rec && rec.itemId && (rec.seasonNo || 0) > 0) {
+                    root.applyResumeTarget(rec.seasonNo, rec.episodeNo || 0, rec.itemId)
+                    return
+                }
                 root._resumePending = false
                 return
             }
-            const rid = root.locateResume()
-            if (!rid)
-                return // 季模型未到:由 onSeasonsReceived 处理
-            root._resumePending = false
-            console.debug("Detail: 定位续播(NextUp 后到) S" + root._resumeSeasonNo, root._resumeEpisodeId)
-            if (rid === root.currentSeasonId)
-                root.scrollToResumeEpisode() // 季已正确:直接滚动到目标集
-            else
-                root.selectSeason(rid, true) // 切到目标季,分集到达后滚动
+            const first = items[0]
+            if ((first.seasonNo || 0) <= 0 || !first.id) {
+                root._resumePending = false
+                return
+            }
+            root.applyResumeTarget(first.seasonNo || 0, first.episodeNo || 0, first.id || "")
         }
         function onEpisodesReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
