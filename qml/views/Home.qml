@@ -778,7 +778,7 @@ Item {
         MouseArea {
             anchors.fill: parent
             onClicked: {
-                if (PathView.isCurrentItem) {
+                if (heroPv.currentIndex === hcard.index) {
                     root.showDetail(hcard.modelData.id, hcard.modelData.posterId || "",
                                     hcard.modelData.name, hcard.modelData.serverUrl,
                                     hcard.modelData.accountId)
