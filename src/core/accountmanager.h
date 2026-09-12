@@ -82,6 +82,10 @@ public:
     // historyChanged 增量通知。
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
+    // 按需刷新某账号的播放历史(详情页进入时调):拉该账号的继续观看列表并
+    // 回写本地,结果经 accountHistoryRefreshed 返回;凭据不全时不发请求,
+    // 调用方走本地回退。
+    Q_INVOKABLE void refreshAccountHistory(const QString &accountId);
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
@@ -135,6 +139,10 @@ signals:
     // 播放历史拉取批次结束(见 fetchPlaybackHistory);拉取中的进度经
     // PlaybackHistory::historyChanged 通知。
     void playbackHistoryReady();
+    // 继续观看列表到位(见 refreshAccountHistory):items 字段与播放历史条目
+    // 同构(含剧集归属),请求失败为空列表。
+    void accountHistoryRefreshed(const QString &serverUrl, const QString &accountId,
+                                 const QVariantList &items);
 
 private:
     struct AccountInfo {
@@ -299,4 +307,10 @@ private:
     void finishHistoryScope(const QString &scope);
     // 账号在拉取途中被删除:撤出本轮(票数与存储一并清理),避免批次卡住。
     void abandonHistoryScope(const QString &scope);
+    // 继续观看列表到位:回写本地播放历史并发 accountHistoryRefreshed。
+    void onResumeReceived(const QString &serverUrl, const QString &accountId,
+                          const QVariantList &items);
+    // 全季分集解析结果到位:回写本地播放历史(选集栏展示仍走 EmbyClient 模型)。
+    void onAllEpisodesParsed(const QString &serverUrl, const QString &accountId,
+                             const QString &seriesId, const QVariantList &items);
 };

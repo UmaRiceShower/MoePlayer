@@ -950,6 +950,30 @@ void EmbyClient::fetchItemUserData(const QString &serverUrl, const QString &acco
         QStringLiteral("拉取条目播放数据"), true /*后台连接池*/);
 }
 
+void EmbyClient::fetchResume(const QString &serverUrl, const QString &accountId,
+                             const QString &token, const QString &userId, int limit)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("MediaTypes"), QStringLiteral("Video"));
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,RunTimeTicks,"
+                                  "SeriesId,SeriesName,IndexNumber,ParentIndexNumber"));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
+    get(serverUrl, token, userId,
+        QStringLiteral("/Users/%1/Items/Resume?%2").arg(userId, q.toString()),
+        [this, serverUrl, accountId](const QJsonDocument &doc) {
+            QVariantList out;
+            int seq = 0;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
+            qInfo() << "Emby: resume =" << out.size() << "on" << serverUrl;
+            emit resumeReceived(serverUrl, accountId, out);
+        },
+        // 失败发空列表:调用方按"无目标"处理(不清既有存储,不阻塞其它回退)。
+        [this, serverUrl, accountId] { emit resumeReceived(serverUrl, accountId, QVariantList()); },
+        QStringLiteral("拉取继续观看"), true /*后台连接池*/);
+}
+
 void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,
                              const QString &userId, const QString &seriesId, int limit)
 {
@@ -1222,17 +1246,24 @@ void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &token,
         }, nullptr, QStringLiteral("获取相似推荐"));
 }
 
-void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &token,
-                                  const QString &userId, const QString &seriesId)
+void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &accountId,
+                                  const QString &token, const QString &userId,
+                                  const QString &seriesId)
 {
     const QString key = serverUrl.trimmed();
     // 不带 SeasonId:返回整剧全部分集(跨季),供"继续观看"按进度定位目标集。
     get(key, token, userId,
         QStringLiteral("/Shows/%1/Episodes?Fields=UserData,PrimaryImageAspectRatio").arg(seriesId),
-        [this, key](const QJsonDocument &doc) {
+        [this, key, serverUrl, accountId, seriesId](const QJsonDocument &doc) {
             fillItems(allEpisodesModelFor(key), doc, false);
+            // 同批解析为播放历史条目(含剧集归属),供调用方回写本地。
+            QVariantList out;
+            int seq = 0;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
             qInfo() << "Emby: allEpisodes =" << allEpisodesModelFor(key)->count() << "on" << key;
             emit allEpisodesReady(key);
+            emit allEpisodesParsed(serverUrl, accountId, seriesId, out);
         }, nullptr, QStringLiteral("获取剧集全部分集"));
 }
 

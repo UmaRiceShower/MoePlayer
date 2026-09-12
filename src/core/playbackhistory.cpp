@@ -1,13 +1,29 @@
 #include "playbackhistory.h"
 
 #include <QDateTime>
+#include <QHash>
 #include <QStandardPaths>
 
 #include <algorithm>
+#include <functional>
 #include <utility>
+
+#include "core/constants.h"
 
 namespace {
 const QString kCacheName = QStringLiteral("playback-history");
+
+// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(实测
+// 0 播放账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。
+// 只接受有痕迹的行,避免"上次播放"落到没看过的分集、或把"下一集"记成已播。
+bool hasPlayTrace(const QVariantMap &m)
+{
+    return m.value(QStringLiteral("played")).toBool()
+           || m.value(QStringLiteral("positionTicks")).toDouble() > 0
+           || m.value(QStringLiteral("playedPercentage")).toDouble() > 0
+           || m.value(QStringLiteral("playCount")).toInt() > 0
+           || m.value(QStringLiteral("lastPlayedAt")).toLongLong() > 0;
+}
 
 // 记录归属键:服务器 + 账号(同服多账号的播放历史各自独立)。
 QString scopeOf(const QString &serverUrl, const QString &accountId)
@@ -68,6 +84,8 @@ void PlaybackHistory::setItems(const QString &serverUrl, const QString &accountI
         m.insert(QStringLiteral("scope"), scope);
         m.insert(QStringLiteral("serverUrl"), serverUrl);
         m.insert(QStringLiteral("accountId"), accountId);
+        if (!hasPlayTrace(m))
+            continue; // 从未播放过的条目不入库(见 hasPlayTrace)
         const auto old = merged.constFind(m.value(QStringLiteral("id")).toString());
         if (old != merged.constEnd()) {
             m.insert(QStringLiteral("playCount"), old->value(QStringLiteral("playCount")));
@@ -105,6 +123,69 @@ void PlaybackHistory::mergeItemUserData(const QString &serverUrl, const QString 
         emit historyChanged();
         return;
     }
+}
+
+void PlaybackHistory::upsertItems(const QString &serverUrl, const QString &accountId,
+                                  const QVariantList &items)
+{
+    if (items.isEmpty())
+        return; // 拉取失败的空结果:不清既有(整体覆盖语义见 setItems)
+    const QString scope = scopeOf(serverUrl, accountId);
+    QHash<QString, int> indexById;
+    int nextSeq = 1;
+    for (int i = 0; i < m_items.size(); ++i) {
+        const QVariantMap m = m_items.at(i).toMap();
+        if (m.value(QStringLiteral("scope")).toString() != scope)
+            continue;
+        indexById.insert(m.value(QStringLiteral("id")).toString(), i);
+        nextSeq = qMax(nextSeq, m.value(QStringLiteral("seq")).toInt() + 1);
+    }
+    for (const QVariant &v : items) {
+        QVariantMap m = v.toMap();
+        m.insert(QStringLiteral("scope"), scope);
+        m.insert(QStringLiteral("serverUrl"), serverUrl);
+        m.insert(QStringLiteral("accountId"), accountId);
+        if (!hasPlayTrace(m))
+            continue; // Resume 的"下一未看集"占位等无痕迹行不入库(见 hasPlayTrace)
+        const auto it = indexById.constFind(m.value(QStringLiteral("id")).toString());
+        if (it == indexById.constEnd()) {
+            if (m.value(QStringLiteral("seq")).toInt() == 0)
+                m.insert(QStringLiteral("seq"), nextSeq++);
+            m_items.append(m);
+            continue;
+        }
+        // 已存在:保持既有播放次数/上次播放时间/顺序(新值非 0 才覆盖)。
+        const QVariantMap old = m_items.at(*it).toMap();
+        for (const char *field : { "playCount", "lastPlayedAt", "seq" }) {
+            const QString f = QLatin1String(field);
+            if (m.value(f).toLongLong() == 0)
+                m.insert(f, old.value(f));
+        }
+        m_items[*it] = m;
+    }
+    // 上限:超出按 (上次播放时间 desc, seq asc) 保留最新的若干条。
+    QList<int> idx;
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items.at(i).toMap().value(QStringLiteral("scope")).toString() == scope)
+            idx.append(i);
+    }
+    if (idx.size() > MoePlayer::kHistoryStoredPerScope) {
+        std::stable_sort(idx.begin(), idx.end(), [this](int a, int b) {
+            const QVariantMap x = m_items.at(a).toMap();
+            const QVariantMap y = m_items.at(b).toMap();
+            const qint64 xa = x.value(QStringLiteral("lastPlayedAt")).toLongLong();
+            const qint64 ya = y.value(QStringLiteral("lastPlayedAt")).toLongLong();
+            if (xa != ya)
+                return xa > ya;
+            return x.value(QStringLiteral("seq")).toInt() < y.value(QStringLiteral("seq")).toInt();
+        });
+        QList<int> drop = idx.mid(MoePlayer::kHistoryStoredPerScope);
+        std::stable_sort(drop.begin(), drop.end(), std::greater<int>());
+        for (int i : std::as_const(drop))
+            m_items.removeAt(i);
+    }
+    m_dirty = true;
+    emit historyChanged();
 }
 
 QVariantList PlaybackHistory::items(const QString &serverUrl, const QString &accountId) const
