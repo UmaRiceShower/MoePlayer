@@ -3,496 +3,280 @@ import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
 
-//! 服务器管理页:枚举已保存的 Emby 服务器(账号)。
-//! 卡片网格展示:名称/用户名/地址/凭据状态。第一张为"添加服务器"
-//! 占位卡(添加/管理 UI 后续设计)。
-//! 拖动排序:按住账号卡拖动(卡片跟手),拖动中半透明并置顶,落点
-//! 卡片高亮,松手按位置重排(首页聚合顺序随之改变)。基于 Qt Quick
-//! 官方 Drag/DropArea 拖放机制:MouseArea.drag 驱动 Drag.active,
-//! 全页 DropArea 换算落点索引后调用 AccountManager.moveAccount;
-//! 拖回原位(from==to)时模型不变化,强制重建卡片网格归位。
-//! 打开方式 Ctrl+O(Main 注册快捷键)。
 Item {
     id: root
 
-    // 卡片尺寸(与 PosterCard 同风格:圆角 + surface 底)。
     readonly property int cardW: Constants.serverCardW
     readonly property int cardH: Constants.serverCardH
     readonly property int iconSize: Constants.serverIconSize
-    // 网格间距与 hover 放大参数。
     readonly property int gridSpacing: Constants.serverGridSpacing
-    // 放大倍数:等比例 scale(宽高同倍),不单独加宽。
     readonly property real hoverScale: Constants.serverHoverScale
-    // 放大后每侧视觉溢出 = 卡宽 × (scale-1)/2;左右邻居各让出该距离(一致)。
     readonly property real expandHalf: root.cardW * (root.hoverScale - 1) / 2
-    // 重排动画(水波):让位卡 320ms、被拖卡 1.5 倍时长追赶(480ms);跨行
-    // 换行/被拖卡淡入 0.5→1。均 OutCubic 无回弹。
     readonly property int moveDuration: Constants.serverMoveMs
     readonly property int dragDuration: Constants.serverDragMs
     readonly property int fadeDuration: Constants.serverFadeMs
-    // hover 边框:强调色 50%(预计算一次,避免每帧 Qt.rgba 重建)。
     readonly property color hoverBorder: Qt.rgba(Theme.accent.r, Theme.accent.g,
                                                  Theme.accent.b, 0.5)
-
-    // 重排状态(FLIP First):模型变化前抓各卡位置快照(id → {x,y}),
-    // 新 delegate 按快照就位(消除瞬移 (0,0));dragAccountId 标记被拖卡
-    // (水波:更长动画);reordering 标志本次布局走重排动画而非 hover 挤压。
-    property var posSnapshot: ({})
-    property string dragAccountId: ""
-    property bool reordering: false
-    // 上次已知账号 id 集合:isNew 判定基线(新 id = 新卡,淡入出场;
-    // 旧 id 重登/添加引起的重建不误判为新卡,避免全网格集体淡入)。
-    property var prevAccountIds: []
-    // 拖动状态:按下时记录的卡 id 与布局位置。drop 处理不触碰 drop.source
-    // (拖动中重建后 source 可能是已销毁的旧卡,访问即 internal error),
-    // 统一走这里记录的值。
-    property string pressCardId: ""
-    // 拖动来源类型("" = 无,"account" = 账号卡,"folder" = 文件夹卡):
-    // onPressed 记录,drop 处理据此分流(账号 = 排序/加入文件夹,
-    // 文件夹 = 文件夹排序)。
-    property string pressCardType: ""
-    // 是否有卡在拖动中:拖动期间抑制其他卡 hover 放大。Qt Quick 的 hover
-    // 事件派发给鼠标下所有 hoverEnabled MouseArea(不因 z/覆盖抑制),
-    // 拖动卡(z=10)经过其他卡时其 onEntered 照常触发,不抑制会放大并
-    // 挤压邻居("拖动经过展开文件夹成员卡出现异常 hover")。
+    property var acctCache: ({})
+    property var folderCache: ({})
+    readonly property var emptyAccount: ({ name: "", userName: "", serverUrl: "", authStatus: "", icon: "" })
+    readonly property var emptyFolder: ({ name: "", color: "", accountIds: [] })
+    property string hoveredKey: ""
+    property string dropTargetKey: ""
+    property string dragKey: ""
+    property string pressKey: ""
     property bool dragActive: false
-    property real pressStartX: 0
-    property real pressStartY: 0
-    // 拖动期间模型是否变化过(accountsChanged):拖放重排/重登/添加都会
-    // 触发 Repeater 重建,旧卡 delegate 的 context 被引擎失效但对象尚未
-    // 销毁(deleteLater),此时调用旧卡任何 QML 函数会触发引擎
-    // "QQmlVMEMetaObject: Internal error - invalid context"。onReleased
-    // 据此外出——模型未变(拖出窗口)时旧卡必然有效,归位兜底才安全。
-    property bool dragDirty: false
-
-    // ---- 添加服务器浮窗 ----
-    // 半透明遮罩 + 居中卡片。字段:名称(可选,留空登录成功后自动获取
-    // 服务器端 ServerName)、地址(必填,无 scheme 自动补 http://)、
-    // 用户名(必填)、密码(可为空,填了默认记住供 token 失效自动重登)。
-    // 点"添加"经 AccountManager.addAccount 登录:成功关闭浮窗(账号卡
-    // 自动出现,首页经 accountsChanged 自动重拉聚合);失败在按钮下方
-    // 显示"失败"与详细原因。点击遮罩取消。
+    readonly property int cellW: root.cardW + root.gridSpacing
+    readonly property int cellH: root.cardH + root.gridSpacing
+    readonly property int columns: Math.max(1, Math.floor(gridArea.width / root.cellW))
     property bool addOpen: false
     property bool adding: false
     property string errorMsg: ""
-
-    // ---- 图标设置浮窗 ----
-    property bool iconOpen: false
-    property string iconAccountId: ""
-    property string iconCurrent: ""
-
-    // ---- 服务器修改浮窗 ----
-    // Ctrl+点击账号卡打开:编辑名称/地址/用户名、设置图标、删除。
     property bool editOpen: false
     property string editAccountId: ""
     property string editError: ""
-
-    // ---- 文件夹(分类) ----
-    // 已展开的文件夹 id 列表(纯 UI 层状态,不持久化):点击文件夹卡切换,
-    // 展开时成员卡显示在文件夹卡后,收起时隐藏。
     property var expandedFolders: []
-    // 账号 id → 账号卡 delegate 映射:布局/拖放按 id 查找成员卡用。
-    // Repeater delegate 无 id 直达,由 delegate onCompleted/onDestruction
-    // 注册注销(模型重建时旧卡先删新卡后建,顺序安全)。
-    property var accountCardById: ({})
-    // folderId → 文件夹卡 delegate 映射(同 accountCardById):visualSequence
-    // 按 layoutOrder 查找文件夹卡用,delegate onCompleted/onDestruction 注册注销。
-    property var folderCardById: ({})
-    // 重建前各卡 hover/放大状态(key = accountId/folderId)。Repeater 对
-    // QVariantList model 变化是整体重建(旧 delegate 销毁、新 delegate
-    // 创建);鼠标静止时引擎不会对新卡补发 enter 事件,重建前放大的卡
-    // 重建后放大消失,直到鼠标移动才恢复——拖入文件夹等场景表现为
-    // "先收拢再挤开"两段动画。saveCardHoverState 在重建前保存,新卡
-    // onCompleted 恢复(鼠标移开时 onExited 正常收起,无残留放大)。
-    property var cardHoverState: ({})
-    // 文件夹编辑浮窗:folderEditId 空 = 新建,非空 = 重命名该文件夹。
     property bool folderOpen: false
     property string folderEditId: ""
-    // 浮窗中当前选中的颜色(新建默认随机预设色,重命名预填当前色)。
     property string folderSelectedColor: ""
-
+    readonly property int hoveredIndex: root.indexOfKey(root.hoveredKey)
+    readonly property int hoveredCell: root.hoveredKey === "" ? -1 : root.hoveredIndex
+    readonly property int hoveredRow: root.hoveredCell < 0
+                                      ? -1 : Math.floor(root.hoveredCell / root.columns)
     signal backRequested()
 
-    // 手动布局:占位卡第 0 格,账号卡其后。hover 卡等比例放大(scale),
-    // 其左侧全部卡片左移 expandHalf、右侧全部卡片右移 expandHalf(对称
-    // 一致挤压);y 不变(行距 16 > 上下视觉溢出 9,不重叠)。
-    // animate=true 时位置变化走卡片内动画(挤压 220ms/复位 120ms,OutCubic),
-    // false 用于初始/resize 直接定位。
-    // qmllint disable missing-property
-    // cardRepeater.itemAt() 的静态类型是 QQuickItem,delegate 自定义成员
-    // (expanded/isNew/accountId/animateTo 等)无法静态推导——这是 Repeater
-    // itemAt 回访的固有局限。所有访问均有空值守卫且 delegate 类型恒定,
-    // 运行时安全,故屏蔽该误报。
-    // 视觉序列:占位卡(格 0)→ 按 AccountManager.layoutOrder 遍历:文件夹项
-    // = 文件夹卡(展开时其后紧跟成员卡,成员按该文件夹 accountIds 加入顺序),
-    // 账号项 = 未分组账号卡。layoutOrder 是混合视觉顺序(文件夹块 + 未分组
-    // 账号交错),由 C++ 维护(账号视觉顺序展平恒等于 accounts 顺序)。
-    // 布局与拖放落点共用此序列,顺序规则只在 C++ setLayoutOrder 一处实现,
-    // 不会各写各的导致错位。
-    function visualSequence() {
-        const seq = [plusCard]
+    function rowKeyOf(kind, id) { return kind + ":" + id }
+    function kindOfKey(key) { return key.substring(0, key.indexOf(":")) }
+    function idOfKey(key) { return key.substring(key.indexOf(":") + 1) }
+    function desiredKeys() {
+        const out = []
         const order = AccountManager.layoutOrder
         for (let i = 0; i < order.length; ++i) {
             const e = order[i]
             if (e.type === "folder") {
-                const f = root.folderCardById[e.id]
-                if (!f)
-                    continue
-                seq.push(f)
+                out.push(root.rowKeyOf("folder", e.id))
                 if (root.isFolderExpanded(e.id)) {
-                    const ids = f.modelData.accountIds
-                    for (let j = 0; j < ids.length; ++j) {
-                        const m = root.accountCardById[ids[j]]
-                        if (m)
-                            seq.push(m)
-                    }
+                    const ids = root.folderInfo(e.id).accountIds || []
+                    for (let j = 0; j < ids.length; ++j)
+                        out.push(root.rowKeyOf("account", ids[j]))
                 }
             } else {
-                const c = root.accountCardById[e.id]
-                if (c)
-                    seq.push(c)
+                out.push(root.rowKeyOf("account", e.id))
             }
         }
-        return seq
+        return out
     }
-
-    function layoutCards(animate) {
-        // 模型变化后 Repeater 异步重建:旧卡已销毁、新卡 incubation 中
-        // 时,Repeater.count 与 model 大小不一致。此时布局会拿到残缺
-        // 视觉序列(缺文件夹卡)→ 成员卡被误判为收起而隐藏、未分组卡带
-        // 动画前移,新卡 onCompleted 再布局又移回——卡片来回跳(账号卡
-        // 重建时 count=0 序列只剩占位卡,无卡可动故未暴露;文件夹重建
-        // 时账号卡满,问题显现)。跳过中间态:最后一张 delegate 的
-        // onCompleted 在全部就绪后触发一次布局(每张卡都调 scheduleLayout,
-        // Timer 触发时 count 已更新完毕)。
-        if (cardRepeater.count !== AccountManager.accountCount
-            || folderRepeater.count !== AccountManager.folders.length)
-            return
-        const seq = root.visualSequence()
-        const n = seq.length - 1 // 卡数(不含占位卡)
-        const stepW = root.cardW + root.gridSpacing
-        const stepH = root.cardH + root.gridSpacing
-        const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
-        // 网格居中偏移:内容区比 cols×stepW 宽时,整行卡整体右移居中;
-        // 极端窄窗(内容区 < 卡宽)时为 0,卡片贴左。
-        const offset = Math.max(0, (grid.width - cols * stepW) / 2)
-        // hover 放大卡在序列中的索引(账号卡与文件夹卡都有 expanded)。
-        let hover = -1
-        for (let i = 1; i < seq.length; ++i) {
-            if (seq[i].expanded) {
-                hover = i
-                break
-            }
+    function rowObject(key) {
+        if (key === "plus")
+            return { key: "plus", kind: "plus", id: "" }
+        return { key: key, kind: root.kindOfKey(key), id: root.idOfKey(key) }
+    }
+    function syncModel() {
+        root.refreshDataCache()
+        const want = ["plus"].concat(root.desiredKeys())
+        for (let i = vmodel.count - 1; i >= 0; --i) {
+            if (want.indexOf(vmodel.get(i).key) < 0)
+                vmodel.remove(i)
         }
-        // hover 卡所在行:挤压只作用于同行左右,其他行不受影响。
-        let hrow = -1
-        if (hover >= 0)
-            hrow = Math.floor(hover / cols)
-        // 无放大卡 = 复原:全部卡片用短时复位动画(时长 < hover 触发阈值,
-        // 复原期间移回不与放大动画冲突)。
-        const restore = hover < 0
-        // 重排(水波)模式:快照生效中且无 hover 挤压时,受影响卡从旧位置
-        // 动画到新位置(让位卡 220ms、被拖卡 330ms),跨行/被拖卡淡入;
-        // 新卡(无快照)直接定位 + 淡入,不参与位置动画。
-        const wave = root.reordering && hover < 0 && animate
-        // 占位卡(格 0):行 0 且有同行放大卡时一并左移让位。
-        root.placeCard(plusCard, (hrow === 0 ? -root.expandHalf : 0) + offset, 0, animate, restore, false, 0)
-        // 收起(不在序列)的账号卡:隐藏并复位 hover 放大(避免残留放大,
-        // 展开后直接放大);序列内此前隐藏的成员卡(展开)由下方循环
-        // 显示 + 淡入。
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (!c || seq.indexOf(c) >= 0)
-                continue
-            if (c.visible)
-                c.visible = false
-            c.hovered = false
-            if (c.expanded)
-                c.expanded = false
-        }
-        for (let i = 1; i < seq.length; ++i) {
-            const c = seq[i]
-            if (c.Drag.active)
-                continue
-            const cell = i // 占位卡占第 0 格,序列索引即格位
-            const col = cell % cols
-            const row = Math.floor(cell / cols)
-            const y = row * stepH
-            let x = col * stepW + offset
-            if (hover >= 0 && row === hrow) {
-                if (cell < hover)
-                    x -= root.expandHalf
-                else if (cell > hover)
-                    x += root.expandHalf
-            }
-            // 展开的成员卡此前隐藏:显示 + 淡入(收进去的卡展开出场)。
-            if (!c.visible) {
-                c.visible = true
-                if (animate)
-                    c.fadeInFromZero()
-                else
-                    c.opacity = 1
-            }
-            if (c.isNew) {
-                // 新账号卡:直接定位(位置无需动画)+ 淡入;初始/无动画场景
-                // 直接显示(避免启动时全卡透明)。
-                c.x = x
-                c.y = y
-                c.isNew = false
-                if (animate)
-                    c.fadeInFromZero()
-                else
-                    c.opacity = 1
+        for (let i = 0; i < want.length; ++i) {
+            if (i >= vmodel.count) {
+                vmodel.append(root.rowObject(want[i]))
                 continue
             }
-            // 受影响 = 位置变化(以动画前位置为准:重建卡已被快照复位)。
-            // 跨行(旧 y ≠ 新 y)或为被拖卡 → 淡入;行内平移不淡。
-            const moved = Math.abs(c.x - x) > 0.5 || Math.abs(c.y - y) > 0.5
-            if (!wave) {
-                root.placeCard(c, x, y, animate, restore, false, 0)
+            if (vmodel.get(i).key === want[i])
                 continue
+            let from = -1
+            for (let k = i + 1; k < vmodel.count; ++k) {
+                if (vmodel.get(k).key === want[i]) {
+                    from = k
+                    break
+                }
             }
-            // 无快照的非新卡(添加场景旧卡)或快照为初始位 (0,0) 的卡
-            // (首次展开前成员卡从未布局,位置停初始 0,0,快照抓到 0,0):
-            // 静默定位(同帧直接赋值,不渲染 (0,0)),不走 (0,0) 飞行动画。
-            const key = c.accountId || c.folderId
-            const p0 = root.posSnapshot[key]
-            if (!p0 || (p0.x === 0 && p0.y === 0)) {
-                c.x = x
-                c.y = y
+            if (from < 0)
+                vmodel.insert(i, root.rowObject(want[i]))
+            else
+                vmodel.move(from, i, 1)
+        }
+    }
+    function refreshDataCache() {
+        const accs = AccountManager.accounts
+        const a = {}
+        const prevA = root.acctCache
+        for (const k in prevA)
+            a[k] = prevA[k]
+        for (let i = 0; i < accs.length; ++i)
+            a[accs[i].id] = accs[i]
+        root.acctCache = a
+        const fs = AccountManager.folders
+        const f = {}
+        const prevF = root.folderCache
+        for (const k in prevF)
+            f[k] = prevF[k]
+        for (let i = 0; i < fs.length; ++i)
+            f[fs[i].id] = fs[i]
+        root.folderCache = f
+    }
+    // 取数失败(行刚被移除、退场动画仍在跑)回字段齐全的空模板,
+    // 卡体绑定不会求值到 undefined。
+    function accountInfo(id) { return root.acctCache[id] || root.emptyAccount }
+    function folderInfo(id) { return root.folderCache[id] || root.emptyFolder }
+
+    // key → 模型行号(-1 = 不存在)。
+    function indexOfKey(key) {
+        for (let i = 0; i < vmodel.count; ++i)
+            if (vmodel.get(i).key === key)
+                return i
+        return -1
+    }
+    // hover 让位量:同排且非自身才偏移(卡体容器 x 绑定此值)。
+    function shiftOfCell(cell) {
+        if (root.hoveredCell < 0 || cell === root.hoveredCell)
+            return 0
+        if (Math.floor(cell / root.columns) !== root.hoveredRow)
+            return 0
+        return cell < root.hoveredCell ? -root.expandHalf : root.expandHalf
+    }
+
+    // 拖动归位
+    function settleCardBodies() {
+        for (let i = 0; i < vmodel.count; ++i) {
+            const it = vgrid.itemAtIndex(i)
+            if (!it || it.children.length === 0)
                 continue
+            const holder = it.children[0]
+            for (let k = 0; k < holder.children.length; ++k) {
+                const ch = holder.children[k]
+                if (ch.accountId !== it.id && ch.folderId !== it.id)
+                    continue
+                if (typeof ch.settleBack !== "function")
+                    continue
+                ch.settleBack()
             }
-            const isDrag = c.accountId === root.dragAccountId
-            // 重排走长动画(非短时复位),fade 由跨行/被拖卡判定决定。
-            root.placeCard(c, x, y, animate, false,
-                           moved && (Math.abs(c.y - y) > 0.5 || isDrag),
-                           isDrag ? root.dragDuration : root.moveDuration)
         }
     }
 
-    // 放置卡片:位置变化时 animate=true 走卡片内部 animateTo(restore=true
-    // 用短时复位动画),否则直接赋值。卡片内动画以 id 引用(delegate 内部
-    // 合法),外部经函数访问(QML id 不是对象属性,itemAt(i).animX 无法直达)。
-    // fade/duration 仅重排(水波)时使用:跨行卡淡入、被拖卡 480ms 追赶。
-    function placeCard(c, x, y, animate, restore, fade, duration) {
-        if (animate)
-            c.animateTo(x, y, restore, fade, duration)
-        else {
-            c.x = x
-            c.y = y
-        }
+    // 落点行:页面坐标 → 内容坐标 → 按格宽高取格(floor;格间隙归就近格),
+    // 格位超出模型范围(末行之下、最右列之外)= null(空白)。
+    // 不用 vgrid.indexAt():它要 contentItem 坐标,而由页面坐标映射出的视图
+    // 坐标与内容坐标差 contentX/contentY(视图滚动后落点整体错位);且它只
+    // 命中 delegate 矩形,格间隙与尾部返回 -1(拖到那就没有落点)。
+    // 网格上方/左侧(标题栏那条、左留白)= 占位卡格位,即"移到最前"。
+    function dropTargetAt(x, y) {
+        if (vmodel.count === 0)
+            return null
+        const p = vgrid.contentItem.mapFromItem(root, x, y)
+        if (p.x < 0 || p.y < 0)
+            return { kind: "plus", id: "", key: "plus" }
+        const col = Math.floor(p.x / vgrid.cellWidth)
+        const row = Math.floor(p.y / vgrid.cellHeight)
+        if (col >= root.columns || row >= Math.ceil(vmodel.count / root.columns))
+            return null
+        const r = vmodel.get(Math.min(row * root.columns + col, vmodel.count - 1))
+        return { kind: r.kind, id: r.id, key: r.key }
     }
 
-    // 重排前抓位置快照(FLIP First):遍历当前卡片记录 id → {x,y}(账号卡
-    // 与文件夹卡都要抓;被收起的成员卡也抓——它们位置停在上次布局位,
-    // 展开时从停靠位动画到新位)。新 delegate 按快照复位(见 delegate
-    // Component.onCompleted),重排动画从旧位置出发;dragId 为空表示删除
-    // 场景(无被拖卡)。动画结束后由 dragResetTimer 清状态,避免后续
-    // hover 挤压误判为重排。
-    // 重排前把所有位移动画瞬移到目标位(complete):动画移动期间点击
-    // 触发的新重排,快照与布局起点必须是稳定布局位。否则快照/placeCard
-    // 从中间值出发——卡绕路、回弹,或与前卡之间出现空位(展开文件夹1
-    // 动画中点击文件夹2 → 文件夹2 与前卡空出距离)。不拦截点击,hover
-    // 挤压动画同样被瞬移,点击响应不受影响。
-    function settleAllAnimations() {
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c && c.settle) c.settle()
-        }
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (f && f.settle) f.settle()
-        }
-        if (plusCard && plusCard.settle) plusCard.settle()
-    }
+    function clearDropTarget() { root.dropTargetKey = "" }
 
-    function snapshotPositions(dragId) {
-        root.settleAllAnimations()
-        root.posSnapshot = {}
-        root.dragAccountId = dragId || ""
-        root.reordering = true
-        // 基线 = 变化前的账号集合(交换/删除不改变"哪些卡存在",仅顺序)。
-        root.prevAccountIds = AccountManager.accounts.map(a => a.id)
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c)
-                root.posSnapshot[c.accountId] = { x: c.layoutTargetX(), y: c.layoutTargetY() }
-        }
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (f)
-                root.posSnapshot[f.folderId] = { x: f.layoutTargetX(), y: f.layoutTargetY() }
-        }
-        dragResetTimer.restart()
-    }
-    // qmllint enable missing-property
-
-    // hover 状态/账号列表变化后延迟一帧重排(等 delegate 稳定)。
-    function scheduleLayout() {
-        layoutTimer.restart()
-    }
-
-    // 重建前保存各卡 hover 放大状态(见 cardHoverState 注释)。须在
-    // Repeater 重建前调用:信号 handler 同步执行时旧 delegate 尚未销毁,
-    // 可遍历读取;Repeater 的 model 绑定惰性求值,重建发生在下一帧。
-    // 只记 expanded(不记 hovered):恢复逻辑按状态放大,若把拖动经过时
-    // 仅 hovered 的卡记下,重建后会误恢复成放大且鼠标不在其上——残留
-    // 放大 + 邻居持续挤开。hovered 由重建后鼠标重新进入自然恢复。
-    function saveCardHoverState() {
-        // 拖动中发生重建(异步重登/删除等)时,被拖卡随模型销毁、鼠标
-        // grab 释放,onReleased 永不执行,dragActive 会卡死 true,此后
-        // 所有 hover 放大失效。此处复位:正常 drop 路径此刻已被
-        // onReleased 置 false,重复置幂等;mid-drag 重建时拖拽已随卡
-        // 销毁终结,复位才是正确语义。
-        root.dragActive = false
-        root.cardHoverState = {}
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (f)
-                root.cardHoverState[f.folderId] = f.expanded
-        }
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c)
-                root.cardHoverState[c.accountId] = c.expanded
-        }
-    }
-
-    // 落点目标:优先命中文件夹卡(矩形),其次视觉序列中的账号卡(矩形),
-    // 最后行列换算兜底(任何位置松手都归位到最近的卡位)。返回
-    // {card, hit}:hit=true 表示落在卡矩形内(真正"拖到某张卡上"),
-    // false 表示纯空白兜底(拖到文件夹外空白 = 拖出文件夹的判定依据)。
-    // card 为账号卡(有 accountId)或文件夹卡(有 folderId)。坐标为
-    // DropArea 坐标系(相对 root),先减 grid 偏移换到内容区坐标系。
-    // qmllint disable missing-property
-    // (同 layoutCards:itemAt 回访的动态类型访问,空值守卫下安全。)
-    function dropTargetCard(dx, dy) {
-        const lx = dx - grid.x
-        const ly = dy - grid.y
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (!f)
-                continue
-            // 拖动文件夹卡时跳过自身(同账号卡:拖动卡跟手,z=10 悬于最上
-            // 层,其矩形恒含鼠标点,不跳过永远命中自己,排序失效)。
-            if (root.pressCardType === "folder" && f.folderId === root.pressCardId)
-                continue
-            if (lx >= f.x && lx <= f.x + f.width && ly >= f.y && ly <= f.y + f.height)
-                return { card: f, hit: true }
-        }
-        const seq = root.visualSequence()
-        for (let i = 1; i < seq.length; ++i) {
-            const c = seq[i]
-            if (!c.accountId)
-                continue
-            // 跳过拖动中的卡自身:拖动卡跟手(Drag.target 随鼠标移动,z=10
-            // 悬于最上层),其矩形恒包含鼠标点。不跳过会永远命中自己,
-            // 拖到其他卡/空白全被判为"拖回原位"——排序与拖出文件夹失效。
-            if (c.accountId === root.pressCardId)
-                continue
-            if (lx >= c.x && lx <= c.x + c.width && ly >= c.y && ly <= c.y + c.height)
-                return { card: c, hit: true }
-        }
-        // 兜底:行列换算 → 视觉序列索引(与 layoutCards 同源居中偏移)。
-        const stepW = root.cardW + root.gridSpacing
-        const stepH = root.cardH + root.gridSpacing
-        const cols = Math.max(1, Math.floor((grid.width + root.gridSpacing) / stepW))
-        const offset = Math.max(0, (grid.width - cols * stepW) / 2)
-        const col = Math.max(0, Math.min(cols - 1, Math.floor((lx - offset + root.gridSpacing / 2) / stepW)))
-        const row = Math.max(0, Math.floor((ly + root.gridSpacing / 2) / stepH))
-        const idx = Math.max(1, Math.min(row * cols + col, seq.length - 1))
-        return { card: seq[idx], hit: false }
-    }
-
-    // 拖到该目标是否有实际意义(决定是否高亮):同文件夹成员间无操作
-    // (成员排序暂不支持),未分组账号间为排序(有意义),跨上下文为
-    // 加入/转移/移出(有意义)。
-    function dropMeaningful(fromId, targetFolderId, targetAccountId) {
-        const fromFolder = AccountManager.folderIdOfAccount(fromId)
-        if (targetFolderId !== "")
-            return fromFolder !== targetFolderId
-        const toFolder = AccountManager.folderIdOfAccount(targetAccountId)
-        if (fromFolder === toFolder)
-            return fromFolder === "" && fromId !== targetAccountId
-        return true
-    }
-
-    function clearDropTarget() {
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c)
-                c.dropTarget = false
-        }
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (f)
-                f.dropTarget = false
-        }
-    }
-
+    // 落点判定(拖动过程中):与最终 drop 语义一致,只有"有意义的落点"才
+    // 高亮(无操作不高亮)。
     function updateDropTarget(drop) {
-        root.clearDropTarget()
-        // 用 onPressed 记录的 id,不触碰 drop.source:拖动中模型可能被重建
-        // (重登/添加触发 accountsChanged),旧卡已销毁,访问其属性会触发
-        // 引擎 internal error。
-        if (root.pressCardType === "folder") {
-            // 文件夹拖动:目标为另一文件夹卡 = 排序;账号卡(未分组或
-            // 其他文件夹成员)= 跨类排序——均高亮(与账号拖动同款落点
-            // 高亮)。自己的成员不高亮(无操作)。
-            if (AccountManager.folders.findIndex(f => f.id === root.pressCardId) < 0)
-                return
-            const t = root.dropTargetCard(drop.x, drop.y)
-            if (!t || !t.hit)
-                return
-            const c = t.card
-            if (c.folderId) {
-                if (c.folderId !== root.pressCardId)
-                    c.dropTarget = true
-            } else if (c.accountId && AccountManager.folderIdOfAccount(c.accountId) !== root.pressCardId) {
-                c.dropTarget = true
+        const fromKind = root.kindOfKey(root.pressKey)
+        const fromId = root.idOfKey(root.pressKey)
+        let next = ""
+        if (fromKind !== "" && fromId !== "") {
+            const t = root.dropTargetAt(drop.x, drop.y)
+            // 占位卡行(格 0)= 移到最前,与拖到空白区分不了高亮,不预高亮。
+            if (t && t.kind !== "plus" && t.key !== root.pressKey) {
+                if (fromKind === "folder") {
+                    // 文件夹:落点另一文件夹卡 = 排序;落点账号卡 = 跨类排序
+                    // (本夹成员是无操作,不高亮)。
+                    if (t.kind === "folder")
+                        next = t.key
+                    else if (AccountManager.folderIdOfAccount(t.id) !== fromId)
+                        next = t.key
+                } else {
+                    const fromFolder = AccountManager.folderIdOfAccount(fromId)
+                    if (t.kind === "folder") {
+                        if (fromFolder !== t.id)
+                            next = t.key
+                    } else {
+                        const toFolder = AccountManager.folderIdOfAccount(t.id)
+                        if (fromFolder !== toFolder || (fromFolder === "" && fromId !== t.id))
+                            next = t.key
+                    }
+                }
             }
-            return
         }
-        if (AccountManager.accounts.findIndex(a => a.id === root.pressCardId) < 0)
-            return
-        const t = root.dropTargetCard(drop.x, drop.y)
-        // 纯空白兜底无落点高亮(拖出文件夹在松手时生效,不预高亮)。
-        if (!t || !t.hit)
-            return
-        const c = t.card
-        if (!root.dropMeaningful(root.pressCardId, c.folderId || "", c.accountId || ""))
-            return
-        c.dropTarget = true
+        // 只在目标真变时赋值:每次鼠标移动都 ""→key 抖动会让所有卡重算绑定。
+        if (next !== root.dropTargetKey)
+            root.dropTargetKey = next
     }
 
-    // 拖回原位/无操作:找到存活卡按按下时位置短时复位归位(拖动中模型
-    // 重建过则位置已在布局位,找到即复位;找不到说明卡已销毁,布局接管)。
-    function returnToPress(fromId) {
-        for (let i = 0; i < cardRepeater.count; ++i) {
-            const c = cardRepeater.itemAt(i)
-            if (c && c.accountId === fromId) {
-                c.animateTo(root.pressStartX, root.pressStartY, true)
-                break
+    // 落下:执行重排 / 加入文件夹 / 拖出。语义与原实现一致——账号:同上下文
+    // 排序、落到文件夹卡或成员卡 = 加入/转移、落到空白 = 拖出;文件夹:落点
+    // 文件夹或账号卡 = 排序,空白 = 不动。
+    function applyDrop(x, y) {
+        const fromKind = root.kindOfKey(root.pressKey)
+        const fromId = root.idOfKey(root.pressKey)
+        if (fromKind === "" || fromId === "")
+            return
+        const t = root.dropTargetAt(x, y)
+        if (fromKind === "folder") {
+            if (AccountManager.folders.findIndex(f => f.id === fromId) < 0)
+                return
+            if (!t)
+                return
+            if (t.kind === "plus") {
+                // 占位卡位(首格):文件夹移到最前。
+                root.moveLayoutElement("folder", fromId, "", "")
+                return
             }
+            if (t.kind === "folder") {
+                if (t.id !== fromId)
+                    root.moveLayoutElement("folder", fromId, "folder", t.id)
+                return
+            }
+            if (AccountManager.folderIdOfAccount(t.id) !== fromId)
+                root.moveLayoutElement("folder", fromId, "account", t.id)
+            return
         }
-    }
-    // 文件夹卡拖回原位/无操作(类比 returnToPress):找到存活卡按按下时
-    // 位置短时复位归位。仅在未调用 moveFolder(模型未变、卡必然存活)
-    // 时使用,故可直接 animateTo。
-    function returnFolderToPress(folderId) {
-        for (let i = 0; i < folderRepeater.count; ++i) {
-            const f = folderRepeater.itemAt(i)
-            if (f && f.folderId === folderId) {
-                f.animateTo(root.pressStartX, root.pressStartY, true)
-                break
-            }
+        if (AccountManager.accounts.findIndex(a => a.id === fromId) < 0)
+            return
+        const fromFolder = AccountManager.folderIdOfAccount(fromId)
+        if (!t || t.kind === "plus") {
+            // 空白 / 占位卡格位:文件夹成员 = 拖出(回到未分组区末尾);
+            // 未分组账号 = 占位卡格位算"移到最前",纯空白算"移到末尾"。
+            if (fromFolder !== "")
+                AccountManager.removeAccountFromFolder(fromId)
+            else if (t)
+                root.moveLayoutElement("account", fromId, "", "")
+            else
+                root.moveLayoutElement("account", fromId, "@end", "")
+            return
+        }
+        if (t.kind === "folder") {
+            if (fromFolder !== t.id)
+                AccountManager.addAccountToFolder(t.id, fromId)
+            return
+        }
+        const toFolder = AccountManager.folderIdOfAccount(t.id)
+        if (fromFolder === toFolder) {
+            if (fromFolder === "" && fromId !== t.id)
+                root.moveLayoutElement("account", fromId, "account", t.id)
+            return
+        }
+        if (toFolder !== "") {
+            AccountManager.addAccountToFolder(toFolder, fromId)
+        } else {
+            AccountManager.removeAccountFromFolder(fromId)
+            root.moveLayoutElement("account", fromId, "account", t.id)
         }
     }
 
     // 跨类排序统一入口:把视觉元素(type/id)移到 beforeType/beforeId 之前
     // (移除后插入),提交 AccountManager.setLayoutOrder 统一规范化 + 重排
     // accounts/folders + 持久化。beforeType 空 = 移到最前(占位卡格位);
-    // 目标不在序列中(理论不可达,防御)= 移到末尾。
+    // 目标不在序列中 = 移到末尾(调用方以 "@end" 哨兵表达"移到末尾")。
     function moveLayoutElement(type, id, beforeType, beforeId) {
         const order = JSON.parse(JSON.stringify(AccountManager.layoutOrder))
         const from = order.findIndex(e => e.type === type && e.id === id)
@@ -508,7 +292,6 @@ Item {
         order.splice(to, 0, { type: type, id: id })
         AccountManager.setLayoutOrder(order)
     }
-    // qmllint enable missing-property
 
     // ---- 文件夹(分类) ----
     function isFolderExpanded(id) {
@@ -516,14 +299,13 @@ Item {
     }
     // 点击文件夹卡:切换展开/收起。展开 = 成员卡进入视觉序列(从停靠位
     // 动画到新位 + 淡入);收起 = 成员卡移出序列隐藏(收进文件夹)。
-    // 快照先于布局抓,展开的成员卡停靠位置被记录,重排从停靠位出发。
     function toggleFolder(id) {
         if (root.isFolderExpanded(id))
             root.expandedFolders = root.expandedFolders.filter(f => f !== id)
         else
             root.expandedFolders = root.expandedFolders.concat([id])
-        root.snapshotPositions("")
-        root.scheduleLayout()
+        // 成员行随 expandedFolders 增删(见 onExpandedFoldersChanged → syncModel),
+        // 展开/收起动画由视图的 add/remove/displaced 过渡播。
     }
     function folderNameById(id) {
         const folders = AccountManager.folders
@@ -589,13 +371,15 @@ Item {
     // ---- 服务器修改浮窗 ----
     function openEditDialog(id) {
         root.editAccountId = id
-        // 预填当前值(名称/地址/用户名)。
+        // 预填当前值(名称/地址/用户名);图标字段留空 = 保持当前图标,
+        // 且必须清掉上一次的输入(否则会把它写到另一个账号上)。
         const acc = AccountManager.accounts.find(a => a.id === id)
         if (acc) {
             editNameField.text = acc.name
             editUrlField.text = acc.serverUrl
             editUserField.text = acc.userName
         }
+        editIconField.text = ""
         root.editError = ""
         root.editOpen = true
         editNameField.forceActiveFocus()
@@ -617,20 +401,18 @@ Item {
         const full = url.indexOf("://") < 0 ? "http://" + url : url
         // 仅改存储(token/密码保留),保存即落盘并通知 UI。
         AccountManager.updateAccount(root.editAccountId, editNameField.text.trim(), full, user)
+        // 图标:字段非空才应用(留空 = 保持当前图标);清除由"清除图标"按钮即时执行。
+        const icon = editIconField.text.trim()
+        if (icon !== "")
+            AccountManager.setAccountIcon(root.editAccountId, icon)
         root.closeEditDialog()
     }
     // 删除:先向服务器发登出(结果忽略),再删本地数据(见
     // AccountManager.removeAccount),账号卡自动补位。
     function deleteEditAccount() {
-        root.snapshotPositions("")
         AccountManager.removeAccount(root.editAccountId)
         root.closeEditDialog()
     }
-    // 从修改浮窗打开图标设置(传递当前图标/服务器默认图标)。
-    function openEditIconDialog() {
-        root.openIconDialog(root.editAccountId)
-    }
-
     function openAddDialog() {
         root.addOpen = true
         nameField.text = ""
@@ -644,30 +426,6 @@ Item {
         root.addOpen = false
         root.adding = false
         passField.text = "" // 不留密码于控件,避免二次读取
-    }
-
-    function openIconDialog(id) {
-        const acc = AccountManager.accounts.find(a => a.id === id)
-        root.iconAccountId = id
-        root.iconCurrent = acc ? (acc.icon || "") : ""
-        iconUrlField.text = ""
-        root.iconOpen = true
-        iconUrlField.forceActiveFocus()
-    }
-    function closeIconDialog() {
-        root.iconOpen = false
-    }
-    // 保存即下载缓存并持久化;文本为空不动作(避免误清当前图标)。
-    function saveIcon() {
-        const url = iconUrlField.text.trim()
-        if (url !== "")
-            AccountManager.setAccountIcon(root.iconAccountId, url)
-        root.closeIconDialog()
-    }
-    // 清除自定义图标 → 恢复默认(服务器 Emby 图标)。
-    function clearIcon() {
-        AccountManager.setAccountIcon(root.iconAccountId, "")
-        root.closeIconDialog()
     }
 
     function submitAdd() {
@@ -690,46 +448,25 @@ Item {
         AccountManager.addAccount(nameField.text, full, user, passField.text)
     }
 
-    // 重排动画(被拖卡 480ms)结束后清状态,防后续 hover 挤压误判。
-    Timer {
-        id: dragResetTimer
-        interval: root.dragDuration + 80
-        repeat: false
-        onTriggered: {
-            root.reordering = false
-            root.dragAccountId = ""
-            root.posSnapshot = {}
-        }
-    }
+    onExpandedFoldersChanged: root.syncModel()
 
-    // 账号增删/排序后 Repeater 重建 delegate,重排到位。
+    Component.onCompleted: root.syncModel()
+
+    ListModel { id: vmodel }
+
     Connections {
         target: AccountManager
         function onAccountsChanged() {
-            // 重建前保存 hover 状态(新卡 onCompleted 恢复,见注释)。
-            root.saveCardHoverState()
-            // 模型变化 → 旧卡 context 失效(见 dragDirty 说明),onReleased
-            // 不得再触碰卡函数。
-            root.dragDirty = true
-            // 重建完成后一拍布局:accountsChanged 处理后旧 delegate 已销毁、
-            // 新 delegate 已按快照复位,此时 layoutCards 只作用于新卡,不会
-            // 把拖动卡定位回原位。若孵化未完成(部分新卡未创建),onCompleted
-            // 的兜底 scheduleLayout 会补全——两者幂等合并。
-            // 注意:不在此同步 isNew 基线(会先于异步重建的 delegate 判定,
-            // 导致新增卡误判为旧卡)。
-            root.scheduleLayout()
+            root.syncModel()
         }
-        // 文件夹增删/成员变化(拖入/移出)后重排:视觉序列变化,账号卡
-        // 不重建(accounts 未变),文件夹卡由 Repeater 按 model 重建。
         function onFoldersChanged() {
-            // 重建前保存 hover 状态(新卡 onCompleted 恢复,见注释)。
-            root.saveCardHoverState()
-            root.dragDirty = true
-            root.scheduleLayout()
+            root.syncModel()
+        }
+        function onLayoutOrderChanged() {
+            root.syncModel()
         }
     }
 
-    // 空白区右键菜单:新建文件夹。
     Menu {
         id: blankMenu
         MenuItem {
@@ -738,133 +475,17 @@ Item {
         }
     }
 
-    // 拖放目标:覆盖整页,任何位置松手都换算并重排(拖出网格也不会失序)。
     DropArea {
-        id: gridDrop
         anchors.fill: parent
-        onPositionChanged: (drop) => root.updateDropTarget(drop)
+        onPositionChanged: (drag) => root.updateDropTarget(drag)
         onExited: root.clearDropTarget()
-        // 同 layoutCards:itemAt 回访的动态类型访问,空值守卫下安全。
-        // qmllint disable missing-property
         onDropped: (drop) => {
+            drop.acceptProposedAction()
             root.clearDropTarget()
-            // 不触碰 drop.source(拖动中重建后可能已销毁,访问即 internal
-            // error),来源 id 与归位值统一用 onPressed 记录的 root 状态。
-            // 文件夹拖动:排序分支(pressCardId 此时是 folderId,先于账号
-            // 逻辑;账号拖动 pressCardType === "account",走下方原逻辑)。
-            if (root.pressCardType === "folder") {
-                const fId = root.pressCardId
-                if (AccountManager.folders.findIndex(f => f.id === fId) < 0)
-                    return
-                const t = root.dropTargetCard(drop.x, drop.y)
-                if (!t) {
-                    root.returnFolderToPress(fId)
-                    return
-                }
-                // 落点分类(视觉序列元素):
-                // - folder 卡 / 展开成员卡 → 目标 folder
-                // - 未分组账号卡 → 目标账号(跨类:文件夹插到该账号项前)
-                // - 占位卡(格 0)→ 最前
-                const tc = t.card
-                let targetFolder = ""
-                let targetAccount = ""
-                if (tc.folderId)
-                    targetFolder = tc.folderId
-                else if (tc.accountId) {
-                    targetAccount = tc.accountId
-                    targetFolder = AccountManager.folderIdOfAccount(tc.accountId)
-                }
-                if (targetFolder === fId) {
-                    // 拖回自身/自身成员附近:无操作,归位(模型未变,卡存活)。
-                    root.returnFolderToPress(fId)
-                    return
-                }
-                if (targetFolder !== "") {
-                    // 排序:文件夹插到目标 folder 项前(hit=true 命中另一
-                    // 文件夹卡,或 hit=false 兜底落在 folder 块格位)。
-                    root.snapshotPositions(fId)
-                    root.moveLayoutElement("folder", fId, "folder", targetFolder)
-                    return
-                }
-                if (targetAccount !== "") {
-                    // 未分组账号位:文件夹插到该账号项前(跨类排序)。
-                    root.snapshotPositions(fId)
-                    root.moveLayoutElement("folder", fId, "account", targetAccount)
-                    return
-                }
-                // 占位卡位(序列首):移到最前。
-                root.snapshotPositions(fId)
-                root.moveLayoutElement("folder", fId, "", "")
-                return
-            }
-            const fromId = root.pressCardId
-            if (AccountManager.accounts.findIndex(a => a.id === fromId) < 0)
-                return
-            const t = root.dropTargetCard(drop.x, drop.y)
-            if (!t) {
-                root.returnToPress(fromId)
-                return
-            }
-            const fromFolder = AccountManager.folderIdOfAccount(fromId)
-            // 纯空白落点(未命中任何卡):恢复原判断方式——文件夹成员 =
-            // 拖出文件夹(移出后回到未分组区,位置由重排决定 = 序列末尾);
-            // 未分组账号 = 按兜底位排序(仅账号卡格位有意义);命中文件夹
-            // 块/占位卡格位 = 无操作归位(账号不跨类排序,只有文件夹可
-            // 拖到账号位置)。
-            if (!t.hit) {
-                const bc = t.card
-                if (fromFolder !== "") {
-                    root.snapshotPositions(fromId)
-                    AccountManager.removeAccountFromFolder(fromId)
-                } else if (bc && bc.accountId && fromId !== bc.accountId) {
-                    root.snapshotPositions(fromId)
-                    root.moveLayoutElement("account", fromId, "account", bc.accountId)
-                } else {
-                    root.returnToPress(fromId)
-                }
-                return
-            }
-            const tc = t.card
-            if (tc.folderId !== undefined && tc.folderId !== "") {
-                // 命中文件夹卡(矩形内 = "上方"):加入该文件夹(已在其中
-                // 则拖回原位)。快照在模型变化前抓(被拖卡此刻 x/y 已是
-                // 拖动位置,FLIP First),foldersChanged 重建文件夹卡后按
-                // 快照复位,成员卡从拖动位置直接动画到文件夹后。
-                if (fromFolder !== tc.folderId) {
-                    root.snapshotPositions(fromId)
-                    AccountManager.addAccountToFolder(tc.folderId, fromId)
-                } else {
-                    root.returnToPress(fromId)
-                }
-                return
-            }
-            // 命中账号卡:按源/目标归属执行——同上下文(未分组↔未分组)走
-            // 排序;同文件夹成员间无操作;跨上下文为加入/转移/移出。
-            const toFolder = AccountManager.folderIdOfAccount(tc.accountId)
-            if (fromFolder === toFolder) {
-                if (fromFolder === "" && fromId !== tc.accountId) {
-                    root.snapshotPositions(fromId)
-                    root.moveLayoutElement("account", fromId, "account", tc.accountId)
-                } else {
-                    root.returnToPress(fromId)
-                }
-                return
-            }
-            if (toFolder !== "") {
-                // 拖到成员卡:加入(转移)该文件夹。
-                root.snapshotPositions(fromId)
-                AccountManager.addAccountToFolder(toFolder, fromId)
-            } else {
-                // 从文件夹拖到未分组账号卡:移出 + 落到该账号前。
-                root.snapshotPositions(fromId)
-                AccountManager.removeAccountFromFolder(fromId)
-                root.moveLayoutElement("account", fromId, "account", tc.accountId)
-            }
+            root.applyDrop(drop.x, drop.y)
         }
-        // qmllint enable missing-property
     }
 
-    // 顶栏:标题 + 计数。
     Row {
         id: header
         anchors.top: parent.top
@@ -893,18 +514,14 @@ Item {
         }
     }
 
-    // 返回快捷键:Alt+←(原"← 返回"按钮移除后替代);仅本页可见时生效。
     Shortcut {
         sequences: ["Alt+Left"]
         enabled: root.visible
         onActivated: root.backRequested()
     }
 
-    // 卡片网格(手动布局,见 layoutCards):第一张为加号占位卡,其后每账号一张。
-    // hover 放大/左右对称挤压/动画均由 layoutCards 驱动,不用 Flow(Flow
-    // 无法表达"左侧也被挤压"且加宽是横向的,做不到等比例)。
     Item {
-        id: grid
+        id: gridArea
         anchors.top: header.bottom
         anchors.topMargin: 20
         anchors.left: parent.left
@@ -913,25 +530,7 @@ Item {
         anchors.leftMargin: 24
         anchors.rightMargin: 24
         anchors.bottomMargin: 24
-        Component.onCompleted: {
-            // isNew 判定基线:页面打开时的账号集合。此后添加账号 = 新 id
-            // 淡入;重登/重建 = 旧 id 不误判,不触发集体淡入。
-            root.prevAccountIds = AccountManager.accounts.map(a => a.id)
-            root.layoutCards(false)
-        }
-        onWidthChanged: root.layoutCards(false)
-        onHeightChanged: root.layoutCards(false)
 
-        // 延迟重排(hover 状态/账号变化后执行);首次与 resize 直接定位无动画。
-        Timer {
-            id: layoutTimer
-            interval: 1
-            repeat: false
-            onTriggered: root.layoutCards(true)
-        }
-
-        // 空白区右键:新建文件夹。置于最底层(先声明),卡片区域由卡片自身
-        // 的 MouseArea 拦截,空白处(含加号卡外区域)命中这里。
         MouseArea {
             id: blankArea
             anchors.fill: parent
@@ -939,7 +538,6 @@ Item {
             onClicked: (mouse) => blankMenu.popup(blankArea, mouse.x, mouse.y)
         }
 
-        // 空状态提示:没有服务器时居中显示萌系文案。
         Column {
             anchors.centerIn: parent
             visible: AccountManager.accountCount === 0
@@ -947,12 +545,6 @@ Item {
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 200 } }
 
-            AppText {
-                text: "♥"
-                color: Constants.moePink
-                font.pixelSize: 48
-                anchors.horizontalCenter: parent.horizontalCenter
-            }
             AppText {
                 text: "还没有服务器哦~"
                 color: Theme.textPrimary
@@ -968,842 +560,502 @@ Item {
             }
         }
 
-        // 添加服务器占位卡:萌系虚线边框 + hover 粉色发光。
-        Rectangle {
-            id: plusCard
-            width: root.cardW
-            height: root.cardH
-            radius: 12
-            color: "transparent"
-            border.width: 2
-            border.color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
-            // hover 时粉色柔光外圈。
-            Rectangle {
-                anchors.fill: parent
-                anchors.margins: -3
-                radius: 15
-                color: "transparent"
-                border.width: plusHover.containsMouse ? 2 : 0
-                border.color: Constants.moePink
-                opacity: plusHover.containsMouse ? 0.35 : 0
-                Behavior on opacity { NumberAnimation { duration: 120 } }
+        GridView {
+            id: vgrid
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width, root.columns * root.cellW)
+            clip: true
+            cellWidth: root.cellW
+            cellHeight: root.cellH
+            model: vmodel
+            interactive: !root.dragActive
+            add: Transition {
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.fadeDuration; easing.type: Easing.OutCubic }
             }
-            // 被同行放大卡挤压时同样让位/复位(经 animateTo 驱动)。
-            // 位移动画进行中瞬移到目标位(同账号卡 settle,见其注释)。
-            function settle() {
-                if (plusAnimX.running) plusAnimX.complete()
-                if (plusAnimY.running) plusAnimY.complete()
-                if (plusAnimXBack.running) plusAnimXBack.complete()
-                if (plusAnimYBack.running) plusAnimYBack.complete()
+            remove: Transition {
+                NumberAnimation { property: "opacity"; to: 0; duration: root.fadeDuration; easing.type: Easing.OutCubic }
             }
-            function animateTo(tx, ty, restore) {
-                if (Math.abs(plusCard.x - tx) > 0.5) {
-                    if (restore) {
-                        // 同属性动画互斥(与账号卡一致):挤压进行中恢复先停前者。
-                        plusAnimX.stop()
-                        plusAnimXBack.from = plusCard.x
-                        plusAnimXBack.to = tx
-                        plusAnimXBack.start()
-                    } else {
-                        plusAnimXBack.stop()
-                        plusAnimX.from = plusCard.x
-                        plusAnimX.to = tx
-                        plusAnimX.start()
-                    }
-                }
-                if (Math.abs(plusCard.y - ty) > 0.5) {
-                    if (restore) {
-                        plusAnimY.stop()
-                        plusAnimYBack.from = plusCard.y
-                        plusAnimYBack.to = ty
-                        plusAnimYBack.start()
-                    } else {
-                        plusAnimYBack.stop()
-                        plusAnimY.from = plusCard.y
-                        plusAnimY.to = ty
-                        plusAnimY.start()
-                    }
-                }
+            displaced: Transition {
+                NumberAnimation { properties: "x,y"; duration: root.moveDuration; easing.type: Easing.OutCubic }
             }
-            NumberAnimation {
-                id: plusAnimX
-                target: plusCard
-                property: "x"
-                duration: 220
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                id: plusAnimY
-                target: plusCard
-                property: "y"
-                duration: 220
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                id: plusAnimXBack
-                target: plusCard
-                property: "x"
-                duration: 120
-                easing.type: Easing.OutCubic
-            }
-            NumberAnimation {
-                id: plusAnimYBack
-                target: plusCard
-                property: "y"
-                duration: 120
-                easing.type: Easing.OutCubic
+            move: Transition {
+                NumberAnimation { properties: "x,y"; duration: root.moveDuration; easing.type: Easing.OutCubic }
             }
 
-            Canvas {
-                id: plusIcon
-                anchors.centerIn: parent
-                anchors.verticalCenterOffset: -10
-                width: 44
-                height: 44
-                property color lineColor: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
-                onLineColorChanged: requestPaint()
-                onPaint: {
-                    const ctx = getContext("2d")
-                    ctx.clearRect(0, 0, width, height)
-                    ctx.strokeStyle = lineColor
-                    ctx.lineWidth = 3
-                    ctx.lineCap = "round"
-                    ctx.beginPath()
-                    ctx.moveTo(8, height / 2)
-                    ctx.lineTo(width - 8, height / 2)
-                    ctx.stroke()
-                    ctx.beginPath()
-                    ctx.moveTo(width / 2, 8)
-                    ctx.lineTo(width / 2, height - 8)
-                    ctx.stroke()
-                }
-            }
-            AppText {
-                anchors.top: plusIcon.bottom
-                anchors.topMargin: 8
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "添加服务器"
-                color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
-                font.pixelSize: 14
-                Behavior on color { ColorAnimation { duration: 120 } }
-            }
+            delegate: Item {
+                id: cell
+                required property int index
+                required property string key
+                required property string kind
+                required property string id
+                readonly property var modelData: cell.kind === "folder"
+                                                 ? root.folderInfo(cell.id) : root.accountInfo(cell.id)
+                readonly property bool isFolder: cell.kind === "folder"
+                readonly property bool isPlus: cell.kind === "plus"
+                readonly property bool isHovered: root.hoveredKey === cell.key
+                readonly property bool dropTarget: root.dropTargetKey === cell.key
+                width: vgrid.cellWidth
+                height: vgrid.cellHeight
+                z: (root.dragKey === cell.key || cell.isHovered) ? 2 : 1
 
-            // 点击打开添加浮窗。
-            MouseArea {
-                id: plusHover
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: root.openAddDialog()
-            }
-        }
+                Item {
+                    id: holder
+                    width: root.cardW
+                    height: root.cardH
+                    x: root.shiftOfCell(cell.index)
+                    Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
-        // 账号卡。
-        Repeater {
-            id: cardRepeater
-            model: AccountManager.accounts
+                    // ===== 添加服务器占位卡(第 0 行)=====
+                    Item {
+                        id: plusSlot
+                        visible: cell.isPlus
+                        width: root.cardW
+                        height: root.cardH
+                        Rectangle {
+                            id: plusCard
+                            width: root.cardW
+                            height: root.cardH
+                            radius: 12
+                            color: "transparent"
+                            border.width: 2
+                            border.color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                            
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: -3
+                                radius: 15
+                                color: "transparent"
+                                border.width: plusHover.containsMouse ? 2 : 0
+                                border.color: Constants.moePink
+                                opacity: plusHover.containsMouse ? 0.35 : 0
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                            }
 
-            Rectangle {
-                id: card
-                // Repeater 注入的模型元素。显式 required 声明让 qmllint 把
-                // delegate 内 modelData 视为本卡属性(否则逐处报 unqualified)。
-                required property var modelData
-                // hover 放大:等比例 scale(宽高同倍),200ms 触发阈值(快速
-                // 划过不触发),拖动中收起。位置由 root.layoutCards 管理:
-                // 放大卡左右邻居对称让位(expandHalf),动画走 animX/animY
-                // (220ms)与 animXBack/animYBack(120ms),均 OutCubic 无回弹。
-                width: root.cardW
-                height: root.cardH
-                radius: 12
-                // 背景:所属文件夹颜色(半透明,保持文字可读);未分组或
-                // 颜色非法用 surface。依赖 AccountManager.folders
-                // (foldersChanged 时绑定重估,加入/移出文件夹即时着色)。
-                color: {
-                    const c = root.folderColorOfAccount(card.modelData.id)
-                    if (c === "")
-                        return Theme.surface
-                    const col = root.hexToRgba(c, 0.30)
-                    return col !== "" ? col : Theme.surface
-                }
-                // 拖动中半透明并置顶,松手恢复;放大卡同样置顶避免压边。
-                opacity: Drag.active ? 0.6 : 1.0
-                z: Drag.active ? 10 : (card.expanded ? 9 : 0)
-                scale: card.expanded ? root.hoverScale : 1.0
-                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                // 官方拖放模式:MouseArea.drag 移动卡片自身并驱动 Drag.active。
-                // Drag.source 是 QObject(卡片自身),drop 侧经 accountId 识别。
-                Drag.active: dragArea.drag.active
-                Drag.source: card
-                Drag.hotSpot.x: width / 2
-                Drag.hotSpot.y: height / 2
-                property string accountId: card.modelData.id
-                // 凭据失效(重登失败)标红边;拖动落点高亮用强调色。
-                border.width: card.modelData.authStatus === "invalid" ? 2 : (card.dropTarget ? 2 : 1)
-                border.color: card.modelData.authStatus === "invalid" ? Theme.danger
-                              : (card.dropTarget ? Theme.accent
-                              : (card.hovered ? Constants.moePink : Theme.bg))
-                // 常驻阴影 + hover 粉色柔光外圈。
-                Rectangle {
-                    z: -1
-                    anchors.centerIn: parent
-                    width: parent.width
-                    height: parent.height
-                    radius: parent.radius
-                    color: "transparent"
-                    border.width: card.hovered ? 3 : 0
-                    border.color: Constants.moePink
-                    opacity: card.hovered ? 0.35 : 0
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                }
-                property bool hovered: false
-                property bool dropTarget: false
-                property bool expanded: false
-                // 新账号卡(无位置快照):直接定位 + 淡入,不参与重排位移动画。
-                property bool isNew: false
-                property real dragStartX: 0
-                property real dragStartY: 0
-                // 重排后按快照复位到旧位置(FLIP Invert),消除瞬移 (0,0)。
-                // isNew 由账号 id 基线判定(非快照缺失):新 id 淡入出场;
-                // 旧 id 重建(添加/重登)不误判,无快照时由布局静默定位。
-                // 销毁前停掉所有动画:target 随 delegate 销毁,主动 stop
-                // 避免动画引擎在失效对象上求值(QQmlVMEMetaObject internal
-                // error——重登等触发的重建可能发生在动画进行中)。
-                Component.onDestruction: {
-                    delete root.accountCardById[card.modelData.id]
-                    animX.stop()
-                    animY.stop()
-                    animXBack.stop()
-                    animYBack.stop()
-                    opacityAnim.stop()
-                }
-                Component.onCompleted: {
-                    root.accountCardById[card.modelData.id] = card
-                    // 重建前该卡 hover 放大中(鼠标未动):立即恢复放大,
-                    // 避免"放大消失→延迟重现"两段挤开。鼠标移开时
-                    // onExited 正常收起,不会残留。
-                    if (root.cardHoverState[card.modelData.id]) {
-                        card.hovered = true
-                        card.expanded = true
-                    }
-                    delete root.cardHoverState[card.modelData.id]
-                    const p = root.posSnapshot[card.modelData.id]
-                    card.isNew = !root.prevAccountIds.includes(card.modelData.id)
-                    if (p) {
-                        card.x = p.x
-                        card.y = p.y
-                    } else if (card.isNew) {
-                        card.opacity = 0
-                    }
-                    // Repeater 重建为异步(incubation):accountsChanged 触发的
-                    // 1ms 布局可能跑在重建完成前。本 delegate 完成后主动触发
-                    // 一次布局,同批次全部 onCompleted 会合并到同一 Timer 周期,
-                    // 最终布局在全部 delegate 就绪后执行(幂等,仅动位置变化的卡)。
-                    root.scheduleLayout()
-                }
+                            Canvas {
+                                id: plusIcon
+                                property color lineColor: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                                anchors.centerIn: parent
+                                anchors.verticalCenterOffset: -10
+                                width: 44
+                                height: 44
+                                onLineColorChanged: requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.strokeStyle = lineColor
+                                    ctx.lineWidth = 3
+                                    ctx.lineCap = "round"
+                                    ctx.beginPath()
+                                    ctx.moveTo(8, height / 2)
+                                    ctx.lineTo(width - 8, height / 2)
+                                    ctx.stroke()
+                                    ctx.beginPath()
+                                    ctx.moveTo(width / 2, 8)
+                                    ctx.lineTo(width / 2, height - 8)
+                                    ctx.stroke()
+                                }
+                            }
+                            AppText {
+                                anchors.top: plusIcon.bottom
+                                anchors.topMargin: 8
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: "添加服务器"
+                                color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                                font.pixelSize: 14
+                                Behavior on color { ColorAnimation { duration: 120 } }
+                            }
 
-                // 布局目标位置(位移动画中返回动画 to 值,否则当前 x/y):
-                // 重排/挤压动画进行中抓快照用目标位,避免动画中间值进入
-                // 快照——点击移动中的卡触发重排时,布局从旧布局位动画到
-                // 新位(无中间值跳变,"不可预知"动画)。
-                function layoutTargetX() {
-                    if (animX.running) return animX.to
-                    if (animXBack.running) return animXBack.to
-                    return card.x
-                }
-                function layoutTargetY() {
-                    if (animY.running) return animY.to
-                    if (animYBack.running) return animYBack.to
-                    return card.y
-                }
-                // 位移动画进行中瞬移到目标位(complete 直接落 to 值):
-                // 动画移动期间点击触发重排时,快照与布局起点必须是稳定
-                // 布局位而非中间值——从中间值出发的布局会让卡绕路/回弹,
-                // 或与前卡之间产生空位。snapshotPositions 开头统一调用。
-                function settle() {
-                    if (animX.running) animX.complete()
-                    if (animY.running) animY.complete()
-                    if (animXBack.running) animXBack.complete()
-                    if (animYBack.running) animYBack.complete()
-                }
-                // 放大状态变化 → 重排(左右邻居让位/复位)。
-                onExpandedChanged: root.scheduleLayout()
-                // 位移动画:线性插值 + easeOutCubic(挤压与复位一致,无回弹);
-                // 复位 120ms < hover 触发 200ms,复原期间移回不会与放大
-                // 动画冲突。手动 from/to 驱动(不设 Behavior,否则初始
-                // 布局也会动画)。
-                function animateTo(tx, ty, restore, fade, duration) {
-                    if (Math.abs(card.x - tx) > 0.5) {
-                        if (restore) {
-                            // 同属性动画互斥:挤压(animX)进行中启动恢复时先
-                            // 停掉前者。否则两动画每帧双写 x,恢复被挤压
-                            // 动画结束帧覆盖——放大/挤压刚启动时右键,卡片
-                            // 停在被挤开位、两侧不收回(复现场景)。
-                            animX.stop()
-                            animXBack.from = card.x
-                            animXBack.to = tx
-                            animXBack.start()
-                        } else {
-                            animXBack.stop()
-                            animX.duration = duration > 0 ? duration : root.moveDuration
-                            animX.from = card.x
-                            animX.to = tx
-                            animX.start()
+                            // 点击打开添加浮窗。
+                            MouseArea {
+                                id: plusHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: root.openAddDialog()
+                            }
                         }
                     }
-                    if (Math.abs(card.y - ty) > 0.5) {
-                        if (restore) {
-                            animY.stop()
-                            animYBack.from = card.y
-                            animYBack.to = ty
-                            animYBack.start()
-                        } else {
-                            animYBack.stop()
-                            animY.duration = duration > 0 ? duration : root.moveDuration
-                            animY.from = card.y
-                            animY.to = ty
-                            animY.start()
+
+                    // ===== 账号卡 =====
+                    Rectangle {
+                        id: card
+                        readonly property var modelData: cell.kind === "account" ? cell.modelData : root.emptyAccount
+                        property string accountId: cell.id
+                        property bool hovered: false
+                        property bool expanded: false
+
+                        function settleBack() {
+                            if (Math.abs(card.x) > 0.5) {
+                                cardSettleX.from = card.x
+                                cardSettleX.to = 0
+                                cardSettleX.start()
+                            }
+                            if (Math.abs(card.y) > 0.5) {
+                                cardSettleY.from = card.y
+                                cardSettleY.to = 0
+                                cardSettleY.start()
+                            }
+                        }
+
+                        visible: cell.kind === "account"
+                        width: root.cardW
+                        height: root.cardH
+                        radius: 12
+                        color: {
+                            const c = root.folderColorOfAccount(card.modelData.id)
+                            if (c === "")
+                                return Theme.surface
+                            const col = root.hexToRgba(c, 0.30)
+                            return col !== "" ? col : Theme.surface
+                        }
+                        opacity: Drag.active ? 0.6 : 1.0
+                        scale: card.expanded ? root.hoverScale : 1.0
+                        Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        Drag.active: dragArea.drag.active
+                        Drag.source: card
+                        Drag.hotSpot.x: width / 2
+                        Drag.hotSpot.y: height / 2
+                        border.width: card.modelData.authStatus === "invalid" ? 2 : (cell.dropTarget ? 2 : 1)
+                        border.color: card.modelData.authStatus === "invalid" ? Theme.danger
+                                      : (cell.dropTarget ? Theme.accent
+                                      : (card.hovered ? Constants.moePink : Theme.bg))
+                        Rectangle {
+                            z: -1
+                            anchors.centerIn: parent
+                            width: parent.width
+                            height: parent.height
+                            radius: parent.radius
+                            color: "transparent"
+                            border.width: card.hovered ? 3 : 0
+                            border.color: Constants.moePink
+                            opacity: card.hovered ? 0.35 : 0
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+                        }
+
+                        NumberAnimation {
+                            id: cardSettleX
+                            target: card
+                            property: "x"
+                            duration: root.dragDuration
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            id: cardSettleY
+                            target: card
+                            property: "y"
+                            duration: root.dragDuration
+                            easing.type: Easing.OutCubic
+                        }
+
+                        Timer {
+                            id: hoverTimer
+                            interval: 200
+                            repeat: false
+                            onTriggered: {
+                                if (root.dragActive)
+                                    return
+                                card.expanded = true
+                                root.hoveredKey = cell.key
+                            }
+                        }
+
+                        Rectangle {
+                            width: root.iconSize
+                            height: root.iconSize
+                            radius: 10
+                            anchors.top: parent.top
+                            anchors.topMargin: 14
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14
+                            color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                            ServerIcon {
+                                anchors.fill: parent
+                                icon: card.modelData.icon
+                                fallbackText: (card.modelData.name !== "" ? card.modelData.name : card.modelData.userName).charAt(0)
+                            }
+                        }
+
+                        Column {
+                            anchors.top: parent.top
+                            anchors.topMargin: 18
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14 + root.iconSize + 12
+                            anchors.right: parent.right
+                            anchors.rightMargin: 14
+                            spacing: 4
+                            Row {
+                                width: parent.width
+                                spacing: 6
+                                AppText {
+                                    text: card.modelData.name !== "" ? card.modelData.name : card.modelData.userName
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    width: parent.width - (card.modelData.authStatus === "invalid" ? 78 : 0)
+                                }
+                                AppText {
+                                    visible: card.modelData.authStatus === "invalid"
+                                    text: "[凭据失效]"
+                                    color: Theme.danger
+                                    font.pixelSize: 12
+                                }
+                            }
+                            AppText {
+                                width: parent.width
+                                text: card.modelData.userName + " · " + card.modelData.serverUrl
+                                color: Theme.textMuted
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            id: dragArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            drag {
+                                target: card
+                                threshold: 8
+                            }
+                            onEntered: {
+                                card.hovered = true
+                                if (!root.dragActive)
+                                    hoverTimer.start()
+                            }
+                            onExited: {
+                                card.hovered = false
+                                hoverTimer.stop()
+                                card.expanded = false
+                                if (root.hoveredKey === cell.key)
+                                    root.hoveredKey = ""
+                            }
+                            onPressed: (mouse) => {
+                                hoverTimer.stop()
+                                card.expanded = false
+                                if (root.hoveredKey === cell.key)
+                                    root.hoveredKey = ""
+                                root.pressKey = cell.key
+                                root.dragKey = cell.key
+                                root.dragActive = true
+                            }
+                            onClicked: (mouse) => {
+                                if (mouse.modifiers & Qt.ControlModifier)
+                                    root.openEditDialog(cell.id)
+                            }
+                            onReleased: {
+                                const r = root
+                                r.dragActive = false
+                                card.Drag.drop()
+                                r.dragKey = ""
+                                r.settleCardBodies()
+                            }
                         }
                     }
-                    // 跨行换行/被拖卡淡入(0.5→1),行内平移不淡。
-                    if (fade && !restore) {
-                        opacityAnim.from = 0.5
-                        opacityAnim.to = 1
-                        opacityAnim.start()
-                    }
-                }
-                // 新账号卡:淡入(0→1)出场。
-                function fadeInFromZero() {
-                    opacityAnim.from = 0
-                    opacityAnim.to = 1
-                    opacityAnim.start()
-                }
-                NumberAnimation {
-                    id: animX
-                    target: card
-                    property: "x"
-                    duration: 220
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: animY
-                    target: card
-                    property: "y"
-                    duration: 220
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: animXBack
-                    target: card
-                    property: "x"
-                    duration: 120
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: animYBack
-                    target: card
-                    property: "y"
-                    duration: 120
-                    easing.type: Easing.OutCubic
-                }
-                // 重排淡入:跨行换行/被拖卡 0.5→1、新卡 0→1。
-                NumberAnimation {
-                    id: opacityAnim
-                    target: card
-                    property: "opacity"
-                    duration: root.fadeDuration
-                    easing.type: Easing.OutCubic
-                }
 
-                // hover 触发阈值:进入后 200ms 才放大,快速划过不触发;
-                // 大于复原动画时长(120ms),复原期间移回不会与放大冲突。
-                Timer {
-                    id: hoverTimer
-                    interval: 200
-                    repeat: false
-                    onTriggered: card.expanded = true
-                }
+                    // ===== 文件夹卡 =====
+                    Rectangle {
+                        id: fcard
+                        readonly property var modelData: cell.kind === "folder" ? cell.modelData : root.emptyFolder
+                        property string folderId: cell.id
+                        property bool isOpen: root.isFolderExpanded(fcard.folderId)
+                        property bool hovered: false
+                        property bool expanded: false
 
-                // 图标区:自定义图标 → 服务器默认 Emby 图标(web PWA 图标/
-                // favicon)→ 名称首字,加载失败自动降档(见 ServerIcon)。
-                Rectangle {
-                    width: root.iconSize
-                    height: root.iconSize
-                    radius: 10
-                    anchors.top: parent.top
-                    anchors.topMargin: 14
-                    anchors.left: parent.left
-                    anchors.leftMargin: 14
-                    color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
-                    ServerIcon {
-                        anchors.fill: parent
-                        icon: card.modelData.icon
-                        fallbackText: (card.modelData.name !== "" ? card.modelData.name : card.modelData.userName).charAt(0)
-                    }
-                }
+                        function settleBack() {
+                            if (Math.abs(fcard.x) > 0.5) {
+                                folderSettleX.from = fcard.x
+                                folderSettleX.to = 0
+                                folderSettleX.start()
+                            }
+                            if (Math.abs(fcard.y) > 0.5) {
+                                folderSettleY.from = fcard.y
+                                folderSettleY.to = 0
+                                folderSettleY.start()
+                            }
+                        }
 
-                // 名称 + 用户名 · 地址。
-                Column {
-                    anchors.top: parent.top
-                    anchors.topMargin: 18
-                    anchors.left: parent.left
-                    anchors.leftMargin: 14 + root.iconSize + 12
-                    anchors.right: parent.right
-                    anchors.rightMargin: 14
-                    spacing: 4
-                    Row {
-                        width: parent.width
-                        spacing: 6
+                        visible: cell.isFolder
+                        width: root.cardW
+                        height: root.cardH
+                        radius: 12
+                        color: {
+                            const col = root.hexToRgba(fcard.modelData.color, 0.30)
+                            return col !== "" ? col : Theme.surface
+                        }
+                        opacity: Drag.active ? 0.6 : 1.0
+                        scale: fcard.expanded ? root.hoverScale : 1.0
+                        Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+                        Drag.active: farea.drag.active
+                        Drag.source: fcard
+                        Drag.hotSpot.x: width / 2
+                        Drag.hotSpot.y: height / 2
+                        border.width: cell.dropTarget ? 2 : 1
+                        border.color: cell.dropTarget ? Constants.moePink
+                                      : (fcard.isOpen ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                                      : (fcard.hovered ? Constants.moePink : Theme.bg))
+                        Rectangle {
+                            z: -1
+                            anchors.centerIn: parent
+                            width: parent.width
+                            height: parent.height
+                            radius: parent.radius
+                            color: "transparent"
+                            border.width: fcard.hovered ? 3 : 0
+                            border.color: Constants.moePink
+                            opacity: fcard.hovered ? 0.35 : 0
+                            Behavior on opacity { NumberAnimation { duration: 120 } }
+                        }
+
+                        NumberAnimation {
+                            id: folderSettleX
+                            target: fcard
+                            property: "x"
+                            duration: root.dragDuration
+                            easing.type: Easing.OutCubic
+                        }
+                        NumberAnimation {
+                            id: folderSettleY
+                            target: fcard
+                            property: "y"
+                            duration: root.dragDuration
+                            easing.type: Easing.OutCubic
+                        }
+
+                        Timer {
+                            id: fcardHoverTimer
+                            interval: 200
+                            repeat: false
+                            onTriggered: {
+                                if (root.dragActive)
+                                    return
+                                fcard.expanded = true
+                                root.hoveredKey = cell.key
+                            }
+                        }
+
+                        Rectangle {
+                            width: root.iconSize
+                            height: root.iconSize
+                            radius: 10
+                            anchors.top: parent.top
+                            anchors.topMargin: 14
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14
+                            color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                            Canvas {
+                                property color lineColor: farea.containsMouse ? Constants.moePink : Theme.textMuted
+                                anchors.centerIn: parent
+                                width: 28
+                                height: 28
+                                onLineColorChanged: requestPaint()
+                                onPaint: {
+                                    const ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    ctx.lineCap = "round"
+                                    ctx.lineJoin = "round"
+                                    ctx.lineWidth = 2.5
+                                    ctx.strokeStyle = lineColor
+                                    ctx.beginPath()
+                                    ctx.moveTo(5, 11)
+                                    ctx.lineTo(10, 11)
+                                    ctx.lineTo(13, 7)
+                                    ctx.lineTo(23, 7)
+                                    ctx.lineTo(23, 11)
+                                    ctx.moveTo(5, 11)
+                                    ctx.lineTo(5, 23)
+                                    ctx.lineTo(23, 23)
+                                    ctx.lineTo(23, 11)
+                                    ctx.stroke()
+                                }
+                            }
+                        }
+
+                        Column {
+                            anchors.top: parent.top
+                            anchors.topMargin: 18
+                            anchors.left: parent.left
+                            anchors.leftMargin: 14 + root.iconSize + 12
+                            anchors.right: parent.right
+                            anchors.rightMargin: 14
+                            spacing: 4
+                            AppText {
+                                width: parent.width
+                                text: fcard.modelData.name
+                                color: Theme.textPrimary
+                                font.pixelSize: 15
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            AppText {
+                                width: parent.width
+                                text: (fcard.modelData.accountIds ? fcard.modelData.accountIds.length : 0) + " 台服务器"
+                                color: Theme.textMuted
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                        }
+
                         AppText {
-                            text: card.modelData.name !== "" ? card.modelData.name : card.modelData.userName
-                            color: Theme.textPrimary
-                            font.pixelSize: 15
-                            font.bold: true
-                            elide: Text.ElideRight
-                            width: parent.width - (card.modelData.authStatus === "invalid" ? 78 : 0)
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: 8
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            text: fcard.isOpen ? "▾" : "▸"
+                            color: farea.containsMouse ? Theme.accent : Theme.textMuted
+                            font.pixelSize: 13
                         }
-                        AppText {
-                            visible: card.modelData.authStatus === "invalid"
-                            text: "[凭据失效]"
-                            color: Theme.danger
-                            font.pixelSize: 12
+
+                        MouseArea {
+                            id: farea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton
+                            preventStealing: true
+                            drag {
+                                target: fcard
+                                threshold: 8
+                            }
+                            onEntered: {
+                                fcard.hovered = true
+                                if (!root.dragActive)
+                                    fcardHoverTimer.start()
+                            }
+                            onExited: {
+                                fcard.hovered = false
+                                fcardHoverTimer.stop()
+                                fcard.expanded = false
+                                if (root.hoveredKey === cell.key)
+                                    root.hoveredKey = ""
+                            }
+                            onPressed: (mouse) => {
+                                fcardHoverTimer.stop()
+                                fcard.expanded = false
+                                if (root.hoveredKey === cell.key)
+                                    root.hoveredKey = ""
+                                root.pressKey = cell.key
+                                root.dragKey = cell.key
+                                root.dragActive = true
+                            }
+                            onClicked: (mouse) => {
+                                // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
+                                // 展开/收起成员。拖动超过 threshold 后不触发 click。
+                                if (mouse.modifiers & Qt.ControlModifier)
+                                    root.openFolderDialog(cell.id)
+                                else
+                                    root.toggleFolder(cell.id)
+                            }
+                            onReleased: {
+                                const r = root
+                                r.dragActive = false
+                                fcard.Drag.drop()
+                                r.dragKey = ""
+                                r.settleCardBodies()
+                            }
                         }
-                    }
-                    AppText {
-                        width: parent.width
-                        text: card.modelData.userName + " · " + card.modelData.serverUrl
-                        color: Theme.textMuted
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                    }
-                }
-
-                // 拖动:按住拖动卡片(跟手),松手按落点重排;hover 样式合并于此。
-                // 拖动前记录布局位置:未发生真实交换时(drop 未投递/拖回原位)
-                // 手动归位——不触碰 Repeater.model(赋值会破坏 accounts 绑定,
-                // 导致后续所有重排都不刷新)。
-                MouseArea {
-                    id: dragArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    // 仅左键:拖动排序 + Ctrl+点击修改;右键不再弹菜单。
-                    acceptedButtons: Qt.LeftButton
-                    drag {
-                        target: card
-                        threshold: 8
-                    }
-                    onEntered: {
-                        card.hovered = true
-                        // 拖动进行中不放大:其他卡的 hover 事件不会被拖动
-                        // 卡遮挡抑制,不检查会让拖动路径上的卡放大挤压。
-                        if (!root.dragActive)
-                            hoverTimer.start()
-                    }
-                    onExited: {
-                        card.hovered = false
-                        hoverTimer.stop()
-                        card.expanded = false
-                    }
-                    onPressed: (mouse) => {
-                        // 按住立即收起放大(hover 让位于拖动),并记录布局位置
-                        // 与卡 id(root 级,drop 处理经此访问,不触碰可能已
-                        // 随重建销毁的 drop.source)。
-                        hoverTimer.stop()
-                        card.expanded = false
-                        card.dragStartX = card.x
-                        card.dragStartY = card.y
-                        root.pressCardId = card.accountId
-                        root.pressCardType = "account"
-                        // 同 folder 卡:动画中按下时归位目标用稳定位(layout
-                        // TargetX 动画中返回 to 值),防卡拉回动画中间值。
-                        root.pressStartX = card.layoutTargetX()
-                        root.pressStartY = card.layoutTargetY()
-                        root.dragActive = true // 拖动期间抑制其他卡放大
-                        root.dragDirty = false // 新一轮拖动,清模型变化标记
-                    }
-                    onClicked: (mouse) => {
-                        // Ctrl+点击打开修改浮窗(名称/地址/用户名/图标/删除);
-                        // 普通点击无操作(拖动排序是主要交互)。
-                        if (mouse.modifiers & Qt.ControlModifier)
-                            root.openEditDialog(card.modelData.id)
-                    }
-                    onReleased: {
-                        // 事件顺序:released 先于 drop 投递。Drag.drop() 在
-                        // 本 handler 内投递 drop → onDropped → moveAccount →
-                        // Repeater 重建会使本卡 delegate 的 context 失效
-                        // (clearContext,对象未销毁)。此后本 handler 内任何
-                        // id 解析(root/card)都会 ReferenceError,任何本卡
-                        // QML 函数调用都会 "QQmlVMEMetaObject: Internal
-                        // error - invalid context"(gdb 实证)。因此全部取值
-                        // 在 drop 前完成:捕获根对象引用 r(JS 引用,属性读取
-                        // 不走 context,drop 后仍可安全读 r.dragDirty)与
-                        // 归位目标;drop 后不再做任何 id 查找。
-                        const r = root
-                        r.dragActive = false // 拖动结束(须在 drop 前,r 引用安全)
-                        const sx = card.dragStartX
-                        const sy = card.dragStartY
-                        const act = card.Drag.drop()
-                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)且模型未变
-                        // (dragDirty 仍 false,本卡有效)时手动归位;投递成功
-                        // 时归位由 onDropped(from==to)或重排布局完成,本卡
-                        // 已失效,不再触碰。
-                        if (act === Qt.IgnoreAction && !r.dragDirty && card.animateTo)
-                            card.animateTo(sx, sy, true)
-                    }
-                }
-            }
-        }
-
-        // 文件夹卡(同款卡片):点击切换展开/收起(展开时成员卡跟在文件夹
-        // 卡后),Ctrl+点击打开修改浮窗(重命名/删除);拖放目标(账号卡
-        // 拖入即加入,拖到其上高亮)。不参与拖动(无 Drag,布局/落点经
-        // visualSequence 合成)。
-        Repeater {
-            id: folderRepeater
-            model: AccountManager.folders
-
-            Rectangle {
-                id: fcard
-                // Repeater 注入的模型元素(同账号卡:required 声明让
-                // 静态检查把 modelData 视为本卡属性)。
-                required property var modelData
-                width: root.cardW
-                height: root.cardH
-                radius: 12
-                // 背景 = 文件夹颜色(半透明,保持文字可读);无/非法颜色
-                // fallback surface(loadFolders 已兜底随机色,双保险)。
-                color: {
-                    const col = root.hexToRgba(fcard.modelData.color, 0.30)
-                    return col !== "" ? col : Theme.surface
-                }
-                // 放大卡置顶避免压边;拖动中半透明并置顶(与账号卡一致)。
-                // 文件夹卡可拖动排序(跨类:可插到未分组账号项前,见
-                // onDropped 的 pressCardType==="folder" 分支与
-                // moveLayoutElement);点击展开/收起不受影响(drag.threshold
-                // 保证未拖动的按下-释放仍为 click)。
-                opacity: Drag.active ? 0.6 : 1.0
-                z: Drag.active ? 10 : (fcard.expanded ? 9 : 0)
-                scale: fcard.expanded ? root.hoverScale : 1.0
-                Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-                // 官方拖放模式(同账号卡):MouseArea.drag 移动卡片自身并驱动
-                // Drag.active;drop 侧经 folderId 识别来源。
-                Drag.active: farea.drag.active
-                Drag.source: fcard
-                Drag.hotSpot.x: width / 2
-                Drag.hotSpot.y: height / 2
-                property string folderId: fcard.modelData.id
-                // 展开状态(绑定 root.expandedFolders,切换即刷新)。
-                property bool isOpen: root.isFolderExpanded(fcard.folderId)
-                // 拖放落点高亮 / hover 边框;展开态边框用粉色淡描边。
-                border.width: fcard.dropTarget ? 2 : 1
-                border.color: fcard.dropTarget ? Constants.moePink
-                              : (fcard.isOpen ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
-                              : (fcard.hovered ? Constants.moePink : Theme.bg))
-                // hover 粉色柔光外圈。
-                Rectangle {
-                    z: -1
-                    anchors.centerIn: parent
-                    width: parent.width
-                    height: parent.height
-                    radius: parent.radius
-                    color: "transparent"
-                    border.width: fcard.hovered ? 3 : 0
-                    border.color: Constants.moePink
-                    opacity: fcard.hovered ? 0.35 : 0
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                }
-                property bool hovered: false
-                property bool dropTarget: false
-                property bool expanded: false
-                // 拖动起点(onPressed 记录,drop 未投递时手动归位用)。
-                property real dragStartX: 0
-                property real dragStartY: 0
-
-                // 位移动画(与账号卡同套:挤压/复位/重排水波共用)。
-                function animateTo(tx, ty, restore, fade, duration) {
-                    if (Math.abs(fcard.x - tx) > 0.5) {
-                        if (restore) {
-                            // 同属性动画互斥(与账号卡一致):挤压进行中恢复
-                            // 先停前者,防双写同一属性。
-                            fcardAnimX.stop()
-                            fcardAnimXBack.from = fcard.x
-                            fcardAnimXBack.to = tx
-                            fcardAnimXBack.start()
-                        } else {
-                            fcardAnimXBack.stop()
-                            fcardAnimX.duration = duration > 0 ? duration : root.moveDuration
-                            fcardAnimX.from = fcard.x
-                            fcardAnimX.to = tx
-                            fcardAnimX.start()
-                        }
-                    }
-                    if (Math.abs(fcard.y - ty) > 0.5) {
-                        if (restore) {
-                            fcardAnimY.stop()
-                            fcardAnimYBack.from = fcard.y
-                            fcardAnimYBack.to = ty
-                            fcardAnimYBack.start()
-                        } else {
-                            fcardAnimYBack.stop()
-                            fcardAnimY.duration = duration > 0 ? duration : root.moveDuration
-                            fcardAnimY.from = fcard.y
-                            fcardAnimY.to = ty
-                            fcardAnimY.start()
-                        }
-                    }
-                    if (fade && !restore) {
-                        fcardOpacityAnim.from = 0.5
-                        fcardOpacityAnim.to = 1
-                        fcardOpacityAnim.start()
-                    }
-                }
-                function fadeInFromZero() {
-                    fcardOpacityAnim.from = 0
-                    fcardOpacityAnim.to = 1
-                    fcardOpacityAnim.start()
-                }
-                NumberAnimation {
-                    id: fcardAnimX
-                    target: fcard
-                    property: "x"
-                    duration: 220
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: fcardAnimY
-                    target: fcard
-                    property: "y"
-                    duration: 220
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: fcardAnimXBack
-                    target: fcard
-                    property: "x"
-                    duration: 120
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: fcardAnimYBack
-                    target: fcard
-                    property: "y"
-                    duration: 120
-                    easing.type: Easing.OutCubic
-                }
-                NumberAnimation {
-                    id: fcardOpacityAnim
-                    target: fcard
-                    property: "opacity"
-                    duration: root.fadeDuration
-                    easing.type: Easing.OutCubic
-                }
-
-                // 销毁前停掉所有动画并注销映射(同账号卡:动画 target 随
-                // delegate 销毁;映射不注销会残留悬空引用)。
-                Component.onDestruction: {
-                    fcardAnimX.stop()
-                    fcardAnimY.stop()
-                    fcardAnimXBack.stop()
-                    fcardAnimYBack.stop()
-                    fcardOpacityAnim.stop()
-                    delete root.folderCardById[fcard.folderId]
-                }
-                Component.onCompleted: {
-                    // 注册到 id → 卡映射(visualSequence 按 layoutOrder 查找)。
-                    root.folderCardById[fcard.folderId] = fcard
-                    // 重建前该卡 hover 放大中(鼠标未动):立即恢复放大,
-                    // 避免"放大消失→延迟重现"两段挤开。鼠标移开时
-                    // onExited 正常收起,不会残留。
-                    if (root.cardHoverState[fcard.folderId]) {
-                        fcard.hovered = true
-                        fcard.expanded = true
-                    }
-                    delete root.cardHoverState[fcard.folderId]
-                    // 重排后按快照复位到旧位置(FLIP Invert,key = folderId),
-                    // 消除瞬移 (0,0);新文件夹卡无快照,由布局静默定位。
-                    const p = root.posSnapshot[fcard.folderId]
-                    if (p) {
-                        fcard.x = p.x
-                        fcard.y = p.y
-                    }
-                    root.scheduleLayout()
-                }
-                // 布局目标位置(位移动画中返回动画 to 值,否则当前 x/y):
-                // 同账号卡 layoutTargetX/Y——快照抓动画目标位,防中间值
-                // 导致点击移动中的卡时布局跳变。
-                function layoutTargetX() {
-                    if (fcardAnimX.running) return fcardAnimX.to
-                    if (fcardAnimXBack.running) return fcardAnimXBack.to
-                    return fcard.x
-                }
-                function layoutTargetY() {
-                    if (fcardAnimY.running) return fcardAnimY.to
-                    if (fcardAnimYBack.running) return fcardAnimYBack.to
-                    return fcard.y
-                }
-                // 位移动画进行中瞬移到目标位(同账号卡 settle,见其注释)。
-                function settle() {
-                    if (fcardAnimX.running) fcardAnimX.complete()
-                    if (fcardAnimY.running) fcardAnimY.complete()
-                    if (fcardAnimXBack.running) fcardAnimXBack.complete()
-                    if (fcardAnimYBack.running) fcardAnimYBack.complete()
-                }
-                // 放大状态变化 → 重排(左右邻居让位/复位)。
-                onExpandedChanged: root.scheduleLayout()
-
-                // hover 触发阈值(同账号卡:200ms,快速划过不触发)。
-                Timer {
-                    id: fcardHoverTimer
-                    interval: 200
-                    repeat: false
-                    onTriggered: fcard.expanded = true
-                }
-
-                // 图标区:粉色爱心文件夹图标,hover 高亮。
-                Rectangle {
-                    width: root.iconSize
-                    height: root.iconSize
-                    radius: 10
-                    anchors.top: parent.top
-                    anchors.topMargin: 14
-                    anchors.left: parent.left
-                    anchors.leftMargin: 14
-                    color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
-                    Canvas {
-                        anchors.centerIn: parent
-                        width: 28
-                        height: 28
-                        property color lineColor: farea.containsMouse ? Constants.moePink : Theme.textMuted
-                        onLineColorChanged: requestPaint()
-                        onPaint: {
-                            const ctx = getContext("2d")
-                            ctx.clearRect(0, 0, width, height)
-                            ctx.lineCap = "round"
-                            ctx.lineJoin = "round"
-                            ctx.lineWidth = 2.5
-                            ctx.strokeStyle = lineColor
-                            ctx.beginPath()
-                            // 文件夹主体 + 顶部标签页
-                            ctx.moveTo(5, 11)
-                            ctx.lineTo(10, 11)
-                            ctx.lineTo(13, 7)
-                            ctx.lineTo(23, 7)
-                            ctx.lineTo(23, 11)
-                            ctx.moveTo(5, 11)
-                            ctx.lineTo(5, 23)
-                            ctx.lineTo(23, 23)
-                            ctx.lineTo(23, 11)
-                            ctx.stroke()
-                        }
-                    }
-                }
-
-                // 名称 + 成员数。
-                Column {
-                    anchors.top: parent.top
-                    anchors.topMargin: 18
-                    anchors.left: parent.left
-                    anchors.leftMargin: 14 + root.iconSize + 12
-                    anchors.right: parent.right
-                    anchors.rightMargin: 14
-                    spacing: 4
-                    AppText {
-                        width: parent.width
-                        text: fcard.modelData.name
-                        color: Theme.textPrimary
-                        font.pixelSize: 15
-                        font.bold: true
-                        elide: Text.ElideRight
-                    }
-                    AppText {
-                        width: parent.width
-                        text: fcard.modelData.accountIds.length + " 台服务器"
-                        color: Theme.textMuted
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                    }
-                }
-
-                // 展开/收起箭头(右下角):▸ 收起 / ▾ 展开。
-                AppText {
-                    anchors.bottom: parent.bottom
-                    anchors.bottomMargin: 8
-                    anchors.right: parent.right
-                    anchors.rightMargin: 12
-                    text: fcard.isOpen ? "▾" : "▸"
-                    color: farea.containsMouse ? Theme.accent : Theme.textMuted
-                    font.pixelSize: 13
-                }
-
-                // 点击切换展开/收起;Ctrl+点击打开修改浮窗(重命名/删除);
-                // 按住拖动 = 文件夹排序(threshold 内释放仍是点击)。
-                MouseArea {
-                    id: farea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    // 仅左键:点击展开/收起,Ctrl+点击修改;右键不再弹菜单。
-                    acceptedButtons: Qt.LeftButton
-                    drag {
-                        target: fcard
-                        threshold: 8
-                    }
-                    onEntered: {
-                        fcard.hovered = true
-                        // 拖动进行中不放大(同账号卡,见 root.dragActive 注释)。
-                        if (!root.dragActive)
-                            fcardHoverTimer.start()
-                    }
-                    onExited: {
-                        fcard.hovered = false
-                        fcardHoverTimer.stop()
-                        fcard.expanded = false
-                    }
-                    onPressed: (mouse) => {
-                        // 按住立即收起放大(同账号卡):点击/Ctrl+点击时卡片
-                        // 不保持放大,两侧正常复位;同时记录拖动状态(root
-                        // 级,drop 处理经此访问,不触碰可能随重建销毁的 source)。
-                        fcardHoverTimer.stop()
-                        fcard.expanded = false
-                        fcard.dragStartX = fcard.x
-                        fcard.dragStartY = fcard.y
-                        root.pressCardId = fcard.folderId
-                        root.pressCardType = "folder"
-                        // 动画中按下(点击移动中的卡):归位/排序目标用稳定位
-                        // (layoutTargetX 动画中返回 to 值),否则 returnFolder
-                        // ToPress 会把卡拉回按下时的动画中间值——"先到目标位
-                        // 置,再拉回鼠标位置,再飞向目标位置"三段运动。
-                        root.pressStartX = fcard.layoutTargetX()
-                        root.pressStartY = fcard.layoutTargetY()
-                        root.dragActive = true // 拖动期间抑制其他卡放大
-                        root.dragDirty = false // 新一轮拖动,清模型变化标记
-                    }
-                    onReleased: {
-                        // 同账号卡:released 先于 drop 投递,全部取值在 drop
-                        // 前完成(r 引用 drop 后仍可安全读),drop 后不再做
-                        // 任何 id 查找(moveFolder 触发 foldersChanged 会使
-                        // 本卡 delegate 的 context 失效)。
-                        const r = root
-                        r.dragActive = false // 拖动结束(须在 drop 前,r 引用安全)
-                        const sx = fcard.dragStartX
-                        const sy = fcard.dragStartY
-                        const act = fcard.Drag.drop()
-                        // 仅当 drop 未投递(拖出窗口,IgnoreAction)且模型未变
-                        // (dragDirty 仍 false,本卡有效)时手动归位;投递成功
-                        // 时归位由 onDropped 或重排布局完成,本卡已失效。
-                        if (act === Qt.IgnoreAction && !r.dragDirty && fcard.animateTo)
-                            fcard.animateTo(sx, sy, true)
-                    }
-                    // 不绑定 onDoubleClicked:Qt 只在存在该处理器时进入双击
-                    // 检测(第一次 click 被抑制等待双击窗口,连点事件流不
-                    // 完整)。不绑定则每次 click 独立、立即发出——快速连点
-                    // 两次 = 两次完整 toggle(展开+收起),时序由布局层防御
-                    // (settleAllAnimations,snapshotPositions 开头瞬移动画)
-                    // 兜底,无错乱。
-                    onClicked: (mouse) => {
-                        // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
-                        // 展开/收起成员。拖动超过 threshold 后不触发 click。
-                        if (mouse.modifiers & Qt.ControlModifier)
-                            root.openFolderDialog(fcard.folderId)
-                        else
-                            root.toggleFolder(fcard.folderId)
                     }
                 }
             }
@@ -1829,7 +1081,6 @@ Item {
         anchors.fill: parent
         color: Qt.rgba(0, 0, 0, 0.55)
         z: 100
-        // 点击遮罩取消;浮窗打开时遮罩拦截鼠标,卡片网格不可拖动。
         MouseArea {
             anchors.fill: parent
             onClicked: root.closeAddDialog()
@@ -1844,8 +1095,6 @@ Item {
             border.width: 1
             border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
-            // 吞掉点击:卡片空白处(标题/标签/间隙)不穿透到遮罩误关。
-            // 须在 Column 之前声明(下层),TextField/Button 在其上正常交互。
             MouseArea {
                 anchors.fill: parent
             }
@@ -1875,7 +1124,6 @@ Item {
                     }
                 }
 
-                // 名称(可选)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -1903,7 +1151,6 @@ Item {
                         onAccepted: urlField.forceActiveFocus()
                     }
                 }
-                // 地址(必填)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -1931,7 +1178,6 @@ Item {
                         onAccepted: userField.forceActiveFocus()
                     }
                 }
-                // 用户名(必填)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -1959,7 +1205,6 @@ Item {
                         onAccepted: passField.forceActiveFocus()
                     }
                 }
-                // 密码(可为空,回车提交)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -2011,7 +1256,6 @@ Item {
                     }
                 }
 
-                // 失败提示(按钮下方):红色"失败" + 详细错误(网络/HTTP 状态)。
                 Column {
                     visible: root.errorMsg !== ""
                     width: parent.width
@@ -2034,181 +1278,6 @@ Item {
         }
     }
 
-    // ---- 图标设置浮窗 ----
-    // 半透明遮罩 + 居中卡片:输入图片 URL(图床/服务器资源),实时预览,
-    // 保存即持久化(conf 落盘,卡片与设置入口自动刷新);"清除"恢复名称首字。
-    // 点击遮罩取消。
-    Rectangle {
-        id: iconOverlay
-        visible: root.iconOpen
-        anchors.fill: parent
-        color: Qt.rgba(0, 0, 0, 0.55)
-        z: 100
-        MouseArea {
-            anchors.fill: parent
-            onClicked: root.closeIconDialog()
-        }
-
-        Rectangle {
-            anchors.centerIn: parent
-            width: 420
-            height: iconCol.implicitHeight + 48
-            radius: 12
-            color: Theme.surface
-            border.width: 1
-            border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
-
-            // 同添加浮窗:吞掉空白处点击,防穿透误关。
-            MouseArea {
-                anchors.fill: parent
-            }
-
-            Column {
-                id: iconCol
-                anchors.top: parent.top
-                anchors.topMargin: 24
-                anchors.horizontalCenter: parent.horizontalCenter
-                width: parent.width - 48
-                spacing: 14
-
-                Row {
-                    spacing: 8
-                    AppText {
-                        text: "♥"
-                        color: Constants.moePink
-                        font.pixelSize: 24
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    AppText {
-                        text: "服务器图标"
-                        color: Theme.textPrimary
-                        font.pixelSize: 20
-                        font.bold: true
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                }
-
-                // 预览:自定义 URL 生效即显示,否则走服务器默认图标链
-                // (与卡片一致);输入实时反映。
-                Row {
-                    spacing: 14
-                    Rectangle {
-                        width: 52
-                        height: 52
-                        radius: 10
-                        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
-                        ServerIcon {
-                            anchors.fill: parent
-                            icon: iconUrlField.text.trim() !== "" ? iconUrlField.text.trim() : root.iconCurrent
-                            fallbackText: "图"
-                        }
-                    }
-                    Column {
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 4
-                        AppText {
-                            text: "输入图片 URL 覆盖默认图标"
-                            color: Theme.textMuted
-                            font.pixelSize: 13
-                        }
-                        AppText {
-                            text: "默认显示服务器 Emby 图标;清除恢复默认"
-                            color: Theme.textMuted
-                            font.pixelSize: 12
-                        }
-                    }
-                }
-
-                TextField {
-                    id: iconUrlField
-                    width: parent.width
-                    height: 36
-                    leftPadding: 14
-                    rightPadding: 14
-                    placeholderText: "图片 URL 或本地路径,如 /path/icon.png"
-                    placeholderTextColor: Theme.textMuted
-                    color: "white"
-                    font.pixelSize: 14
-                    background: Rectangle {
-                        radius: 18
-                        color: Theme.bg
-                        border.width: 1
-                        border.color: iconUrlField.activeFocus ? Constants.moePink : Theme.textMuted
-                    }
-                    onAccepted: root.saveIcon()
-                }
-
-                Row {
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 12
-                    Button {
-                        id: iconSaveBtn
-                        width: 110
-                        height: 36
-                        text: "保存"
-                        onClicked: root.saveIcon()
-                        background: Rectangle {
-                            radius: 18
-                            color: iconSaveBtn.hovered ? Constants.moePinkDark : Constants.moePink
-                            border.width: 0
-                        }
-                        contentItem: AppText {
-                            text: iconSaveBtn.text
-                            color: "white"
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Button {
-                        id: iconClearBtn
-                        width: 110
-                        height: 36
-                        text: "清除"
-                        enabled: iconUrlField.text.trim() !== ""
-                        onClicked: root.clearIcon()
-                        background: Rectangle {
-                            radius: 18
-                            color: iconClearBtn.enabled && iconClearBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
-                            border.width: 1
-                            border.color: iconClearBtn.enabled ? (iconClearBtn.hovered ? Constants.moePink : Theme.textMuted) : Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: iconClearBtn.text
-                            color: iconClearBtn.enabled ? (iconClearBtn.hovered ? Constants.moePink : Theme.textPrimary) : Theme.textMuted
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Button {
-                        id: iconCancelBtn
-                        width: 110
-                        height: 36
-                        text: "取消"
-                        onClicked: root.closeIconDialog()
-                        background: Rectangle {
-                            radius: 18
-                            color: iconCancelBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
-                            border.width: 1
-                            border.color: iconCancelBtn.hovered ? Constants.moePink : Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: iconCancelBtn.text
-                            color: iconCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ---- 文件夹编辑浮窗(新建/重命名)----
-    // 半透明遮罩 + 居中卡片:输入文件夹名称,确定创建/重命名。新建时
-    // 名称留空走 AccountManager 自动命名("文件夹 N")。点击遮罩取消。
     Rectangle {
         id: folderOverlay
         visible: root.folderOpen
@@ -2229,7 +1298,6 @@ Item {
             border.width: 1
             border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
-            // 吞掉点击:卡片空白处不穿透到遮罩误关。
             MouseArea {
                 anchors.fill: parent
             }
@@ -2285,14 +1353,10 @@ Item {
                     onAccepted: root.saveFolder()
                 }
 
-                // 预设颜色选择:色点一排,点击选中(选中加边框指示)。
-                // 新建默认随机、重命名预填当前色,均可在保存前修改。
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 8
                     Repeater {
-                        // 无参 invokable 须带括号调用:不带括号是函数对象
-                        // 引用,赋给 model 报 "Unable to assign a function"。
                         model: AccountManager.presetFolderColors()
                         Rectangle {
                             required property string modelData
@@ -2300,7 +1364,6 @@ Item {
                             height: 24
                             radius: 12
                             color: modelData
-                            // 选中指示:粉边 + 外圈(与背景色区分)。
                             border.width: root.folderSelectedColor === modelData ? 3 : 0
                             border.color: Constants.moePink
                             scale: root.folderSelectedColor === modelData ? 1.15 : 1.0
@@ -2357,7 +1420,6 @@ Item {
                     }
                 }
 
-                // 删除文件夹(仅重命名场景):成员自动释放回未分组,账号不删。
                 Button {
                     id: folderDeleteBtn
                     visible: root.folderEditId !== ""
@@ -2365,9 +1427,7 @@ Item {
                     width: 160
                     height: 36
                     text: "删除文件夹"
-                    // 删除前抓快照:其余卡水波让位,成员卡回到未分组区。
                     onClicked: {
-                        root.snapshotPositions("")
                         AccountManager.removeFolder(root.folderEditId)
                         root.closeFolderDialog()
                     }
@@ -2389,10 +1449,6 @@ Item {
         }
     }
 
-    // ---- 服务器修改浮窗 ----
-    // Ctrl+点击账号卡打开:编辑名称/地址/用户名(保存即 updateAccount,
-    // token/密码保留),设置图标(复用图标浮窗),删除(登出+删本地数据)。
-    // 点击遮罩取消。
     Rectangle {
         id: editOverlay
         visible: root.editOpen
@@ -2413,7 +1469,6 @@ Item {
             border.width: 1
             border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
 
-            // 吞掉点击:卡片空白处不穿透到遮罩误关。
             MouseArea {
                 anchors.fill: parent
             }
@@ -2443,7 +1498,6 @@ Item {
                     }
                 }
 
-                // 名称(可选)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -2471,7 +1525,6 @@ Item {
                         onAccepted: editUrlField.forceActiveFocus()
                     }
                 }
-                // 地址(必填)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -2499,7 +1552,6 @@ Item {
                         onAccepted: editUserField.forceActiveFocus()
                     }
                 }
-                // 用户名(必填,回车保存)。
                 Column {
                     width: parent.width
                     spacing: 6
@@ -2528,6 +1580,76 @@ Item {
                     }
                 }
 
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    AppText {
+                        text: "服务器图标（可选，留空保持不变）"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    Row {
+                        width: parent.width
+                        spacing: 12
+                        Rectangle {
+                            width: 52
+                            height: 52
+                            radius: 10
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                            ServerIcon {
+                                anchors.fill: parent
+                                icon: editIconField.text.trim() || root.accountInfo(root.editAccountId).icon
+                                fallbackText: "图"
+                            }
+                        }
+                        TextField {
+                            id: editIconField
+                            width: parent.width - 172
+                            height: 36
+                            anchors.verticalCenter: parent.verticalCenter
+                            leftPadding: 14
+                            rightPadding: 14
+                            placeholderText: "图片 URL 或本地路径,如 /path/icon.png"
+                            placeholderTextColor: Theme.textMuted
+                            color: "white"
+                            font.pixelSize: 14
+                            background: Rectangle {
+                                radius: 18
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: editIconField.activeFocus ? Constants.moePink : Theme.textMuted
+                            }
+                            onAccepted: root.submitEdit()
+                        }
+                        Button {
+                            id: editIconClearBtn
+                            width: 96
+                            height: 30
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "清除图标"
+                            enabled: editIconField.text.trim() !== ""
+                                     || (root.accountInfo(root.editAccountId).icon || "") !== ""
+                            onClicked: {
+                                AccountManager.setAccountIcon(root.editAccountId, "")
+                                editIconField.text = ""
+                            }
+                            background: Rectangle {
+                                radius: 15
+                                color: editIconClearBtn.enabled && editIconClearBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
+                                border.width: 1
+                                border.color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Constants.moePink : Theme.textMuted) : Theme.textMuted
+                            }
+                            contentItem: AppText {
+                                text: editIconClearBtn.text
+                                color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Constants.moePink : Theme.textPrimary) : Theme.textMuted
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                    }
+                }
+
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
@@ -2545,26 +1667,6 @@ Item {
                         contentItem: AppText {
                             text: editSaveBtn.text
                             color: "white"
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                        }
-                    }
-                    Button {
-                        id: editIconBtn
-                        width: 120
-                        height: 36
-                        text: "设置图标…"
-                        onClicked: root.openEditIconDialog()
-                        background: Rectangle {
-                            radius: 18
-                            color: "transparent"
-                            border.width: 1
-                            border.color: editIconBtn.hovered ? Constants.moePink : Theme.textMuted
-                        }
-                        contentItem: AppText {
-                            text: editIconBtn.text
-                            color: editIconBtn.hovered ? Constants.moePink : Theme.textPrimary
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -2592,7 +1694,6 @@ Item {
                     }
                 }
 
-                // 失败提示(按钮下方):红色"失败" + 详细原因。
                 Column {
                     visible: root.editError !== ""
                     width: parent.width
@@ -2612,7 +1713,6 @@ Item {
                     }
                 }
 
-                // 删除(危险操作):登出 + 删本地数据,账号卡自动补位。
                 Button {
                     id: editDeleteBtn
                     anchors.horizontalCenter: parent.horizontalCenter
