@@ -82,11 +82,10 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &serverUrl)
     m.insert(QStringLiteral("positionTicks"), ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
     m.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
     m.insert(QStringLiteral("unplayedCount"), ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
-    m.insert(QStringLiteral("playbackDateTicks"), ud.value(QLatin1String("PlaybackDateTicks")).toDouble(0));
     m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
     m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
     m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
-    m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("Favorite")).toBool(false));
+    m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("IsFavorite")).toBool(false));
     return m;
 }
 
