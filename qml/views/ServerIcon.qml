@@ -28,6 +28,11 @@ Item {
         // 网络图异步解码,避免阻塞 UI。
         asynchronous: true
         fillMode: Image.PreserveAspectCrop
+        // PreserveAspectCrop 会画到范围外(文档提示 clip 默认 false),裁掉。
+        clip: true
+        // 图标源通常是远大于显示尺寸的方图,只靠默认的 smooth(双线性)降采样会有
+        // 明显锯齿;文档:mipmap 的降采样质量优于 smooth。
+        mipmap: true
         visible: status === Image.Ready
     }
 

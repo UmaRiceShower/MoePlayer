@@ -141,8 +141,8 @@ QtObject {
     readonly property int serverIconSize: 52
     readonly property int serverGridSpacing: 16
     readonly property real serverHoverScale: 1.12
-    readonly property int serverMoveMs: 320
-    readonly property int serverDragMs: 480
+    readonly property int serverMoveMs: 170
+    readonly property int serverDragMs: 160
     readonly property int serverFadeMs: 320
 
     // ===================== Library.qml =====================
