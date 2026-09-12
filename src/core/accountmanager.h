@@ -82,6 +82,14 @@ public:
     // historyChanged 增量通知。
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
+    // 页面"加载更多":按账号从服务器取一页更早的记录。结果只回给调用方(页面
+    // 会话内展示),**不写入本地存储** —— 本地按(上次播放时间, 服务器顺序)裁剪,
+    // 深档旧条目入库后会被丢掉、重启即消失。
+    Q_INVOKABLE void fetchHistoryPage(const QString &accountId, int startIndex);
+    // 分页窗口(每页条数,= 首页批次的拉取条数):页面据此算起始游标与"整页"判定,
+    // 避免在 QML 里复制这个常量。
+    Q_INVOKABLE int historyPageSize() const;
+
     // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):
     // 已在拉取中则由 startPlaybackHistoryFetch 的在途保护跳过。
     Q_INVOKABLE void refreshPlaybackHistory();
@@ -146,6 +154,10 @@ signals:
     // 同构(含剧集归属),请求失败为空列表。
     void accountHistoryRefreshed(const QString &serverUrl, const QString &accountId,
                                  const QVariantList &items);
+    // 播放历史分页结果(见 fetchHistoryPage):items 已补服务器前缀并过滤掉无播放
+    // 痕迹的行;ok=false 表示该页请求失败(items 为空)。
+    void historyPageReceived(const QString &serverUrl, const QString &accountId,
+                             int startIndex, const QVariantList &items, int rawCount, bool ok);
 
 private:
     struct AccountInfo {
@@ -316,6 +328,8 @@ private:
     // 账号在拉取途中被删除:撤出本轮(票数与存储一并清理),避免批次卡住。
     void abandonHistoryScope(const QString &scope);
     // 继续观看列表到位:回写本地播放历史并发 accountHistoryRefreshed。
+    void onHistoryPageReceived(const QString &serverUrl, const QString &accountId,
+                               int startIndex, const QVariantList &items, bool ok);
     void onResumeReceived(const QString &serverUrl, const QString &accountId,
                           const QVariantList &items);
     // 全季分集解析结果到位:回写本地播放历史(选集栏展示仍走 EmbyClient 模型)。
