@@ -90,6 +90,13 @@ Item {
         id: bottom
         anchors.fill: parent
         visible: false
+        // 降采样锯齿:源图常上千像素而显示尺寸远小,双线性只采 2×2 纹素会走样,
+        // mipmap 预滤波层级是主解(同 PosterCard)。
+        smooth: true
+        mipmap: true
+        // 不设 sourceSize:源图尺寸已由 provider 按 kind 限制(海报 512/背景 1600),
+        // 而本组件常用于随窗口缩放的背景 —— 设了会随尺寸变化反复重解码,
+        // 显示缩放交给渲染器(已开 mipmap)。
         retainWhileLoading: true
     }
     // 顶层:过渡中的新图(同离屏处理)。
@@ -100,6 +107,8 @@ Item {
         fillMode: bottom.fillMode
         asynchronous: bottom.asynchronous
         cache: bottom.cache
+        smooth: true
+        mipmap: true
         retainWhileLoading: true
         onStatusChanged: {
             if (status === Image.Ready && root._pending)
