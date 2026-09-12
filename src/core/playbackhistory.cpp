@@ -13,17 +13,6 @@
 namespace {
 const QString kCacheName = QStringLiteral("playback-history");
 
-// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(实测
-// 0 播放账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。
-// 只接受有痕迹的行,避免"上次播放"落到没看过的分集、或把"下一集"记成已播。
-bool hasPlayTrace(const QVariantMap &m)
-{
-    return m.value(QStringLiteral("played")).toBool()
-           || m.value(QStringLiteral("positionTicks")).toDouble() > 0
-           || m.value(QStringLiteral("playedPercentage")).toDouble() > 0
-           || m.value(QStringLiteral("playCount")).toInt() > 0
-           || m.value(QStringLiteral("lastPlayedAt")).toLongLong() > 0;
-}
 
 // 记录归属键:服务器 + 账号(同服多账号的播放历史各自独立)。
 QString scopeOf(const QString &serverUrl, const QString &accountId)
@@ -44,6 +33,18 @@ bool historyBefore(const QVariant &a, const QVariant &b)
     return x.value(QStringLiteral("seq")).toInt() < y.value(QStringLiteral("seq")).toInt();
 }
 } // namespace
+
+// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(实测
+// 0 播放账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。
+// 只接受有痕迹的行,避免"上次播放"落到没看过的分集、或把"下一集"记成已播。
+bool hasPlayTrace(const QVariantMap &m)
+{
+    return m.value(QStringLiteral("played")).toBool()
+           || m.value(QStringLiteral("positionTicks")).toDouble() > 0
+           || m.value(QStringLiteral("playedPercentage")).toDouble() > 0
+           || m.value(QStringLiteral("playCount")).toInt() > 0
+           || m.value(QStringLiteral("lastPlayedAt")).toLongLong() > 0;
+}
 
 PlaybackHistory::PlaybackHistory(QObject *parent)
     : QObject(parent)
@@ -70,7 +71,10 @@ void PlaybackHistory::setItems(const QString &serverUrl, const QString &accountI
             continue;
         const qint64 at = m.value(QStringLiteral("lastPlayedAt")).toLongLong();
         const int count = m.value(QStringLiteral("playCount")).toInt();
-        if (at > 0 || count > 0)
+        // dateFetched = 该条目查过单条端点(见 kHistoryDetailLimit 的变更检测):
+        // 服务器上没有 LastPlayedDate 的条目(如手动标记已看)也要保留该标记,
+        // 否则每次拉列表都会被当成"尚无时间戳"重复补明细。
+        if (at > 0 || count > 0 || m.value(QStringLiteral("dateFetched")).toBool())
             merged.insert(m.value(QStringLiteral("id")).toString(), m);
     }
 
@@ -90,9 +94,11 @@ void PlaybackHistory::setItems(const QString &serverUrl, const QString &accountI
         if (old != merged.constEnd()) {
             m.insert(QStringLiteral("playCount"), old->value(QStringLiteral("playCount")));
             m.insert(QStringLiteral("lastPlayedAt"), old->value(QStringLiteral("lastPlayedAt")));
+            m.insert(QStringLiteral("dateFetched"), old->value(QStringLiteral("dateFetched")));
         } else {
             m.insert(QStringLiteral("playCount"), 0);
             m.insert(QStringLiteral("lastPlayedAt"), qint64(0));
+            m.insert(QStringLiteral("dateFetched"), false);
         }
         kept.append(m);
     }
@@ -114,6 +120,8 @@ void PlaybackHistory::mergeItemUserData(const QString &serverUrl, const QString 
             continue;
         m.insert(QStringLiteral("playCount"), playCount);
         m.insert(QStringLiteral("lastPlayedAt"), lastPlayedAt);
+        // 查过单条端点即置位(即使服务器没有 LastPlayedDate):变更检测据此不再重复补(见 constants)。
+        m.insert(QStringLiteral("dateFetched"), true);
         if (positionTicks >= 0) {
             m.insert(QStringLiteral("positionTicks"), positionTicks);
             m.insert(QStringLiteral("played"), played);
@@ -154,9 +162,9 @@ void PlaybackHistory::upsertItems(const QString &serverUrl, const QString &accou
             m_items.append(m);
             continue;
         }
-        // 已存在:保持既有播放次数/上次播放时间/顺序(新值非 0 才覆盖)。
+        // 已存在:保持既有播放次数/上次播放时间/顺序/已查标记(新值非 0 才覆盖)。
         const QVariantMap old = m_items.at(*it).toMap();
-        for (const char *field : { "playCount", "lastPlayedAt", "seq" }) {
+        for (const char *field : { "playCount", "lastPlayedAt", "seq", "dateFetched" }) {
             const QString f = QLatin1String(field);
             if (m.value(f).toLongLong() == 0)
                 m.insert(f, old.value(f));

@@ -7,6 +7,11 @@
 
 #include "core/persistmap.h"
 
+// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(实测 0 播放
+// 账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。入库与
+// 播放历史明细补全(AccountManager)共用同一判据。
+bool hasPlayTrace(const QVariantMap &item);
+
 //! 播放历史本地存储(跨服务器聚合的基础设施)。
 //! 服务器不提供逐次播放会话记录:列表端点(/Users/{id}/Items,
 //! SortBy=DatePlayed)只给"最近播放"的顺序与当前状态,真实播放次数与
