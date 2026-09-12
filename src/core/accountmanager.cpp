@@ -758,22 +758,34 @@ bool AccountManager::reorderFoldersToLayout(const QVariantList &order)
 
 bool AccountManager::reorderAccountsToVisual(const QVariantList &order)
 {
+    // 视觉序可能含已删账号的残留 id(文件夹成员表历史数据):按 id 取回
+    // 可能为空,跳过而非解引用(空指针即崩溃)。
     const QStringList visual = visualAccountOrder(order);
-    bool changed = visual.size() != m_accounts.size();
+    QList<AccountInfo> reordered;
+    reordered.reserve(m_accounts.size());
+    QSet<QString> taken;
+    for (const auto &id : visual) {
+        const auto *a = accountById(id);
+        if (!a || taken.contains(id))
+            continue;
+        taken.insert(id);
+        reordered.append(*a);
+    }
+    // 视觉序未覆盖的账号(异常数据)按原顺序补回,不丢账号。
+    for (const auto &a : m_accounts)
+        if (!taken.contains(a.id))
+            reordered.append(a);
+
+    bool changed = reordered.size() != m_accounts.size();
     if (!changed) {
         for (int i = 0; i < m_accounts.size(); ++i)
-            if (m_accounts.at(i).id != visual.at(i)) {
+            if (m_accounts.at(i).id != reordered.at(i).id) {
                 changed = true;
                 break;
             }
     }
-    if (changed) {
-        QList<AccountInfo> reordered;
-        reordered.reserve(visual.size());
-        for (const auto &id : visual)
-            reordered.append(*accountById(id));
+    if (changed)
         m_accounts = reordered;
-    }
     return changed;
 }
 
@@ -1257,10 +1269,19 @@ void AccountManager::removeAccount(const QString &id)
     }
     const QString serverUrl = it->serverUrl;
     m_accounts.erase(it, m_accounts.end());
-    // 视觉顺序同步:未分组账号项移除(成员账号不在序列中;folder.accountIds
-    // 残留由 loadFolders 下次过滤,运行时 visualSequence 按卡映射跳过)。
+    // 视觉顺序同步:未分组账号项移除(成员账号不在序列中)。
     removeFromLayoutOrder(QLatin1String("account"), id);
     persistLayoutOrder();
+    // 成员表同步:残留已删 id 会被视觉序展平计入,重排时取不到账号。
+    bool foldersTouched = false;
+    for (auto &f : m_folders) {
+        if (f.accountIds.removeAll(id) > 0)
+            foldersTouched = true;
+    }
+    if (foldersTouched) {
+        saveFolders();
+        emit foldersChanged();
+    }
     m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
     reorderHomeRows(); // 被删服的行一并移除,本地重排不重拉网络(见 moveAccount)
     save();
