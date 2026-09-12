@@ -2607,26 +2607,6 @@ Item {
             }
             root.applyResumeTarget(first.seasonNo || 0, first.episodeNo || 0, first.id || "")
         }
-        // 继续观看列表到达(进入详情页时请求):该剧的续播目标即首个匹配项;
-        // 与当前目标一致时不重复定位(避免选集栏两次跳动)。
-        function onAccountHistoryRefreshed(serverUrl, accountId, items) {
-            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
-                return
-            const series = root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
-            if (!series || !items)
-                return
-            for (const it of items) {
-                if (it.type !== "Episode" || it.seriesId !== series)
-                    continue
-                if ((it.seasonNo || 0) <= 0 || !it.id)
-                    return
-                if (it.id === root._resumeEpisodeId)
-                    return
-                root._resumePending = true
-                root.applyResumeTarget(it.seasonNo || 0, it.episodeNo || 0, it.id)
-                return
-            }
-        }
         function onEpisodesReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)
                 return
@@ -2660,6 +2640,31 @@ Item {
             console.warn("Detail: 播放协商失败", itemId, message)
             root.playbackPending = false
             root.playbackFailed(itemId, message)
+        }
+    }
+
+    // 继续观看列表(Resume)到达(进详情页时请求):该剧的续播目标即首个匹配项;
+    // 与当前目标一致时不重复定位(避免选集栏两次跳动)。信号属 AccountManager,
+    // 不可并入上方 target: EmbyClient 的块。
+    Connections {
+        target: AccountManager
+        function onAccountHistoryRefreshed(serverUrl, accountId, items) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
+                return
+            const series = root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
+            if (!series || !items)
+                return
+            for (const it of items) {
+                if (it.type !== "Episode" || it.seriesId !== series)
+                    continue
+                if ((it.seasonNo || 0) <= 0 || !it.id)
+                    return
+                if (it.id === root._resumeEpisodeId)
+                    return
+                root._resumePending = true
+                root.applyResumeTarget(it.seasonNo || 0, it.episodeNo || 0, it.id)
+                return
+            }
         }
     }
 

@@ -819,8 +819,10 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &token, c
 {
     const QString key = serverUrl.trimmed();
     get(key, token, userId,
-        QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&Fields=UserData,PrimaryImageAspectRatio")
-            .arg(seriesId, seasonId),
+        // UserId 必带:分集端点的 UserData 只在该参数存在时返回(实测缺参数时
+        // 响应条目里整个 UserData 键都不存在),已看徽标/进度条/续播位置依赖它。
+        QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&UserId=%3&Fields=UserData,PrimaryImageAspectRatio")
+            .arg(seriesId, seasonId, userId),
         [this, key](const QJsonDocument &doc) {
             fillItems(episodesModelFor(key), doc, false);
             qInfo() << "Emby: episodes =" << episodesModelFor(key)->count() << "on" << key;
@@ -1253,7 +1255,9 @@ void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &accou
     const QString key = serverUrl.trimmed();
     // 不带 SeasonId:返回整剧全部分集(跨季),供"继续观看"按进度定位目标集。
     get(key, token, userId,
-        QStringLiteral("/Shows/%1/Episodes?Fields=UserData,PrimaryImageAspectRatio").arg(seriesId),
+        // UserId 必带:UserData 只在该参数存在时返回(见 fetchEpisodes)。
+        QStringLiteral("/Shows/%1/Episodes?UserId=%2&Fields=UserData,PrimaryImageAspectRatio")
+            .arg(seriesId, userId),
         [this, key, serverUrl, accountId, seriesId](const QJsonDocument &doc) {
             fillItems(allEpisodesModelFor(key), doc, false);
             // 同批解析为播放历史条目(含剧集归属),供调用方回写本地。
