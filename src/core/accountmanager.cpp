@@ -692,6 +692,9 @@ QVariantList AccountManager::historyItemsWithPosterIds(const QVariantList &items
         const QString pid = m.value(QStringLiteral("posterId")).toString();
         if (!pid.isEmpty())
             m.insert(QStringLiteral("posterId"), serverPosterId(serverUrl, pid));
+        const QString sid = m.value(QStringLiteral("seriesPosterId")).toString();
+        if (!sid.isEmpty())
+            m.insert(QStringLiteral("seriesPosterId"), serverPosterId(serverUrl, sid));
         out.append(m);
     }
     return out;
