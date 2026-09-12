@@ -15,6 +15,11 @@ MoePlayer is licensed under the GNU General Public License, version 3
 - License: GNU General Public License v2 or later.
 - Copyright: see https://github.com/mpv-player/mpv/blob/master/Copyright
 
+## osc.lua (modified)
+- `resources/lua/osc.lua` is adapted from mpv's on-screen controller:
+  https://github.com/mpv-player/mpv/blob/master/player/lua/osc.lua
+- License: GNU General Public License v2 or later (see file header).
+
 ## mpv-examples (MpvItem adaptation)
 - `src/playback/mpvitem.{h,cpp}` is adapted from the QML embedding example
   in https://github.com/mpv-player/mpv-examples (directory `libmpv/qml/`).

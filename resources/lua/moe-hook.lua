@@ -1,3 +1,6 @@
+-- SPDX-License-Identifier: GPL-3.0-or-later
+-- Copyright (C) MoePlayer contributors
+
 -- MoePlayer 播放列表钩子:占位条目(moe://ep/<id>)经 on_load hook 交回
 -- MoePlayer 实时协商真实流地址后重定向(官方 on_load + stream-open-filename
 -- 契约,见 mpv DOCS/man/input.rst "Hooks" 与 "stream-open-filename")。

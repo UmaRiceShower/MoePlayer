@@ -36,10 +36,10 @@ public:
     // 查找 mpv 可执行:MOEPLAYER_MPV 环境变量 → <appdir>/mpv(发版内封) →
     // PATH 上的 "mpv"。找不到则返回空。
     static QString findMpvBinary();
-    // 查找 osc.lua:<appdir>/osc.lua(发版内封) → 源码 third_party/osc.lua(开发)。
+    // 查找随包脚本:应用目录旁置 lua/(开发 build/ 与 AppImage/Flatpak)→ 系统安装
+    static QString findScript(const QString &fileName);
+    // osc.lua(官方控制栏)与 moe-hook.lua(on_load 占位重定向)。
     static QString findOscScript();
-    // 查找 moe-hook.lua(on_load 占位重定向):<appdir>/moe-hook.lua →
-    // 源码 third_party/moe-hook.lua(交付内置,与 osc 同款)。
     static QString findMoeHookScript();
 
     // 先弹 mpv 空窗(协商期加载态);meta 含 itemId/serverUrl/...。成功返回 true。

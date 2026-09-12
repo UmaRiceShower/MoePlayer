@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=MoePlayer
+GenericName=Emby Client
+GenericName[zh_CN]=Emby 客户端
+Comment=Browse and play your Emby library
+Comment[zh_CN]=浏览与播放 Emby 媒体库
+Exec=MoePlayer %u
+Icon=io.github.umariceshower.MoePlayer
+Terminal=false
+Categories=AudioVideo;Player;
+Keywords=emby;media;video;anime;
+Keywords[zh_CN]=Emby;媒体;视频;动画;
+StartupNotify=true
+StartupWMClass=io.github.umariceshower.MoePlayer

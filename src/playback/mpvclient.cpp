@@ -78,32 +78,29 @@ QString MpvClient::findMpvBinary()
     return QStringLiteral("mpv");
 }
 
-QString MpvClient::findOscScript()
+QString MpvClient::findScript(const QString &fileName)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
-    const QString bundled = QDir(appDir).filePath(QStringLiteral("osc.lua"));
+    // 旁置布局(开发构建 build/lua/、AppImage/Flatpak 与可执行文件同级 lua/)。
+    const QString bundled = QDir(appDir).filePath(QStringLiteral("lua/") + fileName);
     if (QFileInfo::exists(bundled))
         return bundled;
-    // 开发:源码到 third_party/osc.lua(构建目录在项目根下)。
-    const QString src =
-        QDir(appDir).filePath(QStringLiteral("../third_party/osc.lua"));
-    if (QFileInfo::exists(src))
-        return src;
-    return bundled; // 缺失时由 mpv --script 报错,兜底返回应用目录路径。
+    // 系统安装(DEB/RPM/AUR):share/moeplayer/lua/。
+    const QString installed =
+        QDir(appDir).filePath(QStringLiteral("../share/moeplayer/lua/") + fileName);
+    if (QFileInfo::exists(installed))
+        return installed;
+    return bundled; // 缺失时由 mpv --script 报错,兜底返回旁置路径。
+}
+
+QString MpvClient::findOscScript()
+{
+    return findScript(QStringLiteral("osc.lua"));
 }
 
 QString MpvClient::findMoeHookScript()
 {
-    const QString appDir = QCoreApplication::applicationDirPath();
-    const QString bundled = QDir(appDir).filePath(QStringLiteral("moe-hook.lua"));
-    if (QFileInfo::exists(bundled))
-        return bundled;
-    // 开发:源码到 third_party/moe-hook.lua(构建目录在项目根下)。
-    const QString src =
-        QDir(appDir).filePath(QStringLiteral("../third_party/moe-hook.lua"));
-    if (QFileInfo::exists(src))
-        return src;
-    return bundled; // 缺失时由 mpv --script 报错,兜底返回应用目录路径。
+    return findScript(QStringLiteral("moe-hook.lua"));
 }
 
 MpvClient::Session *MpvClient::sessionFor(const QString &key) const

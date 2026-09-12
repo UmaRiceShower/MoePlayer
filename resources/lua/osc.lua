@@ -1,3 +1,8 @@
+-- osc.lua:on-screen controller,adapted from mpv for MoePlayer.
+-- Upstream: https://github.com/mpv-player/mpv/blob/master/player/lua/osc.lua
+-- Copyright (C) the mpv developers
+-- SPDX-License-Identifier: GPL-2.0-or-later
+
 local assdraw = require 'mp.assdraw'
 local msg = require 'mp.msg'
 local opt = require 'mp.options'
