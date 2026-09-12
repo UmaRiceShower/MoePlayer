@@ -300,6 +300,11 @@ ApplicationWindow {
     StackView {
         id: stackView
         anchors.fill: parent
+        // 浮层可见时禁用页面:PosterCard 的点击用默认策略 TapHandler(按下不抢占
+        // 手势,只有 MouseArea/ReleaseWithinBounds 才抢),浮层卡片的点击会同时
+        // 命中页面同位置卡片,一次点击开出两个详情页(最小复现实测)。禁用后页面
+        // 及其子项不参与输入;重新启用时 Qt 恢复原 activeFocus(实测),不丢焦点。
+        enabled: !searchOverlay.visible && !settingsOverlay.visible
         initialItem: homePage
     }
 
