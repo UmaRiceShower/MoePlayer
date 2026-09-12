@@ -25,6 +25,7 @@ Item {
     signal openServerManager()
     signal openSettings()
     signal openSearch()
+    signal openHistory()
 
     // 聚合 hero 轮播数据:优先服务器建议(/Suggestions),按建议顺序展示;
     // 建议未到/为空时回退本地聚合(继续观看优先,不足补最新添加)。
@@ -137,7 +138,7 @@ Item {
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "history"
-                    // 播放历史页未做,点击暂不响应
+                    onClicked: root.openHistory()
                 }
             }
             FrostedGlass {

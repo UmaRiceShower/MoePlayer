@@ -272,6 +272,10 @@ ApplicationWindow {
             accountId: accountId || root.currentAccountId
         })
     }
+    // 打开播放历史页(数据层是全账号聚合,无需服务器/账号参数)。
+    function pushHistory() {
+        stackView.push(historyPage)
+    }
     // 打开媒体库页:记录浏览服务器与账号。
     function toggleSearch() {
         if (searchOverlay.visible) {
@@ -342,6 +346,18 @@ ApplicationWindow {
             onOpenServerManager: stackView.push(serverManagerPage)
             onOpenSettings: settingsOverlay.visible ? settingsOverlay.close() : settingsOverlay.open()
             onOpenSearch: root.toggleSearch()
+            onOpenHistory: root.pushHistory()
+        }
+    }
+
+    // 播放历史页:条目点击进详情(带结果所属服务器与账号)。
+    Component {
+        id: historyPage
+        PlaybackHistoryPage {
+            onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
+                root.pushDetail(itemId, posterId, title, serverUrl, accountId)
+            }
+            onBackRequested: stackView.pop()
         }
     }
 

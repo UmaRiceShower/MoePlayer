@@ -669,6 +669,21 @@ void AccountManager::startPlaybackHistoryFetch()
         emit playbackHistoryReady();
 }
 
+QVariantList AccountManager::historyItemsWithPosterIds(const QVariantList &items,
+                                                        const QString &serverUrl) const
+{
+    QVariantList out;
+    out.reserve(items.size());
+    for (const QVariant &v : items) {
+        QVariantMap m = v.toMap();
+        const QString pid = m.value(QStringLiteral("posterId")).toString();
+        if (!pid.isEmpty())
+            m.insert(QStringLiteral("posterId"), serverPosterId(serverUrl, pid));
+        out.append(m);
+    }
+    return out;
+}
+
 void AccountManager::onHistoryListReceived(const QString &serverUrl, const QString &accountId,
                                            const QVariantList &items, bool ok)
 {
@@ -682,16 +697,8 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
         onHistoryTaskDone(scope);
         return;
     }
-    QVariantList stored;
-    stored.reserve(items.size());
-    for (const QVariant &v : items) {
-        QVariantMap m = v.toMap();
-        // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
-        const QString pid = m.value(QStringLiteral("posterId")).toString();
-        m.insert(QStringLiteral("posterId"),
-                 pid.isEmpty() ? QString() : serverPosterId(serverUrl, pid));
-        stored.append(m);
-    }
+    // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
+    const QVariantList stored = historyItemsWithPosterIds(items, serverUrl);
     // 变更检测:先留一份本地旧条目再整体覆盖(见 PlaybackHistory::setItems)。
     // 列表端点不返回上次播放时间,故以 (id, 观看进度, 已看) 是否有变化、以及
     // 时间戳是否已知为判据,只对"新增/有变化/尚无时间戳"的条目逐条补明细;
@@ -808,7 +815,8 @@ void AccountManager::onResumeReceived(const QString &serverUrl, const QString &a
                                       const QVariantList &items)
 {
     if (!items.isEmpty() && accountById(accountId)) {
-        m_playbackHistory->upsertItems(serverUrl, accountId, items);
+        m_playbackHistory->upsertItems(serverUrl, accountId,
+                                       historyItemsWithPosterIds(items, serverUrl));
         m_historyFlushTimer.start();
     }
     // 空列表(失败/确无目标)照常转发:调用方按"无目标"处理并走其它回退。
@@ -822,7 +830,8 @@ void AccountManager::onAllEpisodesParsed(const QString &serverUrl, const QString
     if (items.isEmpty() || !accountById(accountId))
         return;
     // 逐季分集回写:选集栏的展示仍走 EmbyClient 的全季模型,这里只补本地记录。
-    m_playbackHistory->upsertItems(serverUrl, accountId, items);
+    m_playbackHistory->upsertItems(serverUrl, accountId,
+                                   historyItemsWithPosterIds(items, serverUrl));
     m_historyFlushTimer.start();
 }
 
