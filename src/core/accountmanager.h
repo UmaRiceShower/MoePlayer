@@ -82,6 +82,9 @@ public:
     // historyChanged 增量通知。
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
+    // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):
+    // 已在拉取中则由 startPlaybackHistoryFetch 的在途保护跳过。
+    Q_INVOKABLE void refreshPlaybackHistory();
     // 按需刷新某账号的播放历史(详情页进入时调):拉该账号的继续观看列表并
     // 回写本地,结果经 accountHistoryRefreshed 返回;凭据不全时不发请求,
     // 调用方走本地回退。

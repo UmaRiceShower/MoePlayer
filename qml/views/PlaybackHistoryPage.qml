@@ -24,7 +24,21 @@ Item {
     readonly property int thumbW: 152
     readonly property int thumbH: 86
     readonly property int pageMargin: 24
-    readonly property int topBarH: 56
+    readonly property int topBarH: 108
+
+    // 账号过滤:空 = 全部。页面级状态(不持久化)。
+    property string filterAccountId: ""
+    // chip 选项:按账号出现顺序,跳过凭据失效的账号。
+    readonly property var accountOptions: {
+        const list = AccountManager.accounts
+        const out = []
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].authStatus === "invalid")
+                continue
+            out.push({ id: list[i].id, name: list[i].name })
+        }
+        return out
+    }
 
     // ============================= 信号 =============================
 
@@ -99,13 +113,53 @@ Item {
             return 0
         return Math.min(1, it.positionTicks / it.runtimeTicks)
     }
+    // 进页面刷新:列表(全账号,内部有在途保护)+ 每账号继续观看列表;结果经
+    // PlaybackHistory::historyChanged 回来,去抖后重建(见 rebuildTimer)。
+    function refresh() {
+        AccountManager.refreshPlaybackHistory()
+        const list = AccountManager.accounts
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].authStatus === "invalid")
+                continue
+            if (AccountManager.credsForAccount(list[i].id).token === "")
+                continue
+            AccountManager.refreshAccountHistory(list[i].id)
+        }
+    }
+    // 滚动锚点:首个可见条目行的行键与相对偏移(重建前记、重建后恢复)。
+    function currentAnchor() {
+        const y = list.contentY
+        for (let i = Math.max(0, list.indexAt(0, y)); i < list.count; ++i) {
+            const it = list.itemAtIndex(i)
+            if (!it || !it.modelData || it.modelData.kind !== "item")
+                continue
+            if (it.y + it.height > y)
+                return { key: it.modelData.key, delta: y - it.y }
+        }
+        return null
+    }
+    function restoreAnchor(anchor) {
+        if (!anchor)
+            return
+        for (let i = 0; i < root.rows.length; ++i) {
+            if (root.rows[i].kind === "item" && root.rows[i].key === anchor.key) {
+                list.positionViewAtIndex(i, ListView.Beginning)
+                list.contentY = Math.max(0, list.contentY + anchor.delta)
+                return
+            }
+        }
+    }
     // 重建行模型:allItems() 已按(上次播放时间倒序, 服务器顺序)排好,
-    // 故同桶条目连续,扫一遍即可分组。
-    function rebuildRows() {
+    // 故同桶条目连续,扫一遍即可分组;重建前记锚点、重建后恢复滚动位置。
+    // keepPosition=false:条目集合整体变化(如切换账号过滤),不沿用锚点、由调用方回顶。
+    function rebuildRows(keepPosition) {
+        const anchor = keepPosition ? root.currentAnchor() : null
         const out = []
         let bucket = -1
         let header = null
         for (const it of PlaybackHistory.allItems()) {
+            if (root.filterAccountId !== "" && (it.accountId || "") !== root.filterAccountId)
+                continue
             const b = dayBucket(it.lastPlayedAt || 0)
             if (b !== bucket) {
                 bucket = b
@@ -136,11 +190,42 @@ Item {
                 ++headers
         }
         root.itemCount = out.length - headers
+        Qt.callLater(() => root.restoreAnchor(anchor))
     }
 
-    // 只在进入页面时重建:后台明细合并会持续触发 historyChanged,若跟着重建
-    // 会打断滚动(跨页保留位置的刷新在 AccountManager 信号接入时一并做)。
-    Component.onCompleted: root.rebuildRows()
+    // 账号过滤变化:条目集合整体变化,重建并回到列表顶部(不沿用锚点)。
+    onFilterAccountIdChanged: {
+        root.rebuildRows(false)
+        list.positionViewAtBeginning()
+    }
+
+    Component.onCompleted: {
+        root.rebuildRows(false)
+        root.refresh()
+    }
+
+    // 后台明细合并会连续触发 historyChanged:去抖后重建,重建时按锚点恢复滚动位置
+    // (避免"刷新一次跳一次")。
+    Connections {
+        target: PlaybackHistory
+        function onHistoryChanged() {
+            rebuildTimer.restart()
+        }
+    }
+    // 账号增删后 chip 选项变化:重建一次(过滤账号被删则回到"全部")。
+    Connections {
+        target: AccountManager
+        function onAccountsChanged() {
+            if (root.filterAccountId !== "" && !root.accountOptions.some(a => a.id === root.filterAccountId))
+                root.filterAccountId = ""
+            rebuildTimer.restart()
+        }
+    }
+    Timer {
+        id: rebuildTimer
+        interval: 800
+        onTriggered: root.rebuildRows(true)
+    }
 
     // 返回:Alt+←(与详情页同一约定;仅本页可见时生效)。
     Shortcut {
@@ -165,9 +250,11 @@ Item {
         border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.22)
 
         Row {
+            id: titleRow
             anchors.left: parent.left
             anchors.leftMargin: 16
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.top: parent.top
+            anchors.topMargin: 12
             spacing: 8
             AppText {
                 text: "♥"
@@ -185,6 +272,34 @@ Item {
                 text: root.itemCount + " 条 · 最近播放在前"
                 color: Theme.textMuted
                 font.pixelSize: 12
+            }
+        }
+        // 账号过滤:全部 / 单账号(与全局搜索的目标选择同一交互约定)
+        Row {
+            anchors.left: parent.left
+            anchors.leftMargin: 16
+            anchors.right: parent.right
+            anchors.rightMargin: 16
+            anchors.top: titleRow.bottom
+            anchors.topMargin: 10
+            spacing: 8
+            clip: true
+            FilterChip {
+                label: "全部"
+                active: root.filterAccountId === ""
+                showHeart: false
+                onClicked: root.filterAccountId = ""
+            }
+            Repeater {
+                model: root.accountOptions
+                delegate: FilterChip {
+                    required property var modelData
+                    label: modelData.name
+                    active: root.filterAccountId === modelData.id
+                    showHeart: false
+                    onClicked: root.filterAccountId = (root.filterAccountId === modelData.id
+                                                       ? "" : modelData.id)
+                }
             }
         }
     }
@@ -404,9 +519,11 @@ Item {
         }
         AppText {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: AccountManager.accounts.length === 0
-                  ? "先在「服务器管理」里添加 Emby 服务器"
-                  : "播放过的条目会出现在这里"
+            text: root.filterAccountId !== ""
+                  ? "该账号还没有播放记录"
+                  : (AccountManager.accounts.length === 0
+                     ? "先在「服务器管理」里添加 Emby 服务器"
+                     : "播放过的条目会出现在这里")
             color: Theme.textMuted
             font.pixelSize: 12
         }

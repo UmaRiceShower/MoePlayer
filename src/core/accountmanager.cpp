@@ -648,8 +648,21 @@ void AccountManager::fetchPlaybackHistory()
                        &AccountManager::startPlaybackHistoryFetch);
 }
 
+void AccountManager::refreshPlaybackHistory()
+{
+    // 上一批次的明细补全仍在排队/在途时不开新批次:startPlaybackHistoryFetch 会清空
+    // 明细队列并把在途计数归零(见实现),被丢的条目因 dateFetched 仍缺会在新批次里
+    // 重新入队,明细请求翻倍 —— 而"列表就绪"在列表到位时就已置位,不足以代表明细排空。
+    // 进行中的批次会把记录填好并经 historyChanged 通知页面,页面不缺新鲜度。
+    if (m_historyActive || !m_historyDetailQueue.isEmpty() || m_historyDetailInFlight > 0)
+        return;
+    startPlaybackHistoryFetch();
+}
+
 void AccountManager::startPlaybackHistoryFetch()
 {
+    if (m_historyActive)
+        return; // 已在拉取(启动批次或上一次触发未结束):跳过,避免重复批次互相踩
     m_historyScopes.clear();
     m_historyOutstanding.clear();
     m_historyDetailQueue.clear();
