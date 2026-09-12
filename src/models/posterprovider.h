@@ -30,8 +30,9 @@ public:
     // 返回 false = 缺前缀/凭据,不发起请求。
     bool resolveImageId(const QString &id, QString *serverUrl, QString *token,
                         QString *itemId, QString *tag, QString *kind) const;
-    // 按解析结果构造回源 URL(缓存键稳定;maxWidth 按 kind 分级,
-    // 传 requestedSize 时按显示尺寸量化,未传用 kind 上限)。
+    // 按解析结果构造回源 URL(缓存键稳定;maxWidth 按 kind 分级取固定厚档,
+    // 与显示尺寸解耦 —— URL 恒定,窗口缩放不重拉;显示缩放由客户端
+    // Image.sourceSize 负责,故 requestedSize 保留但未参与构造)。
     static QUrl imageUrl(const QString &serverUrl, const QString &itemId,
                          const QString &tag, const QString &kind,
                          const QSize &requestedSize = QSize());
