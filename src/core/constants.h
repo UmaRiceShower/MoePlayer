@@ -25,6 +25,22 @@ inline constexpr int kMaxPageSize = 200;
 inline constexpr int kHomePerLibraryLimit = 20;
 // 首页 hero 服务器建议条数(每账号;全部账号展平后由 QML 再截断)。
 inline constexpr int kHomeSuggestLimit = 10;
+// 播放历史拉取条数(每账号)。
+inline constexpr int kHistoryFetchLimit = 60;
+// 播放历史明细补全条数(每账号):列表端点不返回播放次数与上次播放时间,
+// 需逐条查单条端点,故只补最靠前的这批(在后台进行,不阻塞列表就绪)。
+inline constexpr int kHistoryDetailLimit = 30;
+// 明细补全的并发请求数。Qt 对同一主机的 HTTP/1.1 连接数默认 6,且公开可配:
+// QHttp1Configuration::setNumberOfConnectionsPerHost(1..255)+ QNetworkRequest::
+// setHttp1Configuration(),须在该主机首个请求之前设置;HTTP/2 下恒为 1 条连接
+// 多路复用,不受该值约束。此处取 6 即默认值:历史明细走 EmbyClient 的后台专用
+// 连接池(独立 QNetworkAccessManager,与浏览/首页的 6 条互不挤占),6 即该池
+// 上限,再多只会排在 Qt 队列里白耗传输超时。
+inline constexpr int kHistoryDetailConcurrency = 6;
+// 明细合并后的落盘防抖(ms):逐条写文件过密,合并结果延迟合并写一次。
+inline constexpr int kHistoryFlushDebounceMs = 1000;
+// 播放历史拉取延迟(ms):启动即拉会与首页聚合抢同一主机的连接配额。
+inline constexpr int kHistoryStartupDelayMs = 4000;
 // 搜索返回条数上限。
 inline constexpr int kSearchLimit = 40;
 // 图片请求固定厚档(服务器端缩放并缓存缩略图;与显示尺寸解耦,URL 恒定

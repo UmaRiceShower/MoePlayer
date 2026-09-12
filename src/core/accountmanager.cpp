@@ -18,6 +18,7 @@
 
 #include "core/constants.h"
 #include "core/embyclient.h"
+#include "core/playbackhistory.h"
 // 服务器版本是否支持首页建议过滤(/Suggestions 的 IncludeItemTypes,4.9+):
 // 旧版本忽略该参数,建议内容为目录条目(Studio/Artist/Album),客户端跳过不发,
 // hero 回退本地聚合。
@@ -63,9 +64,10 @@ const QString kHomeCacheName = QStringLiteral("home-rows");
 constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
 } // namespace
 
-AccountManager::AccountManager(EmbyClient *client, QObject *parent)
+AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QObject *parent)
     : QObject(parent)
     , m_client(client)
+    , m_playbackHistory(history)
     , m_persist(&m_settings, QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
 {
     m_homeRowsModel = new HomeRowsModel(this);
@@ -77,6 +79,35 @@ AccountManager::AccountManager(EmbyClient *client, QObject *parent)
     m_netRetryTimer.setInterval(kNetRetryIntervalMs);
     connect(&m_netRetryTimer, &QTimer::timeout, this,
             &AccountManager::retryNetworkAccounts);
+
+    // 播放历史:列表到位写入存储并入队明细补全;明细逐条回收并推进队列
+    // (见 fetchPlaybackHistory)。
+    connect(m_client, &EmbyClient::playbackHistoryReceived, this,
+            &AccountManager::onHistoryListReceived);
+    connect(m_client, &EmbyClient::itemUserDataReceived, this,
+            [this](const QString &serverUrl, const QString &accountId, const QString &itemId,
+                   int playCount, qint64 lastPlayedAt, double positionTicks, bool played) {
+                // 并发槽归还与队列推进与 scope 无关:被删账号的在途响应也必须归还
+                // 槽位并继续派发,否则槽位被它占满时其他账号排队的明细不再发出。
+                if (m_historyDetailInFlight > 0)
+                    --m_historyDetailInFlight;
+                drainHistoryDetails();
+                const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
+                if (!m_historyScopes.contains(scope))
+                    return; // 非本轮参与(账号已删除等):跳过写入与计数
+                if (positionTicks >= 0) {
+                    m_playbackHistory->mergeItemUserData(serverUrl, accountId, itemId,
+                                                         playCount, lastPlayedAt,
+                                                         positionTicks, played);
+                    m_historyFlushTimer.start(); // 防抖落盘(见 constants)
+                }
+                onHistoryTaskDone(scope);
+            });
+    // 后台明细的合并结果延迟落盘(逐条写文件过密,见 constants)。
+    m_historyFlushTimer.setSingleShot(true);
+    m_historyFlushTimer.setInterval(MoePlayer::kHistoryFlushDebounceMs);
+    connect(&m_historyFlushTimer, &QTimer::timeout, this,
+            [this] { m_playbackHistory->flush(); });
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
@@ -601,6 +632,127 @@ void AccountManager::reorderHomeRows()
     // 顺序路径 out 含全部行(重排);删除路径 out 已剔除被删服的行。
     m_homeRows = out;
     m_homeRowsModel->setRows(out);
+}
+
+// 播放历史拉取(见 fetchPlaybackHistory):延迟到首页聚合之后开拉,已调度
+// 则忽略重复调用。
+void AccountManager::fetchPlaybackHistory()
+{
+    if (m_historyScheduled)
+        return;
+    m_historyScheduled = true;
+    QTimer::singleShot(MoePlayer::kHistoryStartupDelayMs, this,
+                       &AccountManager::startPlaybackHistoryFetch);
+}
+
+void AccountManager::startPlaybackHistoryFetch()
+{
+    m_historyScopes.clear();
+    m_historyOutstanding.clear();
+    m_historyDetailQueue.clear();
+    m_historyDetailInFlight = 0;
+    for (const AccountInfo &acc : std::as_const(m_accounts)) {
+        if (acc.token.isEmpty() || acc.userId.isEmpty())
+            continue; // 未登录/凭据不全的账号跳过(下次启动再试)
+        const QString scope = acc.serverUrl.trimmed() + QLatin1Char('|') + acc.id;
+        m_historyScopes.insert(scope);
+        // 先记列表请求这一票:否则某账号先返回空结果时会被误判为"全部完成"。
+        m_historyOutstanding.insert(scope, 1);
+        m_client->fetchPlaybackHistory(acc.serverUrl, acc.id, acc.token, acc.userId,
+                                       MoePlayer::kHistoryFetchLimit);
+    }
+    m_historyActive = !m_historyScopes.isEmpty();
+    if (!m_historyActive)
+        emit playbackHistoryReady();
+}
+
+void AccountManager::onHistoryListReceived(const QString &serverUrl, const QString &accountId,
+                                           const QVariantList &items, bool ok)
+{
+    const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
+    if (!m_historyScopes.contains(scope) || !accountById(accountId))
+        return; // 非本轮参与或账号已删除
+    // 失败与"成功但确有零条播放记录"都会带空列表:失败时必须保留既有条目与
+    // fetchedAt(后者是后续按陈旧度触发拉取的判断依据),只结算列表这一票。
+    if (!ok) {
+        qInfo() << "AccountManager: 播放历史拉取失败,保留既有数据" << scope;
+        onHistoryTaskDone(scope);
+        return;
+    }
+    QVariantList stored;
+    stored.reserve(items.size());
+    for (const QVariant &v : items) {
+        QVariantMap m = v.toMap();
+        // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
+        const QString pid = m.value(QStringLiteral("posterId")).toString();
+        m.insert(QStringLiteral("posterId"),
+                 pid.isEmpty() ? QString() : serverPosterId(serverUrl, pid));
+        stored.append(m);
+    }
+    m_playbackHistory->setItems(serverUrl, accountId, stored);
+    m_playbackHistory->flush(); // 列表即刻落盘:UI 可立即消费,不等后台明细
+    // 列表按最近播放倒序:只补最靠前的若干条明细(逐条请求,见 constants);
+    // 明细仅入队,不计入本轮票数 —— 就绪不等待后台。
+    const int detailCount = qMin(stored.size(), MoePlayer::kHistoryDetailLimit);
+    for (int i = 0; i < detailCount; ++i) {
+        m_historyDetailQueue.enqueue(
+            { scope, stored.at(i).toMap().value(QStringLiteral("id")).toString() });
+    }
+    if (detailCount > 0)
+        drainHistoryDetails();
+    onHistoryTaskDone(scope); // 该账号仅"列表"一票
+}
+
+// 按并发上限从队列派发明细请求(账号已删除/凭据失效直接计完成)。
+void AccountManager::drainHistoryDetails()
+{
+    while (m_historyDetailInFlight < MoePlayer::kHistoryDetailConcurrency
+           && !m_historyDetailQueue.isEmpty()) {
+        const QPair<QString, QString> task = m_historyDetailQueue.dequeue();
+        const QString accountId = task.first.mid(task.first.lastIndexOf(QLatin1Char('|')) + 1);
+        const AccountInfo *acc = accountById(accountId);
+        if (!acc || acc->token.isEmpty()) {
+            onHistoryTaskDone(task.first);
+            continue;
+        }
+        ++m_historyDetailInFlight;
+        m_client->fetchItemUserData(acc->serverUrl, acc->id, acc->token, acc->userId, task.second);
+    }
+}
+
+void AccountManager::onHistoryTaskDone(const QString &scope)
+{
+    const auto it = m_historyOutstanding.find(scope);
+    if (it == m_historyOutstanding.end())
+        return;
+    if (--it.value() > 0)
+        return;
+    m_historyOutstanding.erase(it);
+    finishHistoryScope(scope);
+}
+
+// 该账号拉取收尾(列表已在到位时落盘):所有账号收尾后发就绪,不等后台明细。
+void AccountManager::finishHistoryScope(const QString &scope)
+{
+    Q_UNUSED(scope);
+    if (!m_historyOutstanding.isEmpty() || !m_historyActive)
+        return;
+    m_historyActive = false;
+    qInfo() << "AccountManager: 播放历史列表就绪(明细后台补全中),账号数"
+            << m_historyScopes.size();
+    emit playbackHistoryReady();
+}
+
+// 账号在拉取途中被删除:撤出本轮(票数与存储一并清理),避免批次永远等不到收尾。
+void AccountManager::abandonHistoryScope(const QString &scope)
+{
+    if (!m_historyScopes.remove(scope))
+        return;
+    m_historyOutstanding.remove(scope);
+    if (m_historyOutstanding.isEmpty() && m_historyActive) {
+        m_historyActive = false;
+        emit playbackHistoryReady();
+    }
 }
 
 void AccountManager::maybeAssembleHomeRows()
@@ -1282,6 +1434,10 @@ void AccountManager::removeAccount(const QString &id)
         saveFolders();
         emit foldersChanged();
     }
+    // 播放历史:删号即撤出本轮拉取(防批次永远等不到收尾),并清除该账号
+    // scope 的存储(同服多账号只清被删账号)。
+    abandonHistoryScope(serverUrl.trimmed() + QLatin1Char('|') + id);
+    m_playbackHistory->removeScope(serverUrl, id);
     m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
     reorderHomeRows(); // 被删服的行一并移除,本地重排不重拉网络(见 moveAccount)
     save();

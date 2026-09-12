@@ -89,6 +89,34 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &serverUrl)
     return m;
 }
 
+// Emby 时间戳(ISO 8601)换算毫秒 epoch;空值/解析失败返回 0(未知)。
+// 服务端实测小数秒为 7 位,Qt 6.11 的 ISODateWithMs 可直接解析并截断到毫秒
+// (实测 7 位/3 位/无小数均有效),无需预处理。
+qint64 parseEmbyDateMs(const QString &iso)
+{
+    if (iso.isEmpty())
+        return 0;
+    const QDateTime dt = QDateTime::fromString(iso, Qt::ISODateWithMs);
+    return dt.isValid() ? dt.toMSecsSinceEpoch() : 0;
+}
+
+// 解析播放历史条目:在首页条目字段(海报/背景键、进度、已看等,卡片可直接
+// 消费)之上补剧集定位、进度百分比与服务器给出的顺序 seq。播放次数与上次
+// 播放时间不在列表端点返回,由 fetchItemUserData 补全。
+QVariantMap parseHistoryItem(const QJsonObject &o, const QString &serverUrl, int seq)
+{
+    QVariantMap m = parseHomeItem(o, serverUrl);
+    const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+    m.insert(QStringLiteral("seriesId"), o.value(QLatin1String("SeriesId")).toString());
+    m.insert(QStringLiteral("seriesName"), o.value(QLatin1String("SeriesName")).toString());
+    m.insert(QStringLiteral("seasonNo"), o.value(QLatin1String("ParentIndexNumber")).toInt(0));
+    m.insert(QStringLiteral("episodeNo"), o.value(QLatin1String("IndexNumber")).toInt(0));
+    m.insert(QStringLiteral("playedPercentage"),
+             ud.value(QLatin1String("PlayedPercentage")).toDouble(0));
+    m.insert(QStringLiteral("seq"), seq);
+    return m;
+}
+
 } // namespace
 
 EmbyClient::EmbyClient(QObject *parent)
@@ -99,11 +127,15 @@ EmbyClient::EmbyClient(QObject *parent)
     // 故始终显式指定,避免意外走系统代理(Emby 多为局域网服务)。
     m_nam.setProxy(QNetworkProxy::NoProxy);
     m_nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    // 后台连接池同样显式直连(见 m_bgNam 注释),超时与前台一致。
+    m_bgNam.setProxy(QNetworkProxy::NoProxy);
+    m_bgNam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
 }
 
 void EmbyClient::setProxy(const QNetworkProxy &proxy)
 {
     m_nam.setProxy(proxy); // 对后续新请求生效
+    m_bgNam.setProxy(proxy); // 后台连接池同步
 }
 
 QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) const
@@ -170,9 +202,10 @@ QNetworkRequest EmbyClient::makeRequest(const QString &serverUrl, const QString 
 
 void EmbyClient::get(const QString &serverUrl, const QString &token, const QString &userId,
                      const QString &path, std::function<void(const QJsonDocument &)> onOk,
-                     std::function<void()> onFail, const QString &what)
+                     std::function<void()> onFail, const QString &what, bool background)
 {
-    QNetworkReply *reply = m_nam.get(makeRequest(serverUrl, token, userId, path, false));
+    QNetworkAccessManager &nam = background ? m_bgNam : m_nam;
+    QNetworkReply *reply = nam.get(makeRequest(serverUrl, token, userId, path, false));
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
@@ -858,6 +891,63 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
         // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
         [this, serverUrl, accountId, viewId] { emit serverItemsReceived(serverUrl, accountId, viewId, QVariantList()); },
         QStringLiteral("获取首页行"));
+}
+
+void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
+                                      const QString &token, const QString &userId, int limit)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    // 播放记录以影片与分集为单位(剧集/季自身的最近播放时间来自其分集,
+    // 一并返回会重复)。
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Episode"));
+    // 服务器按条目 LastPlayedDate 倒序返回(列表端点不返回该字段,但顺序
+    // 有效);时间与次数由 fetchItemUserData 逐条补全。
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DatePlayed"));
+    q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,RunTimeTicks,"
+                                  "SeriesId,SeriesName,IndexNumber,ParentIndexNumber"));
+    q.addQueryItem(QStringLiteral("Limit"),
+                   QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
+    get(serverUrl, token, userId,
+        QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
+        [this, serverUrl, accountId](const QJsonDocument &doc) {
+            QVariantList out;
+            int seq = 0;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
+            qInfo() << "Emby: playbackHistory =" << out.size() << "on" << serverUrl;
+            emit playbackHistoryReceived(serverUrl, accountId, out, true);
+        },
+        // 失败:发空列表 + ok=false(调用方保留既有存储,只结算本次请求)。
+        [this, serverUrl, accountId] {
+            emit playbackHistoryReceived(serverUrl, accountId, QVariantList(), false);
+        },
+        QStringLiteral("拉取播放历史"), true /*后台连接池*/);
+}
+
+void EmbyClient::fetchItemUserData(const QString &serverUrl, const QString &accountId,
+                                   const QString &token, const QString &userId,
+                                   const QString &itemId)
+{
+    // 单条端点返回全量档(列表端点的 UserData 被裁剪,无 PlayCount/
+    // LastPlayedDate)。
+    get(serverUrl, token, userId,
+        userPath(userId, QStringLiteral("/Items/%1").arg(itemId)),
+        [this, serverUrl, accountId, itemId](const QJsonDocument &doc) {
+            const QJsonObject ud = doc.object().value(QLatin1String("UserData")).toObject();
+            emit itemUserDataReceived(serverUrl, accountId, itemId,
+                                      ud.value(QLatin1String("PlayCount")).toInt(0),
+                                      parseEmbyDateMs(ud.value(QLatin1String("LastPlayedDate")).toString()),
+                                      ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0),
+                                      ud.value(QLatin1String("Played")).toBool(false));
+        },
+        // 失败以 positionTicks < 0 上报(字段无意义),批次照常推进。
+        [this, serverUrl, accountId, itemId] {
+            emit itemUserDataReceived(serverUrl, accountId, itemId, 0, 0, -1.0, false);
+        },
+        QStringLiteral("拉取条目播放数据"), true /*后台连接池*/);
 }
 
 void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,

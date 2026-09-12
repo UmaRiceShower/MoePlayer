@@ -12,6 +12,7 @@
 #include <clocale>
 
 #include "core/accountmanager.h"
+#include "core/playbackhistory.h"
 #include "core/watchhistory.h"
 #include "core/applog.h"
 #include "core/configmanager.h"
@@ -116,7 +117,13 @@ int main(int argc, char *argv[])
                      [&configManager, &embyClient]() { embyClient.setProxy(configManager.proxyObject()); });
     // 未显式设代理的 QNAM(QML Image 原始 URL 等)统一走配置代理。
     QNetworkProxyFactory::setApplicationProxyFactory(new AppProxyFactory(&configManager));
-    AccountManager accountManager(&embyClient);
+    // 播放历史本地存储:启动拉取(AccountManager::fetchPlaybackHistory)的
+    // 结果落此,供 UI 直接消费并为跨服务器合并留结构;须在 AccountManager
+    // 构造与 QML 引用前就绪。
+    PlaybackHistory playbackHistory;
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                 "PlaybackHistory", &playbackHistory);
+    AccountManager accountManager(&embyClient, &playbackHistory);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ConfigManager", &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);
