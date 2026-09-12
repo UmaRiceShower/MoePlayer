@@ -61,6 +61,7 @@ Item {
         if (AccountManager.hasAccounts) {
             AccountManager.validateTokens()
             AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
+            AccountManager.fetchPlaybackHistory()
         }
     }
 

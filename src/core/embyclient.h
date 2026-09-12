@@ -140,6 +140,18 @@ public:
     // 结果经 nextUpReceived 返回,用于详情页定位上次播放的季/集。
     Q_INVOKABLE void fetchNextUp(const QString &serverUrl, const QString &token,
                                  const QString &userId, const QString &seriesId, int limit);
+    // 拉取播放历史列表(服务器按条目 LastPlayedDate 倒序返回,顺序有效;
+    // 条目字段与首页条目一致,另带剧集定位与顺序 seq)。列表端点不返回
+    // playCount/lastPlayedAt,需再经 fetchItemUserData 逐条补全。
+    // 结果经 playbackHistoryReceived 返回,失败发空列表。
+    Q_INVOKABLE void fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
+                                          const QString &token, const QString &userId, int limit);
+    // 拉取单条目用户数据(全量档:真实 PlayCount/LastPlayedDate/进度),
+    // 结果经 itemUserDataReceived 返回;失败以 positionTicks < 0 上报,
+    // 调用方据批次计数照常推进。
+    Q_INVOKABLE void fetchItemUserData(const QString &serverUrl, const QString &accountId,
+                                       const QString &token, const QString &userId,
+                                       const QString &itemId);
     // 拉取服务器建议(/Users/{id}/Suggestions,首页 hero 轮播数据源;结果经
     // serverSuggestionsReceived 返回)。suggestion 由服务器按混合类型排序
     // (继续观看/最新/热门等,不受客户端控制);失败发空列表,连同
@@ -231,6 +243,15 @@ signals:
     // 失败/无目标发空列表。
     void nextUpReceived(const QString &serverUrl, const QString &seriesId,
                         const QVariantList &items);
+    // 播放历史列表(见 fetchPlaybackHistory):ok=false 表示请求失败(items 为空),
+    // 调用方据此保留既有存储(空列表也可能只是"该账号确无播放记录",两者不可混)。
+    void playbackHistoryReceived(const QString &serverUrl, const QString &accountId,
+                                 const QVariantList &items, bool ok);
+    // 单条目用户数据(见 fetchItemUserData):positionTicks < 0 表示失败
+    // (其余字段无意义)。
+    void itemUserDataReceived(const QString &serverUrl, const QString &accountId,
+                              const QString &itemId, int playCount, qint64 lastPlayedAt,
+                              double positionTicks, bool played);
     // 服务器建议结果(见 fetchServerSuggestions):serverUrl/accountId 归位,
     // items 字段与首页行条目一致(id/name/type/posterId/backdropId/year 等)。
     void serverSuggestionsReceived(const QString &serverUrl, const QString &accountId,
@@ -270,7 +291,7 @@ private:
     // 并调用 onFail(可为空;聚合计数推进用)。
     void get(const QString &serverUrl, const QString &token, const QString &userId,
              const QString &path, std::function<void(const QJsonDocument &)> onOk,
-             std::function<void()> onFail, const QString &what);
+             std::function<void()> onFail, const QString &what, bool background = false);
     // 跨服务器 POST(无认证头,登录端点用),失败发 serverRequestFailed 并调用 onFail。
     void postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
                   std::function<void(const QJsonDocument &)> onOk,
@@ -304,6 +325,10 @@ private:
     static QString parseFaviconLink(const QString &html, const QString &baseHtmlUrl);
 
     QNetworkAccessManager m_nam;
+    // 后台专用连接池:QNetworkAccessManager 的每主机连接数(HTTP/1.1 默认 6,
+    // 可用 QHttp1Configuration 调整)按实例计,独立实例使后台播放历史请求不与
+    // 浏览/首页请求互相排队。
+    QNetworkAccessManager m_bgNam;
     QSettings m_settings;
     // 模型按服务器字典化(key = trimmed serverUrl):多服浏览并行互不覆盖。
     QHash<QString, MediaItemModel *> m_viewsModels;

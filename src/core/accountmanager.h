@@ -12,6 +12,7 @@
 #include "homerowsmodel.h"
 
 class EmbyClient;
+class PlaybackHistory;
 
 //! 多账号与凭据持久化管理(QML 单例 "MoePlayer.Core AccountManager")。
 //! 无"激活账号"概念:所有浏览请求按目标服务器显式携带凭据
@@ -43,7 +44,9 @@ class AccountManager : public QObject
     // 逐账号到位即发 suggestionsUpdated,新数据覆盖旧数据(不等待全部)。
     Q_PROPERTY(QVariantList suggestions READ suggestions NOTIFY suggestionsUpdated)
 public:
-    explicit AccountManager(EmbyClient *client, QObject *parent = nullptr);
+    // history 为播放历史本地存储(拉取结果写入其中,不持有所有权)。
+    explicit AccountManager(EmbyClient *client, PlaybackHistory *history,
+                            QObject *parent = nullptr);
 
     QVariantList accounts() const;
     int accountCount() const { return m_accounts.size(); }
@@ -72,6 +75,13 @@ public:
     // 首页聚合:遍历全部账号(顺序即账号列表顺序),每服拉公开信息/视图/最近条目,
     // 全部就绪后填充 homeRows 并发 homeRowsReady。perLibraryLimit 为每库条目上限。
     Q_INVOKABLE void fetchHomeRows(int perLibraryLimit);
+    // 播放历史拉取:对全部账号拉最近播放列表(写入存储并立即落盘),随后
+    // 在后台逐条补全最靠前的若干条的播放次数/上次播放时间(列表端点不返回
+    // 这两个字段;并发与落盘防抖见 constants)。列表全部到位即发
+    // playbackHistoryReady,不等明细 —— 明细到达经 PlaybackHistory::
+    // historyChanged 增量通知。
+    // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
+    Q_INVOKABLE void fetchPlaybackHistory();
     // 启动校验:对所有有 token 的账号发轻量认证请求(/System/Info),
     // 401 即 token 失效(标红 + 记住密码自动重登),网络错误不算失效。
     Q_INVOKABLE void validateTokens();
@@ -122,6 +132,9 @@ signals:
     void homeRowsReady();
     // 某个账号的服务器建议到位(见 fetchHomeRows)。
     void suggestionsUpdated();
+    // 播放历史拉取批次结束(见 fetchPlaybackHistory);拉取中的进度经
+    // PlaybackHistory::historyChanged 通知。
+    void playbackHistoryReady();
 
 private:
     struct AccountInfo {
@@ -237,6 +250,19 @@ private:
     // 时图标为服务器默认,内容相同,仅决定归属账号)。
     QHash<QString, QString> m_serverIconOwner;
     QTimer m_netRetryTimer; // 网络问题账号定期重试
+    // 播放历史本地存储(构造注入,不持有所有权)。
+    PlaybackHistory *m_playbackHistory;
+    // 播放历史拉取状态(见 fetchPlaybackHistory):调度标记、本轮参与的
+    // scope(serverUrl|账号 id)、各 scope 未完成任务数(列表 1 项 + 入队的
+    // 明细数)、明细待发队列与飞行中计数。
+    bool m_historyScheduled = false;
+    bool m_historyActive = false;
+    QSet<QString> m_historyScopes;
+    QHash<QString, int> m_historyOutstanding;
+    QQueue<QPair<QString, QString>> m_historyDetailQueue; // scope + itemId
+    int m_historyDetailInFlight = 0;
+    // 后台明细合并后的落盘防抖(见 constants):逐条写文件过密,合并写一次。
+    QTimer m_historyFlushTimer;
     // 账号认证状态(accounts() 暴露 authStatus):invalid/network/ok。
     QString authStatusOf(const QString &accountId) const;
     // 对某账号发起一次 token 校验(结果经 validateToken 回调处理)。
@@ -256,4 +282,21 @@ private:
     // 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排聚合行,不重拉
     // 网络(避免撞上重登中的 token 失效触发连锁重登与首页反复重建)。
     void reorderHomeRows();
+
+    // ---- 播放历史拉取(见 fetchPlaybackHistory)----
+    // 延迟到首页聚合之后开拉;已调度则忽略重复调用。
+    void startPlaybackHistoryFetch();
+    // 某账号的列表到位(ok=false 为请求失败):成功则补海报服务器前缀后写入
+    // 存储并立即落盘,再把最靠前的若干条入队交由后台补全;失败保留既有存储。
+    void onHistoryListReceived(const QString &serverUrl, const QString &accountId,
+                               const QVariantList &items, bool ok);
+    // 按并发上限从队列派发后台明细请求(账号已删除/凭据失效直接跳过)。
+    void drainHistoryDetails();
+    // 该 scope 的列表任务结算(见 startPlaybackHistoryFetch 的预置票):归零即
+    // 收尾该账号;不等待后台明细。
+    void onHistoryTaskDone(const QString &scope);
+    // 该账号拉取收尾:所有账号都收尾后发 playbackHistoryReady。
+    void finishHistoryScope(const QString &scope);
+    // 账号在拉取途中被删除:撤出本轮(票数与存储一并清理),避免批次卡住。
+    void abandonHistoryScope(const QString &scope);
 };
