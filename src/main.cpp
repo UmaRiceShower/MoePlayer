@@ -69,6 +69,8 @@ int main(int argc, char *argv[])
     // 版本号来自 CMake project(VERSION),经 MOEPLAYER_VERSION 编译期注入,
     // 全局 applicationVersion() 与 UA/认证头共用,无第二处副本。
     app.setApplicationVersion(QStringLiteral(MOEPLAYER_VERSION));
+    // 桌面集成标识:desktop 文件/图标/Wayland app_id(反向域名)。
+    app.setDesktopFileName(MoePlayer::kAppId);
     // 文件日志:setApplicationName 后即可定位 AppConfigLocation,
     // 尽早安装让首个 qInfo(RHI backend)也落盘。
     AppLog::install();

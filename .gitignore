@@ -32,7 +32,10 @@ ui_*.h
 *.jsc
 Makefile*
 *build-*
+!packaging/build-*.sh
 build/
+dist/
+.flatpak-builder/
 *.qm
 *.prl
 *.qmlls.ini
@@ -64,3 +67,5 @@ tmp/
 AUDIT*
 
 .agents/
+RULES*
+AGENTS*

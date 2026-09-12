@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.21)
 project(MoePlayer VERSION 0.1.0 LANGUAGES CXX)
 
+# 桌面集成标识(反向域名):desktop 文件名、图标名、Wayland app_id 与
+# 打包(Flatpak/AppImage)统一取值,与 QSettings 路径(MOEPLAYER_NAME)解耦。
+set(MOEPLAYER_APP_ID "io.github.umariceshower.MoePlayer")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -20,10 +24,6 @@ qt_standard_project_setup(REQUIRES 6.8)
 # 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
 # (默认输出 build/MoePlayer/Core 会占用 build/MoePlayer 目录名)。
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
-# 官方 osc.lua:拷贝到构建目录,运行时经 <appdir>/osc.lua 加载。
-# 开发时构建目录在项目根下(applicationDirPath),可直接找到。
-configure_file(third_party/osc.lua "${CMAKE_BINARY_DIR}/osc.lua" COPYONLY)
-
 # pragma Singleton 文件须显式声明,qmldir 才会生成 singleton 条目
 # (qmlls/LSP 才能识别 Theme/Constants 为单例并解析 Theme.bg 等成员)。
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -134,6 +134,49 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${PROJECT_VERSION}"
     MOEPLAYER_NAME="${PROJECT_NAME}"
+    MOEPLAYER_APP_ID="${MOEPLAYER_APP_ID}"
     # 仅 Debug 启用 QML 调试/剖析(QML Profiler / -qmljsdebugger 需要 QT_QML_DEBUG)。
     $<$<CONFIG:Debug>:QT_QML_DEBUG>)
 target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus)
+
+include(GNUInstallDirs)
+install(TARGETS MoePlayer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+install(DIRECTORY resources/lua/
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/moeplayer/lua)
+add_custom_command(TARGET MoePlayer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/lua
+        ${CMAKE_BINARY_DIR}/lua
+    COMMENT "Copying mpv lua scripts to build/lua")
+install(FILES packaging/${MOEPLAYER_APP_ID}.desktop
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+install(DIRECTORY packaging/icons/hicolor/
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor)
+install(FILES LICENSE THIRD-PARTY-NOTICES.md
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/moeplayer)
+
+set(CPACK_PACKAGE_NAME "moeplayer")
+set(CPACK_PACKAGE_VENDOR "UmaRiceShower")
+set(CPACK_PACKAGE_CONTACT "UmaRiceShower")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Emby media client with a moe dark UI (Qt/QML, external mpv)")
+set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/UmaRiceShower/MoePlayer")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_PACKAGE_FILE_NAME "moeplayer-${PROJECT_VERSION}-1.${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_GENERATOR "TGZ;DEB;RPM")
+
+set(CPACK_DEBIAN_PACKAGE_SECTION "video")
+set(CPACK_DEBIAN_PACKAGE_MAINTAINER "UmaRiceShower")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "mpv (>= 0.38.0), \
+    qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-effects, \
+    qml6-module-qtquick-layouts, qml6-module-qtquick-shapes, qml6-module-qtquick-window")
+set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
+set(CPACK_RPM_PACKAGE_REQUIRES "mpv >= 0.38.0, qt6-qtdeclarative")
+set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+
+include(CPack)

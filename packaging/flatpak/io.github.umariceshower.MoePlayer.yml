@@ -1,0 +1,129 @@
+app-id: io.github.umariceshower.MoePlayer
+runtime: org.kde.Platform
+runtime-version: '6.10'
+sdk: org.kde.Sdk
+command: MoePlayer
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --share=network
+  - --socket=pulseaudio
+  # ScreenInhibit:主路径 logind,兜底 ScreenSaver。
+  - --talk-name=org.freedesktop.login1
+  - --talk-name=org.freedesktop.ScreenSaver
+  - --filesystem=xdg-run/pipewire-0:ro
+
+cleanup:
+  - '*.a'
+  - '*.la'
+
+modules:
+  # mpv 0.41 硬依赖 libplacebo(>= 6.338.2),KDE runtime 未提供;版本与
+  # 构建参数对齐 Flathub 的 io.mpv.Mpv。
+  - name: libplacebo
+    buildsystem: meson
+    config-opts:
+      - -Dvulkan=enabled
+      - -Dshaderc=enabled
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/haasn/libplacebo.git
+        tag: v7.360.1
+        commit: cee9b076f2c63104ccfd497fa79c39a867293ec4
+
+  # mpv 0.41 硬依赖 libass(字幕渲染),KDE runtime 未提供;
+  # 其 freetype/harfbuzz/fontconfig/fribidi 依赖由 runtime 提供。
+  - name: libass
+    buildsystem: autotools
+    config-opts:
+      - --disable-static
+      - --enable-asm
+      - --enable-harfbuzz
+      - --enable-fontconfig
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+    sources:
+      - type: git
+        url: https://github.com/libass/libass.git
+        tag: 0.17.5
+        commit: 4a05d8127f525943ebf45fdc6497c9e665947f0d
+
+  # mpv 的脚本引擎(osc.lua/moe-hook.lua 必需):KDE SDK 无 lua。
+  # 定义取自 Flathub shared-modules 的 luajit(lua 5.2 的 make install
+  # 只装静态库,链接 mpv 时会缺 -llua5.2)。
+  - name: luajit
+    no-autogen: true
+    make-args:
+      - BUILDMODE=dynamic
+      - PREFIX=${FLATPAK_DEST}
+    make-install-args:
+      - PREFIX=${FLATPAK_DEST}
+    cleanup:
+      - /bin
+      - /include
+      - /lib/pkgconfig
+      - /share/man
+    sources:
+      - type: git
+        url: https://github.com/openresty/luajit2.git
+        tag: v2.1-20260724
+        commit: 982cd8323eafd8604a9e5f2a916aa50b9f67d9ed
+
+  # mpv 的 x11 依赖组要求 xpresent(其余 x11/xscrnsaver/xext/xrandr 由 runtime 提供)。
+  - name: libXpresent
+    buildsystem: autotools
+    sources:
+      - type: git
+        url: https://gitlab.freedesktop.org/xorg/lib/libxpresent.git
+        tag: libXpresent-1.0.2
+        commit: 4d92149372461bf575e8a09b1064a2884c38c3aa
+
+  - name: mpv
+    buildsystem: meson
+    config-opts:
+      - -Dlibmpv=false
+      - -Dcplayer=true
+      - -Dlua=enabled
+      - -Dpulse=enabled
+      - -Dpipewire=enabled
+      - -Dx11=enabled
+      - -Dwayland=enabled
+      - -Dgl=enabled
+      - -Degl=enabled
+      - -Ddvdnav=disabled
+      - -Dlibbluray=disabled
+      - -Dcdda=disabled
+      - -Ddvbin=disabled
+      - -Dlibavdevice=disabled
+      - -Dvapoursynth=disabled
+      - -Duchardet=disabled
+      - -Dlibarchive=disabled
+      - -Dlcms2=disabled
+      - -Drubberband=disabled
+      - -Dxv=disabled
+      - -Dcaca=disabled
+      - -Djack=disabled
+      - -Dopenal=disabled
+      - -Dvulkan=disabled
+      - -Dshaderc=disabled
+      - -Dzimg=disabled
+    sources:
+      - type: git
+        url: https://github.com/mpv-player/mpv.git
+        tag: v0.41.0
+        commit: 41f6a645068483470267271e1d09966ca3b9f413
+
+  - name: moeplayer
+    buildsystem: cmake-ninja
+    config-opts:
+      - -DCMAKE_BUILD_TYPE=Release
+    sources:
+      - type: dir
+        path: ../..
