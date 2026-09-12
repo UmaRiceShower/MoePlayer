@@ -692,16 +692,51 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
                  pid.isEmpty() ? QString() : serverPosterId(serverUrl, pid));
         stored.append(m);
     }
+    // 变更检测:先留一份本地旧条目再整体覆盖(见 PlaybackHistory::setItems)。
+    // 列表端点不返回上次播放时间,故以 (id, 观看进度, 已看) 是否有变化、以及
+    // 时间戳是否已知为判据,只对"新增/有变化/尚无时间戳"的条目逐条补明细;
+    // 未变且有时间的条目一条请求都不发(稳态明细请求为 0,见 constants)。
+    QHash<QString, QVariantMap> before;
+    const QVariantList oldItems = m_playbackHistory->items(serverUrl, accountId);
+    for (const QVariant &v : oldItems) {
+        const QVariantMap m = v.toMap();
+        before.insert(m.value(QStringLiteral("id")).toString(), m);
+    }
     m_playbackHistory->setItems(serverUrl, accountId, stored);
     m_playbackHistory->flush(); // 列表即刻落盘:UI 可立即消费,不等后台明细
-    // 列表按最近播放倒序:只补最靠前的若干条明细(逐条请求,见 constants);
-    // 明细仅入队,不计入本轮票数 —— 就绪不等待后台。
-    const int detailCount = qMin(stored.size(), MoePlayer::kHistoryDetailLimit);
-    for (int i = 0; i < detailCount; ++i) {
-        m_historyDetailQueue.enqueue(
-            { scope, stored.at(i).toMap().value(QStringLiteral("id")).toString() });
+    int needDetail = 0;
+    int skipped = 0;
+    int untraced = 0;
+    for (const QVariant &v : std::as_const(stored)) { // 列表按最近播放倒序
+        if (needDetail >= MoePlayer::kHistoryDetailLimit)
+            break;
+        const QVariantMap m = v.toMap();
+        // 无播放痕迹的条目不会入库(见 hasPlayTrace):补明细也留不下结果。
+        if (!hasPlayTrace(m)) {
+            ++untraced;
+            continue;
+        }
+        const QString id = m.value(QStringLiteral("id")).toString();
+        const QVariantMap old = before.value(id);
+        const bool changed =
+            old.isEmpty()
+            || old.value(QStringLiteral("positionTicks")).toDouble()
+                   != m.value(QStringLiteral("positionTicks")).toDouble()
+            || old.value(QStringLiteral("played")).toBool()
+                   != m.value(QStringLiteral("played")).toBool();
+        const bool dateKnown = old.value(QStringLiteral("lastPlayedAt")).toLongLong() > 0
+                               || old.value(QStringLiteral("dateFetched")).toBool();
+        if (!changed && dateKnown) {
+            ++skipped;
+            continue;
+        }
+        m_historyDetailQueue.enqueue({ scope, id });
+        ++needDetail;
     }
-    if (detailCount > 0)
+    qInfo() << "AccountManager: 播放历史列表" << stored.size() << "条,补明细" << needDetail
+            << "条(未变且有时间的" << skipped << "条跳过,无播放痕迹的" << untraced
+            << "条不入库)" << scope;
+    if (needDetail > 0)
         drainHistoryDetails();
     onHistoryTaskDone(scope); // 该账号仅"列表"一票
 }
