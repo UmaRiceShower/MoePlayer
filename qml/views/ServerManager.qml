@@ -128,6 +128,12 @@ Item {
                 return i
         return -1
     }
+    // hover 放大每侧的溢出量(与 cardW/cardH 同量级):横向 expandHalf、纵向
+    // cardH*(hoverScale-1)/2;各加 4px 余量作为网格内容四周的留白,让放大和邻居
+    // 让位都落在视图内部,不被视图裁剪。
+    readonly property int hoverPadX: Math.ceil(root.expandHalf) + 4
+    readonly property int hoverPadY: Math.ceil(root.cardH * (root.hoverScale - 1) / 2) + 4
+
     // hover 让位量:同排且非自身才偏移(卡体容器 x 绑定此值)。
     function shiftOfCell(cell) {
         if (root.hoveredCell < 0 || cell === root.hoveredCell)
@@ -165,10 +171,12 @@ Item {
         if (vmodel.count === 0)
             return null
         const p = vgrid.contentItem.mapFromItem(root, x, y)
-        if (p.x < 0 || p.y < 0)
+        // 卡体在格内偏移了 hoverPadX/hoverPadY(给 hover 放大留白),取格时补回来。
+        const col = Math.floor((p.x - root.hoverPadX) / vgrid.cellWidth)
+        const row = Math.floor((p.y - root.hoverPadY) / vgrid.cellHeight)
+        // 网格上方/左侧(标题栏那条、留白外沿)= 占位卡格位,即"移到最前"。
+        if (col < 0 || row < 0)
             return { kind: "plus", id: "", key: "plus" }
-        const col = Math.floor(p.x / vgrid.cellWidth)
-        const row = Math.floor(p.y / vgrid.cellHeight)
         if (col >= root.columns || row >= Math.ceil(vmodel.count / root.columns))
             return null
         const r = vmodel.get(Math.min(row * root.columns + col, vmodel.count - 1))
@@ -564,9 +572,13 @@ Item {
             id: vgrid
             anchors.top: parent.top
             anchors.bottom: parent.bottom
+            anchors.topMargin: -root.hoverPadY
+            anchors.bottomMargin: -root.hoverPadY
             anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(parent.width, root.columns * root.cellW)
+            width: root.columns * root.cellW + 2 * root.hoverPadX
             clip: true
+            header: Item { width: 1; height: root.hoverPadY }
+            footer: Item { width: 1; height: root.hoverPadY }
             cellWidth: root.cellW
             cellHeight: root.cellH
             model: vmodel
@@ -604,7 +616,7 @@ Item {
                     id: holder
                     width: root.cardW
                     height: root.cardH
-                    x: root.shiftOfCell(cell.index)
+                    x: root.hoverPadX + root.shiftOfCell(cell.index)
                     Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
 
                     // ===== 添加服务器占位卡(第 0 行)=====
