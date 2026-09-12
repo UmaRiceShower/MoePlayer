@@ -55,6 +55,8 @@ bool validateProxy(const QVariant &v);
 bool validateWheelStep(const QVariant &v);
 bool validatePageWheelStep(const QVariant &v);
 bool validateSearchLimit(const QVariant &v);
+QVariantList optionsHistoryView();
+bool validateHistoryView(const QVariant &v);
 
 #define MoeConfig_Type_bool MoeConfig::Type::Bool
 #define MoeConfig_Type_QString MoeConfig::Type::String
@@ -82,7 +84,9 @@ bool validateSearchLimit(const QVariant &v);
     M(searchWheelStep, "searchWheelStep", int, 0, "scroll", "搜索浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
     M(settingsWheelStep, "settingsWheelStep", int, 0, "scroll", "设置浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
     M(libraryWheelStep, "libraryWheelStep", int, 0, "scroll", "媒体库页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "scroll", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit)
+    M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "scroll", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \
+    M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, optionsHistoryView, validateHistoryView) \
+    M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr)
 
 // 表构建行(元数据;宏行即真相)。
 #define MOECONFIG_ITEM_ROW(n, tk, t, d, s, c, us, l, ds, w, o, v) \

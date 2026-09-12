@@ -111,6 +111,14 @@ QVariantMap parseHistoryItem(const QJsonObject &o, const QString &serverUrl, int
     m.insert(QStringLiteral("seriesName"), o.value(QLatin1String("SeriesName")).toString());
     m.insert(QStringLiteral("seasonNo"), o.value(QLatin1String("ParentIndexNumber")).toInt(0));
     m.insert(QStringLiteral("episodeNo"), o.value(QLatin1String("IndexNumber")).toInt(0));
+    // 剧集海报键(网格视图的分集用 2:3 剧海报,分集自身图是 16:9 剧照):
+    // 与 posterId 一样不带服务器前缀,由调用方补(见 historyItemsWithPosterIds)。
+    const QString seriesId = m.value(QStringLiteral("seriesId")).toString();
+    const QString seriesTag = o.value(QLatin1String("SeriesPrimaryImageTag")).toString();
+    m.insert(QStringLiteral("seriesPosterId"),
+             (seriesId.isEmpty() || seriesTag.isEmpty())
+                 ? QString()
+                 : seriesId + QLatin1Char('~') + seriesTag);
     m.insert(QStringLiteral("playedPercentage"),
              ud.value(QLatin1String("PlayedPercentage")).toDouble(0));
     m.insert(QStringLiteral("seq"), seq);

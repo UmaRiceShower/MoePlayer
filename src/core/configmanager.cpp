@@ -223,6 +223,20 @@ bool validatePageWheelStep(const QVariant &v)
     return v.toInt() >= 0;
 }
 
+QVariantList optionsHistoryView()
+{
+    return { QVariantMap{ { QStringLiteral("label"), QStringLiteral("时间轴") },
+                          { QStringLiteral("key"), QStringLiteral("timeline") } },
+             QVariantMap{ { QStringLiteral("label"), QStringLiteral("网格") },
+                          { QStringLiteral("key"), QStringLiteral("grid") } } };
+}
+
+bool validateHistoryView(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("timeline") || s == QLatin1String("grid");
+}
+
 bool validateSearchLimit(const QVariant &v)
 {
     const int i = v.toInt();
