@@ -207,6 +207,11 @@ private:
     int accountIndexById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
     static QString serverPosterId(const QString &serverUrl, const QString &posterId);
+    // 播放历史条目入库前统一补海报前缀:历史条目来自分集/继续观看等端点,
+    // posterId 一律不带前缀(见 EmbyClient::parseHomeItem 的契约),而
+    // image://emby/ 需要前缀(backdropId 已自带,不处理)。
+    QVariantList historyItemsWithPosterIds(const QVariantList &items,
+                                           const QString &serverUrl) const;
 
     EmbyClient *m_client;
     QSettings m_settings;

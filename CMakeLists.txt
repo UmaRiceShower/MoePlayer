@@ -78,6 +78,7 @@ qt_add_qml_module(MoePlayer
         qml/views/WheelStepHandler.qml
         qml/views/ServerIcon.qml
         qml/views/FilterChip.qml
+        qml/views/PlaybackHistoryPage.qml
 )
 
 # ShaderEffect 用 qsb 编译的 shader(官方路径):资源嵌入 qrc:
