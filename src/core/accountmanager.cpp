@@ -110,6 +110,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
             [this] { m_playbackHistory->flush(); });
     // 详情页按需刷新:继续观看列表与整剧分集都回写本地播放历史。
     connect(m_client, &EmbyClient::resumeReceived, this, &AccountManager::onResumeReceived);
+    connect(m_client, &EmbyClient::historyPageReceived, this, &AccountManager::onHistoryPageReceived);
     connect(m_client, &EmbyClient::allEpisodesParsed, this, &AccountManager::onAllEpisodesParsed);
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
@@ -646,6 +647,48 @@ void AccountManager::fetchPlaybackHistory()
     m_historyScheduled = true;
     QTimer::singleShot(MoePlayer::kHistoryStartupDelayMs, this,
                        &AccountManager::startPlaybackHistoryFetch);
+}
+
+int AccountManager::historyPageSize() const
+{
+    return MoePlayer::kHistoryFetchLimit;
+}
+
+void AccountManager::fetchHistoryPage(const QString &accountId, int startIndex)
+{
+    const AccountInfo *acc = accountById(accountId);
+    if (!acc || acc->token.isEmpty() || acc->userId.isEmpty())
+        return;
+    m_client->fetchHistoryPage(acc->serverUrl, acc->id, acc->token, acc->userId,
+                               qMax(0, startIndex), MoePlayer::kHistoryFetchLimit);
+}
+
+void AccountManager::onHistoryPageReceived(const QString &serverUrl, const QString &accountId,
+                                           int startIndex, const QVariantList &items, bool ok)
+{
+    QVariantList out;
+    if (ok) {
+        // 与入库同一判据:服务器在已播条目之后仍会带回从未播放的行(见 hasPlayTrace),
+        // 页面不需要它们;海报键补服务器前缀(页面直接拼 image://emby/)。
+        QVariantList traced;
+        for (const QVariant &v : std::as_const(items)) {
+            if (hasPlayTrace(v.toMap()))
+                traced.append(v);
+        }
+        out = historyItemsWithPosterIds(traced, serverUrl);
+        // 分页结果不入库(scope/serverUrl/accountId 是 PlaybackHistory 写库时补的),
+        // 这里按同一口径补上:页面据此与库内条目去重、显示账号标签,并把两者透传给
+        // 详情页 —— 缺了会重复显示、标签为空,多账号下还会进错账号的详情页。
+        const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
+        for (QVariant &v : out) {
+            QVariantMap m = v.toMap();
+            m.insert(QStringLiteral("scope"), scope);
+            m.insert(QStringLiteral("serverUrl"), serverUrl);
+            m.insert(QStringLiteral("accountId"), accountId);
+            v = m;
+        }
+    }
+    emit historyPageReceived(serverUrl, accountId, startIndex, out, items.size(), ok);
 }
 
 void AccountManager::refreshPlaybackHistory()

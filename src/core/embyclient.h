@@ -146,6 +146,12 @@ public:
     // 结果经 playbackHistoryReceived 返回,失败发空列表。
     Q_INVOKABLE void fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
                                           const QString &token, const QString &userId, int limit);
+
+    // 播放历史分页(页面"加载更多")：从 startIndex 起再取一页,结果经
+    // historyPageReceived 返回(ok=false 表示失败);只读,不涉及本地存储。
+    Q_INVOKABLE void fetchHistoryPage(const QString &serverUrl, const QString &accountId,
+                                      const QString &token, const QString &userId,
+                                      int startIndex, int limit);
     // 拉取单条目用户数据(全量档:真实 PlayCount/LastPlayedDate/进度),
     // 结果经 itemUserDataReceived 返回;失败以 positionTicks < 0 上报,
     // 调用方据批次计数照常推进。
@@ -252,6 +258,10 @@ signals:
                         const QVariantList &items);
     // 播放历史列表(见 fetchPlaybackHistory):ok=false 表示请求失败(items 为空),
     // 调用方据此保留既有存储(空列表也可能只是"该账号确无播放记录",两者不可混)。
+    // rawCount = 服务器该页原始条数(未过滤):调用方按它推进游标,并据此判断
+    // 该账号是否已取完(不足一页)。
+    void historyPageReceived(const QString &serverUrl, const QString &accountId,
+                             int startIndex, const QVariantList &items, int rawCount, bool ok);
     void playbackHistoryReceived(const QString &serverUrl, const QString &accountId,
                                  const QVariantList &items, bool ok);
     // 单条目用户数据(见 fetchItemUserData):positionTicks < 0 表示失败

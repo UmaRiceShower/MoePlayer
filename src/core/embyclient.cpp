@@ -159,6 +159,33 @@ QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) c
 
 namespace {
 // 播放地址补全 server 前缀(相对路径 → 绝对;已是 http 原样)。
+// 播放历史列表查询(首页批次与"加载更多"分页共用):startIndex<=0 不传该参数
+// (与首页批次请求逐字一致)。服务器按 LastPlayedDate 倒序;列表端点不返回该字段,
+// 但顺序有效(时间与次数由 fetchItemUserData 逐条补全)。
+QUrlQuery historyListQuery(int startIndex, int limit, bool playedOnly)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    // 播放记录以影片与分集为单位(剧集/季自身的最近播放时间来自其分集,
+    // 一并返回会重复)。
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Episode"));
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DatePlayed"));
+    q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,RunTimeTicks,"
+                                  "SeriesId,SeriesName,IndexNumber,ParentIndexNumber"));
+    // 分页("加载更多")加服务器端过滤:实测服务器把"播过的"排在前面、从未播放的排在
+    // 其后,不过滤时第 60 条之后整页都是未播条目,翻页毫无意义。刻意只用 IsPlayed
+    // (不用 IsResumable 组合:实测逗号组合是"同时满足"语义,会把结果缩到几条)。
+    if (playedOnly)
+        q.addQueryItem(QStringLiteral("Filters"), QStringLiteral("IsPlayed"));
+    if (startIndex > 0)
+        q.addQueryItem(QStringLiteral("StartIndex"), QString::number(startIndex));
+    q.addQueryItem(QStringLiteral("Limit"),
+                   QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
+    return q;
+}
+
 QString absolutePlaybackUrl(const QString &serverKey, QString p)
 {
     if (p.startsWith(QLatin1String("http")))
@@ -906,20 +933,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
 void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId, int limit)
 {
-    QUrlQuery q;
-    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
-    // 播放记录以影片与分集为单位(剧集/季自身的最近播放时间来自其分集,
-    // 一并返回会重复)。
-    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Episode"));
-    // 服务器按条目 LastPlayedDate 倒序返回(列表端点不返回该字段,但顺序
-    // 有效);时间与次数由 fetchItemUserData 逐条补全。
-    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DatePlayed"));
-    q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
-    q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("PrimaryImageAspectRatio,ProductionYear,RunTimeTicks,"
-                                  "SeriesId,SeriesName,IndexNumber,ParentIndexNumber"));
-    q.addQueryItem(QStringLiteral("Limit"),
-                   QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
+    QUrlQuery q = historyListQuery(0, limit, false);
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
         [this, serverUrl, accountId](const QJsonDocument &doc) {
@@ -935,6 +949,31 @@ void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &a
             emit playbackHistoryReceived(serverUrl, accountId, QVariantList(), false);
         },
         QStringLiteral("拉取播放历史"), true /*后台连接池*/);
+}
+
+
+// 播放历史分页:从 startIndex 起再取一页(页面"加载更多"用)。与首页批次同源,
+// 仅多带 StartIndex;结果只经 historyPageReceived 回给调用方。
+void EmbyClient::fetchHistoryPage(const QString &serverUrl, const QString &accountId,
+                                  const QString &token, const QString &userId,
+                                  int startIndex, int limit)
+{
+    const QUrlQuery q = historyListQuery(qMax(0, startIndex), limit, true);
+    get(serverUrl, token, userId,
+        QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
+        [this, serverUrl, accountId, startIndex](const QJsonDocument &doc) {
+            QVariantList out;
+            int seq = 0;
+            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
+                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
+            qInfo() << "Emby: historyPage =" << out.size() << "startIndex" << startIndex
+                    << "on" << serverUrl;
+            emit historyPageReceived(serverUrl, accountId, startIndex, out, out.size(), true);
+        },
+        [this, serverUrl, accountId, startIndex] {
+            emit historyPageReceived(serverUrl, accountId, startIndex, QVariantList(), 0, false);
+        },
+        QStringLiteral("播放历史分页"), true /*后台连接池*/);
 }
 
 void EmbyClient::fetchItemUserData(const QString &serverUrl, const QString &accountId,
