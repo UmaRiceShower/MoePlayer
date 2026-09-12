@@ -108,6 +108,9 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
     m_historyFlushTimer.setInterval(MoePlayer::kHistoryFlushDebounceMs);
     connect(&m_historyFlushTimer, &QTimer::timeout, this,
             [this] { m_playbackHistory->flush(); });
+    // 详情页按需刷新:继续观看列表与整剧分集都回写本地播放历史。
+    connect(m_client, &EmbyClient::resumeReceived, this, &AccountManager::onResumeReceived);
+    connect(m_client, &EmbyClient::allEpisodesParsed, this, &AccountManager::onAllEpisodesParsed);
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
@@ -753,6 +756,39 @@ void AccountManager::abandonHistoryScope(const QString &scope)
         m_historyActive = false;
         emit playbackHistoryReady();
     }
+}
+
+// 详情页进入时的按需刷新:只拉该账号的继续观看列表(服务器按上次播放倒序,
+// 含"有进度"与"下一未看集"两类),结果回写本地并发 accountHistoryRefreshed。
+void AccountManager::refreshAccountHistory(const QString &accountId)
+{
+    const AccountInfo *acc = accountById(accountId);
+    if (!acc || acc->token.isEmpty() || acc->userId.isEmpty())
+        return; // 凭据不全:调用方走本地回退
+    m_client->fetchResume(acc->serverUrl, accountId, acc->token, acc->userId,
+                          MoePlayer::kResumeLimit);
+}
+
+void AccountManager::onResumeReceived(const QString &serverUrl, const QString &accountId,
+                                      const QVariantList &items)
+{
+    if (!items.isEmpty() && accountById(accountId)) {
+        m_playbackHistory->upsertItems(serverUrl, accountId, items);
+        m_historyFlushTimer.start();
+    }
+    // 空列表(失败/确无目标)照常转发:调用方按"无目标"处理并走其它回退。
+    emit accountHistoryRefreshed(serverUrl, accountId, items);
+}
+
+void AccountManager::onAllEpisodesParsed(const QString &serverUrl, const QString &accountId,
+                                         const QString &seriesId, const QVariantList &items)
+{
+    Q_UNUSED(seriesId);
+    if (items.isEmpty() || !accountById(accountId))
+        return;
+    // 逐季分集回写:选集栏的展示仍走 EmbyClient 的全季模型,这里只补本地记录。
+    m_playbackHistory->upsertItems(serverUrl, accountId, items);
+    m_historyFlushTimer.start();
 }
 
 void AccountManager::maybeAssembleHomeRows()

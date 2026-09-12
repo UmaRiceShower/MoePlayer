@@ -178,9 +178,16 @@ public:
     // 相似推荐(/Items/{id}/Similar),填充该服务器的 similarModel,发 similarReady。
     Q_INVOKABLE void fetchSimilar(const QString &serverUrl, const QString &token,
                                   const QString &userId, const QString &itemId);
-    // 剧集全部集(/Shows/{id}/Episodes 不带 SeasonId),供跨季续播查找。
-    Q_INVOKABLE void fetchAllEpisodes(const QString &serverUrl, const QString &token,
-                                      const QString &userId, const QString &seriesId);
+    // 剧集全部集(/Shows/{id}/Episodes 不带 SeasonId),供跨季续播查找;
+    // accountId 用于把解析结果回写播放历史(见 allEpisodesParsed)。
+    Q_INVOKABLE void fetchAllEpisodes(const QString &serverUrl, const QString &accountId,
+                                      const QString &token, const QString &userId,
+                                      const QString &seriesId);
+    // 继续观看列表(/Users/{id}/Items/Resume):服务器按上次播放倒序返回,含
+    // "有进度"与"下一未看集"两类条目,详情页据此定位续播目标(无需排序参数)。
+    // 条目字段与播放历史同构,经 resumeReceived 返回。
+    Q_INVOKABLE void fetchResume(const QString &serverUrl, const QString &accountId,
+                                 const QString &token, const QString &userId, int limit);
     // 写入已看/继续观看状态(/Users/{id}/Items/{itemId}/UserData)。
     // played=true 表示看完(位置清零);否则写入上次播放位置供继续观看。
     Q_INVOKABLE void setWatched(const QString &serverUrl, const QString &token,
@@ -252,6 +259,13 @@ signals:
     void itemUserDataReceived(const QString &serverUrl, const QString &accountId,
                               const QString &itemId, int playCount, qint64 lastPlayedAt,
                               double positionTicks, bool played);
+    // 继续观看列表(见 fetchResume):items 字段与播放历史条目同构(含 seq);
+    // 失败发空列表(调用方按"无目标"处理,不清既有存储)。
+    void resumeReceived(const QString &serverUrl, const QString &accountId,
+                        const QVariantList &items);
+    // 全季分集解析结果(见 fetchAllEpisodes):供调用方回写播放历史。
+    void allEpisodesParsed(const QString &serverUrl, const QString &accountId,
+                           const QString &seriesId, const QVariantList &items);
     // 服务器建议结果(见 fetchServerSuggestions):serverUrl/accountId 归位,
     // items 字段与首页行条目一致(id/name/type/posterId/backdropId/year 等)。
     void serverSuggestionsReceived(const QString &serverUrl, const QString &accountId,

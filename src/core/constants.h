@@ -39,6 +39,12 @@ inline constexpr int kHistoryDetailLimit = 30;
 inline constexpr int kHistoryDetailConcurrency = 6;
 // 明细合并后的落盘防抖(ms):逐条写文件过密,合并结果延迟合并写一次。
 inline constexpr int kHistoryFlushDebounceMs = 1000;
+// 继续观看列表拉取条数(每账号):服务器按上次播放倒序,含"有进度"与
+// "下一未看集"两类条目,详情页据此定位续播目标。
+inline constexpr int kResumeLimit = 60;
+// 本地播放历史每账号条目上限:详情页逐季回写会持续增长,超出按
+// (上次播放时间, 服务器顺序)保留最新的若干条。
+inline constexpr int kHistoryStoredPerScope = 1000;
 // 播放历史拉取延迟(ms):启动即拉会与首页聚合抢同一主机的连接配额。
 inline constexpr int kHistoryStartupDelayMs = 4000;
 // 搜索返回条数上限。

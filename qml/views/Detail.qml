@@ -163,7 +163,6 @@ Item {
         if (root.playbackPending || !itemId)
             return
         console.info("Detail: 播放发起", itemId, resume > 0 ? "续播" : "从头")
-        root.recordWatchHistory(itemId)
         root.playbackPending = true
         root.pendingPlayItemId = itemId
         root.resumeTicks = resume
@@ -326,12 +325,14 @@ Item {
         // 有选集(剧集/集详情)时 loaded 延迟到分集到达才置 true(见
         // onEpisodesReceived),避免选集栏先渲染旧数据再跳新数据。
         if (d.type === "Series") {
-            // 续播目标(服务器 NextUp)与季模型就绪后定位上次播放的季/集。
+            // 续播目标(继续观看列表优先,NextUp 兜底)与季模型就绪后定位。
             root._resumePending = true
             root._nextUpReady = false
             EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
-            // 全部集(跨季),供"继续观看"按进度定位目标集。
-            EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, d.id)
+            // 全部集(跨季):供"继续观看"定位目标集,并回写本地播放历史。
+            EmbyClient.fetchAllEpisodes(root.serverUrl, root.accountId, c.token, c.userId, d.id)
+            // 服务器继续观看列表(按上次播放倒序,含"下一未看集"),进详情页拉一次。
+            AccountManager.refreshAccountHistory(root.accountId)
             EmbyClient.fetchNextUp(root.serverUrl, c.token, c.userId, d.id, 1)
         } else if (d.type === "Episode" && d.seriesId) {
             EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
@@ -408,37 +409,16 @@ Item {
         }
     }
 
-    // 记录播放目标到本地观看记录(定位回退与后续跨服观看聚合用)。
-    function recordWatchHistory(itemId) {
-        const d = root.detail
-        if (!d || !itemId)
-            return
-        let type = "Movie", seriesId = "", seriesName = "", seasonNo = 0, episodeNo = 0
-        if (d.type === "Series") {
-            // 剧集页播放按钮:目标集在全集模型中查季集号。
-            type = "Episode"
-            seriesId = d.id
-            seriesName = d.name || ""
-            const m = EmbyClient.allEpisodesModelFor(root.serverUrl)
-            for (let i = 0; i < m.count; ++i) {
-                const it = m.itemAt(i)
-                if (it.id === itemId) {
-                    seasonNo = it.seasonNo || 0
-                    episodeNo = it.episodeNo || 0
-                    break
-                }
-            }
-        } else if (d.type === "Episode") {
-            type = "Episode"
-            seriesId = d.seriesId || ""
-            seriesName = d.seriesName || ""
-            seasonNo = d.seasonNo || 0
-            episodeNo = d.episodeNo || 0
+    function localResumeTarget(seriesId) {
+        const list = PlaybackHistory.items(root.serverUrl, root.accountId)
+        for (const it of list) {
+            if (it.type === "Episode" && it.seriesId === seriesId
+                    && (it.seasonNo || 0) > 0 && it.id)
+                return { seasonNo: it.seasonNo, episodeNo: it.episodeNo || 0, itemId: it.id }
         }
-        WatchHistory.record(root.serverUrl, root.accountId, itemId, type, seriesId, seriesName,
-                            seasonNo, episodeNo, 0, false)
+        return null
     }
-    // 设置续播目标并定位(NextUp 与本地观看记录两条来源共用);
+    // 设置续播目标并定位(继续观看/NextUp 与本地播放历史多条来源共用);
     // 返回 false = 季模型未到,由 onSeasonsReceived 的 locateResume 接手。
     function applyResumeTarget(seasonNo, episodeNo, episodeId) {
         root._resumeSeasonNo = seasonNo
@@ -542,7 +522,7 @@ Item {
         if (seriesId)
             EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, seriesId)
         if (root.detail.type === "Series")
-            EmbyClient.fetchAllEpisodes(root.serverUrl, c.token, c.userId, root.detail.id)
+            EmbyClient.fetchAllEpisodes(root.serverUrl, root.accountId, c.token, c.userId, root.detail.id)
         EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
     }
 
@@ -2610,11 +2590,11 @@ Item {
                 return
             root._nextUpReady = true
             if (!items || items.length === 0) {
-                // 服务器无续播目标(未看/全看完)或请求失败:回退本地观看记录
+                // 服务器无续播目标(未看/全看完)或请求失败:回退本地播放历史
                 // (不依赖网络);仍无记录则保持第一季。
-                const rec = WatchHistory.lastEpisode(root.serverUrl, root.accountId, series)
-                if (rec && rec.itemId && (rec.seasonNo || 0) > 0) {
-                    root.applyResumeTarget(rec.seasonNo, rec.episodeNo || 0, rec.itemId)
+                const rec = root.localResumeTarget(series)
+                if (rec) {
+                    root.applyResumeTarget(rec.seasonNo, rec.episodeNo, rec.itemId)
                     return
                 }
                 root._resumePending = false
@@ -2626,6 +2606,26 @@ Item {
                 return
             }
             root.applyResumeTarget(first.seasonNo || 0, first.episodeNo || 0, first.id || "")
+        }
+        // 继续观看列表到达(进入详情页时请求):该剧的续播目标即首个匹配项;
+        // 与当前目标一致时不重复定位(避免选集栏两次跳动)。
+        function onAccountHistoryRefreshed(serverUrl, accountId, items) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
+                return
+            const series = root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
+            if (!series || !items)
+                return
+            for (const it of items) {
+                if (it.type !== "Episode" || it.seriesId !== series)
+                    continue
+                if ((it.seasonNo || 0) <= 0 || !it.id)
+                    return
+                if (it.id === root._resumeEpisodeId)
+                    return
+                root._resumePending = true
+                root.applyResumeTarget(it.seasonNo || 0, it.episodeNo || 0, it.id)
+                return
+            }
         }
         function onEpisodesReceived(serverUrl) {
             if (serverUrl !== root.serverUrl)

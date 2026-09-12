@@ -41,7 +41,6 @@ qt_add_executable(MoePlayer
     src/core/applog.cpp
     src/core/configmanager.cpp
     src/core/persistmap.cpp
-    src/core/watchhistory.cpp
     src/core/playbackhistory.cpp
     src/core/screeninhibit.cpp
     src/models/colorprovider.cpp

@@ -30,6 +30,12 @@ public:
     Q_INVOKABLE void mergeItemUserData(const QString &serverUrl, const QString &accountId,
                                        const QString &itemId, int playCount,
                                        qint64 lastPlayedAt, double positionTicks, bool played);
+    // 按需补写条目(详情页进入时的继续观看列表与逐季分集):按 id 合并,已存在的
+    // 条目保留其播放次数/上次播放时间(新值非 0 才覆盖),新条目追加;空列表视为
+    // 无数据、不清既有(与 setItems 的整体覆盖语义区分)。超出上限按
+    // (上次播放时间, 服务器顺序)保留最新若干条。
+    Q_INVOKABLE void upsertItems(const QString &serverUrl, const QString &accountId,
+                                 const QVariantList &items);
     // 该 scope 的条目:上次播放时间已知者按时间倒序在前,未知者按服务器给的
     // 顺序 seq 排在其后。
     Q_INVOKABLE QVariantList items(const QString &serverUrl, const QString &accountId) const;
