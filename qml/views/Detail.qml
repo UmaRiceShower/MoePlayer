@@ -171,6 +171,9 @@ Item {
         const seriesName = isSeries ? root.detail.name : (root.detail.seriesName || "")
         root.playWindowRequested({
             serverUrl: root.serverUrl,
+            // 账号随播放上下文下推:EmbyClient 的 playbackReady meta 不含
+            // accountId,而按集续链/全季拉取都要按账号定位(Main 收下即并入)。
+            accountId: root.accountId,
             itemId: itemId,
             displayName: root.heroFullTitle(),
             seriesId: seriesId,
