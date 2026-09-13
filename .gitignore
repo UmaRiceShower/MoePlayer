@@ -69,3 +69,7 @@ AUDIT*
 .agents/
 RULES*
 AGENTS*
+
+# Python 工具(tools/)运行产生的字节码
+__pycache__/
+*.pyc

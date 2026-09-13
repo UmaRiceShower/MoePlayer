@@ -161,6 +161,41 @@ Item {
 
     // 打开:保留上次输入/过滤/目标与结果模型(不自动重搜);仅清理失效
     // 目标(所选服务器已不存在 → 回退"全部"并按当前关键词重搜)。
+    // 目标下拉行:"" = 全部;无查询保持服务器顺序,有查询按匹配分降序。
+    function serverRows(query) {
+        const q = (query || "").trim()
+        const out = []
+        if (q === "" || FuzzyMatch.hit(q, "全部"))
+            out.push({ url: "", name: "全部" })
+        const opts = root.serverOptions
+        const hits = []
+        for (let i = 0; i < opts.length; ++i) {
+            if (!FuzzyMatch.hit(q, opts[i].name))
+                continue
+            hits.push({ url: opts[i].serverUrl, name: opts[i].name,
+                        score: Math.max(0, FuzzyMatch.score(q, opts[i].name)) })
+        }
+        if (q !== "")
+            hits.sort((a, b) => b.score - a.score)
+        return out.concat(hits)
+    }
+    // 勾选/取消一台服务器("" = 清空为全部),并按当前关键词立即重搜。
+    function toggleServer(url) {
+        if (url === "") {
+            root.selectedServers = []
+            root.searchNow()
+            return
+        }
+        // 原地 splice/push 不触发 var 通知,整体重赋值。
+        const a = root.selectedServers.slice()
+        const i = a.indexOf(url)
+        if (i >= 0)
+            a.splice(i, 1)
+        else
+            a.push(url)
+        root.selectedServers = a
+        root.searchNow()
+    }
     function open() {
         root.visible = true
         const opts = root.serverOptions
@@ -554,14 +589,24 @@ Item {
                         parent: serverChip
                         y: serverChip.height + 4
                         x: -width + serverChip.width
-                        width: 220
+                        width: 240
                         padding: 8
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
                         enter: Transition {
                             NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
                         }
                         exit: Transition {
                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                        }
+                        onOpened: {
+                            serverSearch.text = ""
+                            // 延时取焦:等 popup 完成打开处理后再把焦点交给输入框。
+                            serverFocusTimer.start()
+                        }
+                        Timer {
+                            id: serverFocusTimer
+                            interval: 60
+                            onTriggered: serverSearch.forceActiveFocus()
                         }
                         background: Rectangle {
                             color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
@@ -571,62 +616,62 @@ Item {
                         }
                         contentItem: Column {
                             width: parent.width - 16
-                            spacing: 2
-                            // "全部":点它清空具体选择(与具体选项互斥)。
-                            ItemDelegate {
-                                id: allItem
-                                readonly property bool allOn: root.selectedServers.length === 0
+                            spacing: 6
+                            // 服务器搜索:本地模糊匹配,服务器多时不必在长列表里翻。
+                            TextField {
+                                id: serverSearch
                                 width: parent.width
                                 height: 30
-                                padding: 0
-                                contentItem: Item {
-                                    AppText {
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "全部"
-                                        color: "white"
-                                        font.pixelSize: 13
-                                    }
-                                    Rectangle {
-                                        anchors.right: parent.right
-                                        anchors.rightMargin: 4
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        width: 6
-                                        height: 6
-                                        radius: 3
-                                        color: Constants.moePink
-                                        visible: allItem.allOn
-                                    }
-                                }
+                                // 打开下拉即取焦(见 serverFocusTimer),可直接输入过滤。
+                                focus: true
+                                leftPadding: 10
+                                rightPadding: 10
+                                placeholderText: "搜索服务器"
+                                placeholderTextColor: Theme.textMuted
+                                color: "white"
+                                font.pixelSize: 13
+                                selectByMouse: true
                                 background: Rectangle {
-                                    radius: 4
-                                    color: parent.hovered
-                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
-                                        : "transparent"
+                                    radius: 6
+                                    color: Qt.rgba(0, 0, 0, 0.25)
+                                    border.width: 1
+                                    border.color: serverSearch.activeFocus
+                                                  ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
+                                                  : Qt.rgba(1, 1, 1, 0.10)
                                 }
-                                onClicked: {
-                                    root.selectedServers = []
-                                    root.searchNow()
+                                // 回车 = 勾选/取消首个匹配项(与点击首行等价)。
+                                onAccepted: {
+                                    const rows = serverList.model
+                                    if (rows && rows.length > 0)
+                                        root.toggleServer(rows[0].url)
                                 }
                             }
-                            // 服务器多选:勾选任意项即脱离"全部"。
-                            Repeater {
-                                model: root.serverOptions
+                            // 行:"" = 全部,其余为服务器多选;高度按内容自适应、超出滚动。
+                            ListView {
+                                id: serverList
+                                width: parent.width
+                                height: Math.min(contentHeight, 252)
+                                clip: true
+                                model: root.serverRows(serverSearch.text)
                                 delegate: ItemDelegate {
                                     required property var modelData
-                                    readonly property bool isOn: root.selectedServers.indexOf(modelData.serverUrl) >= 0
-                                    width: parent.width
+                                    readonly property bool isOn: modelData.url === ""
+                                                                 ? root.selectedServers.length === 0
+                                                                 : root.selectedServers.indexOf(modelData.url) >= 0
+                                    width: serverList.width
                                     height: 30
                                     padding: 0
                                     contentItem: Item {
                                         AppText {
                                             anchors.left: parent.left
                                             anchors.leftMargin: 4
+                                            anchors.right: parent.right
+                                            anchors.rightMargin: 16
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: modelData.name
                                             color: "white"
                                             font.pixelSize: 13
+                                            elide: Text.ElideRight
                                         }
                                         Rectangle {
                                             anchors.right: parent.right
@@ -645,17 +690,7 @@ Item {
                                             ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
                                             : "transparent"
                                     }
-                                    onClicked: {
-                                        // 原地 splice/push 不触发 var 通知,整体重赋值。
-                                        let a = root.selectedServers.slice()
-                                        const i = a.indexOf(modelData.serverUrl)
-                                        if (i >= 0)
-                                            a.splice(i, 1)
-                                        else
-                                            a.push(modelData.serverUrl)
-                                        root.selectedServers = a
-                                        root.searchNow()
-                                    }
+                                    onClicked: root.toggleServer(modelData.url)
                                 }
                             }
                         }

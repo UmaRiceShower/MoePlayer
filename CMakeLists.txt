@@ -28,6 +28,7 @@ set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
 # (qmlls/LSP 才能识别 Theme/Constants 为单例并解析 Theme.bg 等成员)。
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/theme/Constants.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/FuzzyMatch.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 # QML 模块:所有 QML 文件 + C++ 类型统一归入 URI MoePlayer.Core,
 # 替代旧的 qml.qrc + 运行时 qmlRegister 布局。qt_add_qml_module 生成
@@ -43,6 +44,8 @@ qt_add_executable(MoePlayer
     src/core/persistmap.cpp
     src/core/playbackhistory.cpp
     src/core/screeninhibit.cpp
+    src/core/pinyinhelper.cpp
+    src/core/pinyin_table.cpp
     src/models/colorprovider.cpp
     src/models/homerowsmodel.cpp
     src/models/mediaitemmodel.cpp
@@ -60,6 +63,7 @@ qt_add_qml_module(MoePlayer
     IMPORT_PATH "${CMAKE_BINARY_DIR}/qml"
     QML_FILES
         qml/Main.qml
+        qml/FuzzyMatch.qml
         qml/theme/Theme.qml
         qml/theme/Constants.qml
         qml/theme/AppText.qml

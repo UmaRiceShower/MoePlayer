@@ -27,3 +27,11 @@ MoePlayer is licensed under the GNU General Public License, version 3
   multi-licensed (WTFPL, ISC, Ms-PL, AGPLv3, BSD — pick any) and may also
   be treated as public domain. This project treats it as ISC.
 - License texts: https://opensource.org/licenses/alphabetical
+
+## pinyin-data
+- `src/core/pinyin_table.{h,cpp}` is generated from pinyin-data's `pinyin.txt`
+  (Chinese character → pinyin readings, Unicode range U+4E00..U+9FFF, the two
+  most common readings per character).
+- Source: https://github.com/mozillazg/pinyin-data
+- License: MIT — Copyright (c) 2016 mozillazg
+- Regeneration: `tools/gen-pinyin-table.py` (see its header comment).

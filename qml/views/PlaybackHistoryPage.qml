@@ -128,6 +128,44 @@ Item {
                 return list[i].name
         return ""
     }
+    // 条目是否命中搜索(查询为空即全命中)。匹配对象 = 剧名 + 集名 + 账号名 +
+    // "SxxExx" 记号 + 年份,并附拼音(全拼/首字母简拼)—— 汉字、拼音、数字记号都能搜;
+    // 大小写不敏感,填账号名即可按服务器筛。
+    function itemHaystack(it) {
+        let h = (it.seriesName || "") + " " + (it.name || "") + " " + root.accountName(it)
+        if ((it.seasonNo || 0) > 0)
+            h += " S" + root.pad2(it.seasonNo || 0) + "E" + root.pad2(it.episodeNo || 0)
+        if ((it.year || 0) > 0)
+            h += " " + it.year
+        return h
+    }
+    function matchesQuery(it) {
+        return FuzzyMatch.hit(searchField.text, root.itemHaystack(it))
+    }
+    // 账号下拉行:"" = 全部;无查询保持账号顺序,有查询按匹配分降序。
+    function accountRows(query) {
+        const q = (query || "").trim()
+        const out = []
+        if (q === "" || FuzzyMatch.hit(q, "全部"))
+            out.push({ id: "", name: "全部" })
+        const opts = root.accountOptions
+        const hits = []
+        for (let i = 0; i < opts.length; ++i) {
+            if (!FuzzyMatch.hit(q, opts[i].name))
+                continue
+            // 排序仍按原文模糊分:拼音命中但原文不中的并列在 0(列表本身很短)。
+            hits.push({ id: opts[i].id, name: opts[i].name, score: Math.max(0, FuzzyMatch.score(q, opts[i].name)) })
+        }
+        if (q !== "")
+            hits.sort((a, b) => b.score - a.score)
+        return out.concat(hits)
+    }
+    // 选中账号(空 = 全部)并收起下拉。
+    function selectAccount(id) {
+        root.filterAccountId = id
+        accountPopup.close()
+    }
+
     // 缩略图:行内是 16:9 框,优先取 16:9 图源 —— backdropId 对分集是父剧背景、
     // 对影片是自身背景;两者都没有时回退自身 posterId(2:3 海报会裁切)。
     function thumbSource(it) {
@@ -313,6 +351,8 @@ Item {
         for (const it of PlaybackHistory.allItems()) {
             if (root.filterAccountId !== "" && (it.accountId || "") !== root.filterAccountId)
                 continue
+            if (!root.matchesQuery(it))
+                continue
             source.push(it)
         }
         const seen = {}
@@ -320,6 +360,8 @@ Item {
             seen[(it.accountId || "") + "|" + (it.id || "")] = true
         for (const it of root.pageItems) {
             if (root.filterAccountId !== "" && (it.accountId || "") !== root.filterAccountId)
+                continue
+            if (!root.matchesQuery(it))
                 continue
             const k = (it.accountId || "") + "|" + (it.id || "")
             if (seen[k])
@@ -519,6 +561,64 @@ Item {
             }
         }
 
+        // 搜索框:模糊匹配剧名/集名/账号/SxxExx,本地即时过滤;宽度取标题与右侧
+        // 控件之间的空档(窄窗下不小于 0,避免负宽度)。
+        TextField {
+            id: searchField
+            anchors.left: titleRow.right
+            anchors.leftMargin: 20
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(0, controlRow.x - titleRow.x - titleRow.width - 40)
+            height: 28
+            leftPadding: 30
+            rightPadding: 26
+            placeholderText: "搜索剧名 / 集名 / 账号"
+            placeholderTextColor: Theme.textMuted
+            color: "white"
+            font.pixelSize: 13
+            selectByMouse: true
+            // 与右侧控件同一视觉语言:半透明底 + 细边,聚焦时细边转粉。
+            background: Rectangle {
+                radius: height / 2
+                color: Qt.rgba(0.07, 0.08, 0.11, 0.45)
+                border.width: 1
+                border.color: searchField.activeFocus
+                              ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
+                              : Qt.rgba(1, 1, 1, 0.10)
+            }
+            AppText {
+                anchors.left: parent.left
+                anchors.leftMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "♥"
+                color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                font.pixelSize: 13
+            }
+            // 清除:有内容时可点;Esc 同样清除(焦点在框内时)。
+            AppText {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "✕"
+                visible: searchField.text !== ""
+                color: clearHover.hovered ? "white" : Theme.textMuted
+                font.pixelSize: 12
+                HoverHandler {
+                    id: clearHover
+                    cursorShape: Qt.PointingHandCursor
+                }
+                TapHandler {
+                    onTapped: searchField.text = ""
+                }
+            }
+            // 本地数据,直接过滤不防抖;过滤后回到列表顶部(与切账号一致)。
+            onTextChanged: {
+                root.rebuildRows(false)
+                list.positionViewAtBeginning()
+            }
+            Keys.onEscapePressed: searchField.text = ""
+        }
+
         // 右侧控件(自左向右):账号筛选 → 视图 → 聚合。
         Row {
             id: controlRow
@@ -538,14 +638,24 @@ Item {
                     parent: accountChip
                     y: accountChip.height + 4
                     x: -width + accountChip.width
-                    width: 200
+                    width: 240
                     padding: 8
                     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    Timer {
+                        id: accountFocusTimer
+                        interval: 60
+                        onTriggered: accountSearch.forceActiveFocus()
+                    }
                     enter: Transition {
                         NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
                     }
                     exit: Transition {
                         NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                    }
+                    onOpened: {
+                        accountSearch.text = ""
+                        // 延时取焦:等 popup 完成打开处理后再把焦点交给输入框。
+                        accountFocusTimer.start()
                     }
                     background: Rectangle {
                         color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
@@ -555,52 +665,49 @@ Item {
                     }
                     contentItem: Column {
                         width: parent.width - 16
-                        spacing: 2
-                        // "全部":清空单账号过滤。
-                        ItemDelegate {
-                            id: allItem
-                            readonly property bool allOn: root.filterAccountId === ""
+                        spacing: 6
+                        // 账号搜索:本地模糊匹配,账号多时不必在长列表里翻。
+                        TextField {
+                            id: accountSearch
                             width: parent.width
                             height: 30
-                            padding: 0
-                            contentItem: Item {
-                                AppText {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: 4
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "全部"
-                                    color: "white"
-                                    font.pixelSize: 13
-                                }
-                                Rectangle {
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: 4
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 6
-                                    height: 6
-                                    radius: 3
-                                    color: Constants.moePink
-                                    visible: allItem.allOn
-                                }
-                            }
+                            // 打开下拉即取焦(见 accountFocusTimer),可直接输入过滤。
+                            focus: true
+                            leftPadding: 10
+                            rightPadding: 10
+                            placeholderText: "搜索账号"
+                            placeholderTextColor: Theme.textMuted
+                            color: "white"
+                            font.pixelSize: 13
+                            selectByMouse: true
                             background: Rectangle {
-                                radius: 4
-                                color: parent.hovered
-                                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
-                                    : "transparent"
+                                radius: 6
+                                color: Qt.rgba(0, 0, 0, 0.25)
+                                border.width: 1
+                                border.color: accountSearch.activeFocus
+                                              ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
+                                              : Qt.rgba(1, 1, 1, 0.10)
                             }
-                            onClicked: {
-                                root.filterAccountId = ""
-                                accountPopup.close()
+                            // Esc 关下拉(焦点在输入框,按键由这里收口)。
+                            Keys.onEscapePressed: accountPopup.close()
+                            // 回车 = 选中首个匹配项(与点击首行等价)。
+                            onAccepted: {
+                                const rows = accountList.model
+                                if (rows && rows.length > 0)
+                                    root.selectAccount(rows[0].id)
                             }
                         }
-                        // 单账号:选中项右侧点标出(点击收起下拉,不提供反选)。
-                        Repeater {
-                            model: root.accountOptions
+                        // 行:"" = 全部,其余为单账号;列表高度按内容自适应、超出滚动。
+                        ListView {
+                            id: accountList
+                            width: parent.width
+                            height: Math.min(contentHeight, 252)
+                            clip: true
+                            model: root.accountRows(accountSearch.text)
                             delegate: ItemDelegate {
                                 required property var modelData
                                 readonly property bool isOn: root.filterAccountId === modelData.id
-                                width: parent.width
+                                width: accountList.width
                                 height: 30
                                 padding: 0
                                 contentItem: Item {
@@ -632,10 +739,7 @@ Item {
                                         ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
                                         : "transparent"
                                 }
-                                onClicked: {
-                                    root.filterAccountId = modelData.id
-                                    accountPopup.close()
-                                }
+                                onClicked: root.selectAccount(modelData.id)
                             }
                         }
                     }
@@ -935,11 +1039,13 @@ Item {
         }
         AppText {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: root.filterAccountId !== ""
-                  ? "该账号还没有播放记录"
-                  : (AccountManager.accounts.length === 0
-                     ? "先在「服务器管理」里添加 Emby 服务器"
-                     : "播放过的条目会出现在这里")
+            text: searchField.text !== ""
+                  ? "没有匹配的记录"
+                  : (root.filterAccountId !== ""
+                     ? "该账号还没有播放记录"
+                     : (AccountManager.accounts.length === 0
+                        ? "先在「服务器管理」里添加 Emby 服务器"
+                        : "播放过的条目会出现在这里"))
             color: Theme.textMuted
             font.pixelSize: 12
         }
