@@ -66,7 +66,6 @@ Item {
     // ============================= 信号 =============================
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
-    signal backRequested()
 
     // ============================= 函数 =============================
 
@@ -406,12 +405,6 @@ Item {
         }
     }
 
-    // 返回:Alt+←(与详情页同一约定;仅本页可见时生效)。
-    Shortcut {
-        sequences: ["Alt+Left"]
-        enabled: root.visible
-        onActivated: root.backRequested()
-    }
 
     // ============================= 子对象 =============================
 
