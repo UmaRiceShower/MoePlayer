@@ -43,7 +43,6 @@ Item {
     readonly property int hoveredCell: root.hoveredKey === "" ? -1 : root.hoveredIndex
     readonly property int hoveredRow: root.hoveredCell < 0
                                       ? -1 : Math.floor(root.hoveredCell / root.columns)
-    signal backRequested()
 
     function rowKeyOf(kind, id) { return kind + ":" + id }
     function kindOfKey(key) { return key.substring(0, key.indexOf(":")) }
@@ -522,11 +521,6 @@ Item {
         }
     }
 
-    Shortcut {
-        sequences: ["Alt+Left"]
-        enabled: root.visible
-        onActivated: root.backRequested()
-    }
 
     Item {
         id: gridArea

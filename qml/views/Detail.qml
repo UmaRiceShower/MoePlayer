@@ -137,7 +137,6 @@ Item {
     signal playWindowRequested(var meta)
     signal playbackDelivered(string url, var headers, var meta)
     signal playbackFailed(string itemId, string message)
-    signal backRequested()
     onItemIdChanged: {
         // 首次进入由 onCompleted 处理;之后(itemId 原地替换)在此重拉。
         if (root._ready)
@@ -294,21 +293,21 @@ Item {
         })
         root.replaceItem(itemId, posterId, title)
     }
-    // 返回键:集详情先原地回父剧详情;否则沿详情历史逐级恢复;
-    // 历史空则 pop 回上层页(首页/库)。
-    function back() {
+    // 页内返回契约:Alt+Left 由 Main 统一分发到此处(Esc 只关浮层,不进页面栈)。
+    // 集详情先原地回父剧详情,否则沿详情历史逐级恢复;都不适用时不消费(返回
+    // false,交给 Main 退页面栈)。
+    function goBack() {
         if (root.detail.type === "Episode" && root.detail.seriesId) {
             root.replaceItem(root.detail.seriesId, "", root.detail.seriesName)
-            return
+            return true
         }
         if (root.detailHistory.length > 0) {
             const prev = root.detailHistory.pop()
             root.replaceItem(prev.itemId, prev.posterId, prev.title)
-            return
+            return true
         }
-        root.backRequested()
-    }
-    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步)。
+        return false
+    }    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步)。
     // 落地详情数据(fadeInOut 动画中调用,正文已淡出;fromReplace 仅标记
     // 替换场景,文字揭示动画由 fadeInOut 自身编排)。
     function applyDetail(d, fromReplace) {
@@ -2670,11 +2669,6 @@ Item {
 
     // 返回快捷键:Alt+←(原"← 返回"按钮移除后替代);仅本页可见时生效,
     // 被上层页覆盖/pop 后不误触发。
-    Shortcut {
-        sequences: ["Alt+Left"]
-        enabled: root.visible
-        onActivated: root.back()
-    }
 
 }
 

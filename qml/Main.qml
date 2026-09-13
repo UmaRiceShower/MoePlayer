@@ -357,7 +357,6 @@ ApplicationWindow {
             onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
                 root.pushDetail(itemId, posterId, title, serverUrl, accountId)
             }
-            onBackRequested: stackView.pop()
         }
     }
 
@@ -429,9 +428,6 @@ ApplicationWindow {
             onPlaybackFailed: function (itemId, message) {
                 MpvClient.fail(itemId, message)
             }
-            // 返回键:详情内导航(相似推荐/换集/历史)已在 Detail 内原地完成,
-            // 仅历史空时 pop 回上层页。
-            onBackRequested: stackView.pop()
         }
     }
 
@@ -439,11 +435,35 @@ ApplicationWindow {
     Component {
         id: serverManagerPage
         ServerManager {
-            onBackRequested: stackView.pop()
         }
     }
 
+    // Alt+Left 的返回分发:浮层先关(优先级与 Esc 相同,但不穿透到下面的页面),
+    // 其次给当前页的页内层级(如详情页的 集→父剧 / 浏览历史链)消费,最后才退页面栈。
+    // 页内契约:页面可选实现 goBack() -> bool(返回是否已消费)。
+    // 注意 Esc 不走这里:Esc 只关浮层(页面内 Esc 另有"清输入/关下拉"语义)。
+    function goBack() {
+        if (settingsOverlay.visible) {
+            settingsOverlay.close()
+            return;
+        }
+        if (searchOverlay.visible) {
+            searchOverlay.close()
+            return;
+        }
+        const cur = stackView.currentItem
+        if (cur && typeof cur.goBack === "function" && cur.goBack())
+            return;
+        if (stackView.depth > 1)
+            stackView.pop();
+    }
+
     // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S,搜索 Ctrl+K。
+    // Alt+Left:统一在此注册(各页面不再自带);分发规则见 goBack()。
+    Shortcut {
+        sequences: ["Alt+Left"]
+        onActivated: root.goBack()
+    }
     Shortcut {
         sequences: ["Ctrl+F"]
         // pop 到根即返回首页(initialItem);已在首页时无操作。
