@@ -20,6 +20,13 @@ cleanup:
   - '*.a'
   - '*.la'
 
+# 显式指定 libdir:runner 上的 flatpak-builder(1.2.2)与 KDE SDK 组合下,meson 模块
+# 会落到 /app/lib64,而构建环境的 PKG_CONFIG_PATH 与运行时的库搜索路径都只认
+# /app/lib —— 结果是 libplacebo 的 .pc/.so 装到 /app/lib64 后 mpv 的 meson 报
+# 'Dependency "libplacebo" not found, tried pkgconfig and cmake'。这里统一回到 /app/lib。
+build-options:
+  libdir: /app/lib
+
 modules:
   # mpv 0.41 硬依赖 libplacebo(>= 6.338.2),KDE runtime 未提供;版本与
   # 构建参数对齐 Flathub 的 io.mpv.Mpv。
