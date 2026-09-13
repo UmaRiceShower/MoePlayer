@@ -17,7 +17,7 @@ jobs:
         uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.*'
-          modules: 'qtshadertools'
+          modules: 'qtshadertools qtwebsockets'
           cache: true
 
       - name: 安装构建依赖
