@@ -427,6 +427,7 @@ Item {
                     currentIndex: 0
                     model: ListModel {
                         ListElement { label: "界面" }
+                        ListElement { label: "播放" }
                         ListElement { label: "媒体库" }
                         ListElement { label: "详情页" }
                         ListElement { label: "代理" }
@@ -495,6 +496,15 @@ Item {
                         PageHeader { text: "界面" }
                         Repeater {
                             model: root.itemsFor("界面")
+                            delegate: SettingItem {}
+                        }
+                    }
+
+                    // ---- 播放(配置项经 items 表枚举) ----
+                    SettingsPage {
+                        PageHeader { text: "播放" }
+                        Repeater {
+                            model: root.itemsFor("播放")
                             delegate: SettingItem {}
                         }
                     }

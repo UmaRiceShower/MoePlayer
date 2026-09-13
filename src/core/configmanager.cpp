@@ -1,5 +1,7 @@
 #include "core/configmanager.h"
 
+#include "playback/mpvclient.h"
+
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -235,6 +237,16 @@ bool validateHistoryView(const QVariant &v)
 {
     const QString s = v.toString();
     return s == QLatin1String("timeline") || s == QLatin1String("grid");
+}
+
+QVariantList optionsSuperRes()
+{
+    return MpvClient::superResOptions();
+}
+
+bool validateSuperRes(const QVariant &v)
+{
+    return MpvClient::superResPreset(v.toString()) != nullptr;
 }
 
 bool validateSearchLimit(const QVariant &v)
