@@ -69,12 +69,10 @@ void PlaybackHistory::setItems(const QString &serverUrl, const QString &accountI
         const QVariantMap m = v.toMap();
         if (m.value(QStringLiteral("scope")).toString() != scope)
             continue;
-        const qint64 at = m.value(QStringLiteral("lastPlayedAt")).toLongLong();
-        const int count = m.value(QStringLiteral("playCount")).toInt();
-        // dateFetched = 该条目查过单条端点(见 kHistoryDetailLimit 的变更检测):
-        // 服务器上没有 LastPlayedDate 的条目(如手动标记已看)也要保留该标记,
-        // 否则每次拉列表都会被当成"尚无时间戳"重复补明细。
-        if (at > 0 || count > 0 || m.value(QStringLiteral("dateFetched")).toBool())
+        // 保留判据 = 入库判据(hasPlayTrace):只要这条曾有过播放痕迹就跨列表刷新
+        // 保留。列表刷新只带回最近一页,而更早的行(逐页回补得来,没有精确时间戳)
+        // 与"想看/在看"的行都不在页内,若按"有时间戳/次数"保留会被整体重写清掉。
+        if (hasPlayTrace(m))
             merged.insert(m.value(QStringLiteral("id")).toString(), m);
     }
 

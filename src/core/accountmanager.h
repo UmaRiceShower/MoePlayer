@@ -82,14 +82,6 @@ public:
     // historyChanged 增量通知。
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
-    // 页面"加载更多":按账号从服务器取一页更早的记录。结果只回给调用方(页面
-    // 会话内展示),**不写入本地存储** —— 本地按(上次播放时间, 服务器顺序)裁剪,
-    // 深档旧条目入库后会被丢掉、重启即消失。
-    Q_INVOKABLE void fetchHistoryPage(const QString &accountId, int startIndex);
-    // 分页窗口(每页条数,= 首页批次的拉取条数):页面据此算起始游标与"整页"判定,
-    // 避免在 QML 里复制这个常量。
-    Q_INVOKABLE int historyPageSize() const;
-
     // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):
     // 已在拉取中则由 startPlaybackHistoryFetch 的在途保护跳过。
     Q_INVOKABLE void refreshPlaybackHistory();
@@ -154,11 +146,6 @@ signals:
     // 同构(含剧集归属),请求失败为空列表。
     void accountHistoryRefreshed(const QString &serverUrl, const QString &accountId,
                                  const QVariantList &items);
-    // 播放历史分页结果(见 fetchHistoryPage):items 已补服务器前缀并过滤掉无播放
-    // 痕迹的行;ok=false 表示该页请求失败(items 为空)。
-    void historyPageReceived(const QString &serverUrl, const QString &accountId,
-                             int startIndex, const QVariantList &items, int rawCount, bool ok);
-
 private:
     struct AccountInfo {
         QString id;
@@ -281,12 +268,16 @@ private:
     // 播放历史本地存储(构造注入,不持有所有权)。
     PlaybackHistory *m_playbackHistory;
     // 播放历史拉取状态(见 fetchPlaybackHistory):调度标记、本轮参与的
-    // scope(serverUrl|账号 id)、各 scope 未完成任务数(列表 1 项 + 入队的
-    // 明细数)、明细待发队列与飞行中计数。
+    // scope(serverUrl|账号 id)、各 scope 未完成任务数(列表/回补页 1 项 + 入队的
+    // 明细数)、逐页回补的累积行与下一页下标、明细待发队列与飞行中计数。
     bool m_historyScheduled = false;
     bool m_historyActive = false;
     QSet<QString> m_historyScopes;
     QHash<QString, int> m_historyOutstanding;
+    QHash<QString, QVariantList> m_historyAccum;  // scope → 本轮已回补的行(按页序)
+    QHash<QString, int> m_historyNextStart;       // scope → 过滤段下一页 startIndex
+    QHash<QString, int> m_historyPages;           // scope → 过滤段已回补页数
+    QHash<QString, int> m_historyPhase;           // scope → 0=窗口页(未过滤) 1=过滤段
     QQueue<QPair<QString, QString>> m_historyDetailQueue; // scope + itemId
     int m_historyDetailInFlight = 0;
     // 后台明细合并后的落盘防抖(见 constants):逐条写文件过密,合并写一次。
@@ -317,7 +308,7 @@ private:
     // 某账号的列表到位(ok=false 为请求失败):成功则补海报服务器前缀后写入
     // 存储并立即落盘,再把最靠前的若干条入队交由后台补全;失败保留既有存储。
     void onHistoryListReceived(const QString &serverUrl, const QString &accountId,
-                               const QVariantList &items, bool ok);
+                               int startIndex, const QVariantList &items, int total, bool ok);
     // 按并发上限从队列派发后台明细请求(账号已删除/凭据失效直接跳过)。
     void drainHistoryDetails();
     // 该 scope 的列表任务结算(见 startPlaybackHistoryFetch 的预置票):归零即
@@ -328,8 +319,6 @@ private:
     // 账号在拉取途中被删除:撤出本轮(票数与存储一并清理),避免批次卡住。
     void abandonHistoryScope(const QString &scope);
     // 继续观看列表到位:回写本地播放历史并发 accountHistoryRefreshed。
-    void onHistoryPageReceived(const QString &serverUrl, const QString &accountId,
-                               int startIndex, const QVariantList &items, bool ok);
     void onResumeReceived(const QString &serverUrl, const QString &accountId,
                           const QVariantList &items);
     // 全季分集解析结果到位:回写本地播放历史(选集栏展示仍走 EmbyClient 模型)。

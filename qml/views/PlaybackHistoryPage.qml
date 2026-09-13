@@ -40,16 +40,6 @@ Item {
     // 宽度变化时立即捕获的锚点(见 onColumnsChanged):交给去抖后的重建使用。
     property var pendingAnchor: null
 
-    // ---- "加载更多"(仅页面会话)----
-    // 深档条目只放在本页模型里:本地存储按(上次播放时间, 服务器顺序)裁剪,深档
-    // 旧条目入库后会被丢掉、重启即消失(见 AccountManager::fetchHistoryPage)。
-    property var pageItems: []        // 已取到的更早条目(跨账号按到达顺序)
-    property var pageCursor: ({})     // accountId → 下一个 StartIndex
-    property var pageDone: ({})       // accountId → 该账号已取完
-    property bool loadingMore: false
-    property int pendingPages: 0
-    property var pageHops: ({})        // accountId → 本次动作已自动追页数
-
     // 账号过滤:空 = 全部。页面级状态(不持久化)。
     property string filterAccountId: ""
     // chip 选项:按账号出现顺序,跳过凭据失效的账号。
@@ -204,45 +194,6 @@ Item {
             AccountManager.refreshAccountHistory(list[i].id)
         }
     }
-    // 还能继续分页的账号(受账号过滤约束;凭据不全/已取完的不算)。
-    function pageTargets() {
-        const out = []
-        const list = AccountManager.accounts
-        for (let i = 0; i < list.length; ++i) {
-            const a = list[i]
-            if (a.authStatus === "invalid" || root.pageDone[a.id])
-                continue
-            if (root.filterAccountId !== "" && a.id !== root.filterAccountId)
-                continue
-            if (AccountManager.credsForAccount(a.id).token === "")
-                continue
-            out.push(a.id)
-        }
-        return out
-    }
-    function moreLabel() {
-        if (root.loadingMore)
-            return "加载中…"
-        return root.pageTargets().length === 0 ? "没有更多了" : "加载更多"
-    }
-    // 取下一页。游标从 0 起:分页请求带 Filters=IsPlayed,服务器的 StartIndex 落在
-    // **过滤后**的列表上 —— 从窗口大小起会跳过"最新的 N 条已看条目"(本地存储只保留
-    // 原始窗口内有播放痕迹的子集,数量通常远少于窗口),故从 0 起、靠下面按
-    // (账号|条目)去重兜住与本地重叠的部分。
-    function loadMore() {
-        if (root.loadingMore)
-            return
-        const targets = root.pageTargets()
-        if (targets.length === 0)
-            return
-        root.loadingMore = true
-        root.pendingPages = targets.length
-        root.pageHops = {}   // 每次动作重置自动追页计数
-        for (const id of targets) {
-            const next = root.pageCursor[id] !== undefined ? root.pageCursor[id] : 0
-            AccountManager.fetchHistoryPage(id, next)
-        }
-    }
     // 滚动锚点:首个可见条目行的行键与相对偏移(重建前记、重建后恢复)。
     function currentAnchor() {
         const y = list.contentY
@@ -257,6 +208,9 @@ Item {
     }
     function restoreAnchor(anchor) {
         if (!anchor)
+            return
+        // 用户正在滚动时不抢视口:分页在底部追加行不会移动已有行,不需要回位。
+        if (list.moving || list.flicking)
             return
         for (let i = 0; i < root.rows.length; ++i) {
             const r = root.rows[i]
@@ -355,20 +309,6 @@ Item {
                 continue
             source.push(it)
         }
-        const seen = {}
-        for (const it of source)
-            seen[(it.accountId || "") + "|" + (it.id || "")] = true
-        for (const it of root.pageItems) {
-            if (root.filterAccountId !== "" && (it.accountId || "") !== root.filterAccountId)
-                continue
-            if (!root.matchesQuery(it))
-                continue
-            const k = (it.accountId || "") + "|" + (it.id || "")
-            if (seen[k])
-                continue
-            seen[k] = true
-            source.push(it)
-        }
         const items = root.aggregate ? root.aggregateItems(source) : source
         let chunk = null
         for (const it of items) {
@@ -392,8 +332,6 @@ Item {
                 out.push(root.timelineRecord(it, b))
             }
         }
-        if (out.length > 0)
-            out.push({ kind: "more", key: "more" })
         root.rows = out
         root.itemCount = items.length
         Qt.callLater(() => root.restoreAnchor(anchor))
@@ -418,60 +356,10 @@ Item {
             rebuildTimer.restart()
         }
     }
+
     // 账号增删后 chip 选项变化:重建一次(过滤账号被删则回到"全部")。
     Connections {
         target: AccountManager
-        // 分页结果:按(账号 + 条目)去重后并入会话模型;一页不足 kHistoryFetchLimit
-        // 视为该账号取完;失败只停止本轮(游标保留,可再点)。
-        function onHistoryPageReceived(serverUrl, accountId, startIndex, items, rawCount, ok) {
-            const cur = Object.assign({}, root.pageCursor)
-            if (ok) {
-                cur[accountId] = startIndex + rawCount   // 游标按原始条数推进(有痕迹条目可能远少于整页)
-                const done = Object.assign({}, root.pageDone)
-                // 不足一页 = 该账号已取完。服务器在 DatePlayed 排序里也混着从未播放的
-                // 条目(越深越多),整页都被痕迹过滤时自动再追几页,避免"点了没反应"。
-                const full = rawCount >= AccountManager.historyPageSize()
-                if (!full)
-                    done[accountId] = true
-                root.pageDone = done
-                if (items.length === 0 && full) {
-                    const hops = (root.pageHops[accountId] || 0) + 1
-                    if (hops <= 4) {
-                        const h = Object.assign({}, root.pageHops)
-                        h[accountId] = hops
-                        root.pageHops = h
-                        root.pageCursor = cur
-                        AccountManager.fetchHistoryPage(accountId, cur[accountId])
-                        return   // 本轮不算完:继续等这一账号的下一页
-                    }
-                    // 连追 4 页都是"整页被痕迹过滤":这些账号更早的行全是从未播放的
-                    // (或服务器忽略了 Filters)⇒ 再翻也翻不出内容,置取完,让按钮如实
-                    // 显示"没有更多了"(否则永远可点、每次白发 4 页请求)。
-                    const d = Object.assign({}, root.pageDone)
-                    d[accountId] = true
-                    root.pageDone = d
-                }
-                const seen = {}
-                for (const it of root.pageItems)
-                    seen[(it.accountId || "") + "|" + (it.id || "")] = true
-                const add = []
-                for (const it of items) {
-                    const k = (it.accountId || "") + "|" + (it.id || "")
-                    if (seen[k])
-                        continue
-                    seen[k] = true
-                    add.push(it)
-                }
-                if (add.length > 0)
-                    root.pageItems = root.pageItems.concat(add)
-            }
-            root.pageCursor = cur
-            if (--root.pendingPages <= 0) {
-                root.pendingPages = 0
-                root.loadingMore = false
-            }
-            root.rebuildRows(true)
-        }
         function onAccountsChanged() {
             if (root.filterAccountId !== "" && !root.accountOptions.some(a => a.id === root.filterAccountId))
                 root.filterAccountId = ""
@@ -783,8 +671,7 @@ Item {
             required property int index
             width: list.width
             height: modelData.kind === "header" ? root.headerH
-                  : (modelData.kind === "cards" ? root.gridRowH
-                     : (modelData.kind === "more" ? 56 : root.rowH + root.rowGap))
+                  : (modelData.kind === "cards" ? root.gridRowH : root.rowH + root.rowGap)
 
             // 分组头:今天 / 昨天 / 本周 / 更早 + 条数
             Item {
@@ -807,34 +694,6 @@ Item {
                         color: Theme.textMuted
                         font.pixelSize: 12
                     }
-                }
-            }
-
-            // "加载更多"行:深档条目只进本页模型,不入本地存储
-            Item {
-                anchors.fill: parent
-                visible: rowItem.modelData.kind === "more"
-                Rectangle {
-                    anchors.fill: parent
-                    radius: 12
-                    color: moreHover.hovered ? Qt.rgba(0.16, 0.10, 0.14, 0.85)
-                                             : Qt.rgba(0.08, 0.09, 0.12, 0.55)
-                    border.width: moreHover.hovered ? 1 : 0
-                    border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
-                    AppText {
-                        anchors.centerIn: parent
-                        text: root.moreLabel()
-                        color: Constants.moePinkText
-                        font.pixelSize: 14
-                    }
-                }
-                HoverHandler {
-                    id: moreHover
-                    cursorShape: root.pageTargets().length === 0 ? Qt.ArrowCursor : Qt.PointingHandCursor
-                }
-                TapHandler {
-                    enabled: !root.loadingMore && root.pageTargets().length > 0
-                    onTapped: root.loadMore()
                 }
             }
 
