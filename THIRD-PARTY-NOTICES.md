@@ -28,6 +28,13 @@ MoePlayer is licensed under the GNU General Public License, version 3
   be treated as public domain. This project treats it as ISC.
 - License texts: https://opensource.org/licenses/alphabetical
 
+## Anime4K (GLSL shaders)
+- `resources/shaders/*.glsl` are the official Anime4K v4.x GLSL shaders
+  (v4.0.1 tag), used as mpv user shaders via `--glsl-shaders`.
+- https://github.com/bloc97/Anime4K
+- License: MIT, except the `Anime4K_AutoDownscalePre_x2/x4.glsl` files, which
+  are Unlicense (public domain); see each file's header.
+
 ## pinyin-data
 - `src/core/pinyin_table.{h,cpp}` is generated from pinyin-data's `pinyin.txt`
   (Chinese character → pinyin readings, Unicode range U+4E00..U+9FFF, the two

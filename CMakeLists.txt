@@ -150,11 +150,20 @@ install(TARGETS MoePlayer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 install(DIRECTORY resources/lua/
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/moeplayer/lua)
+
+# Anime4K shader(随包,供 mpv --glsl-shaders 用;mpv 只收文件路径)。
+install(DIRECTORY resources/shaders/
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/moeplayer/shaders)
 add_custom_command(TARGET MoePlayer POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/lua
         ${CMAKE_BINARY_DIR}/lua
     COMMENT "Copying mpv lua scripts to build/lua")
+add_custom_command(TARGET MoePlayer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        ${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders
+        ${CMAKE_BINARY_DIR}/shaders
+    COMMENT "Copying Anime4K shaders to build/shaders")
 install(FILES packaging/${MOEPLAYER_APP_ID}.desktop
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
 install(DIRECTORY packaging/icons/hicolor/

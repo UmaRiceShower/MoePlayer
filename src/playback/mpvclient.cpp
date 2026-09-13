@@ -35,6 +35,10 @@ constexpr int kTrackListRequestId = 998;
 constexpr int kEofCheckRequestId = 997;
 // 播放列表查询(end-file 后判定失败条目是占位还是真实集)的 request_id。
 constexpr int kPlaylistCheckRequestId = 996;
+// 超分回读:glsl-shaders 挂载列表 / video-params / osd-dimensions。
+constexpr int kSuperResListRequestId = 995;
+constexpr int kSuperResVideoRequestId = 994;
+constexpr int kSuperResOutputRequestId = 993;
 // 快速重试退避(ms):用完转慢速重试等待网络恢复(用户换代理/换网后自动继续)。
 constexpr int kFastRetryDelaysMs[] = {1000, 2000, 4000};
 constexpr int kSlowRetryDelayMs = 15000;
@@ -45,6 +49,15 @@ MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
     , m_emby(emby)
     , m_config(config)
 {
+    // 超分档位变化(设置界面/配置文件热重载/mpv 内快捷键回传)即时应用到
+    // 所有在线会话。
+    if (m_config) {
+        connect(m_config, &ConfigManager::superResChanged, this, [this]() {
+            const QString id = m_config->superRes();
+            for (Session *s : m_sessions)
+                applySuperRes(s, id, true);
+        });
+    }
 }
 
 void MpvClient::shutdownAll()
@@ -101,6 +114,148 @@ QString MpvClient::findOscScript()
 QString MpvClient::findMoeHookScript()
 {
     return findScript(QStringLiteral("moe-hook.lua"));
+}
+
+
+QString MpvClient::findShader(const QString &fileName)
+{
+    const QString appDir = QCoreApplication::applicationDirPath();
+    // 旁置布局(开发构建 build/shaders/、AppImage/Flatpak 与可执行文件同级)。
+    const QString bundled = QDir(appDir).filePath(QStringLiteral("shaders/") + fileName);
+    if (QFileInfo::exists(bundled))
+        return bundled;
+    // 系统安装(DEB/RPM/AUR):share/moeplayer/shaders/。
+    const QString installed =
+        QDir(appDir).filePath(QStringLiteral("../share/moeplayer/shaders/") + fileName);
+    if (QFileInfo::exists(installed))
+        return installed;
+    return bundled; // 缺失时由 mpv 报错,兜底返回旁置路径。
+}
+
+namespace {
+
+// Anime4K v4.0.1 官方预设链:文件名顺序即 shader 处理顺序,同一文件不得出现
+// 两次(官方 Advanced 文档)。A/B/C 为一次放大(+可选 AutoDownscalePre 夹在两次
+// 放大之间),A+/B+/C+A 为二次放大(仅在放大比 ≥2 倍时使用)。
+const char *const kSrModeA[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Restore_CNN_VL.glsl",
+    "Anime4K_Upscale_CNN_x2_VL.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+const char *const kSrModeAPlus[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Restore_CNN_VL.glsl",
+    "Anime4K_Upscale_CNN_x2_VL.glsl",
+    "Anime4K_Restore_CNN_M.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+const char *const kSrModeB[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Restore_CNN_Soft_VL.glsl",
+    "Anime4K_Upscale_CNN_x2_VL.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+const char *const kSrModeBPlus[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Restore_CNN_Soft_VL.glsl",
+    "Anime4K_Upscale_CNN_x2_VL.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Restore_CNN_Soft_M.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+const char *const kSrModeC[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Upscale_Denoise_CNN_x2_VL.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+const char *const kSrModeCA[] = {
+    "Anime4K_Clamp_Highlights.glsl",
+    "Anime4K_Upscale_Denoise_CNN_x2_VL.glsl",
+    "Anime4K_AutoDownscalePre_x2.glsl",
+    "Anime4K_AutoDownscalePre_x4.glsl",
+    "Anime4K_Restore_CNN_M.glsl",
+    "Anime4K_Upscale_CNN_x2_M.glsl",
+};
+// 无尺寸门槛:参数/滤波类 pass,窗口模式下也有效果。
+const char *const kSrDenoise[] = { "Anime4K_Denoise_Bilateral_Mode.glsl" };
+const char *const kSrDeblur[] = { "Anime4K_Deblur_DoG.glsl" };
+
+#define MOE_SR_ROW(id, label, key, arr)     { id, label, key, arr, int(sizeof(arr) / sizeof(arr[0])) }
+
+const QVector<MpvClient::SuperResPreset> &superResTable()
+{
+    static const QVector<MpvClient::SuperResPreset> t = {
+        { "off", "关闭", "CTRL+0", nullptr, 0 },
+        MOE_SR_ROW("mode_a", "模式 A(1080p 常用)", "CTRL+1", kSrModeA),
+        MOE_SR_ROW("mode_b", "模式 B(720p 常用)", "CTRL+2", kSrModeB),
+        MOE_SR_ROW("mode_c", "模式 C(降采样源)", "CTRL+3", kSrModeC),
+        MOE_SR_ROW("mode_a_plus", "模式 A+(放大 ≥2 倍)", "CTRL+4", kSrModeAPlus),
+        MOE_SR_ROW("mode_b_plus", "模式 B+(放大 ≥2 倍)", "CTRL+5", kSrModeBPlus),
+        MOE_SR_ROW("mode_c_a", "模式 C+A(放大 ≥2 倍)", "CTRL+6", kSrModeCA),
+        MOE_SR_ROW("denoise", "去噪(窗口可用)", "CTRL+7", kSrDenoise),
+        MOE_SR_ROW("deblur", "去模糊(窗口可用)", "CTRL+8", kSrDeblur),
+    };
+    return t;
+}
+
+#undef MOE_SR_ROW
+
+// shader 源里是否带「输出须大于源 1.2 倍」的尺寸门槛(官方 CNN 放大 pass 的
+// //!WHEN OUTPUT.w MAIN.w / 1.200 > …)。从文件现算,不手工维护名单。
+bool shaderHasSizeGate(const QString &path)
+{
+    static QHash<QString, bool> cache;
+    const auto it = cache.constFind(path);
+    if (it != cache.constEnd())
+        return it.value();
+    bool gated = false;
+    QFile f(path);
+    if (f.open(QIODevice::ReadOnly))
+        gated = f.readAll().contains("OUTPUT.w MAIN.w / 1.200 >");
+    cache.insert(path, gated);
+    return gated;
+}
+
+} // namespace
+
+const QVector<MpvClient::SuperResPreset> &MpvClient::superResPresets()
+{
+    return superResTable();
+}
+
+const MpvClient::SuperResPreset *MpvClient::superResPreset(const QString &id)
+{
+    for (const SuperResPreset &p : superResTable()) {
+        if (id == QLatin1String(p.id))
+            return &p;
+    }
+    return nullptr;
+}
+
+QVariantList MpvClient::superResOptions()
+{
+    QVariantList out;
+    for (const SuperResPreset &p : superResTable()) {
+        out.append(QVariantMap{ { QStringLiteral("label"), QString::fromUtf8(p.label) },
+                                { QStringLiteral("key"), QString::fromLatin1(p.id) } });
+    }
+    return out;
+}
+
+QString MpvClient::superResLabel(const QString &id)
+{
+    const SuperResPreset *p = superResPreset(id);
+    return p ? QString::fromUtf8(p->label) : QString();
 }
 
 MpvClient::Session *MpvClient::sessionFor(const QString &key) const
@@ -475,6 +630,54 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
                 stopAndConsiderEnd(s->key, false);
             else
                 s->pendingEofPos = -1;
+        } else if (rid == kSuperResListRequestId) {
+            // glsl-shaders 回读:实际挂载数 + 是否含尺寸门槛 pass。
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            bool gated = false;
+            for (const QJsonValue &v : list)
+                if (shaderHasSizeGate(v.toString()))
+                    gated = true;
+            s->superResState.insert(QStringLiteral("mounted"), list.size());
+            s->superResState.insert(QStringLiteral("sizeGated"), gated);
+        } else if (rid == kSuperResVideoRequestId) {
+            const QJsonObject v = obj.value(QStringLiteral("data")).toObject();
+            s->superResState.insert(QStringLiteral("videoW"), v.value(QStringLiteral("w")).toInt());
+            s->superResState.insert(QStringLiteral("videoH"), v.value(QStringLiteral("h")).toInt());
+        } else if (rid == kSuperResOutputRequestId) {
+            const QJsonObject v = obj.value(QStringLiteral("data")).toObject();
+            const int outW = v.value(QStringLiteral("w")).toInt();
+            const int outH = v.value(QStringLiteral("h")).toInt();
+            const int vidW = s->superResState.value(QStringLiteral("videoW")).toInt();
+            const int vidH = s->superResState.value(QStringLiteral("videoH")).toInt();
+            const int mounted = s->superResState.value(QStringLiteral("mounted")).toInt();
+            const bool gated = s->superResState.value(QStringLiteral("sizeGated")).toBool();
+            s->superResState.insert(QStringLiteral("outputW"), outW);
+            s->superResState.insert(QStringLiteral("outputH"), outH);
+            // 门槛判定:仅当播着且挂了 shader 才下结论(尺寸未知不下结论,
+            // 既不谎报"已生效"也不误报失败)。判定口径与 shader 源里
+            // //!WHEN OUTPUT.w MAIN.w / 1.200 > 一致,宽高都要过。
+            const bool judged = mounted > 0 && vidW > 0 && vidH > 0 && outW > 0 && outH > 0;
+            if (judged) {
+                const bool willRun = !gated || (outW > vidW * 1.2 && outH > vidH * 1.2);
+                s->superResState.insert(QStringLiteral("willRun"), willRun);
+                if (!willRun && !s->superResState.value(QStringLiteral("warned")).toBool()) {
+                    s->superResState.insert(QStringLiteral("warned"), true);
+                    const QString msg =
+                        QStringLiteral("Anime4K: 放大链未生效(窗口 %1×%2 未超过片源 %3×%4 的 1.2 倍)")
+                            .arg(outW).arg(outH).arg(vidW).arg(vidH);
+                    sendJson(s, QJsonObject{
+                                    {QStringLiteral("command"),
+                                     QJsonArray{QStringLiteral("show-text"), msg, 3000}},
+                                });
+                    qInfo() << "MpvClient:" << msg << s->key;
+                }
+            }
+            qInfo() << "MpvClient: 超分回读" << s->superResPreset
+                    << "挂载" << mounted << "/"
+                    << s->superResState.value(QStringLiteral("expected")).toInt()
+                    << "片源" << vidW << "x" << vidH << "输出" << outW << "x" << outH
+                    << "尺寸门槛" << gated << s->key;
+            emit superResStateChanged(s->key, superResStatus(s->key));
         }
         return;
     }
@@ -497,6 +700,9 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         } else if (name == QLatin1String("pause")) {
             s->paused = data.isBool() ? data.toBool() : s->paused;
             reportProgress(s, true);
+        } else if (name == QLatin1String("glsl-shaders")) {
+            // 链被改动(mpv 内快捷键/外部):重算挂载数与门槛判定。
+            requestSuperResState(s);
         }
         return;
     }
@@ -545,6 +751,9 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             s->retryIndex = -1;
             s->retryPos = 0.0;
         }
+        // 超分:片源尺寸此时才可知,重算门槛判定(窗口够大才真跑放大链)。
+        if (s->superResPreset != QLatin1String("off"))
+            requestSuperResState(s);
         emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
@@ -587,6 +796,19 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             s->pendingFileId = args.at(1).toString();
             qInfo() << "MpvClient: hook 请求" << s->pendingFileId;
             emit episodeUrlRequested(s->pendingFileId);
+        } else if (args.size() >= 1 && args.at(0).toString() == QLatin1String("moe-keys-request")) {
+            // 脚本就绪晚于本类连接时的补发请求(moe-hook.lua 加载即发一次)。
+            sendSuperResKeys(s);
+        } else if (args.size() >= 2 && args.at(0).toString() == QLatin1String("moe-shader")) {
+            // mpv 内快捷键(CTRL+0..8,script-message 广播):写配置,
+            // 随后由 superResChanged 统一应用到所有会话(单一真相源)。
+            const QString id = args.at(1).toString();
+            if (superResPreset(id) && m_config) {
+                qInfo() << "MpvClient: 快捷键切换超分档位" << id << s->key;
+                m_config->setsuperRes(id);
+            } else {
+                qWarning() << "MpvClient: 未知超分档位" << id;
+            }
         }
         return;
     }
@@ -604,6 +826,10 @@ void MpvClient::observe(Session *s)
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 3,
                                         QStringLiteral("pause")}}});
+    // id 4:glsl-shaders(mpv 内快捷键或外部改链时回读刷新超分状态)。
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 4,
+                                        QStringLiteral("glsl-shaders")}}});
 }
 
 void MpvClient::flush(Session *s)
@@ -615,6 +841,8 @@ void MpvClient::flush(Session *s)
     if (!s->observeSent) {
         s->observeSent = true;
         observe(s);
+        // 超分:注册快捷键 + 按配置挂载默认档位(仅一次,之后再变走配置信号)。
+        initSuperRes(s);
     }
     if (!s->url.isEmpty() && !s->loadIssued) {
         if (!s->headers.isEmpty()) {
@@ -1020,4 +1248,121 @@ void MpvClient::command(const QVariantList &params, const QString &itemId)
     for (const QVariant &p : params)
         arr.append(QJsonValue::fromVariant(p));
     sendJson(s, QJsonObject{{QStringLiteral("command"), arr}});
+}
+
+void MpvClient::initSuperRes(Session *s)
+{
+    if (s->superResReady)
+        return;
+    s->superResReady = true;
+    // mpv 窗口内快捷键:把「键 档位 …」清单交 moe-hook.lua 用
+    // mp.add_key_binding 注册。**必须是 lua 的弱绑定**:IPC 的 keybind 命令
+    // 会顶掉用户自己 input.conf 的同名键(实测),lua.rst 的 add_key_binding
+    // 只覆盖默认绑定。按键 → script-message moe-shader <id>(mpv 广播给所有
+    // 客户端,含 IPC)→ 本类 client-message 分支写配置,再统一应用到所有会话。
+    sendSuperResKeys(s);
+    applySuperRes(s, m_config ? m_config->superRes() : QStringLiteral("off"), false);
+}
+
+void MpvClient::sendSuperResKeys(Session *s)
+{
+    QStringList kv;
+    for (const SuperResPreset &p : superResPresets())
+        kv << QString::fromLatin1(p.key) << QString::fromLatin1(p.id);
+    sendJson(s, QJsonObject{
+                    {QStringLiteral("command"),
+                     QJsonArray{QStringLiteral("script-message-to"), QStringLiteral("moe_hook"),
+                                QStringLiteral("moe-keys"), kv.join(QLatin1Char(' '))}},
+                });
+}
+
+void MpvClient::applySuperRes(Session *s, const QString &presetId, bool announce)
+{
+    const SuperResPreset *p = superResPreset(presetId);
+    s->superResPreset = p ? QString::fromLatin1(p->id) : QStringLiteral("off");
+    s->superResState.clear();
+    // clr 的 value 必须给空串(mpv:不带值的操作也要求占位参数)。
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("change-list"),
+                                        QStringLiteral("glsl-shaders"),
+                                        QStringLiteral("clr"), QString()}}});
+    int expected = 0;
+    if (p) {
+        for (int i = 0; i < p->fileCount; ++i) {
+            const QString name = QString::fromLatin1(p->files[i]);
+            const QString path = findShader(name);
+            if (!QFileInfo::exists(path)) {
+                qWarning() << "MpvClient: 缺少 shader 文件" << name << path;
+                continue;
+            }
+            // 逐条 append:单条命令不经路径列表分隔符(POSIX ':' / Windows ';'),
+            // 绝对路径里含分隔符也不会被切开。
+            sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                     QJsonArray{QStringLiteral("change-list"),
+                                                QStringLiteral("glsl-shaders"),
+                                                QStringLiteral("append"), path}}});
+            ++expected;
+        }
+    }
+    s->superResState.insert(QStringLiteral("expected"), expected);
+    s->superResState.insert(QStringLiteral("preset"), s->superResPreset);
+    qInfo() << "MpvClient: 超分档位" << s->superResPreset << "下发" << expected
+            << "个 shader" << s->key;
+    if (announce && p) {
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("show-text"),
+                                    QStringLiteral("Anime4K: ") +
+                                        QString::fromUtf8(p->label)}},
+                    });
+    }
+    requestSuperResState(s);
+}
+
+void MpvClient::requestSuperResState(Session *s)
+{
+    if (!s || !s->ready)
+        return;
+    // 回读三件套:实际挂载列表、片源尺寸、输出(VO)尺寸。
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("glsl-shaders")}},
+                            {QStringLiteral("request_id"), kSuperResListRequestId}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("video-params")}},
+                            {QStringLiteral("request_id"), kSuperResVideoRequestId}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("osd-dimensions")}},
+                            {QStringLiteral("request_id"), kSuperResOutputRequestId}});
+}
+
+void MpvClient::setSuperRes(const QString &presetId, const QString &itemId)
+{
+    if (!itemId.isEmpty()) {
+        if (Session *s = sessionFor(itemId))
+            applySuperRes(s, presetId, true);
+        return;
+    }
+    // 无 itemId:应用到全部在线会话(新会话由 initSuperRes 按配置挂载)。
+    if (m_sessions.isEmpty()) {
+        qInfo() << "MpvClient: 无会话,超分档位仅记入配置" << presetId;
+        return;
+    }
+    for (Session *s : m_sessions)
+        applySuperRes(s, presetId, true);
+}
+
+QVariantMap MpvClient::superResStatus(const QString &itemId) const
+{
+    const Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s)
+        return {};
+    QVariantMap out = s->superResState;
+    out.insert(QStringLiteral("preset"), s->superResPreset);
+    out.insert(QStringLiteral("label"), superResLabel(s->superResPreset));
+    out.insert(QStringLiteral("running"), s->superResPreset != QLatin1String("off")
+                                              && !s->superResState.isEmpty());
+    return out;
 }

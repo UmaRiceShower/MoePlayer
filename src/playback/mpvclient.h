@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QVector>
 
 class QJsonObject;
 class QProcess;
@@ -41,6 +42,35 @@ public:
     // osc.lua(官方控制栏)与 moe-hook.lua(on_load 占位重定向)。
     static QString findOscScript();
     static QString findMoeHookScript();
+
+    // 查找随包 shader(Anime4K):应用目录旁置 shaders/(开发 build/ 与
+    // AppImage/Flatpak)→ 系统安装 share/moeplayer/shaders/。
+    static QString findShader(const QString &fileName);
+
+    // Anime4K 超分预设:shader 链与顺序取官方 v4.0.1 模板
+    // (md/Template/GLSL_Mac_Linux_High-end/input.conf);key 与官方快捷键
+    // 一致(CTRL+1/2/3 模式 A/B/C、CTRL+4/5/6 二次模式、CTRL+0 关闭),
+    // 去噪/去模糊两档为本项目补充(无尺寸门槛,窗口模式也有效果)。
+    struct SuperResPreset
+    {
+        const char *id;
+        const char *label;
+        const char *key;             // mpv 快捷键(随会话经 IPC 注册)
+        const char *const *files;    // 文件名,经 findShader 解析为绝对路径
+        int fileCount;
+    };
+    static const QVector<SuperResPreset> &superResPresets();
+    static const SuperResPreset *superResPreset(const QString &id);
+    // ConfigManager 的 Combo 选项钩子({label,key})与档位显示名。
+    static QVariantList superResOptions();
+    static QString superResLabel(const QString &id);
+
+    // 应用超分档位(off/未知 = 卸载全部)。只下发命令,是否真跑由回读
+    // 判定后经 superResStateChanged 广播(mpv 收下路径 ≠ shader 会执行)。
+    Q_INVOKABLE void setSuperRes(const QString &presetId, const QString &itemId = {});
+    // 最近一次回读:{preset,label,mounted,expected,sizeGated,willRun,
+    // videoW/videoH,outputW/outputH};无会话返回空表。
+    Q_INVOKABLE QVariantMap superResStatus(const QString &itemId = {}) const;
 
     // 先弹 mpv 空窗(协商期加载态);meta 含 itemId/serverUrl/...。成功返回 true。
     Q_INVOKABLE bool startPending(const QVariantMap &meta);
@@ -88,6 +118,8 @@ signals:
     void episodeUrlRequested(const QString &itemId);
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
     void playbackFinished(const QString &itemId, bool error);
+    // 超分回读结果(state 同 superResStatus):挂载数与尺寸门槛判定。
+    void superResStateChanged(const QString &itemId, const QVariantMap &state);
 
 private:
     struct Session
@@ -130,7 +162,11 @@ private:
         int failedEntryId = -1;
         QTimer *retryTimer = nullptr;
         QString m3uPath;           // 播放列表 m3u(重试时重新灌入)
-
+        // 超分(Anime4K):当前档位、spawn 默认档位/快捷键是否已下发、
+        // 最近一次回读结果(挂载数、两侧尺寸、门槛判定)。
+        QString superResPreset = QStringLiteral("off");
+        bool superResReady = false;
+        QVariantMap superResState;
     };
 
     Session *sessionFor(const QString &key) const;
@@ -149,6 +185,13 @@ private:
     // 中匹配出 mpv 数字 id,set aid/sid;字幕 -2 显式关。
     void applyTrackSelection(Session *s, const QJsonArray &trackList);
     void enqueueLoad(Session *s, const QString &url, const QVariantList &headers);
+    // 超分:注册快捷键与默认档位(IPC 就绪后一次)、按档位挂载、回读校验。
+    void initSuperRes(Session *s);
+    // 把「键 档位 …」清单交 moe-hook.lua(弱绑定注册);脚本就绪晚于本类
+    // 连接时由 moe-keys-request 触发补发。
+    void sendSuperResKeys(Session *s);
+    void applySuperRes(Session *s, const QString &presetId, bool announce);
+    void requestSuperResState(Session *s);
     void reportStart(Session *s);
     void reportProgress(Session *s, bool force);
     void reportStopped(Session *s);

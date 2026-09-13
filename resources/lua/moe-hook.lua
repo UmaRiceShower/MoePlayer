@@ -25,6 +25,29 @@ mp.add_hook("on_load", 50, function(hook)
     mp.commandv("script-message", "moe-url", id)
 end)
 
+-- 超分快捷键(Anime4K 档位,CTRL+0..8):MoePlayer 经 moe-keys 下发
+-- 「键 档位 键 档位 …」清单,这里用 mp.add_key_binding 注册 —— **弱绑定**:
+-- 与 IPC 的 keybind 命令不同,用户自己的 input.conf 优先于本脚本
+-- (见 lua.rst:add_key_binding 只覆盖默认绑定)。按下后广播 moe-shader <id>
+-- 交回 MoePlayer 统一处理(写配置 → 应用到所有会话)。
+-- 脚本加载完主动请求一次,覆盖「脚本就绪晚于 MoePlayer 连接」的次序;
+-- 重复下发由 registered 幂等吸收。
+local keys_registered = false
+local function register_keys(spec)
+    if keys_registered or not spec then
+        return
+    end
+    keys_registered = true
+    for key, id in spec:gmatch("(%S+)%s+(%S+)") do
+        mp.add_key_binding(key, "moe-superres-" .. id, function()
+            mp.commandv("script-message", "moe-shader", id)
+        end)
+    end
+    mp.msg.info("moe-hook: 超分快捷键已注册")
+end
+mp.register_script_message("moe-keys", register_keys)
+mp.commandv("script-message", "moe-keys-request")
+
 -- MoePlayer 应答:moe-url-ready <id> <url> [subUrl]
 -- 同时设置该文件本地选项(外挂字幕),再重定向并继续 hook。
 mp.register_script_message("moe-url-ready", function(id, url, subUrl)
