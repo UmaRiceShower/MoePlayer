@@ -78,6 +78,7 @@ qt_add_qml_module(MoePlayer
         qml/views/WheelStepHandler.qml
         qml/views/ServerIcon.qml
         qml/views/FilterChip.qml
+        qml/views/SegmentedControl.qml
         qml/views/PlaybackHistoryPage.qml
 )
 
