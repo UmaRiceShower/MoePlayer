@@ -24,7 +24,7 @@ Item {
     readonly property int thumbW: 152
     readonly property int thumbH: 86
     readonly property int pageMargin: 24
-    readonly property int topBarH: 108
+    readonly property int topBarH: 44
     // 视图与聚合:直接读写 ConfigManager(持久化在 config.toml,可热重载)。
     readonly property string viewMode: ConfigManager.historyView
     readonly property bool aggregate: ConfigManager.historyAggregate
@@ -62,6 +62,15 @@ Item {
             out.push({ id: list[i].id, name: list[i].name })
         }
         return out
+    }
+    // 账号筛选标签:当前账号名;未过滤(或该账号已删除)显示"全部"。
+    readonly property string filterLabel: {
+        const opts = root.accountOptions
+        for (let i = 0; i < opts.length; ++i) {
+            if (opts[i].id === root.filterAccountId)
+                return opts[i].name
+        }
+        return "全部"
     }
 
     // ============================= 信号 =============================
@@ -476,25 +485,20 @@ Item {
 
     // ============================= 子对象 =============================
 
-    // ---- 顶部条:标题 + 条数 ----
-    Rectangle {
+    // ---- 顶部条:标题 + 条数(左)、账号筛选与视图/聚合(右)----
+    // 无底色与描边:直接浮在页面背景上,控件自带视觉边界。
+    Item {
         id: topBar
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: root.pageMargin
         height: root.topBarH
-        radius: 14
-        color: Qt.rgba(0.07, 0.08, 0.11, 0.72)
-        border.width: 1
-        border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.22)
 
         Row {
             id: titleRow
             anchors.left: parent.left
-            anchors.leftMargin: 16
-            anchors.top: parent.top
-            anchors.topMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 8
             AppText {
                 text: "♥"
@@ -509,57 +513,147 @@ Item {
             }
             AppText {
                 anchors.verticalCenter: parent.verticalCenter
-                text: root.itemCount + " 条 · 最近播放在前"
+                text: "· " + root.itemCount + " 条"
                 color: Theme.textMuted
                 font.pixelSize: 12
             }
         }
-        // 视图/聚合开关(状态持久化在 config.toml;与筛选 chip 同一视觉语言)
-        Row {
-            anchors.right: parent.right
-            anchors.rightMargin: 16
-            anchors.verticalCenter: titleRow.verticalCenter
-            spacing: 8
-            FilterChip {
-                label: root.viewMode === "grid" ? "网格视图" : "时间轴视图"
-                active: root.viewMode === "grid"
-                showHeart: false
-                onClicked: ConfigManager.historyView = (root.viewMode === "grid" ? "timeline" : "grid")
-            }
-            FilterChip {
-                label: root.aggregate ? "聚合剧集" : "逐条平铺"
-                active: root.aggregate
-                showHeart: false
-                onClicked: ConfigManager.historyAggregate = !root.aggregate
-            }
-        }
 
-        // 账号过滤:全部 / 单账号(与全局搜索的目标选择同一交互约定)
+        // 右侧控件(自左向右):账号筛选 → 视图 → 聚合。
         Row {
-            anchors.left: parent.left
-            anchors.leftMargin: 16
+            id: controlRow
             anchors.right: parent.right
-            anchors.rightMargin: 16
-            anchors.top: titleRow.bottom
-            anchors.topMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            clip: true
-            FilterChip {
-                label: "全部"
-                active: root.filterAccountId === ""
-                showHeart: false
-                onClicked: root.filterAccountId = ""
-            }
-            Repeater {
-                model: root.accountOptions
-                delegate: FilterChip {
-                    required property var modelData
-                    label: modelData.name
-                    active: root.filterAccountId === modelData.id
-                    showHeart: false
-                    onClicked: root.filterAccountId = (root.filterAccountId === modelData.id
-                                                       ? "" : modelData.id)
+
+            // 账号筛选:单账号过滤,下拉列出账号(与全局搜索的目标选择同一交互约定)。
+            PillTrigger {
+                id: accountChip
+                label: "账号 · " + root.filterLabel
+                active: root.filterAccountId !== ""
+                onClicked: accountPopup.open()
+
+                Popup {
+                    id: accountPopup
+                    parent: accountChip
+                    y: accountChip.height + 4
+                    x: -width + accountChip.width
+                    width: 200
+                    padding: 8
+                    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+                    enter: Transition {
+                        NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+                    }
+                    exit: Transition {
+                        NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+                    }
+                    background: Rectangle {
+                        color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                        radius: 8
+                        border.width: 1
+                        border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                    }
+                    contentItem: Column {
+                        width: parent.width - 16
+                        spacing: 2
+                        // "全部":清空单账号过滤。
+                        ItemDelegate {
+                            id: allItem
+                            readonly property bool allOn: root.filterAccountId === ""
+                            width: parent.width
+                            height: 30
+                            padding: 0
+                            contentItem: Item {
+                                AppText {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "全部"
+                                    color: "white"
+                                    font.pixelSize: 13
+                                }
+                                Rectangle {
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 4
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: Constants.moePink
+                                    visible: allItem.allOn
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: parent.hovered
+                                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                    : "transparent"
+                            }
+                            onClicked: {
+                                root.filterAccountId = ""
+                                accountPopup.close()
+                            }
+                        }
+                        // 单账号:选中项右侧点标出(点击收起下拉,不提供反选)。
+                        Repeater {
+                            model: root.accountOptions
+                            delegate: ItemDelegate {
+                                required property var modelData
+                                readonly property bool isOn: root.filterAccountId === modelData.id
+                                width: parent.width
+                                height: 30
+                                padding: 0
+                                contentItem: Item {
+                                    AppText {
+                                        anchors.left: parent.left
+                                        anchors.leftMargin: 4
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 16
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: modelData.name
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        elide: Text.ElideRight
+                                    }
+                                    Rectangle {
+                                        anchors.right: parent.right
+                                        anchors.rightMargin: 4
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        width: 6
+                                        height: 6
+                                        radius: 3
+                                        color: Constants.moePink
+                                        visible: parent.parent.isOn
+                                    }
+                                }
+                                background: Rectangle {
+                                    radius: 4
+                                    color: parent.hovered
+                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        : "transparent"
+                                }
+                                onClicked: {
+                                    root.filterAccountId = modelData.id
+                                    accountPopup.close()
+                                }
+                            }
+                        }
+                    }
                 }
+            }
+
+            // 视图:时间轴 / 网格(取值持久化在 config.toml,可热重载)
+            SegmentedControl {
+                options: [{ value: "timeline", label: "时间轴" }, { value: "grid", label: "网格" }]
+                currentValue: root.viewMode
+                onActivated: (value) => ConfigManager.historyView = value
+            }
+
+            // 聚合:逐条 / 按剧聚合
+            SegmentedControl {
+                options: [{ value: false, label: "逐条" }, { value: true, label: "聚合" }]
+                currentValue: root.aggregate
+                onActivated: (value) => ConfigManager.historyAggregate = value
             }
         }
     }
@@ -848,6 +942,36 @@ Item {
                      : "播放过的条目会出现在这里")
             color: Theme.textMuted
             font.pixelSize: 12
+        }
+    }
+
+    // 下拉触发器:与右侧分段控件同一视觉语言 —— 同高(28)、同半透明底、同细边;
+    // 选中(有筛选)时用粉色细边标示,不填充实心色。点击开下拉,故不共用 FilterChip
+    // (后者是"开关/筛选"语义,且在 Library 与 SearchOverlay 共享)。
+    component PillTrigger: Button {
+        id: trigger
+        property string label: ""
+        property bool active: false
+
+        height: 28
+        topPadding: 0
+        bottomPadding: 0
+        leftPadding: 14
+        rightPadding: 14
+        background: Rectangle {
+            radius: height / 2
+            color: Qt.rgba(0.07, 0.08, 0.11, 0.45)
+            border.width: 1
+            border.color: trigger.active
+                          ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
+                          : (trigger.hovered ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.10))
+        }
+        contentItem: AppText {
+            text: trigger.label
+            color: trigger.active ? Constants.moePinkText : "white"
+            font.pixelSize: 13
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
         }
     }
 }
