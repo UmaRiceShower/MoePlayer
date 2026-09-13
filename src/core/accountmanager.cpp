@@ -162,6 +162,11 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                 emit accountsChanged();
                 qInfo() << "AccountManager: 账号添加成功" << acc.id << "on" << acc.serverUrl;
                 emit accountLoginFinished(true, QString());
+                // 重跑首页聚合:Home 页只在实例化时拉一次,而新账号的库只能来自
+                // 网络(删除走本地重排,新增没有等价物),不重跑就要等下次启动。
+                // 在途时由 fetchHomeRows 排队合并,不并发打断孵化中的 delegate。
+                if (m_homeLimit > 0)
+                    fetchHomeRows(m_homeLimit);
                 // 名称留空:登录成功后再拉 /System/Info/Public,用服务器端
                 // ServerName 回填账号名(见 serverPublicInfoReceived)。
                 if (acc.name.isEmpty())
@@ -296,6 +301,32 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                             a.name = name;
                             save();
                             emit accountsChanged();
+                            // 首页聚合把账号名快照进 m_homeAccountOrder,并写进各行的
+                            // serverName(行标题"服务器名 · 库名"前缀)。添加账号是
+                            // "先入库(名字为空)再马上重跑聚合",回填若不同步这两处,
+                            // 该账号的行会一直缺前缀,直到下次聚合。只对变化行 setRows:
+                            // 模型内部只对变化行发信号,无整体重建噪音;缓存不在这里写
+                            // (它要求整轮聚合完成才落,见 saveHomeCache 的调用点)。
+                            const QString namedId = a.id;
+                            for (auto &ord : m_homeAccountOrder) {
+                                QVariantMap om = ord.toMap();
+                                if (om.value(QStringLiteral("id")).toString() != namedId)
+                                    continue;
+                                om.insert(QStringLiteral("name"), name);
+                                ord = om;
+                            }
+                            bool rowsTouched = false;
+                            for (auto &row : m_homeRows) {
+                                QVariantMap rm = row.toMap();
+                                if (rm.value(QStringLiteral("accountId")).toString() != namedId
+                                    || rm.value(QStringLiteral("serverName")).toString() == name)
+                                    continue;
+                                rm.insert(QStringLiteral("serverName"), name);
+                                row = rm;
+                                rowsTouched = true;
+                            }
+                            if (rowsTouched)
+                                m_homeRowsModel->setRows(m_homeRows);
                             break;
                         }
                     }
