@@ -7,7 +7,7 @@ jobs:
   flatpak:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: 安装 flatpak 与 KDE runtime
         run: |
@@ -24,7 +24,7 @@ jobs:
             packaging/flatpak/io.github.umariceshower.MoePlayer.yml
           flatpak build-bundle repo MoePlayer.flatpak io.github.umariceshower.MoePlayer
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: flatpak
           path: MoePlayer.flatpak
