@@ -27,6 +27,9 @@ ApplicationWindow {
     property var _pendingChain: null
     // 当前播放集上下文(playbackContextChanged 更新)。
     property var _curMeta: null
+    // 本次播放的账号(Detail 随 playWindowRequested 下推):playbackReady 的
+    // meta 不含 accountId,交付时并入,供按集续链/全季拉取按账号定位。
+    property string _playAccountId: ""
     // 全集列表已灌入 mpv(true 后不再重复 replace;contextChanged 仅在
     // 首次/直达边缘时补建一次——重复 replace 会无限重启循环)。
     property bool _listPrimed: false
@@ -55,7 +58,9 @@ ApplicationWindow {
             const c0 = AccountManager.credsForServer(meta.serverUrl)
             if (c0.token !== "") {
                 root._pendingChain = meta
-                EmbyClient.fetchAllEpisodes(meta.serverUrl, c0.token, c0.userId, meta.seriesId)
+                EmbyClient.fetchAllEpisodes(meta.serverUrl,
+                                            meta.accountId || root.currentAccountId,
+                                            c0.token, c0.userId, meta.seriesId)
             }
             return
         }
@@ -241,6 +246,10 @@ ApplicationWindow {
             if (m.selectedSubtitleOrdinal !== undefined && root._curSubtitleUrl === "")
                 m.selectedSubtitleOrdinal = root._curSubtitleOrdinal
             m.type = "Episode"
+            // 账号随协商结果下推(playbackReady 的 meta 不含 accountId):占位集
+            // 的连播/续链/全季拉取都要按账号定位,不能只在首集带。
+            if (!m.accountId)
+                m.accountId = root._playAccountId || root.currentAccountId
             console.info("Main: 协商就绪入缓存", id)
             root._epUrlCache[id] = { url: url, headers: headers, meta: m }
             root.serveEpisodeUrl(id)
@@ -385,9 +394,13 @@ ApplicationWindow {
         id: detailPage
         Detail {
             onPlayWindowRequested: function (meta) {
+                root._playAccountId = meta.accountId || ""
                 MpvClient.startPending(meta)
             }
             onPlaybackDelivered: function (url, headers, meta) {
+                // 交付 meta 补账号(见 _playAccountId):后续连播/续链据此定位。
+                if (root._playAccountId !== "" && !meta.accountId)
+                    meta.accountId = root._playAccountId
                 // 当前集 URL/头/元数据无条件入共享缓存(hook 应答/补建路径用)。
                 root._epUrlCache[meta.itemId] = { url: url, headers: headers, meta: meta }
                 // 剧集:全集标题入 mpv 播放列表(占位,m3u EXTINF 标题),deliver
@@ -419,8 +432,9 @@ ApplicationWindow {
                     root._deliverMeta = meta
                     const c = AccountManager.credsForServer(meta.serverUrl)
                     if (c.token !== "")
-                        EmbyClient.fetchAllEpisodes(meta.serverUrl, c.token, c.userId,
-                                                    meta.seriesId)
+                        EmbyClient.fetchAllEpisodes(meta.serverUrl,
+                                                    meta.accountId || root.currentAccountId,
+                                                    c.token, c.userId, meta.seriesId)
                     return
                 }
                 MpvClient.deliver(url, headers, meta)
