@@ -180,6 +180,13 @@ ApplicationWindow {
         target: MpvClient
         function onPlaybackFinished(itemId, error) {
             console.info("Main: 播放结束", itemId, "error:", error)
+            // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
+            // 历史页下次打开即是新时间,不必等整表刷新。账号/服务器取会话
+            // 缓存里的 meta(无缓存时退回当前播放上下文)。
+            const e = root._epUrlCache[itemId]
+            const m = e && e.meta ? e.meta : root._curMeta
+            if (m && m.serverUrl && m.accountId)
+                AccountManager.refreshHistoryItem(m.serverUrl, m.accountId, itemId)
             root.refreshCurrentAfterPlayback()
         }
         function onPlaybackContextChanged(meta) {

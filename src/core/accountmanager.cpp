@@ -62,6 +62,13 @@ const QStringList kPresetFolderColors = {
 const QString kHomeCacheName = QStringLiteral("home-rows");
 // 网络问题账号的定期重试间隔。
 constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
+// 播放结束后定点刷新该条明细的延时:Emby 在播放停止报告(Stopped)之后才写
+// LastPlayedDate,立即 GET 可能拿到旧值(旧值非 0 ⇒ 合并不报错、症状照旧),
+// 故延后拉一次。
+constexpr int kHistoryItemRefreshDelayMs = 5000;
+// 播放历史:列表最前 N 条每次都重取明细(见 onHistoryListReceived 的补全判据)。
+// 代价是每次刷新 N 条轻量单条请求,换来"重看旧集也能刷新时间戳"。
+constexpr int kHistoryTopAlwaysDetail = 15;
 } // namespace
 
 AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QObject *parent)
@@ -89,19 +96,31 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                    int playCount, qint64 lastPlayedAt, double positionTicks, bool played) {
                 // 并发槽归还与队列推进与 scope 无关:被删账号的在途响应也必须归还
                 // 槽位并继续派发,否则槽位被它占满时其他账号排队的明细不再发出。
-                if (m_historyDetailInFlight > 0)
-                    --m_historyDetailInFlight;
-                drainHistoryDetails();
                 const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
-                if (!m_historyScopes.contains(scope))
-                    return; // 非本轮参与(账号已删除等):跳过写入与计数
+                // 定点刷新(播放结束后拉刚播的那条)走独立通道:不占批处理的
+                // 并发槽、也不受"本轮参与的 scope"门槛约束(那条约束是给批次
+                // 用的,套在定点上会静默不写)。
+                const bool oneShot =
+                    m_historyOneShot.remove(scope + QLatin1Char('|') + itemId);
+                if (!oneShot) {
+                    if (m_historyDetailInFlight > 0)
+                        --m_historyDetailInFlight;
+                    drainHistoryDetails();
+                    if (!m_historyScopes.contains(scope))
+                        return; // 非本轮参与(账号已删除等):跳过写入与计数
+                }
                 if (positionTicks >= 0) {
                     m_playbackHistory->mergeItemUserData(serverUrl, accountId, itemId,
                                                          playCount, lastPlayedAt,
                                                          positionTicks, played);
                     m_historyFlushTimer.start(); // 防抖落盘(见 constants)
                 }
-                onHistoryTaskDone(scope);
+                if (oneShot)
+                    qInfo() << "AccountManager: 定点刷新合并(播放结束)" << itemId
+                            << "次数" << playCount
+                            << "位置" << qint64(positionTicks);
+                if (!oneShot)
+                    onHistoryTaskDone(scope);
             });
     // 后台明细的合并结果延迟落盘(逐条写文件过密,见 constants)。
     m_historyFlushTimer.setSingleShot(true);
@@ -659,6 +678,23 @@ void AccountManager::refreshPlaybackHistory()
     startPlaybackHistoryFetch();
 }
 
+void AccountManager::refreshHistoryItem(const QString &serverUrl, const QString &accountId,
+                                        const QString &itemId)
+{
+    if (serverUrl.trimmed().isEmpty() || accountId.isEmpty() || itemId.isEmpty())
+        return;
+    // 延时拉:Stopped 报告之后服务器才写 LastPlayedDate(见 constants),拉早了
+    // 只会把旧值原样合回去。
+    const QString url = serverUrl.trimmed();
+    QTimer::singleShot(kHistoryItemRefreshDelayMs, this, [this, url, accountId, itemId]() {
+        const AccountInfo *acc = accountById(accountId);
+        if (!acc || acc->token.isEmpty() || acc->userId.isEmpty())
+            return;
+        m_historyOneShot.insert(url + QLatin1Char('|') + accountId + QLatin1Char('|') + itemId);
+        m_client->fetchItemUserData(url, accountId, acc->token, acc->userId, itemId);
+    });
+}
+
 void AccountManager::startPlaybackHistoryFetch()
 {
     if (m_historyActive)
@@ -726,8 +762,27 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     // **过滤段**取更早的已看条目。过滤会换一套下标空间(实测:窗口页拿到 200 条后
     // 带 Filters=IsPlayed 且 StartIndex=200 的请求返回 0 条),故过滤段的 StartIndex
     // 必须从 0 重新数起,按过滤后的 total 推进。
+    // 窗口页与过滤段头部重叠(过滤段 StartIndex 从 0 重数),同一 id 会来两次;
+    // 只收首次出现的那份(= 窗口页,seq 更小),并在这里重排**全局** seq:每页
+    // 响应的 seq 都从 0 重数,直接沿用会让"列表最前 N 条"命中每一页的头部。
     QVariantList accum = m_historyAccum.value(scope);
-    accum += items;
+    QSet<QString> accumIds;
+    for (const QVariant &v : std::as_const(accum))
+        accumIds.insert(v.toMap().value(QStringLiteral("id")).toString());
+    int dupSkipped = 0;
+    for (const QVariant &v : items) {
+        QVariantMap m = v.toMap();
+        const QString id = m.value(QStringLiteral("id")).toString();
+        if (accumIds.contains(id)) {
+            ++dupSkipped;
+            continue;
+        }
+        accumIds.insert(id);
+        m.insert(QStringLiteral("seq"), accum.size());
+        accum.append(m);
+    }
+    if (dupSkipped > 0)
+        qInfo() << "AccountManager: 播放历史跳过重复条目" << dupSkipped << scope;
     const AccountInfo *acc = accountById(accountId);
     const bool canContinue = acc != nullptr && !acc->token.isEmpty() && !acc->userId.isEmpty();
     const int phase = m_historyPhase.value(scope, 0);
@@ -789,8 +844,16 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
         }
         const QString id = m.value(QStringLiteral("id")).toString();
         const QVariantMap old = before.value(id);
+        // 变化判据:新增/进度或已看状态变化/尚无时间戳,以及**列表最前的若干条**。
+        // 列表端点不给上次播放时间(实测:PlayCount 恒为 0、追加 Fields 也拿不到
+        // 日期),唯一可靠的是它按 DatePlayed 倒序 ⇒ 被重播的条目必然被提升到
+        // 最前;而重看同一集时进度与"已看"可能一字不变(续播点没动),只比这两项
+        // 会让时间戳永远停在第一次补全的结果上(旧实现即如此)。故最前
+        // kHistoryTopAlwaysDetail 条无条件重取明细,更早的条目若被重播也一定会
+        // 进入这个窗口,不会漏。
         const bool changed =
             old.isEmpty()
+            || m.value(QStringLiteral("seq")).toInt() < kHistoryTopAlwaysDetail
             || old.value(QStringLiteral("positionTicks")).toDouble()
                    != m.value(QStringLiteral("positionTicks")).toDouble()
             || old.value(QStringLiteral("played")).toBool()
