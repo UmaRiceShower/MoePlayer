@@ -25,13 +25,19 @@ inline constexpr int kMaxPageSize = 200;
 inline constexpr int kHomePerLibraryLimit = 20;
 // 首页 hero 服务器建议条数(每账号;全部账号展平后由 QML 再截断)。
 inline constexpr int kHomeSuggestLimit = 10;
-// 播放历史拉取条数(每账号)。
-inline constexpr int kHistoryFetchLimit = 60;
+// 播放历史单页条数(每账号):Emby 单页上限 200(kMaxPageSize),取满即一次请求
+// 覆盖最多 200 条。列表端点不返回时间戳,条数多少不影响请求数(整页一次拿回),
+// 故不再用"60 窗口"限制可及范围。
+inline constexpr int kHistoryFetchLimit = 200;
+// 播放历史逐页回补的最大页数(每账号):首页不带 Filters(含"在看"),其后每页带
+// Filters=IsPlayed 取更早的已看条目,页数上限使单账号最多回补
+// kHistoryFetchLimit * kHistoryMaxHistoryPages 条(与 kHistoryStoredPerScope 同量级)。
+inline constexpr int kHistoryMaxHistoryPages = 5;
 // 播放历史明细补全条数(每账号):列表端点不返回播放次数与上次播放时间,
 // 需逐条查单条端点。只对"新增/进度或已看有变化/尚无时间戳"的条目补(见
 // AccountManager::onHistoryListReceived),未变且有时间的条目不发请求,稳态下
-// 为 0 条;取与 kHistoryFetchLimit 相同的 60,使"最新一页里的每一条"都有精确
-// 时间(更深的分页没有时间戳,按服务器顺序归入更早)。
+// 为 0 条。60 只覆盖最新的一小段:更早的条目没有精确时间,按服务器顺序归入
+// "更早"(每条 1 次请求,不宜按 200 条的页宽放大)。
 inline constexpr int kHistoryDetailLimit = 60;
 // 明细补全的并发请求数。Qt 对同一主机的 HTTP/1.1 连接数默认 6,且公开可配:
 // QHttp1Configuration::setNumberOfConnectionsPerHost(1..255)+ QNetworkRequest::

@@ -931,50 +931,33 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
 }
 
 void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
-                                      const QString &token, const QString &userId, int limit)
+                                      const QString &token, const QString &userId,
+                                      int startIndex, int limit, bool filtered)
 {
-    QUrlQuery q = historyListQuery(0, limit, false);
+    // 过滤段带 Filters=IsPlayed:实测服务器在已播条目之后混着从未播放的行,越深越多,
+    // 不过滤翻页只会白拿未播条目。过滤会换一套下标空间,故由调用方显式给出 filtered,
+    // 不能按 StartIndex 推断(过滤段本身也从 0 起)。
+    const int from = qMax(0, startIndex);
+    const QUrlQuery q = historyListQuery(from, limit, filtered);
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, serverUrl, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, accountId, from](const QJsonDocument &doc) {
             QVariantList out;
             int seq = 0;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
-            qInfo() << "Emby: playbackHistory =" << out.size() << "on" << serverUrl;
-            emit playbackHistoryReceived(serverUrl, accountId, out, true);
+            const int total = doc.object().value(QLatin1String("TotalRecordCount")).toInt();
+            qInfo() << "Emby: playbackHistory =" << out.size() << "startIndex" << from
+                    << "总数" << total << "on" << serverUrl;
+            emit playbackHistoryReceived(serverUrl, accountId, from, out, total, true);
         },
         // 失败:发空列表 + ok=false(调用方保留既有存储,只结算本次请求)。
-        [this, serverUrl, accountId] {
-            emit playbackHistoryReceived(serverUrl, accountId, QVariantList(), false);
+        [this, serverUrl, accountId, from] {
+            emit playbackHistoryReceived(serverUrl, accountId, from, QVariantList(), 0, false);
         },
         QStringLiteral("拉取播放历史"), true /*后台连接池*/);
 }
 
-
-// 播放历史分页:从 startIndex 起再取一页(页面"加载更多"用)。与首页批次同源,
-// 仅多带 StartIndex;结果只经 historyPageReceived 回给调用方。
-void EmbyClient::fetchHistoryPage(const QString &serverUrl, const QString &accountId,
-                                  const QString &token, const QString &userId,
-                                  int startIndex, int limit)
-{
-    const QUrlQuery q = historyListQuery(qMax(0, startIndex), limit, true);
-    get(serverUrl, token, userId,
-        QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, serverUrl, accountId, startIndex](const QJsonDocument &doc) {
-            QVariantList out;
-            int seq = 0;
-            for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
-            qInfo() << "Emby: historyPage =" << out.size() << "startIndex" << startIndex
-                    << "on" << serverUrl;
-            emit historyPageReceived(serverUrl, accountId, startIndex, out, out.size(), true);
-        },
-        [this, serverUrl, accountId, startIndex] {
-            emit historyPageReceived(serverUrl, accountId, startIndex, QVariantList(), 0, false);
-        },
-        QStringLiteral("播放历史分页"), true /*后台连接池*/);
-}
 
 void EmbyClient::fetchItemUserData(const QString &serverUrl, const QString &accountId,
                                    const QString &token, const QString &userId,

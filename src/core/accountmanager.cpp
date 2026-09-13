@@ -110,7 +110,6 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
             [this] { m_playbackHistory->flush(); });
     // 详情页按需刷新:继续观看列表与整剧分集都回写本地播放历史。
     connect(m_client, &EmbyClient::resumeReceived, this, &AccountManager::onResumeReceived);
-    connect(m_client, &EmbyClient::historyPageReceived, this, &AccountManager::onHistoryPageReceived);
     connect(m_client, &EmbyClient::allEpisodesParsed, this, &AccountManager::onAllEpisodesParsed);
 
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
@@ -649,48 +648,6 @@ void AccountManager::fetchPlaybackHistory()
                        &AccountManager::startPlaybackHistoryFetch);
 }
 
-int AccountManager::historyPageSize() const
-{
-    return MoePlayer::kHistoryFetchLimit;
-}
-
-void AccountManager::fetchHistoryPage(const QString &accountId, int startIndex)
-{
-    const AccountInfo *acc = accountById(accountId);
-    if (!acc || acc->token.isEmpty() || acc->userId.isEmpty())
-        return;
-    m_client->fetchHistoryPage(acc->serverUrl, acc->id, acc->token, acc->userId,
-                               qMax(0, startIndex), MoePlayer::kHistoryFetchLimit);
-}
-
-void AccountManager::onHistoryPageReceived(const QString &serverUrl, const QString &accountId,
-                                           int startIndex, const QVariantList &items, bool ok)
-{
-    QVariantList out;
-    if (ok) {
-        // 与入库同一判据:服务器在已播条目之后仍会带回从未播放的行(见 hasPlayTrace),
-        // 页面不需要它们;海报键补服务器前缀(页面直接拼 image://emby/)。
-        QVariantList traced;
-        for (const QVariant &v : std::as_const(items)) {
-            if (hasPlayTrace(v.toMap()))
-                traced.append(v);
-        }
-        out = historyItemsWithPosterIds(traced, serverUrl);
-        // 分页结果不入库(scope/serverUrl/accountId 是 PlaybackHistory 写库时补的),
-        // 这里按同一口径补上:页面据此与库内条目去重、显示账号标签,并把两者透传给
-        // 详情页 —— 缺了会重复显示、标签为空,多账号下还会进错账号的详情页。
-        const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
-        for (QVariant &v : out) {
-            QVariantMap m = v.toMap();
-            m.insert(QStringLiteral("scope"), scope);
-            m.insert(QStringLiteral("serverUrl"), serverUrl);
-            m.insert(QStringLiteral("accountId"), accountId);
-            v = m;
-        }
-    }
-    emit historyPageReceived(serverUrl, accountId, startIndex, out, items.size(), ok);
-}
-
 void AccountManager::refreshPlaybackHistory()
 {
     // 上一批次的明细补全仍在排队/在途时不开新批次:startPlaybackHistoryFetch 会清空
@@ -708,6 +665,10 @@ void AccountManager::startPlaybackHistoryFetch()
         return; // 已在拉取(启动批次或上一次触发未结束):跳过,避免重复批次互相踩
     m_historyScopes.clear();
     m_historyOutstanding.clear();
+    m_historyAccum.clear();
+    m_historyNextStart.clear();
+    m_historyPages.clear();
+    m_historyPhase.clear();
     m_historyDetailQueue.clear();
     m_historyDetailInFlight = 0;
     for (const AccountInfo &acc : std::as_const(m_accounts)) {
@@ -716,9 +677,10 @@ void AccountManager::startPlaybackHistoryFetch()
         const QString scope = acc.serverUrl.trimmed() + QLatin1Char('|') + acc.id;
         m_historyScopes.insert(scope);
         // 先记列表请求这一票:否则某账号先返回空结果时会被误判为"全部完成"。
+        // 逐页回补的后续页不单独记票(只到整账号收尾时才结算)。
         m_historyOutstanding.insert(scope, 1);
         m_client->fetchPlaybackHistory(acc.serverUrl, acc.id, acc.token, acc.userId,
-                                       MoePlayer::kHistoryFetchLimit);
+                                       0, MoePlayer::kHistoryFetchLimit, false);
     }
     m_historyActive = !m_historyScopes.isEmpty();
     if (!m_historyActive)
@@ -744,7 +706,7 @@ QVariantList AccountManager::historyItemsWithPosterIds(const QVariantList &items
 }
 
 void AccountManager::onHistoryListReceived(const QString &serverUrl, const QString &accountId,
-                                           const QVariantList &items, bool ok)
+                                           int startIndex, const QVariantList &items, int total, bool ok)
 {
     const QString scope = serverUrl.trimmed() + QLatin1Char('|') + accountId;
     if (!m_historyScopes.contains(scope) || !accountById(accountId))
@@ -753,11 +715,54 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     // fetchedAt(后者是后续按陈旧度触发拉取的判断依据),只结算列表这一票。
     if (!ok) {
         qInfo() << "AccountManager: 播放历史拉取失败,保留既有数据" << scope;
+        m_historyAccum.remove(scope);
+        m_historyNextStart.remove(scope);
+        m_historyPages.remove(scope);
+        m_historyPhase.remove(scope);
         onHistoryTaskDone(scope);
         return;
     }
+    // 两段式取全:先取"窗口页"(不带服务器过滤,与既有语义一致:含"在看"),再进入
+    // **过滤段**取更早的已看条目。过滤会换一套下标空间(实测:窗口页拿到 200 条后
+    // 带 Filters=IsPlayed 且 StartIndex=200 的请求返回 0 条),故过滤段的 StartIndex
+    // 必须从 0 重新数起,按过滤后的 total 推进。
+    QVariantList accum = m_historyAccum.value(scope);
+    accum += items;
+    const AccountInfo *acc = accountById(accountId);
+    const bool canContinue = acc != nullptr && !acc->token.isEmpty() && !acc->userId.isEmpty();
+    const int phase = m_historyPhase.value(scope, 0);
+    // 窗口页的"还有更多"只能用"整页"判:它不带过滤,TotalRecordCount 是整个媒体库的
+    // 条目数,按它推进会一路翻到页数上限且几乎全是未播条目。整页(== Limit)才说明
+    // 库里还有更早的条目,也才需要过滤段去取更早的**已看**条目;没拉满说明整个库
+    // 都在这一页里,已播集合必然已在其中,过滤段可以整个跳过。
+    if (phase == 0 && items.size() >= MoePlayer::kHistoryFetchLimit && canContinue) {
+        // 窗口页到手(且整页)→ 开过滤段(StartIndex 0)。
+        m_historyAccum.insert(scope, accum);
+        m_historyNextStart.insert(scope, 0);
+        m_historyPages.insert(scope, 0);
+        m_historyPhase.insert(scope, 1);
+        m_client->fetchPlaybackHistory(acc->serverUrl, acc->id, acc->token, acc->userId,
+                                       0, MoePlayer::kHistoryFetchLimit, true);
+        return; // 本轮不结算:等过滤段
+    }
+    const int next = startIndex + items.size();
+    const int pages = m_historyPages.value(scope) + 1;
+    if (phase >= 1 && !items.isEmpty() && next < total
+        && pages < MoePlayer::kHistoryMaxHistoryPages && canContinue) {
+        m_historyAccum.insert(scope, accum);
+        m_historyNextStart.insert(scope, next);
+        m_historyPages.insert(scope, pages);
+        m_client->fetchPlaybackHistory(acc->serverUrl, acc->id, acc->token, acc->userId,
+                                       next, MoePlayer::kHistoryFetchLimit, true);
+        return; // 本轮不结算:等下一页
+    }
+    const int pageCount = pages + 1; // 窗口页 + 过滤段页数
+    m_historyAccum.remove(scope);
+    m_historyNextStart.remove(scope);
+    m_historyPages.remove(scope);
+    m_historyPhase.remove(scope);
     // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
-    const QVariantList stored = historyItemsWithPosterIds(items, serverUrl);
+    const QVariantList stored = historyItemsWithPosterIds(accum, serverUrl);
     // 变更检测:先留一份本地旧条目再整体覆盖(见 PlaybackHistory::setItems)。
     // 列表端点不返回上次播放时间,故以 (id, 观看进度, 已看) 是否有变化、以及
     // 时间戳是否已知为判据,只对"新增/有变化/尚无时间戳"的条目逐条补明细;
@@ -799,7 +804,8 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
         m_historyDetailQueue.enqueue({ scope, id });
         ++needDetail;
     }
-    qInfo() << "AccountManager: 播放历史列表" << stored.size() << "条,补明细" << needDetail
+    qInfo() << "AccountManager: 播放历史列表" << stored.size() << "条(回补" << pageCount << "页),补明细"
+            << needDetail
             << "条(未变且有时间的" << skipped << "条跳过,无播放痕迹的" << untraced
             << "条不入库)" << scope;
     if (needDetail > 0)

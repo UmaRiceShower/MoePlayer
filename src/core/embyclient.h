@@ -143,16 +143,13 @@ public:
     // 拉取播放历史列表(服务器按条目 LastPlayedDate 倒序返回,顺序有效;
     // 条目字段与首页条目一致,另带剧集定位与顺序 seq)。列表端点不返回
     // playCount/lastPlayedAt,需再经 fetchItemUserData 逐条补全。
-    // 结果经 playbackHistoryReceived 返回,失败发空列表。
+    // 结果经 playbackHistoryReceived 返回(带该页 startIndex 与服务器总数),失败发空列表。
+    // filtered=false 取"窗口页"(与既有语义一致,含"在看");filtered=true 取更早的
+    // 已看条目(Filters=IsPlayed)。注意过滤会换一套下标空间:过滤段的 StartIndex
+    // 必须从 0 起另算,不能沿用窗口页的推进量(调用方负责)。
     Q_INVOKABLE void fetchPlaybackHistory(const QString &serverUrl, const QString &accountId,
-                                          const QString &token, const QString &userId, int limit);
-
-    // 播放历史分页(页面"加载更多")：从 startIndex 起再取一页,结果经
-    // historyPageReceived 返回(ok=false 表示失败);只读,不涉及本地存储。
-    Q_INVOKABLE void fetchHistoryPage(const QString &serverUrl, const QString &accountId,
-                                      const QString &token, const QString &userId,
-                                      int startIndex, int limit);
-    // 拉取单条目用户数据(全量档:真实 PlayCount/LastPlayedDate/进度),
+                                          const QString &token, const QString &userId,
+                                          int startIndex, int limit, bool filtered);
     // 结果经 itemUserDataReceived 返回;失败以 positionTicks < 0 上报,
     // 调用方据批次计数照常推进。
     Q_INVOKABLE void fetchItemUserData(const QString &serverUrl, const QString &accountId,
@@ -258,12 +255,10 @@ signals:
                         const QVariantList &items);
     // 播放历史列表(见 fetchPlaybackHistory):ok=false 表示请求失败(items 为空),
     // 调用方据此保留既有存储(空列表也可能只是"该账号确无播放记录",两者不可混)。
-    // rawCount = 服务器该页原始条数(未过滤):调用方按它推进游标,并据此判断
-    // 该账号是否已取完(不足一页)。
-    void historyPageReceived(const QString &serverUrl, const QString &accountId,
-                             int startIndex, const QVariantList &items, int rawCount, bool ok);
+    // startIndex = 本次请求的起始下标;total = 服务器按本次查询条件给出的总数,
+    // 调用方据此判断是否继续回补下一页。
     void playbackHistoryReceived(const QString &serverUrl, const QString &accountId,
-                                 const QVariantList &items, bool ok);
+                                 int startIndex, const QVariantList &items, int total, bool ok);
     // 单条目用户数据(见 fetchItemUserData):positionTicks < 0 表示失败
     // (其余字段无意义)。
     void itemUserDataReceived(const QString &serverUrl, const QString &accountId,
