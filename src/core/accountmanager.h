@@ -85,6 +85,10 @@ public:
     // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):
     // 已在拉取中则由 startPlaybackHistoryFetch 的在途保护跳过。
     Q_INVOKABLE void refreshPlaybackHistory();
+    // 定点刷新单条(播放结束后延后拉该条明细:服务器在 Stopped 报告之后才写
+    // 上次播放时间),结果经独立通道合并,不占批处理并发槽。
+    Q_INVOKABLE void refreshHistoryItem(const QString &serverUrl, const QString &accountId,
+                                        const QString &itemId);
     // 按需刷新某账号的播放历史(详情页进入时调):拉该账号的继续观看列表并
     // 回写本地,结果经 accountHistoryRefreshed 返回;凭据不全时不发请求,
     // 调用方走本地回退。
@@ -280,6 +284,8 @@ private:
     QHash<QString, int> m_historyPhase;           // scope → 0=窗口页(未过滤) 1=过滤段
     QQueue<QPair<QString, QString>> m_historyDetailQueue; // scope + itemId
     int m_historyDetailInFlight = 0;
+    // 定点刷新的在途键(scope|accountId|itemId):响应到达时据此走独立通道。
+    QSet<QString> m_historyOneShot;
     // 后台明细合并后的落盘防抖(见 constants):逐条写文件过密,合并写一次。
     QTimer m_historyFlushTimer;
     // 账号认证状态(accounts() 暴露 authStatus):invalid/network/ok。
