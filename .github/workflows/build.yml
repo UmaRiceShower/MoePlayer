@@ -48,8 +48,10 @@ jobs:
       - name: 安装依赖
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends git cmake ninja-build g++ dpkg-dev file \
-            qt6-base-dev qt6-declarative-dev qt6-websockets-dev qt6-shadertools-dev
+          # ca-certificates:debian 基础镜像不带它,而 --no-install-recommends 下
+          # git 只会 Recommends 它 ⇒ 容器内 checkout 会报 SSL CA cert 错误。
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++ \
+            dpkg-dev file qt6-base-dev qt6-declarative-dev qt6-websockets-dev qt6-shadertools-dev
 
       - uses: actions/checkout@v4
 
