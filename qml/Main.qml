@@ -317,9 +317,152 @@ ApplicationWindow {
 
     background: ThemedBackground {}
 
+    // ---- 页面转场:四档可选(ConfigManager.pageTransition),背景层不参与 ----
+    // 曲线/位移取自各自的成体系做法(Material Shared Axis X / Kirigami / 纯淡 / iOS push);
+    // iOS 档用 Easing.BezierSpline 精确复刻 iOS 16.3 帧拟合曲线(Qt 与 Flutter 的分段语义
+    // 一致:按控制点 x 分段,故控制点可原样照搬),pop 方向为其镜像。
+    QtObject {
+        id: navTrans
+        readonly property string kind: ConfigManager.pageTransition
+
+        // 页面皆透明(露动画背景)⇒ 两页同时可见即"双重曝光"。故统一时序:
+        // 旧页先淡出(前 ~40% 时长),新页在旧页退净后淡入;进入页第一帧用
+        // PropertyAction 压到 opacity 0(否则暂停段会以原生 1 闪一帧)。
+        // A. 横向轻移:新页 30px 滑入 + 后 70% 淡入;旧页前 30% 滑出淡出
+        property Transition axIn: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: 30; to: 0; duration: 230; easing.type: Easing.Bezier; easing.bezierCurve: [0.2, 0, 0, 1] }
+                SequentialAnimation {
+                    PropertyAction { property: "opacity"; value: 0 }
+                    PauseAnimation { duration: 70 }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 }
+                }
+            }
+        }
+        property Transition axOut: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: 0; to: -30; duration: 70; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 70; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+            }
+        }
+        property Transition axPopIn: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: -30; to: 0; duration: 230; easing.type: Easing.Bezier; easing.bezierCurve: [0.2, 0, 0, 1] }
+                SequentialAnimation {
+                    PropertyAction { property: "opacity"; value: 0 }
+                    PauseAnimation { duration: 70 }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 160 }
+                }
+            }
+        }
+        property Transition axPopOut: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: 0; to: 30; duration: 70; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 70; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+            }
+        }
+
+        // B. 纵向上浮:旧页前 45% 淡出,新页随后自下方 40px 上滑淡入
+        property Transition upIn: Transition {
+            SequentialAnimation {
+                PropertyAction { property: "opacity"; value: 0 }
+                PauseAnimation { duration: 80 }
+                ParallelAnimation {
+                    NumberAnimation { property: "y"; from: 40; to: 0; duration: 120; easing.type: Easing.OutCubic }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 120 }
+                }
+            }
+        }
+        property Transition upOut: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 80; easing.type: Easing.InCubic }
+        }
+        property Transition upPopIn: Transition {
+            SequentialAnimation {
+                PropertyAction { property: "opacity"; value: 0 }
+                PauseAnimation { duration: 80 }
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 120 }
+            }
+        }
+        property Transition upPopOut: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "y"; from: 0; to: 40; duration: 80; easing.type: Easing.InCubic }
+                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 80; easing.type: Easing.InCubic }
+            }
+        }
+
+        // C. 纯淡入淡出:先后淡化(非交叉),中段只余背景。时序对齐 Android
+        property Transition fadeIn: Transition {
+            SequentialAnimation {
+                PropertyAction { property: "opacity"; value: 0 }
+                PauseAnimation { duration: 105 }
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 195 }
+            }
+        }
+        property Transition fadeOut: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 105; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+        }
+        property Transition fadePopIn: Transition {
+            SequentialAnimation {
+                PropertyAction { property: "opacity"; value: 0 }
+                PauseAnimation { duration: 105 }
+                NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 195 }
+            }
+        }
+        property Transition fadePopOut: Transition {
+            NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 105; easing.type: Easing.Bezier; easing.bezierCurve: [0.4, 0, 1, 1] }
+        }
+
+        // D. 横滑视差:旧页前 100ms 淡出(+左移 1/3 宽作视差),新页随后全宽滑入淡入
+        property Transition iosIn: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: stackView.width; to: 0; duration: 350; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.056, 0.024, 0.108, 0.3085, 0.198, 0.541, 0.3655, 1.0, 0.5465, 0.989, 1, 1] }
+                SequentialAnimation {
+                    PropertyAction { property: "opacity"; value: 0 }
+                    PauseAnimation { duration: 100 }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 250 }
+                }
+            }
+        }
+        property Transition iosOut: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: 0; to: -stackView.width / 3; duration: 350; easing.type: Easing.Bezier; easing.bezierCurve: [0.35, 0.91, 0.33, 0.97] }
+                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100; easing.type: Easing.InCubic }
+            }
+        }
+        property Transition iosPopIn: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: -stackView.width / 3; to: 0; duration: 350; easing.type: Easing.Bezier; easing.bezierCurve: [0.67, 0.03, 0.65, 0.09] }
+                SequentialAnimation {
+                    PropertyAction { property: "opacity"; value: 0 }
+                    PauseAnimation { duration: 100 }
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 250 }
+                }
+            }
+        }
+        property Transition iosPopOut: Transition {
+            ParallelAnimation {
+                NumberAnimation { property: "x"; from: 0; to: stackView.width; duration: 350; easing.type: Easing.BezierSpline; easing.bezierCurve: [0.4535, 0.011, 0.6345, 0.0, 0.802, 0.459, 0.892, 0.6915, 0.944, 0.976, 1, 1] }
+                NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100; easing.type: Easing.InCubic }
+            }
+        }
+    }
+
     StackView {
         id: stackView
         anchors.fill: parent
+        // 转场四档由配置选择,绑定在下方(背景层全程静止)。
+        pushEnter: navTrans.kind === "axis_x" ? navTrans.axIn
+                 : navTrans.kind === "slide_up" ? navTrans.upIn
+                 : navTrans.kind === "ios_slide" ? navTrans.iosIn : navTrans.fadeIn
+        pushExit: navTrans.kind === "axis_x" ? navTrans.axOut
+                : navTrans.kind === "slide_up" ? navTrans.upOut
+                : navTrans.kind === "ios_slide" ? navTrans.iosOut : navTrans.fadeOut
+        popEnter: navTrans.kind === "axis_x" ? navTrans.axPopIn
+                : navTrans.kind === "slide_up" ? navTrans.upPopIn
+                : navTrans.kind === "ios_slide" ? navTrans.iosPopIn : navTrans.fadePopIn
+        popExit: navTrans.kind === "axis_x" ? navTrans.axPopOut
+               : navTrans.kind === "slide_up" ? navTrans.upPopOut
+               : navTrans.kind === "ios_slide" ? navTrans.iosPopOut : navTrans.fadePopOut
         // 浮层可见时禁用页面:PosterCard 的点击用默认策略 TapHandler(按下不抢占
         // 手势,只有 MouseArea/ReleaseWithinBounds 才抢),浮层卡片的点击会同时
         // 命中页面同位置卡片,一次点击开出两个详情页(最小复现实测)。禁用后页面
