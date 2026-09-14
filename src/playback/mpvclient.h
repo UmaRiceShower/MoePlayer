@@ -20,8 +20,7 @@ class ConfigManager;
 //! 官方 osc.lua 经 `--script` 加载,由 mpv 原生窗口自绘 OSD/控制栏),Qt 不再
 //! 渲染视频。经 `--input-ipc-server`(临时 unix socket)用 mpv JSON IPC 控制/订阅。
 //!
-//! Emby 播放状态回传(Start/Progress/Stopped/Ping)在此承接(替代原自绘窗口
-//! PlayerWindow 的逻辑):起播上报、每 progressReportMs(项目 10s)进度节流、
+//! Emby 播放状态回传(Start/Progress/Stopped/Ping)在此承接(原自绘播放窗口的逻辑):起播上报、每 progressReportMs(项目 10s)进度节流、
 //! 每 10 分钟 Ping、结束/关窗上报停止。协商链路:startPending 先弹 mpv 空窗
 //! (先开窗后协商),deliver 交付地址起播,fail 关窗;Library 直连走 start。
 //!

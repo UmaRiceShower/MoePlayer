@@ -1,6 +1,6 @@
 # MoePlayer
 
-**MoePlayer** 是一个纯本地的 Emby 第三方客户端,基于 **Qt 6 / QML + libmpv** 构建。
+**MoePlayer** 是一个纯本地的 Emby 第三方客户端,基于 **Qt 6 / QML** 构建,播放由**外部 mpv 进程**(JSON IPC)承担。
 
 > ### 🚧 开发中(2026-08)
 >
@@ -8,13 +8,13 @@
 > - **开发阶段,不推荐日常使用**:接口与行为可能随时变化
 > - 界面截图仅代表当前开发进度,**非最终效果,以最终发版为准**
 
-> 萌系粉白风格:极光动态背景、柔焦光斑、毛玻璃弹层,搭配暗色媒体库浏览体验。
+> 主题系统:11 套配色(亮/暗)× 5 个动态背景效果(落樱/萤火/星空流星/夜雨/无),毛玻璃弹层;亮暗双配色自动切换文字与玻璃参数。
 
 ## 功能特性
 
 | 功能 | 说明 |
 |:--|:--|
-| **MPV 播放内核** | libmpv 全格式播放,播放窗口独立;进度续播(IsResumable) |
+| **MPV 播放** | 外部 mpv 进程(JSON IPC),播放窗口独立;进度续播(IsResumable) |
 | **服务器管理** | 多服务器账号与凭据管理,添加/编辑/移除 |
 | **媒体库浏览** | 面包屑链导航(服名 ▸ 媒体库 ▸ 文件夹),递归条目加载,子文件夹下钻 |
 | **多维筛选** | 类型 / 评分 / 状态单选 + 年份区间输入(自动枚举为年份列表),激活计数徽标,一键清除 |
@@ -22,7 +22,7 @@
 | **全局搜索** | 毛玻璃搜索浮窗,状态/年份/类型筛选,结果网格分页加载 |
 | **详情页** | 元数据、演员、媒体源信息、相似推荐(hover 放大)、收藏 / 已看状态 |
 | **设置浮窗** | Ctrl+S / 首页按钮开关;左分类 / 右设置项两级面板;界面/媒体库/详情页/代理/关于分类,开关/下拉/输入直连 ConfigManager(config.toml 热重载) |
-| **萌系主题** | 粉白配色、极光背景(QML shader)、柔焦光斑、毛玻璃弹层、卡片 hover 放大浮起 |
+| **主题系统** | 配色 × 背景效果正交预设、亮暗双主题、毛玻璃弹层、卡片 hover 放大浮起 |
 
 ## 界面预览
 
@@ -46,7 +46,7 @@
 
 - CMake ≥ 3.21
 - Qt ≥ 6.8(Core, Gui, Quick, QuickControls2, Network, WebSockets, ShaderTools)
-- libmpv(需 pkg-config 可查找到 `mpv`)
+- 播放依赖:**运行期**外部 mpv(≥ 0.38,需在 PATH;打包依赖随包声明),构建期不需要
 
 ## 构建
 
@@ -63,30 +63,29 @@ cmake --build build -j$(nproc)
 1. 启动后在服务器管理页添加 Emby 服务器地址
 2. 登录获得凭据(或已有账号直接连接)
 3. 进入媒体库:面包屑导航 / 筛选 / 搜索
-4. 点击卡片播放(libmpv 窗口)
+4. 点击卡片播放(外部 mpv 窗口)
 5. `Ctrl+S` 打开设置浮窗:左分类 / 右设置项,值改动即时写入 config.toml 并热重载
 
 ## 技术架构
 
 - **QML 模块化**:所有 QML + C++ 类型归入 URI `MoePlayer.Core`,`qt_add_qml_module` 生成 qmldir/qmltypes,资源嵌入 `qrc:/qt/qml/MoePlayer/Core/`
 - **C++ 核心**:`EmbyClient`(API 请求与模型填充)、`AccountManager`(账号凭据)、`ConfigManager`/`SettingsStore`(配置持久化)、媒体 / 海报 / 取色模型
-- **播放**:`MpvItem`(libmpv QML 集成),播放窗口独立(`PlayerWindow`)
-- **主题**:`Theme`/`Constants` 单例(暗色 + 粉白萌系色板);极光背景 `MoeBackground`(aurora.frag)+ 柔焦光斑 `BokehOrb`;毛玻璃 `GlassPanel`(ShaderEffectSource + MultiEffect)
+- **播放**:外部 mpv 进程 + JSON IPC(`src/playback/MpvClient`),播放窗口由 mpv 自带
+- **主题**:`ThemeStore`(配色 × 效果预设)→ `Theme`/`Constants` 令牌三层;参数化动态背景 `ThemedBackground`(background.frag,落樱/萤火/星空流星/夜雨/无);毛玻璃 `GlassPanel`/`FrostedGlass`(ShaderEffectSource + 折射 shader,共享抓取 `GlassBlurSource`)
 
 ## 目录结构
 
 ```
 qml/
   Main.qml            应用入口
-  player/             播放器窗口
-  theme/              主题与通用组件(Theme, Constants, GlassPanel, MoeBackground, BokehOrb, CrossfadeImage …)
+  theme/              主题与通用组件(ThemeStore, Theme, Constants, AppText, GlassPanel, FrostedGlass, GlassBlurSource, ThemedBackground, CrossfadeImage …)
   views/              页面(ServerManager, Library, Detail, SearchOverlay, PosterCard, SettingsOverlay …)
   assets/             数字动画帧(counter)
 src/
   core/               EmbyClient / AccountManager / 配置持久化
   models/             条目 / 海报 / 取色模型
-  playback/           libmpv 集成
-shaders/              极光背景 / 转场 shader
+  playback/           外部 mpv 进程管理 + JSON IPC(MpvClient)
+shaders/              动态背景(落樱/萤火/星空/夜雨)/ 玻璃折射 / 转场 shader
 third_party/          tomlplusplus(配置解析)
 ```
 
@@ -111,6 +110,6 @@ GPL-3.0 允许收费分发,义务为随附源码获取方式(本仓库即源码)
 ## 致谢
 
 - [Qt](https://www.qt.io) — 跨平台 UI 框架
-- [mpv](https://github.com/mpv-player/mpv) / [libmpv](https://github.com/mpv-player/mpv) — 播放内核
+- [mpv](https://github.com/mpv-player/mpv) — 外部播放器(JSON IPC 承担播放)
 - [Emby](https://emby.media/) — 媒体服务器
 - [tomlplusplus](https://github.com/marzer/tomlplusplus) — 配置解析
