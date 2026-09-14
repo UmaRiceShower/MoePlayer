@@ -9,9 +9,14 @@ import MoePlayer.Core
 Item {
     id: root
 
-    // hero 轮播(继续观看前 8,不足补最新添加前 8)。
-    property var heroItems: []
-    property int heroIndex: 0
+    // hero 轮播数据源:ListModel(原位 set/append/remove),不用 JS 数组——
+    // 整块换数组会销毁重建全部委托、图片重新装载,视觉上"闪一下"。
+    property var heroWant: []
+    property double heroPendingSince: 0
+    property int heroCenter: 0   // 当前中心索引镜像(根级函数读不到 header 里的 id)
+    readonly property int heroKeepRadius: 1   // 前排除 = 当前中心 ±1(pathItemCount 3)
+    property bool heroFromFallback: false   // 当前 hero 内容是否来自本地聚合兜底
+    ListModel { id: heroModel }
     readonly property real navH: Constants.homeNavH
     // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
     // 窄窗随宽度收缩,卡片保持满带宽。
@@ -29,12 +34,113 @@ Item {
 
     // 聚合 hero 轮播数据:优先服务器建议(/Suggestions),按建议顺序展示;
     // 建议未到/为空时回退本地聚合(继续观看优先,不足补最新添加)。
+    // ---- hero 同步:缓存先展示,后台数据到达后原位替换 ----
+    // 前排除(正在看的三张)不改内容:改动先挂起,轮播走开后再落;挂起超过
+    // homeHeroPendingMaxMs 兜底强落(列表 ≤ 3 时轮播不会把任何一张移出前排)。
+    function heroKey(it) {
+        return (it.serverUrl || "") + "|" + (it.id || "")
+    }
+    function heroRowSame(i, it) {
+        return i >= 0 && i < heroModel.count && heroKey(heroModel.get(i)) === heroKey(it)
+    }
+    function heroVisible(i) {
+        const n = heroModel.count
+        if (n <= 0)
+            return false
+        const d = Math.abs(i - root.heroCenter)
+        return Math.min(d, n - d) <= root.heroKeepRadius   // 轮播是环形推进,按环距算
+    }
+    // force=false:只落非前排;true:连前排一起落(轮播走开或超时兜底)。
+    function flushHero(force) {
+        const want = root.heroWant
+        let blocked = false
+        for (let i = 0; i < want.length; ++i) {
+            if (root.heroRowSame(i, want[i]))
+                continue
+            if (!force && root.heroVisible(i)) {
+                blocked = true
+                continue
+            }
+            if (i < heroModel.count)
+                heroModel.set(i, want[i])
+            else
+                heroModel.append(want[i])
+        }
+        while (heroModel.count > want.length) {
+            const last = heroModel.count - 1
+            if (!force && root.heroVisible(last)) {
+                blocked = true
+                break
+            }
+            heroModel.remove(last)
+        }
+        if (!blocked) {
+            root.heroPendingSince = 0
+            return
+        }
+        if (root.heroPendingSince === 0)
+            root.heroPendingSince = Date.now()
+        else if (Date.now() - root.heroPendingSince > Constants.homeHeroPendingMaxMs)
+            root.flushHero(true)
+    }
+    // 角色归一化:ListModel 的角色集由首次 append 定型,而 set() 只覆盖传入的键 ——
+    // 缺字段的条目会让该槽位残留上一条的旧值(旧背景图/旧进度不换)。按"键并集 +
+    // 默认值"补齐(兜底聚合条目与服务器建议条目的字段集本来就不一样)。
+    readonly property var heroRoleDefaults: ({
+        "id": "", "name": "", "backdropId": "", "parentBackdropId": "", "posterId": "",
+        "year": 0, "serverUrl": "", "accountId": ""
+    })
+    function heroRows(items) {
+        const keys = {}
+        for (const k in root.heroRoleDefaults)
+            keys[k] = true
+        for (let i = 0; i < items.length; ++i)
+            for (const k in items[i])
+                keys[k] = true
+        const out = []
+        for (let i = 0; i < items.length; ++i) {
+            const row = {}
+            for (const k in keys) {
+                const v = items[i][k]
+                row[k] = (v === undefined || v === null)
+                         ? (root.heroRoleDefaults[k] !== undefined ? root.heroRoleDefaults[k] : "")
+                         : v
+            }
+            out.push(row)
+        }
+        return out
+    }
+
+    // 挂起期间每秒自查一次:强落的时限判定只在 flushHero 被调用时生效,而轮播
+    // 停摆(列表 ≤ 中心 ±1 全覆盖,如只有 1 条)时没人再调用它 ⇒ 内容永远不更新。
+    Timer {
+        interval: 1000
+        running: root.heroPendingSince > 0
+        repeat: true
+        onTriggered: root.flushHero(false)
+    }
+
+    function syncHero(items, fromFallback) {
+        // 来源切换(兜底 ↔ 服务器建议)直接强落:小列表(≤ 中心 ±1 全覆盖)时
+        // 前排除会让内容永远释放不出来,用户会一直看着兜底数据。
+        const switched = root.heroFromFallback !== fromFallback
+        root.heroFromFallback = fromFallback
+        root.heroWant = root.heroRows(items)
+        if (heroModel.count === 0) {
+            for (let i = 0; i < root.heroWant.length; ++i)
+                heroModel.append(root.heroWant[i])
+            return
+        }
+        root.flushHero(switched)
+    }
+
+
     function rebuildTop() {
         // 服务端已按 IncludeItemTypes=Movie,Series & ImageTypes=Backdrop 过滤
         // (4.9+ 版本门控,旧版跳过),此处只管截断显示条数。
         const sugOk = AccountManager.suggestions
         if (sugOk.length > 0) {
-            root.heroItems = sugOk.slice(0, 10)
+            root.syncHero(sugOk.slice(0, 10), false)
             return
         }
         const all = []
@@ -55,7 +161,7 @@ Item {
         })
         // 候选按行顺序取前 10:行内条目由服务器按 DateModified 倒序返回。
         const cwTop = cw.slice(0, 10)
-        root.heroItems = cwTop.length > 0 ? cwTop : all.slice(0, 10)
+        root.syncHero(cwTop.length > 0 ? cwTop : all.slice(0, 10), true)
     }
 
     Component.onCompleted: {
@@ -246,7 +352,11 @@ Item {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 height: root.heroH
-                model: root.heroItems
+                model: heroModel
+                onCurrentIndexChanged: {
+                    root.heroCenter = currentIndex   // 根级函数读不到本 id,用镜像
+                    root.flushHero(false)            // 轮播走开即结算挂起的替换
+                }
                 pathItemCount: 3
                 preferredHighlightBegin: 0.5
                 preferredHighlightEnd: 0.5
@@ -280,7 +390,7 @@ Item {
                 anchors.topMargin: root.heroH * 0.5 + heroCar.cardH / 2 + Constants.homeHeroDotsGap
                 spacing: Constants.homeHeroDotSpacing
                 Repeater {
-                    model: root.heroItems.length
+                    model: heroModel.count
                     delegate: Rectangle {
                         required property int index
                         id: dot
@@ -311,8 +421,8 @@ Item {
                 id: heroTimer
                 interval: Constants.homeHeroTimerMs
                 repeat: true
-                running: root.heroItems.length > 1
-                onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % root.heroItems.length
+                running: heroModel.count > 1
+                onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
             }
             // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
             Column {

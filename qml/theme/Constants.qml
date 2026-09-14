@@ -77,6 +77,8 @@ QtObject {
     readonly property int homeHeroDotSizeSel: 14          // 选中圆点宽
     readonly property int homeHeroDotSpacing: 8           // 圆点间距
     readonly property int homeHeroTimerMs: 5000           // 自动轮播间隔
+    // hero 前排(中心 ±1)保持:改动挂起上限,超时强落(小列表不会轮播走开)
+    readonly property int homeHeroPendingMaxMs: 15000
     readonly property int homeHeroTitlePx: 25             // 卡右下标题字号
     readonly property int homeHeroYearPx: 16              // 卡右下年份字号
 
