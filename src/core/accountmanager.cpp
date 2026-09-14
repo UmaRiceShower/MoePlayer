@@ -60,6 +60,9 @@ const QStringList kPresetFolderColors = {
 };
 // 首页聚合缓存名(PersistMap saveCache/loadCache 的 name,拼 CacheLocation/<name>.json)。
 const QString kHomeCacheName = QStringLiteral("home-rows");
+// 服务器建议(首页 hero 推荐)缓存名:启动先展示上次推荐,后台按住账号覆盖替换。
+const QString kHomeSuggCacheName = QStringLiteral("home-suggestions");
+
 // 网络问题账号的定期重试间隔。
 constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
 // 播放结束后定点刷新该条明细的延时:Emby 在播放停止报告(Stopped)之后才写
@@ -373,6 +376,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                 if (accountIndexById(accountId) < 0 || m_homeSuggReqGen.value(accountId) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
                 m_homeSuggByAccount.insert(accountId, items);
+                saveHomeSuggestionCache(); // 与旧缓存合并后写(未回执的账号保留上次数据)
                 emit suggestionsUpdated();
             });
     connect(m_client, &EmbyClient::serverItemsReceived, this,
@@ -623,6 +627,9 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     const QVariantList cached = loadHomeCache();
     m_homeRows = cached;
     m_homeRowsModel->setRows(cached); // setRows 内部只对变化行发信号
+    // 推荐(服务器建议)缓存必须在 homeRowsReady **之前**载入:否则 hero 会先被
+    // 本地聚合兜底数据填一次、随即又被推荐替换(启动时可见的一次"换一批")。
+    loadHomeSuggestionCache();
     emit homeRowsReady();
 
     for (int i = 0; i < m_accounts.size(); ++i) {
@@ -1584,6 +1591,65 @@ void AccountManager::saveHomeCache()
     if (m_homeRows.isEmpty())
         return;
     m_persist.saveCache(kHomeCacheName, m_homeRows);
+}
+
+// 推荐缓存:上次各账号的服务器建议。启动先展示,后台回执逐账号覆盖替换。
+void AccountManager::loadHomeSuggestionCache()
+{
+    QVariant val;
+    if (!m_persist.loadCache(kHomeSuggCacheName, val))
+        return;
+    QHash<QString, QVariantList> loaded;
+    for (const auto &v : val.toList()) {
+        const QVariantMap m = v.toMap();
+        const QString id = m.value(QStringLiteral("id")).toString();
+        if (id.isEmpty() || accountIndexById(id) < 0)
+            continue; // 切片无主(账号已删):作废
+        loaded.insert(id, m.value(QStringLiteral("items")).toList());
+    }
+    if (loaded.isEmpty() || loaded == m_homeSuggByAccount)
+        return; // 无可用缓存,或与当前一致:不 emit(hero 重建=可见闪烁)
+    m_homeSuggByAccount = loaded;
+    int n = 0;
+    for (const auto &items : loaded)
+        n += items.size();
+    qInfo() << "AccountManager: 推荐缓存载入" << loaded.size() << "个账号," << n << "条建议";
+    emit suggestionsUpdated();
+}
+
+// 写推荐缓存:已回执账号用本轮数据,未回执账号沿用旧缓存(避免半轮覆盖把
+// 其他账号的缓存抹掉);账号顺序按当前账号表;内容未变则跳过写盘。
+void AccountManager::saveHomeSuggestionCache()
+{
+    QVariant prevVal;
+    const bool havePrev = m_persist.loadCache(kHomeSuggCacheName, prevVal);
+    QHash<QString, QVariantList> merged;
+    if (havePrev) {
+        for (const auto &v : prevVal.toList()) {
+            const QVariantMap m = v.toMap();
+            const QString id = m.value(QStringLiteral("id")).toString();
+            if (!id.isEmpty() && accountIndexById(id) >= 0)
+                merged.insert(id, m.value(QStringLiteral("items")).toList());
+        }
+    }
+    for (auto it = m_homeSuggByAccount.constBegin(); it != m_homeSuggByAccount.constEnd(); ++it) {
+        if (accountIndexById(it.key()) >= 0)
+            merged.insert(it.key(), it.value());
+    }
+    QVariantList out;
+    for (const auto &a : m_accounts) {
+        const auto it = merged.constFind(a.id);
+        if (it == merged.constEnd() || it.value().isEmpty())
+            continue;
+        QVariantMap row;
+        row.insert(QStringLiteral("id"), a.id);
+        row.insert(QStringLiteral("items"), it.value());
+        out.append(row);
+    }
+    if (out.isEmpty() || (havePrev && prevVal.toList() == out))
+        return; // 无可写内容或内容未变:不落盘(QVariant 跨数值类型按 C++ 提升规则比较,实测相等)
+    if (m_persist.saveCache(kHomeSuggCacheName, out))
+        qInfo() << "AccountManager: 推荐缓存已写" << out.size() << "个账号";
 }
 
 QString AccountManager::serverPosterId(const QString &serverUrl, const QString &posterId)

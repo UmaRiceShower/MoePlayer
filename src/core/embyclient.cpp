@@ -1062,8 +1062,10 @@ void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString 
             qInfo() << "Emby: serverSuggestions =" << items.size() << "on" << serverUrl;
             emit serverSuggestionsReceived(serverUrl, accountId, items);
         },
-        // 失败:发空列表(调用方回退本地聚合),原因经 serverRequestFailed 通知。
-        [this, serverUrl, accountId] { emit serverSuggestionsReceived(serverUrl, accountId, QVariantList()); },
+        // 失败:不发空列表——"空列表"与"服务器确实没有建议"是两回事,混同会让
+        // 调用方把失败账号的推荐当成"清空"处理(缓存侧按"无回执 = 保留上次推荐"
+        // 处理)。失败原因仍经 serverRequestFailed/errorOccurred 报出。
+        nullptr,
         QStringLiteral("获取首页建议"));
 }
 

@@ -304,6 +304,11 @@ private:
     // 由调用方与当前展示比较后决定是否重建(相同则跳过,避免无意义重建)。
     QVariantList loadHomeCache();
     void saveHomeCache();
+    // 推荐(服务器建议)缓存:启动先展示上次推荐,后台各服回执逐账号覆盖替换。
+    // 载入丢弃已删账号的切片;与当前内容一致不 emit(hero 无重建)。
+    void loadHomeSuggestionCache();
+    // 写回:已回执账号覆盖、未回执账号沿用旧缓存;内容未变不落盘。
+    void saveHomeSuggestionCache();
     // 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排聚合行,不重拉
     // 网络(避免撞上重登中的 token 失效触发连锁重登与首页反复重建)。
     void reorderHomeRows();
