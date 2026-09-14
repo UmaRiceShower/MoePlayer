@@ -44,6 +44,8 @@ Item {
     property color accentColor: Theme.accent
     // 卡片底色藏色:带海报色相倾向,取代中性灰。
     property color surfaceTint: Theme.surface
+    // 底部渐变尾色:暗色系用莫奈深色(承白字),亮色系用浅色卡底(承深字)
+    property color _bottomFade: ThemeStore.isLight ? root.surfaceTint : root.heroFrom
 
     function applyMonet() {
         // 无条件赋值:取色未完成/失败或配置关闭时显示回退色,Grid 回收
@@ -54,11 +56,12 @@ Item {
         if (c) {
             root.heroFrom = c.heroFrom
             root.accentColor = c.accent
-            root.surfaceTint = c.surfaceTint
+            // 亮色系下卡面取莫奈亮色镜像(否则深卡压深字)
+            root.surfaceTint = ThemeStore.isLight && c.surfaceTintL ? c.surfaceTintL : c.surfaceTint
         } else {
             root.heroFrom = Theme.surface
-            // 萌系:默认进度条/强调色用粉色,不用 Theme.accent(青色)。
-            root.accentColor = Constants.moePink
+            // 进度条/强调色用预设强调色(默认萌系粉白)。
+            root.accentColor = Theme.accent
             root.surfaceTint = Theme.surface
         }
     }
@@ -93,6 +96,25 @@ Item {
         function onColorReady(posterId) {
             if (posterId === root.posterId)
                 root.applyMonet()
+        }
+    }
+    Connections {
+        // 配色切换:莫奈取色是命令式赋值(无绑定),需重跑取亮色镜像。
+        // 挂 paletteChanged(不止明暗:同明暗换配色也要换 surface 回退值)。
+        // 必须 Qt.callLater:回调触发时 Theme.* 依赖链尚未重算完,
+        // 立即读 Theme.surface 会拿到旧值并被固化(实踩:切回暗色后卡面仍白)。
+        target: ThemeStore
+        function onPaletteChanged() {
+            Qt.callLater(root.applyMonet)
+        }
+    }
+    Connections {
+        // 中途打开莫奈取色:补请求本卡取色,否则已有卡永远停在回退色
+        target: ConfigManager
+        function onMonetEnabledChanged() {
+            if (ConfigManager.monetEnabled)
+                ColorProvider.requestColor(root.posterId)
+            Qt.callLater(root.applyMonet)
         }
     }
 
@@ -153,7 +175,7 @@ Item {
 
             AppText {
                 text: root.itemType === "Series" ? "❀" : "🎞"
-                color: Constants.moePink
+                color: Theme.accent
                 font.pixelSize: 44
                 horizontalAlignment: Text.AlignHCenter
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -175,7 +197,7 @@ Item {
             height: 46
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.72) }
+                GradientStop { position: 1.0; color: Qt.rgba(root._bottomFade.r, root._bottomFade.g, root._bottomFade.b, 0.72) }
             }
             radius: 14
         }
@@ -257,21 +279,22 @@ Item {
             height: 18
             width: ratingRow.implicitWidth + 10
             radius: height / 2
-            color: Qt.rgba(0.08, 0.06, 0.05, 0.48)
+            // 0.48 在浅海报上会让内部 ★(accentWarm)读不出,压到 0.60
+            color: Qt.rgba(Theme.badgeScrim.r, Theme.badgeScrim.g, Theme.badgeScrim.b, 0.60)
             border.width: 1
-            border.color: Constants.moeGold
+            border.color: Theme.accentWarm
             Row {
                 id: ratingRow
                 anchors.centerIn: parent
                 spacing: 2
                 AppText {
                     text: "★"
-                    color: Constants.moeGold
+                    color: Theme.accentWarm
                     font.pixelSize: 10
                 }
                 AppText {
                     text: root.rating.toFixed(1)
-                    color: Constants.moePinkText
+                    color: Theme.accentInk
                     font.pixelSize: 10
                 }
             }
@@ -292,10 +315,11 @@ Item {
             color: root.played
                      ? Qt.rgba(Theme.success.r, Theme.success.g, Theme.success.b, 0.75)
                      : (root.itemType === "Series" && root.unplayedCount > 0
-                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.75)
-                        : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.45))
+                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.75)
+                        // 中性"未看":角标永远压在海报图上,用深罩承白字(与主题无关)
+                        : Qt.rgba(0, 0, 0, 0.45))
             border.width: root.played ? 0 : 1
-            border.color: root.played ? "transparent" : Constants.moePink
+            border.color: root.played ? "transparent" : Theme.accent
             Row {
                 id: stateRow
                 anchors.centerIn: parent
@@ -311,7 +335,7 @@ Item {
                                 ? (root.unplayedCount >= 100 ? "99+ 未看"
                                    : root.unplayedCount + " 未看")
                                 : "未看"))
-                    color: root.played ? Theme.textOnBadge : Constants.moePinkText
+                    color: root.played ? Theme.textOnBadge : Theme.accentInk
                     font.pixelSize: 10
                 }
             }
@@ -343,7 +367,7 @@ Item {
         color: "transparent"
         radius: 14
         border.width: (cardHover.hovered || root.current) ? 2.5 : 0
-        border.color: Constants.moePink
+        border.color: Theme.accent
         opacity: (cardHover.hovered || root.current) ? 0.95 : 0
         Behavior on opacity { NumberAnimation { duration: 120 } }
     }

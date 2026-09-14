@@ -31,13 +31,13 @@ Rectangle {
     property real sampleMargin: 96
     // ---- 玻璃质感 ----
     // 玻璃底色(半透明亮色)。黑底下降低不透明度(0.22)减灰感——透出背景。
-    property color glassColor: Qt.rgba(0.10, 0.11, 0.15, 0.22)
+    property color glassColor: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.22)
     // 饱和度提升(黑底/模糊去饱和时补回色彩):0=不变,>0 增强。
     property real saturation: 0.4
     // hover 提亮(0=无):提亮折射内容与边缘光,而非盖白膜(白膜黑底发灰)。
     property real hoverGlow: 0.0
-    // 描边色(比玻璃更亮,营造边缘反光)。
-    property color borderColor: Qt.rgba(1, 1, 1, 0.28)
+    // 描边色(比玻璃更亮,营造边缘反光;亮色系换压深一档的 rim)。
+    property color borderColor: Theme.glassRim
     // ---- 边缘折射(液体玻璃凸透镜,SDF 法线 + Snell) ----
     // 玻璃边缘隆起厚度(px):≥短边一半时整个截面隆起(参考胶囊玻璃);0≈平面。
     property real thickness: 14
@@ -49,7 +49,9 @@ Rectangle {
     property real frostAmount: 0.5
     // 外侧投影(浮起立体感)。0 关闭。
     property real elevation: 6
-    property color shadowColor: Qt.rgba(0, 0, 0, 0.35)
+    // 投影:亮色系下投影是层级的主要手段(浅底上明显,收敛到不脏的量)
+    property color shadowColor: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.20)
+                                                   : Qt.rgba(0, 0, 0, 0.35)
     color: "transparent"
     border.width: 0
     clip: false
@@ -73,7 +75,8 @@ Rectangle {
     // 降采样让高斯更明显、更省 GPU。
     ShaderEffectSource {
         id: bgSource
-        sourceItem: root.blurSource
+        // 共享模式:本组件不再自建抓取(省掉每帧一次整片源遍历)。
+        sourceItem: root._sharedGlass ? null : root.blurSource
         // 坐标系:ShaderEffectSource 把 sourceItem 当「根项」渲染(官方:
         // fully opaque root item) → 纹理 = 该 item 视口,内容已含滚动偏移。
         // 映射用 mapToGlobal 双端点相减(全局坐标走场景统一参考系,跨兄弟
@@ -128,8 +131,29 @@ Rectangle {
         // 需要高分辨率。
         textureSize: Qt.size(Math.max(1, Math.round(root._texW)),
                               Math.max(1, Math.round(root._texH)))
-        live: true
+        live: !root._sharedGlass
         hideSource: false
+    }
+
+    // 共享模糊源:多个玻璃盖在同一片内容上时(如首页固定导航的四个按钮)传同一个
+    // GlassBlurSource —— 只抓一次纹理,采样区固定整片源,低频更新只造成内容滞后、
+    // 不会错位。未传时自建按区抓取(旧行为,每帧同步、跟随控件移动)。
+    property GlassBlurSource blurGroup: null
+    readonly property bool _sharedGlass: blurGroup !== null
+    // 玻璃在共享纹理里的位置(整片源为参考系):与 bgSource 的 sourceRect 一样
+    // 用 mapToGlobal 双端点相减,并显式读入滚动/几何依赖(绑定不追踪函数调用)。
+    property point _sharedPos: {
+        const bs = root.blurSource
+        const _s1 = bs ? bs.contentY : 0
+        const _s2 = root.scrollParent ? root.scrollParent.contentY : 0
+        let _geom = root.x + root.y + root.width + root.height
+        for (let a = root.parent; a; a = a.parent)
+            _geom += a.x + a.y + a.width + a.height
+        if (!bs)
+            return Qt.point(0, 0)
+        const g = root.mapToGlobal(0, 0)
+        const bsG = bs.mapToGlobal(0, 0)
+        return Qt.point(g.x - bsG.x, g.y - bsG.y)
     }
 
     // 折射输出:采样清晰纹理 bgSource,SDF 圆角矩形 + 屏幕导数法线 + Snell
@@ -138,12 +162,17 @@ Rectangle {
     ShaderEffect {
         id: refractFx
         anchors.fill: parent
-        property var source: bgSource
+        property var source: root._sharedGlass ? root.blurGroup.sharedTexture : bgSource
         property size u_size: Qt.size(width, height)
         // 玻璃在采样纹理内的实际像素原点(扩边被 blurSource 边界钳制后的偏移)。
-        property vector2d u_srcOrigin: Qt.vector2d(root._glassOffX, root._glassOffY)
+        property vector2d u_srcOrigin: root._sharedGlass
+                                     ? Qt.vector2d(root._sharedPos.x, root._sharedPos.y)
+                                     : Qt.vector2d(root._glassOffX, root._glassOffY)
         // 采样纹理实际像素尺寸(钳制后,可能小于 w+2m)。
-        property vector2d u_texSize: Qt.vector2d(root._texW, root._texH)
+        property vector2d u_texSize: root._sharedGlass
+                                     ? Qt.vector2d(root.blurSource ? root.blurSource.width : 1,
+                                                   root.blurSource ? root.blurSource.height : 1)
+                                     : Qt.vector2d(root._texW, root._texH)
         property real u_radius: root.radius
         property real u_thickness: root.thickness
         property real u_bend: root.bend
@@ -152,6 +181,10 @@ Rectangle {
         property real u_frost: root.frostAmount
         property real u_blurRadius: root.blurRadius
         property real u_saturation: root.saturation
+        // 亮色系:加法边缘光/反射收敛(浅底加亮过曝)
+        property real u_light: ThemeStore.isLight ? 1.0 : 0.0
+        // 采样透明区(页面留白)回退到主题底色:亮主题下否则透出黑盘
+        property color u_backColor: ThemeStore.background.baseTop
         fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/glass-refract.frag.qsb"
     }
 

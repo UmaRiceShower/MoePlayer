@@ -25,7 +25,7 @@ class QTimer;
 namespace MoeConfig {
 
 enum class Type { Bool, String, Int };
-enum class Widget { Switch, Combo, Field, Hidden };
+enum class Widget { Switch, Combo, Field, Slider, Hidden };
 
 struct Item {
     const char *name;      // 属性名/QML 键(元数据表索引)
@@ -59,6 +59,12 @@ QVariantList optionsHistoryView();
 bool validateHistoryView(const QVariant &v);
 QVariantList optionsSuperRes();
 bool validateSuperRes(const QVariant &v);
+QVariantList optionsThemePalette();
+bool validateThemePalette(const QVariant &v);
+QVariantList optionsBackgroundEffect();
+bool validateBackgroundEffect(const QVariant &v);
+QVariantList optionsBackgroundMotion();
+bool validatePercent(const QVariant &v);
 
 #define MoeConfig_Type_bool MoeConfig::Type::Bool
 #define MoeConfig_Type_QString MoeConfig::Type::String
@@ -71,6 +77,26 @@ bool validateSuperRes(const QVariant &v);
 // 不破坏用户磁盘 config.toml 与手改值。
 #define MOECONFIG_X(M) \
     M(monetEnabled, "monetEnabled", bool, true, "theme", "海报莫奈动态取色(false 回退静态主题色)", "界面", "海报莫奈取色", "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。", Switch, nullptr, nullptr) \
+    M(themePalette, "themePalette", QString, "yozakura", "theme", "配色方案(ThemeStore.palettes 的 key)", "界面", "配色方案", "整套界面配色与背景底色;默认夜樱(深靛 × 浅粉)。", Combo, optionsThemePalette, validateThemePalette) \
+    M(backgroundEffect, "backgroundEffect", QString, "sakura", "theme", "背景效果(ThemeStore.effects 的 key;none 为纯色)", "界面", "背景效果", "背景上的动态效果层,与配色独立;选「无」为纯色背景。", Combo, optionsBackgroundEffect, validateBackgroundEffect) \
+    M(backgroundMotion, "backgroundMotion", QString, "low", "theme", "背景动效帧率(off/low/high;仅含动效的预设生效)", "界面", "背景动效", "含动效的背景按此帧率刷新:极低频几乎看不出刷新、更省,流畅更顺滑;静止预设不受影响。", Combo, optionsBackgroundMotion, nullptr) \
+    M(backgroundIntensity, "backgroundIntensity", int, 100, "theme", "背景强度(百分比 0-100)", "界面", "背景强度", "背景整体强度:0 接近纯底色,100 为预设原样。", Slider, nullptr, validatePercent) \
+    M(backgroundMeteorRate, "backgroundMeteorRate", int, 100, "theme", "星空流星频率(百分比,0=关)", "界面", "流星频率", "仅「星空流星」效果生效:100 = 约 3.5 秒一颗(现状),50 ≈ 7 秒一颗,0 = 不出现流星。", Slider, nullptr, validatePercent) \
+    M(themeBg, "themeBg", QString, "", "theme", "高级自定义:窗口底色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeSurface, "themeSurface", QString, "", "theme", "高级自定义:面板/卡片底色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeTextPrimary, "themeTextPrimary", QString, "", "theme", "高级自定义:主文字色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeTextMuted, "themeTextMuted", QString, "", "theme", "高级自定义:次级文字色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccent, "themeAccent", QString, "", "theme", "高级自定义:强调色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccentSoft, "themeAccentSoft", QString, "", "theme", "高级自定义:浅强调(悬停提亮/浅色文字)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccentDeep, "themeAccentDeep", QString, "", "theme", "高级自定义:深强调(按压/深描边)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccentGlow, "themeAccentGlow", QString, "", "theme", "高级自定义:光晕(带 alpha,写 #AARRGGBB)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccentInk, "themeAccentInk", QString, "", "theme", "高级自定义:强调底上的文字色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeAccentWarm, "themeAccentWarm", QString, "", "theme", "高级自定义:次级暖强调(徽标/收藏点缀)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeBaseTop, "themeBaseTop", QString, "", "theme", "高级自定义:背景渐变起色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeBaseBottom, "themeBaseBottom", QString, "", "theme", "高级自定义:背景渐变终色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeGlowA, "themeGlowA", QString, "", "theme", "高级自定义:背景光团 A 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeGlowB, "themeGlowB", QString, "", "theme", "高级自定义:背景光团 B 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
+    M(themeGlowC, "themeGlowC", QString, "", "theme", "高级自定义:背景光团 C 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(librarySortBy, "sortBy", QString, "DateModified", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
     M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
     M(detailSidebarLeft, "sidebarLeft", bool, false, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示;默认靠右。", Switch, nullptr, nullptr) \

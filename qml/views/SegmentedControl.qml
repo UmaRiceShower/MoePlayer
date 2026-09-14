@@ -55,9 +55,9 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: height / 2
-        color: Qt.rgba(0.07, 0.08, 0.11, 0.45)
+        color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
         border.width: 1
-        border.color: Qt.rgba(1, 1, 1, 0.10)
+        border.color: Theme.borderSoft
     }
 
     // 滑块:当前取值(浅玻璃 + 细粉边;选中靠位置表达,不靠填充色)。
@@ -69,9 +69,9 @@ Item {
         width: root.segmentW
         height: root.segmentH - root.padding * 2
         radius: height / 2
-        color: Qt.rgba(1, 1, 1, 0.10)
+        color: Theme.tint
         border.width: 1
-        border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
+        border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
         Behavior on x {
             NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
         }
@@ -100,7 +100,7 @@ Item {
                     anchors.centerIn: parent
                     text: segment.modelData.label
                     color: segment.index === root.selectedIndex
-                           ? Constants.moePinkText
+                           ? Theme.accentText
                            : (segHover.hovered ? Theme.textPrimary : Theme.textMuted)
                     font.pixelSize: 13
                 }

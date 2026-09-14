@@ -13,8 +13,8 @@ Rectangle {
     property var blurSource: Window.window ? Window.window.contentItem : null
     property rect blurRect: Qt.rect(0, 0, 0, 0)
     property real blurRadius: 32
-    property color glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.55)
-    property color borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.35)
+    property color glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.55)
+    property color borderColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)
     property bool fullSource: true
 
     color: "transparent"

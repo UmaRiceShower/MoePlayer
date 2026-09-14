@@ -503,7 +503,7 @@ Item {
         AppText {
             anchors.verticalCenter: parent.verticalCenter
             text: "♥"
-            color: Constants.moePink
+            color: Theme.accent
             font.pixelSize: 24
         }
         AppText {
@@ -626,7 +626,7 @@ Item {
                             radius: 12
                             color: "transparent"
                             border.width: 2
-                            border.color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                            border.color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
                             
                             Rectangle {
                                 anchors.fill: parent
@@ -634,14 +634,14 @@ Item {
                                 radius: 15
                                 color: "transparent"
                                 border.width: plusHover.containsMouse ? 2 : 0
-                                border.color: Constants.moePink
+                                border.color: Theme.accent
                                 opacity: plusHover.containsMouse ? 0.35 : 0
                                 Behavior on opacity { NumberAnimation { duration: 120 } }
                             }
 
                             Canvas {
                                 id: plusIcon
-                                property color lineColor: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                                property color lineColor: plusHover.containsMouse ? Theme.accent : Theme.textMuted
                                 anchors.centerIn: parent
                                 anchors.verticalCenterOffset: -10
                                 width: 44
@@ -668,7 +668,7 @@ Item {
                                 anchors.topMargin: 8
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 text: "添加服务器"
-                                color: plusHover.containsMouse ? Constants.moePink : Theme.textMuted
+                                color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
                                 font.pixelSize: 14
                                 Behavior on color { ColorAnimation { duration: 120 } }
                             }
@@ -725,7 +725,7 @@ Item {
                         border.width: card.modelData.authStatus === "invalid" ? 2 : (cell.dropTarget ? 2 : 1)
                         border.color: card.modelData.authStatus === "invalid" ? Theme.danger
                                       : (cell.dropTarget ? Theme.accent
-                                      : (card.hovered ? Constants.moePink : Theme.bg))
+                                      : (card.hovered ? Theme.accent : Theme.bg))
                         Rectangle {
                             z: -1
                             anchors.centerIn: parent
@@ -734,7 +734,7 @@ Item {
                             radius: parent.radius
                             color: "transparent"
                             border.width: card.hovered ? 3 : 0
-                            border.color: Constants.moePink
+                            border.color: Theme.accent
                             opacity: card.hovered ? 0.35 : 0
                             Behavior on opacity { NumberAnimation { duration: 120 } }
                         }
@@ -774,7 +774,7 @@ Item {
                             anchors.topMargin: 14
                             anchors.left: parent.left
                             anchors.leftMargin: 14
-                            color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                             ServerIcon {
                                 anchors.fill: parent
                                 icon: card.modelData.icon
@@ -900,9 +900,9 @@ Item {
                         Drag.hotSpot.x: width / 2
                         Drag.hotSpot.y: height / 2
                         border.width: cell.dropTarget ? 2 : 1
-                        border.color: cell.dropTarget ? Constants.moePink
-                                      : (fcard.isOpen ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
-                                      : (fcard.hovered ? Constants.moePink : Theme.bg))
+                        border.color: cell.dropTarget ? Theme.accent
+                                      : (fcard.isOpen ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+                                      : (fcard.hovered ? Theme.accent : Theme.bg))
                         Rectangle {
                             z: -1
                             anchors.centerIn: parent
@@ -911,7 +911,7 @@ Item {
                             radius: parent.radius
                             color: "transparent"
                             border.width: fcard.hovered ? 3 : 0
-                            border.color: Constants.moePink
+                            border.color: Theme.accent
                             opacity: fcard.hovered ? 0.35 : 0
                             Behavior on opacity { NumberAnimation { duration: 120 } }
                         }
@@ -951,9 +951,9 @@ Item {
                             anchors.topMargin: 14
                             anchors.left: parent.left
                             anchors.leftMargin: 14
-                            color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                            color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                             Canvas {
-                                property color lineColor: farea.containsMouse ? Constants.moePink : Theme.textMuted
+                                property color lineColor: farea.containsMouse ? Theme.accent : Theme.textMuted
                                 anchors.centerIn: parent
                                 width: 28
                                 height: 28
@@ -1117,7 +1117,7 @@ Item {
                     spacing: 8
                     AppText {
                         text: "♥"
-                        color: Constants.moePink
+                        color: Theme.accent
                         font.pixelSize: 24
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1146,13 +1146,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "留空则使用服务器端名称"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: nameField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: nameField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: urlField.forceActiveFocus()
                     }
@@ -1173,13 +1173,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "http://192.168.1.100:8096"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: urlField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: urlField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: userField.forceActiveFocus()
                     }
@@ -1200,13 +1200,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "请输入用户名"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: userField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: userField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: passField.forceActiveFocus()
                     }
@@ -1227,14 +1227,14 @@ Item {
                         rightPadding: 14
                         placeholderText: "留空则不保存密码"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         echoMode: TextInput.Password
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: passField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: passField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: root.submitAdd()
                     }
@@ -1250,12 +1250,12 @@ Item {
                     onClicked: root.submitAdd()
                     background: Rectangle {
                         radius: 18
-                        color: addBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                        color: addBtn.hovered ? Theme.accentDeep : Theme.accent
                         border.width: 0
                     }
                     contentItem: AppText {
                         text: addBtn.text
-                        color: "white"
+                        color: Theme.accentInk
                         font.pixelSize: 14
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
@@ -1320,7 +1320,7 @@ Item {
                     spacing: 8
                     AppText {
                         text: "♥"
-                        color: Constants.moePink
+                        color: Theme.accent
                         font.pixelSize: 24
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1348,13 +1348,13 @@ Item {
                     rightPadding: 14
                     placeholderText: "文件夹名称(留空自动命名)"
                     placeholderTextColor: Theme.textMuted
-                    color: "white"
+                    color: Theme.textPrimary
                     font.pixelSize: 14
                     background: Rectangle {
                         radius: 18
                         color: Theme.bg
                         border.width: 1
-                        border.color: folderNameField.activeFocus ? Constants.moePink : Theme.textMuted
+                        border.color: folderNameField.activeFocus ? Theme.accent : Theme.textMuted
                     }
                     onAccepted: root.saveFolder()
                 }
@@ -1371,7 +1371,7 @@ Item {
                             radius: 12
                             color: modelData
                             border.width: root.folderSelectedColor === modelData ? 3 : 0
-                            border.color: Constants.moePink
+                            border.color: Theme.accent
                             scale: root.folderSelectedColor === modelData ? 1.15 : 1.0
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                             MouseArea {
@@ -1393,12 +1393,12 @@ Item {
                         onClicked: root.saveFolder()
                         background: Rectangle {
                             radius: 18
-                            color: folderOkBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                            color: folderOkBtn.hovered ? Theme.accentDeep : Theme.accent
                             border.width: 0
                         }
                         contentItem: AppText {
                             text: folderOkBtn.text
-                            color: "white"
+                            color: Theme.accentInk
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -1414,11 +1414,11 @@ Item {
                             radius: 18
                             color: folderCancelBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
                             border.width: 1
-                            border.color: folderCancelBtn.hovered ? Constants.moePink : Theme.textMuted
+                            border.color: folderCancelBtn.hovered ? Theme.accent : Theme.textMuted
                         }
                         contentItem: AppText {
                             text: folderCancelBtn.text
-                            color: folderCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            color: folderCancelBtn.hovered ? Theme.accent : Theme.textPrimary
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -1445,7 +1445,7 @@ Item {
                     }
                     contentItem: AppText {
                         text: folderDeleteBtn.text
-                        color: folderDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.85)
+                        color: Theme.danger
                         font.pixelSize: 14
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
@@ -1491,7 +1491,7 @@ Item {
                     spacing: 8
                     AppText {
                         text: "♥"
-                        color: Constants.moePink
+                        color: Theme.accent
                         font.pixelSize: 24
                         anchors.verticalCenter: parent.verticalCenter
                     }
@@ -1520,13 +1520,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "留空则使用服务器端名称"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: editNameField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: editNameField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: editUrlField.forceActiveFocus()
                     }
@@ -1547,13 +1547,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "http://192.168.1.100:8096"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: editUrlField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: editUrlField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: editUserField.forceActiveFocus()
                     }
@@ -1574,13 +1574,13 @@ Item {
                         rightPadding: 14
                         placeholderText: "请输入用户名"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 14
                         background: Rectangle {
                             radius: 18
                             color: Theme.bg
                             border.width: 1
-                            border.color: editUserField.activeFocus ? Constants.moePink : Theme.textMuted
+                            border.color: editUserField.activeFocus ? Theme.accent : Theme.textMuted
                         }
                         onAccepted: root.submitEdit()
                     }
@@ -1617,13 +1617,13 @@ Item {
                             rightPadding: 14
                             placeholderText: "图片 URL 或本地路径,如 /path/icon.png"
                             placeholderTextColor: Theme.textMuted
-                            color: "white"
+                            color: Theme.textPrimary
                             font.pixelSize: 14
                             background: Rectangle {
                                 radius: 18
                                 color: Theme.bg
                                 border.width: 1
-                                border.color: editIconField.activeFocus ? Constants.moePink : Theme.textMuted
+                                border.color: editIconField.activeFocus ? Theme.accent : Theme.textMuted
                             }
                             onAccepted: root.submitEdit()
                         }
@@ -1643,11 +1643,11 @@ Item {
                                 radius: 15
                                 color: editIconClearBtn.enabled && editIconClearBtn.hovered ? Qt.rgba(Theme.textPrimary.r, Theme.textPrimary.g, Theme.textPrimary.b, 0.1) : "transparent"
                                 border.width: 1
-                                border.color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Constants.moePink : Theme.textMuted) : Theme.textMuted
+                                border.color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Theme.accent : Theme.textMuted) : Theme.textMuted
                             }
                             contentItem: AppText {
                                 text: editIconClearBtn.text
-                                color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Constants.moePink : Theme.textPrimary) : Theme.textMuted
+                                color: editIconClearBtn.enabled ? (editIconClearBtn.hovered ? Theme.accent : Theme.textPrimary) : Theme.textMuted
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -1667,12 +1667,12 @@ Item {
                         onClicked: root.submitEdit()
                         background: Rectangle {
                             radius: 18
-                            color: editSaveBtn.hovered ? Constants.moePinkDark : Constants.moePink
+                            color: editSaveBtn.hovered ? Theme.accentDeep : Theme.accent
                             border.width: 0
                         }
                         contentItem: AppText {
                             text: editSaveBtn.text
-                            color: "white"
+                            color: Theme.accentInk
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -1688,11 +1688,11 @@ Item {
                             radius: 18
                             color: "transparent"
                             border.width: 1
-                            border.color: editCancelBtn.hovered ? Constants.moePink : Theme.textMuted
+                            border.color: editCancelBtn.hovered ? Theme.accent : Theme.textMuted
                         }
                         contentItem: AppText {
                             text: editCancelBtn.text
-                            color: editCancelBtn.hovered ? Constants.moePink : Theme.textPrimary
+                            color: editCancelBtn.hovered ? Theme.accent : Theme.textPrimary
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -1734,7 +1734,7 @@ Item {
                     }
                     contentItem: AppText {
                         text: editDeleteBtn.text
-                        color: editDeleteBtn.hovered ? Theme.danger : Qt.rgba(Theme.danger.r, Theme.danger.g, Theme.danger.b, 0.85)
+                        color: Theme.danger
                         font.pixelSize: 14
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter

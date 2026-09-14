@@ -18,26 +18,26 @@ Button {
     background: Rectangle {
         radius: 16
         color: root.active
-               ? (root.hovered ? Constants.moePinkLight : Constants.moePink)
+               ? (root.hovered ? Theme.accentSoft : Theme.accent)
                : (root.hovered ? Theme.surface : Theme.bg)
         border.width: 1
         border.color: root.active
-                       ? Constants.moePinkDark
-                       : (root.hovered ? Constants.moePink : Theme.textMuted)
+                       ? Theme.accentDeep
+                       : (root.hovered ? Theme.accent : Theme.textMuted)
         // 萌系小阴影,让胶囊浮起来。
         Rectangle {
             anchors.fill: parent
             anchors.margins: -2
             radius: 18
             color: "transparent"
-            border.color: Constants.moePink
+            border.color: Theme.accent
             border.width: root.active ? 2 : 0
             opacity: 0.25
         }
     }
     contentItem: AppText {
         text: (root.active && root.showHeart ? "♥ " : "") + root.label
-        color: "white"
+        color: root.active ? Theme.accentInk : Theme.textPrimary
         font.pixelSize: 13
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

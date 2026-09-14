@@ -92,6 +92,16 @@ Item {
             font.pixelSize: Constants.homeNavTitlePx
             font.bold: true
         }
+        // 四个按钮共用一份模糊抓取(见 GlassBlurSource):整片列表只抓一次。
+        // 刷新策略 = 滚动驱动 + 定时兜底:滚轮直接写 contentY(不产生 moving/flick),
+        // 挂 contentYChanged 滚动时逐帧刷新;33ms(30fps)定时器兜住非滚动的内容变化
+        // (图片异步装载等)。
+        GlassBlurSource { id: navGlassBlur; sourceItem: pageList }
+        Connections {
+            target: pageList
+            function onContentYChanged() { navGlassBlur.refresh() }
+        }
+
         // iOS 毛玻璃导航:三个圆形通透毛玻璃按钮(背景模糊 + 半透明 + 微光)。
         // 模糊源用滚动内容 pageList,内容滚过按钮时实时通透模糊。
         Row {
@@ -104,6 +114,7 @@ Item {
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                blurGroup: navGlassBlur
                 thickness: 22
                 bend: 1.8
                 frostAmount: 0.35
@@ -112,8 +123,8 @@ Item {
                 blurRadius: 5
                 sampleMargin: 48
                 elevation: 4
-                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
-                borderColor: Qt.rgba(1, 1, 1, 0.32)
+                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
+                borderColor: Theme.glassRim
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "search"
@@ -125,6 +136,7 @@ Item {
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                blurGroup: navGlassBlur
                 thickness: 22
                 bend: 1.8
                 frostAmount: 0.35
@@ -133,8 +145,8 @@ Item {
                 blurRadius: 5
                 sampleMargin: 48
                 elevation: 4
-                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
-                borderColor: Qt.rgba(1, 1, 1, 0.32)
+                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
+                borderColor: Theme.glassRim
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "history"
@@ -146,6 +158,7 @@ Item {
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                blurGroup: navGlassBlur
                 thickness: 22
                 bend: 1.8
                 frostAmount: 0.35
@@ -154,8 +167,8 @@ Item {
                 blurRadius: 5
                 sampleMargin: 48
                 elevation: 4
-                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
-                borderColor: Qt.rgba(1, 1, 1, 0.32)
+                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
+                borderColor: Theme.glassRim
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "server"
@@ -167,6 +180,7 @@ Item {
                 height: Constants.homeNavBtnSize
                 radius: Constants.homeNavBtnSize / 2
                 blurSource: pageList
+                blurGroup: navGlassBlur
                 thickness: 22
                 bend: 1.8
                 frostAmount: 0.35
@@ -175,8 +189,8 @@ Item {
                 blurRadius: 5
                 sampleMargin: 48
                 elevation: 4
-                glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.25)
-                borderColor: Qt.rgba(1, 1, 1, 0.32)
+                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
+                borderColor: Theme.glassRim
                 GlassCircleButton {
                     anchors.centerIn: parent
                     iconName: "settings"
@@ -275,7 +289,8 @@ Item {
                         height: Constants.homeHeroDotSize
                         radius: height / 2
                         color: heroPv.currentIndex === index
-                               ? Constants.moePink : Qt.rgba(1, 1, 1, 0.55)
+                               ? Theme.accent
+                               : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.55)
                         Behavior on width { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
                         Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
                         MouseArea {
@@ -337,7 +352,7 @@ Item {
                             radius: Constants.homeMediaCardRadius
                             color: Theme.surface
                             border.width: 1
-                            border.color: libCard.hovered ? Constants.moePink : Qt.rgba(1, 1, 1, 0.10)
+                            border.color: libCard.hovered ? Theme.accent : Theme.borderSoft
                             Image {
                                 anchors.fill: parent
                                 source: libCard.modelData.posterId
@@ -387,7 +402,7 @@ Item {
                                 anchors.rightMargin: Constants.homeMediaTextMargin
                                 anchors.bottomMargin: Constants.homeMediaTextBottom
                                 text: libCard.modelData.viewName
-                                color: "white"
+                                color: Theme.textOnBadge
                                 font.pixelSize: Constants.homeMediaTextPx
                                 elide: Text.ElideRight
                             }
@@ -473,7 +488,7 @@ Item {
                 anchors.rightMargin: Constants.rowLeftMargin
                 anchors.verticalCenter: parent.verticalCenter
                 text: "查看全部 ›"
-                color: seeAllMouse.hovered ? Constants.moePink : Theme.textMuted
+                color: seeAllMouse.hovered ? Theme.accent : Theme.textMuted
                 font.pixelSize: Constants.homeSeeAllPx
                 MouseArea {
                     id: seeAllMouse
@@ -555,8 +570,8 @@ Item {
     component GlassBar: Rectangle {
         id: gbar
         property var blurSource: null
-        property color glassColor: Qt.rgba(0.08, 0.09, 0.12, 0.5)
-        property color borderColor: Qt.rgba(1, 1, 1, 0.22)
+        property color glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.5)
+        property color borderColor: Theme.glassRim
         color: "transparent"
         border.width: 0
         clip: true
@@ -613,7 +628,8 @@ Item {
             anchors.fill: parent
             radius: gbar.radius
             gradient: Gradient {
-                GradientStop { position: 0.0; color: Qt.rgba(1, 1, 1, 0.08) }
+                GradientStop { position: 0.0; color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.035)
+                                                                        : Qt.rgba(1, 1, 1, 0.08) }
                 GradientStop { position: 0.5; color: "transparent" }
             }
         }
@@ -634,18 +650,23 @@ Item {
             Rectangle {
                 anchors.fill: parent
                 radius: width / 2
-                color: gcb.hovered ? Qt.rgba(1, 1, 1, 0.14) : "transparent"
+                color: gcb.hovered
+                       ? (ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.10)
+                                             : Qt.rgba(1, 1, 1, 0.14))
+                       : "transparent"
                 Behavior on color { ColorAnimation { duration: 150 } }
             }
         }
         // contentItem 会被 Button 拉伸至全尺寸,图标须放进容器内居中才能保持小尺寸。
         // SVG 按显示尺寸×DPR 栅格化:避免大图降采样把细描边摊灰。
+        // 图标是白色描边 SVG:亮色系配色换 dark/ 下的暗色变体(蒙版着色有锯齿,弃用)。
         contentItem: Item {
             Image {
                 width: 14
                 height: 14
                 anchors.centerIn: parent
-                source: gcb.iconName ? "qrc:/icons/" + gcb.iconName + ".svg" : ""
+                source: gcb.iconName ? ("qrc:/icons/" + (ThemeStore.isLight ? "dark/" : "")
+                                        + gcb.iconName + ".svg") : ""
                 fillMode: Image.PreserveAspectFit
                 smooth: true
                 sourceSize.width: Math.max(1, Math.round(14 * Screen.devicePixelRatio))
@@ -732,7 +753,7 @@ Item {
                     id: yearText
                     visible: (hcard.modelData.year || 0) > 0
                     text: hcard.modelData.year || ""
-                    color: Qt.rgba(1, 1, 1, 0.9)
+                    color: Theme.textOnBadge
                     font.pixelSize: Constants.homeHeroYearPx
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
@@ -740,7 +761,7 @@ Item {
                 AppText {
                     id: titleText
                     text: hcard.modelData.name || ""
-                    color: "white"
+                    color: Theme.textOnBadge
                     font.pixelSize: Constants.homeHeroTitlePx
                     font.bold: true
                     elide: Text.ElideRight

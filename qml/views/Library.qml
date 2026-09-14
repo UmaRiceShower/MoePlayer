@@ -85,32 +85,31 @@ Item {
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
 
     // --- 萌系粉白甜系配色(集中定义在 Constants,此处仅别名方便引用) ---
-    readonly property color moePink: Constants.moePink
-    readonly property color moePinkLight: Constants.moePinkLight
-    readonly property color moePinkDark: Constants.moePinkDark
-    readonly property color moePinkGlow: Constants.moePinkGlow
-    readonly property color moePinkText: Constants.moePinkText
-    readonly property color moeGold: Constants.moeGold
 
     // --- chip 样式 ---
     // 选中 chip 底色:粉色降饱和,大色块不用纯 accent。
-    readonly property color chipActive: moePink
-    readonly property color chipActiveHover: moePinkLight
+    readonly property color chipActive: Theme.accent
+    readonly property color chipActiveHover: Theme.accentSoft
 
     // --- 头部面包屑链配色:深冷灰底 + 粉色高亮,避免棕红感 ---
-    readonly property color crumbServer: Qt.rgba(0.06, 0.07, 0.10, 1.0)
-    readonly property color crumbView: Qt.rgba(0.08, 0.09, 0.12, 1.0)
-    readonly property color crumbViewHover: Qt.rgba(0.20, 0.10, 0.16, 1.0)
-    readonly property color crumbFolder: Qt.rgba(0.09, 0.10, 0.13, 1.0)
-    readonly property color crumbFolderHover: Qt.rgba(0.22, 0.12, 0.18, 1.0)
-    readonly property color crumbFolderCurrent: Qt.rgba(0.78, 0.55, 0.66, 1.0)
-    readonly property color crumbFolderCurrentHover: Qt.rgba(0.85, 0.60, 0.70, 1.0)
-    readonly property color crumbBorder: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.30)
-    readonly property color crumbBorderCurrent: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.65)
+    // 亮色系下整条"浅底深字":深色填充换浅系(scrimSoft/tintStrong),否则深字压深底。
+    readonly property color crumbServer: ThemeStore.isLight
+                                         ? Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 1.0)
+                                         : Theme.scrimDeep
+    readonly property color crumbView: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 1.0)
+    readonly property color crumbViewHover: Theme.tint
+    readonly property color crumbFolder: Theme.scrim
+    readonly property color crumbFolderHover: Theme.tintStrong
+    readonly property color crumbFolderCurrent: ThemeStore.isLight ? Theme.tintStrong : Theme.accentMuted
+    readonly property color crumbFolderCurrentHover: ThemeStore.isLight
+                                                     ? Qt.tint(Theme.bg, Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.34))
+                                                     : Theme.accentMutedHover
+    readonly property color crumbBorder: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.30)
+    readonly property color crumbBorderCurrent: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.65)
 
     // --- 筛选下拉底色(与面包屑链同风格) ---
-    readonly property color crumb: Qt.rgba(0.10, 0.11, 0.14, 1.0)
-    readonly property color crumbHover: Qt.rgba(0.20, 0.12, 0.17, 1.0)
+    readonly property color crumb: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 1.0)
+    readonly property color crumbHover: Theme.tint
     // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
     readonly property int bcTip: 20
 
@@ -138,7 +137,7 @@ Item {
             radius: 16
             color: fcombo.hovered ? root.crumbHover : root.crumb
             border.width: 1
-            border.color: fcombo.hovered ? root.moePink : Theme.textMuted
+            border.color: fcombo.hovered ? Theme.accent : Theme.textMuted
         }
         contentItem: Item {
             AppText {
@@ -148,7 +147,6 @@ Item {
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 text: fcombo.displayText
-                color: "white"
                 font.pixelSize: 13
                 elide: Text.ElideRight
             }
@@ -158,7 +156,6 @@ Item {
                 anchors.rightMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 text: fcombo.popup.opened ? "▴" : "▾"
-                color: "white"
                 font.pixelSize: 10
             }
         }
@@ -176,10 +173,10 @@ Item {
                 NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
             }
             background: Rectangle {
-                color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                 radius: 8
                 border.width: 1
-                border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
             }
             contentItem: ListView {
                 clip: true
@@ -203,7 +200,6 @@ Item {
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     text: parent.parent.itemText
-                    color: "white"
                     font.pixelSize: 13
                     elide: Text.ElideRight
                 }
@@ -214,7 +210,7 @@ Item {
                     width: 6
                     height: 6
                     radius: 3
-                    color: root.moePink
+                    color: Theme.accent
                     visible: fcombo.currentIndex === parent.parent.index
                 }
             }
@@ -222,7 +218,7 @@ Item {
             background: Rectangle {
                 radius: 4
                 color: parent.highlighted || parent.hovered
-                    ? Qt.rgba(root.moePink.r, root.moePink.g, root.moePink.b, 0.18)
+                    ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                     : "transparent"
             }
         }
@@ -247,7 +243,6 @@ Item {
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 text: fopt.itemLabel
-                color: "white"
                 font.pixelSize: 13
                 elide: Text.ElideRight
             }
@@ -259,10 +254,10 @@ Item {
                 width: 6
                 height: 6
                 radius: 3
-                color: fopt.isOn ? root.moePink : "transparent"
+                color: fopt.isOn ? Theme.accent : "transparent"
                 border.width: 1
                 border.color: fopt.isOn
-                        ? root.moePink
+                        ? Theme.accent
                         : Qt.rgba(Theme.textMuted.r, Theme.textMuted.g,
                                   Theme.textMuted.b, 0.6)
             }
@@ -270,7 +265,7 @@ Item {
         background: Rectangle {
             radius: 4
             color: fopt.hovered
-                ? Qt.rgba(root.moePink.r, root.moePink.g, root.moePink.b, 0.18)
+                ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                 : "transparent"
         }
     }
@@ -297,7 +292,7 @@ Item {
             anchors.fill: parent
             radius: 16
             color: fpanelHover.containsMouse ? root.crumbHover : root.crumb
-            border.color: fpanel.activeCount > 0 ? root.moePink : Theme.textMuted
+            border.color: fpanel.activeCount > 0 ? Theme.accent : Theme.textMuted
             border.width: 1
         }
         AppText {
@@ -308,7 +303,6 @@ Item {
             anchors.rightMargin: 6
             anchors.verticalCenter: parent.verticalCenter
             text: fpanel.labelText
-            color: "white"
             font.pixelSize: 13
             elide: Text.ElideRight
         }
@@ -318,7 +312,6 @@ Item {
             anchors.rightMargin: 10
             anchors.verticalCenter: parent.verticalCenter
             text: fpanelPopup.opened ? "▴" : "▾"
-            color: "white"
             font.pixelSize: 10
         }
         MouseArea {
@@ -351,10 +344,10 @@ Item {
                 NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
             }
             background: Rectangle {
-                color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                 radius: 8
                 border.width: 1
-                border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
             }
             // 面板固定四节:类型/评分/状态(选项单选)+ 年份(输入区间)。
             // 宽度引用 popup id(组件内 id 无时序问题;ListView.view attached
@@ -462,13 +455,13 @@ Item {
                         text: root.yearInputText()
                         placeholderText: "如 1999-2002"
                         placeholderTextColor: Theme.textMuted
-                        color: "white"
+                        color: Theme.textPrimary
                         font.pixelSize: 13
                         padding: 8
                         background: Rectangle {
                             radius: 6
                             color: root.crumb
-                            border.color: parent.activeFocus ? root.moePink : Theme.textMuted
+                            border.color: parent.activeFocus ? Theme.accent : Theme.textMuted
                             border.width: 1
                         }
                         onEditingFinished: root.applyYearRange(text)
@@ -481,7 +474,7 @@ Item {
                         padding: 0
                         contentItem: AppText {
                             text: "清除筛选"
-                            color: root.moePink
+                            color: Theme.accentText
                             font.pixelSize: 13
                             leftPadding: 10
                             verticalAlignment: Text.AlignVCenter
@@ -885,7 +878,6 @@ Item {
                     anchors.leftMargin: 17
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.serverLabel()
-                    color: "white"
                     font.pixelSize: 16
                     elide: Text.ElideMiddle
                 }
@@ -918,7 +910,6 @@ Item {
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
                     text: root.currentViewName
-                    color: "white"
                     font.pixelSize: 16
                     horizontalAlignment: Text.AlignHCenter
                     elide: Text.ElideRight
@@ -929,7 +920,6 @@ Item {
                     anchors.rightMargin: root.bcTip + 4
                     anchors.verticalCenter: parent.verticalCenter
                     text: viewSelector.popup.opened ? "▴" : "▾"
-                    color: "white"
                     font.pixelSize: 12
                 }
                 // 透明交互层:整块可点击弹出下拉,hover 驱动形状提亮。
@@ -959,7 +949,6 @@ Item {
                                 anchors.leftMargin: 10
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: parent.parent.itemText
-                                color: "white"
                                 font.pixelSize: 15
                                 elide: Text.ElideRight
                             }
@@ -970,7 +959,7 @@ Item {
                                 width: 6
                                 height: 6
                                 radius: 3
-                                color: root.moePink
+                                color: Theme.accent
                                 visible: viewSelector.currentIndex === parent.parent.index
                             }
                         }
@@ -1009,10 +998,10 @@ Item {
                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
                         }
                         background: Rectangle {
-                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                             radius: 8
                             border.width: 1
-                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                         }
                         contentItem: ListView {
                             clip: true
@@ -1067,7 +1056,6 @@ Item {
                         anchors.rightMargin: parent.isCurrent ? 8 : 14
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.name
-                        color: "white"
                         font.pixelSize: 16
                         horizontalAlignment: Text.AlignHCenter
                         elide: Text.ElideMiddle
@@ -1079,7 +1067,6 @@ Item {
                         anchors.rightMargin: root.bcTip + 4
                         anchors.verticalCenter: parent.verticalCenter
                         text: crumbPopup.opened ? "▴" : "▾"
-                        color: "white"
                         font.pixelSize: 12
                     }
                     // 透明交互层:上级段点击跳回(库根段=回根),当前段点击弹子文件夹下拉。
@@ -1129,10 +1116,10 @@ Item {
                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
                         }
                         background: Rectangle {
-                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                             radius: 8
                             border.width: 1
-                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                         }
                         contentItem: ListView {
                             clip: true
@@ -1151,7 +1138,6 @@ Item {
                                         anchors.leftMargin: 10
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: parent.parent.itemText
-                                        color: "white"
                                         font.pixelSize: 15
                                         elide: Text.ElideRight
                                     }
@@ -1160,7 +1146,7 @@ Item {
                                 background: Rectangle {
                                     radius: 4
                                     color: parent.highlighted || parent.hovered
-                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                         : "transparent"
                                 }
                                 onClicked: {
@@ -1194,13 +1180,14 @@ Item {
             leftPadding: 34
             rightPadding: 12
             placeholderText: "搜索当前媒体库…"
-            placeholderTextColor: Qt.lighter(Theme.textMuted, 1.2)
-            color: "white"
+            placeholderTextColor: ThemeStore.isLight ? Theme.textMuted
+                                                     : Qt.lighter(Theme.textMuted, 1.2)
+            color: Theme.textPrimary
             font.pixelSize: 14
             background: Rectangle {
                 radius: 20
                 color: root.crumb
-                border.color: searchBox.activeFocus ? root.moePink : Theme.textMuted
+                border.color: searchBox.activeFocus ? Theme.accent : Theme.textMuted
                 border.width: 1
                 // 聚焦时粉色柔光外圈,萌系氛围。
                 Rectangle {
@@ -1208,7 +1195,7 @@ Item {
                     anchors.margins: -3
                     radius: 23
                     color: "transparent"
-                    border.color: root.moePink
+                    border.color: Theme.accent
                     border.width: searchBox.activeFocus ? 2 : 0
                     opacity: searchBox.activeFocus ? 0.45 : 0
                     Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -1219,7 +1206,7 @@ Item {
                 anchors.leftMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 text: "♥"
-                color: searchBox.activeFocus ? root.moePink : Theme.textMuted
+                color: searchBox.activeFocus ? Theme.accent : Theme.textMuted
                 font.pixelSize: 16
             }
             onTextChanged: searchDebounce.restart()
