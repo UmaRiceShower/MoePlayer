@@ -28,6 +28,7 @@ set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
 # (qmlls/LSP 才能识别 Theme/Constants 为单例并解析 Theme.bg 等成员)。
 set_source_files_properties(qml/theme/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/theme/Constants.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
+set_source_files_properties(qml/theme/ThemeStore.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 set_source_files_properties(qml/FuzzyMatch.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
 
 # QML 模块:所有 QML 文件 + C++ 类型统一归入 URI MoePlayer.Core,
@@ -68,10 +69,11 @@ qt_add_qml_module(MoePlayer
         qml/theme/Constants.qml
         qml/theme/AppText.qml
         qml/theme/CrossfadeImage.qml
-        qml/theme/MoeBackground.qml
+        qml/theme/ThemedBackground.qml
+        qml/theme/GlassBlurSource.qml
         qml/theme/GlassPanel.qml
         qml/theme/FrostedGlass.qml
-        qml/theme/BokehOrb.qml
+        qml/theme/ThemeStore.qml
         qml/views/Home.qml
         qml/views/Library.qml
         qml/views/Detail.qml
@@ -94,7 +96,7 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     # uniform block,与 ShaderEffect 绑定模型不兼容(本应用 RHI 后端为
     # OpenGL)。
     GLSL "100es,120,150"
-    FILES shaders/aurora.frag
+    FILES shaders/background.frag
           shaders/crossfade.frag
           shaders/episode-fade.frag
           shaders/glass-refract.frag
@@ -130,6 +132,11 @@ qt_add_resources(MoePlayer "nav_icons"
         qml/assets/icons/search.svg
         qml/assets/icons/settings.svg
         qml/assets/icons/server.svg
+        qml/assets/icons/petal.svg
+        qml/assets/icons/dark/search.svg
+        qml/assets/icons/dark/settings.svg
+        qml/assets/icons/dark/history.svg
+        qml/assets/icons/dark/server.svg
 )
 
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件

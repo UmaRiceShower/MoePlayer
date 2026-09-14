@@ -87,10 +87,15 @@ Item {
 
     // 选中 chip 底色:accent 降饱和加深(H192° 100% → 35% 饱和)。
     // chip 选中是实心大面积背景,直接套 accent 太艳;边框/进度条等
-    // 小面积场景仍用 Theme.accent。
-    readonly property color chipActive: Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
+    // 小面积场景用预设强调色(低饱和底)。
+    // 亮色系:深底会在浅界面里突兀,改用实心 accent(与 FilterChip 对齐)。
+    readonly property color chipActive: ThemeStore.isLight
+                                        ? Theme.accent
+                                        : Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
     // 选中 chip 悬停:同色相提亮一档。
-    readonly property color chipActiveHover: Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
+    readonly property color chipActiveHover: ThemeStore.isLight
+                                             ? Theme.accentSoft
+                                             : Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
 
     // 点击结果进详情(携带所在服务器)。
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
@@ -241,7 +246,7 @@ Item {
         blurSource: root.backgroundSource
         fullSource: true
         blurRadius: 64
-        glassColor: Qt.rgba(0.04, 0.05, 0.07, 0.55)
+        glassColor: Qt.rgba(Theme.scrimDeep.r, Theme.scrimDeep.g, Theme.scrimDeep.b, 0.55)
         border.width: 0
         MouseArea {
             anchors.fill: parent
@@ -265,8 +270,8 @@ Item {
             blurSource: root.backgroundSource
             fullSource: true
             blurRadius: 48
-            glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.72)
-            borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.35)
+            glassColor: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.72)
+            borderColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)
             radius: parent.radius
         }
 
@@ -290,12 +295,11 @@ Item {
                 spacing: 8
                 AppText {
                     text: "♥"
-                    color: Constants.moePink
+                    color: Theme.accent
                     font.pixelSize: 20
                 }
                 AppText {
                     text: "全局搜索"
-                    color: "white"
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -311,7 +315,7 @@ Item {
                 placeholderText: root.canSearch ? "搜索…(Esc 关闭)"
                                                 : "先在首页打开一个媒体库再搜索(Esc 关闭)"
                 placeholderTextColor: Theme.textMuted
-                color: "white"
+                color: Theme.textPrimary
                 enabled: root.canSearch
                 font.pixelSize: 15
                 // 输入防抖:停止输入 300ms 后才发服务端搜索(过滤区即时触发)。
@@ -320,14 +324,14 @@ Item {
                     radius: 20
                     color: Theme.bg
                     border.width: 1
-                    border.color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                    border.color: searchField.activeFocus ? Theme.accent : Theme.textMuted
                     // 聚焦时粉色柔光外圈。
                     Rectangle {
                         anchors.fill: parent
                         anchors.margins: -3
                         radius: 23
                         color: "transparent"
-                        border.color: Constants.moePink
+                        border.color: Theme.accent
                         border.width: searchField.activeFocus ? 2 : 0
                         opacity: searchField.activeFocus ? 0.35 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
@@ -338,7 +342,7 @@ Item {
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     text: "♥"
-                    color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                    color: searchField.activeFocus ? Theme.accent : Theme.textMuted
                     font.pixelSize: 16
                 }
             }
@@ -406,10 +410,10 @@ Item {
                             NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
                         }
                         background: Rectangle {
-                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                             radius: 8
                             border.width: 1
-                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                         }
                         contentItem: Column {
                             width: parent.width - 20
@@ -450,7 +454,6 @@ Item {
                                                     anchors.leftMargin: 4
                                                     anchors.verticalCenter: parent.verticalCenter
                                                     text: modelData.label
-                                                    color: "white"
                                                     font.pixelSize: 13
                                                 }
                                                 Rectangle {
@@ -460,14 +463,14 @@ Item {
                                                     width: 6
                                                     height: 6
                                                     radius: 3
-                                                    color: Constants.moePink
+                                                    color: Theme.accent
                                                     visible: parent.parent.isOn
                                                 }
                                             }
                                             background: Rectangle {
                                                 radius: 4
                                                 color: parent.hovered
-                                                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                                    ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                                     : "transparent"
                                             }
                                             onClicked: {
@@ -499,7 +502,7 @@ Item {
                                         height: 30
                                         placeholderText: "起"
                                         placeholderTextColor: Theme.textMuted
-                                        color: "white"
+                                        color: Theme.textPrimary
                                         enabled: root.canSearch
                                         font.pixelSize: 13
                                         validator: IntValidator { bottom: 1900; top: 2100 }
@@ -516,7 +519,7 @@ Item {
                                     }
                                     AppText {
                                         text: "至"
-                                        color: "white"
+                                        color: Theme.textMuted
                                         font.pixelSize: 13
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
@@ -526,7 +529,7 @@ Item {
                                         height: 30
                                         placeholderText: "止"
                                         placeholderTextColor: Theme.textMuted
-                                        color: "white"
+                                        color: Theme.textPrimary
                                         enabled: root.canSearch
                                         font.pixelSize: 13
                                         validator: IntValidator { bottom: 1900; top: 2100 }
@@ -552,7 +555,7 @@ Item {
                                 padding: 0
                                 contentItem: AppText {
                                     text: "清除筛选"
-                                    color: Constants.moePink
+                                    color: Theme.accentText
                                     font.pixelSize: 13
                                     leftPadding: 4
                                     verticalAlignment: Text.AlignVCenter
@@ -560,7 +563,7 @@ Item {
                                 background: Rectangle {
                                     radius: 4
                                     color: parent.hovered
-                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                         : "transparent"
                                 }
                                 onClicked: {
@@ -609,10 +612,10 @@ Item {
                             onTriggered: serverSearch.forceActiveFocus()
                         }
                         background: Rectangle {
-                            color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                             radius: 8
                             border.width: 1
-                            border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                         }
                         contentItem: Column {
                             width: parent.width - 16
@@ -628,16 +631,17 @@ Item {
                                 rightPadding: 10
                                 placeholderText: "搜索服务器"
                                 placeholderTextColor: Theme.textMuted
-                                color: "white"
+                                color: Theme.textPrimary
                                 font.pixelSize: 13
                                 selectByMouse: true
                                 background: Rectangle {
                                     radius: 6
-                                    color: Qt.rgba(0, 0, 0, 0.25)
+                                    color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.06)
+                                                              : Qt.rgba(0, 0, 0, 0.25)
                                     border.width: 1
                                     border.color: serverSearch.activeFocus
-                                                  ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
-                                                  : Qt.rgba(1, 1, 1, 0.10)
+                                                  ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                                  : Theme.borderSoft
                                 }
                                 // 回车 = 勾选/取消首个匹配项(与点击首行等价)。
                                 onAccepted: {
@@ -669,7 +673,6 @@ Item {
                                             anchors.rightMargin: 16
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: modelData.name
-                                            color: "white"
                                             font.pixelSize: 13
                                             elide: Text.ElideRight
                                         }
@@ -680,14 +683,14 @@ Item {
                                             width: 6
                                             height: 6
                                             radius: 3
-                                            color: Constants.moePink
+                                            color: Theme.accent
                                             visible: parent.parent.isOn
                                         }
                                     }
                                     background: Rectangle {
                                         radius: 4
                                         color: parent.hovered
-                                            ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                            ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                             : "transparent"
                                     }
                                     onClicked: root.toggleServer(modelData.url)
@@ -706,14 +709,14 @@ Item {
                 visible: statusText.text !== ""
                 AppText {
                     text: "♥"
-                    color: Constants.moePink
+                    color: Theme.accent
                     font.pixelSize: 12
                     opacity: 0.75
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 AppText {
                     id: statusText
-                    color: searchField.text.length === 0 ? Theme.textMuted : "white"
+                    color: searchField.text.length === 0 ? Theme.textMuted : Theme.textPrimary
                     font.pixelSize: 12
                     anchors.verticalCenter: parent.verticalCenter
                     text: {
@@ -785,13 +788,12 @@ Item {
                                     spacing: 6
                                     AppText {
                                         text: "♥"
-                                        color: Constants.moePink
+                                        color: Theme.accent
                                         font.pixelSize: 14
                                         anchors.verticalCenter: parent.verticalCenter
                                     }
                                     AppText {
                                         anchors.verticalCenter: parent.verticalCenter
-                                        color: "white"
                                         font.pixelSize: 14
                                         font.bold: true
                                         text: aggGroup.multiAccount

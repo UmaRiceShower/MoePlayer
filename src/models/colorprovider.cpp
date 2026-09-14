@@ -191,5 +191,12 @@ QVariantMap ColorProvider::extractRoles(const QImage &image)
     roles.insert(QStringLiteral("surfaceTint"), surfaceTint.name());
     roles.insert(QStringLiteral("complement"), complement.name());
     roles.insert(QStringLiteral("complementDark"), complementDark.name());
+    // 亮色系镜像(Detail 页正文在亮色系下是深字,页面底/卡面要提到高明度;
+    // heroFrom 不变——它压在海报图上、承白字)。QML 侧按 ThemeStore.isLight 取用。
+    // L 值与暗色侧(0.055/0.10)保持同样的"比底色低一档"关系:亮底 0.92/0.96,
+    // 与配色底(≈0.94)拉开可感知的藏色(0.94/0.98 时几乎看不见)。
+    roles.insert(QStringLiteral("bgTintL"), QColor::fromHslF(hh, 0.10, 0.92).name());
+    roles.insert(QStringLiteral("surfaceTintL"), QColor::fromHslF(hh, 0.08, 0.96).name());
+    roles.insert(QStringLiteral("complementDarkL"), QColor::fromHslF(chh, 0.22, 0.85).name());
     return roles;
 }

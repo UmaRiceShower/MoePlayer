@@ -425,12 +425,11 @@ Item {
             spacing: 8
             AppText {
                 text: "♥"
-                color: Constants.moePink
+                color: Theme.accent
                 font.pixelSize: 18
             }
             AppText {
                 text: "播放历史"
-                color: "white"
                 font.pixelSize: 17
                 font.bold: true
             }
@@ -455,24 +454,24 @@ Item {
             rightPadding: 26
             placeholderText: "搜索剧名 / 集名 / 账号"
             placeholderTextColor: Theme.textMuted
-            color: "white"
+            color: Theme.textPrimary
             font.pixelSize: 13
             selectByMouse: true
             // 与右侧控件同一视觉语言:半透明底 + 细边,聚焦时细边转粉。
             background: Rectangle {
                 radius: height / 2
-                color: Qt.rgba(0.07, 0.08, 0.11, 0.45)
+                color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
                 border.width: 1
                 border.color: searchField.activeFocus
-                              ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
-                              : Qt.rgba(1, 1, 1, 0.10)
+                              ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                              : Theme.borderSoft
             }
             AppText {
                 anchors.left: parent.left
                 anchors.leftMargin: 10
                 anchors.verticalCenter: parent.verticalCenter
                 text: "♥"
-                color: searchField.activeFocus ? Constants.moePink : Theme.textMuted
+                color: searchField.activeFocus ? Theme.accent : Theme.textMuted
                 font.pixelSize: 13
             }
             // 清除:有内容时可点;Esc 同样清除(焦点在框内时)。
@@ -482,7 +481,7 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "✕"
                 visible: searchField.text !== ""
-                color: clearHover.hovered ? "white" : Theme.textMuted
+                color: clearHover.hovered ? Theme.textPrimary : Theme.textMuted
                 font.pixelSize: 12
                 HoverHandler {
                     id: clearHover
@@ -539,10 +538,10 @@ Item {
                         accountFocusTimer.start()
                     }
                     background: Rectangle {
-                        color: Qt.rgba(0.10, 0.11, 0.14, 0.78)
+                        color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
                         radius: 8
                         border.width: 1
-                        border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                        border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                     }
                     contentItem: Column {
                         width: parent.width - 16
@@ -558,16 +557,17 @@ Item {
                             rightPadding: 10
                             placeholderText: "搜索账号"
                             placeholderTextColor: Theme.textMuted
-                            color: "white"
+                            color: Theme.textPrimary
                             font.pixelSize: 13
                             selectByMouse: true
                             background: Rectangle {
                                 radius: 6
-                                color: Qt.rgba(0, 0, 0, 0.25)
+                                color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.06)
+                                                          : Qt.rgba(0, 0, 0, 0.25)
                                 border.width: 1
                                 border.color: accountSearch.activeFocus
-                                              ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
-                                              : Qt.rgba(1, 1, 1, 0.10)
+                                              ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                              : Theme.borderSoft
                             }
                             // Esc 关下拉(焦点在输入框,按键由这里收口)。
                             Keys.onEscapePressed: accountPopup.close()
@@ -599,7 +599,6 @@ Item {
                                         anchors.rightMargin: 16
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: modelData.name
-                                        color: "white"
                                         font.pixelSize: 13
                                         elide: Text.ElideRight
                                     }
@@ -610,14 +609,14 @@ Item {
                                         width: 6
                                         height: 6
                                         radius: 3
-                                        color: Constants.moePink
+                                        color: Theme.accent
                                         visible: parent.parent.isOn
                                     }
                                 }
                                 background: Rectangle {
                                     radius: 4
                                     color: parent.hovered
-                                        ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                         : "transparent"
                                 }
                                 onClicked: root.selectAccount(modelData.id)
@@ -677,7 +676,7 @@ Item {
                     spacing: 8
                     AppText {
                         text: rowItem.modelData.label || ""
-                        color: Constants.moePink
+                        color: Theme.accentText
                         font.pixelSize: 14
                         font.bold: true
                     }
@@ -729,10 +728,10 @@ Item {
                 height: root.rowH
                 visible: rowItem.modelData.kind === "item"
                 radius: 14
-                color: rowHover.hovered ? Qt.rgba(0.16, 0.10, 0.14, 0.85)
-                                        : Qt.rgba(0.08, 0.09, 0.12, 0.62)
+                color: rowHover.hovered ? Qt.rgba(Theme.tint.r, Theme.tint.g, Theme.tint.b, 0.85)
+                                        : Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.62)
                 border.width: rowHover.hovered ? 1 : 0
-                border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                 Behavior on color { ColorAnimation { duration: 120 } }
 
                 // 16:9 缩略图(无图时露出深色底 + 播放三角)
@@ -793,7 +792,6 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         text: rowItem.modelData.title || ""
-                        color: "white"
                         font.pixelSize: 15
                         font.bold: true
                         elide: Text.ElideRight
@@ -826,7 +824,7 @@ Item {
                             width: parent.width * (rowItem.modelData.progress || 0)
                             height: parent.height
                             radius: 2
-                            color: Constants.moePink
+                            color: Theme.accent
                         }
                     }
                 }
@@ -850,7 +848,7 @@ Item {
                         id: statusText
                         anchors.right: parent.right
                         text: rowItem.modelData.status || ""
-                        color: rowItem.modelData.status === "已看完" ? Theme.success : Constants.moePinkText
+                        color: rowItem.modelData.status === "已看完" ? Theme.success : Theme.textMuted
                         font.pixelSize: 12
                         visible: (rowItem.modelData.status || "") !== ""
                     }
@@ -886,7 +884,6 @@ Item {
         AppText {
             anchors.horizontalCenter: parent.horizontalCenter
             text: "还没有播放记录"
-            color: "white"
             font.pixelSize: 16
         }
         AppText {
@@ -918,15 +915,15 @@ Item {
         rightPadding: 14
         background: Rectangle {
             radius: height / 2
-            color: Qt.rgba(0.07, 0.08, 0.11, 0.45)
+            color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
             border.width: 1
             border.color: trigger.active
-                          ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.55)
-                          : (trigger.hovered ? Qt.rgba(1, 1, 1, 0.22) : Qt.rgba(1, 1, 1, 0.10))
+                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                          : (trigger.hovered ? Theme.textMuted : Theme.borderSoft)
         }
         contentItem: AppText {
             text: trigger.label
-            color: trigger.active ? Constants.moePinkText : "white"
+            color: trigger.active ? Theme.accent : Theme.textPrimary
             font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter

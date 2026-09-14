@@ -93,13 +93,25 @@ Item {
     property color complementColor: root._monet ? root._monet.complement : Theme.textMuted
     // 藏白:白色融入一点莫奈取色(强调色色相 20% 混白),供未激活图标
     // (未收藏爱心/未看勾圈),取代纯白与背景更协调。
-    property color iconWhite: Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
-                                      1 + (root.accentColor.g - 1) * 0.2,
-                                      1 + (root.accentColor.b - 1) * 0.2)
-    property color complementDark: root._monet ? root._monet.complementDark : Theme.bg
+    // 按钮行图标色:暗色系近白(微带海报色相),亮色系取深墨——
+    // 按钮位(hero 底部,页高 ~0.7 处)在亮色下落在 bgTint 浅带 + 渐隐的背景图上,
+    // 白图标不可读(实核:detailHeroFadeBand 0.2,按钮处背景图仅剩 ~5 成 alpha)
+    property color iconWhite: ThemeStore.isLight
+                              ? Theme.textPrimary
+                              : Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
+                                        1 + (root.accentColor.g - 1) * 0.2,
+                                        1 + (root.accentColor.b - 1) * 0.2)
+    property color complementDark: root._monet ? (ThemeStore.isLight ? root._monet.complementDarkL
+                                                                     : root._monet.complementDark)
+                                               : Theme.bg
     // 背景藏色倾向(带海报色相,取代中性灰);surfaceTint 用于卡片底色。
-    property color bgTint: root._monet ? root._monet.bgTint : Theme.bg
-    property color surfaceTint: root._monet ? root._monet.surfaceTint : Theme.surface
+    // 亮色系下取亮色镜像(L 后缀),否则深底压深字。
+    property color bgTint: root._monet ? (ThemeStore.isLight ? root._monet.bgTintL
+                                                             : root._monet.bgTint)
+                                       : Theme.bg
+    property color surfaceTint: root._monet ? (ThemeStore.isLight ? root._monet.surfaceTintL
+                                                                  : root._monet.surfaceTint)
+                                            : Theme.surface
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
@@ -1305,8 +1317,9 @@ Item {
                                     // 主按钮:accent 色调玻璃(透出背景磨砂 + 主题色)。纯磨砂下
                                     // 0.45 太实会盖住模糊透出,降 0.30 留色调又透亮。
                                     glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                       root.accentColor.b, 0.30)
-                                    borderColor: Qt.rgba(1, 1, 1, 0.30)
+                                                       root.accentColor.b,
+                                                       ThemeStore.isLight ? 0.42 : 0.30)
+                                    borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
                                     edgeLight: 0.5
@@ -1317,7 +1330,7 @@ Item {
                                 }
                                 contentItem: AppText {
                                     text: playBtn.text
-                                    color: "white"
+                                    color: ThemeStore.isLight ? Theme.textPrimary : "white"
                                     font.pixelSize: 16
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1334,9 +1347,11 @@ Item {
                                     blurSource: detailBg
                                     scrollParent: overview
                                     // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b, 0.22)
-                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                                       root.complementColor.b,
+                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                    borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
                                     edgeLight: 0.5
@@ -1351,7 +1366,7 @@ Item {
                                         anchors.centerIn: parent
                                         width: 22
                                         height: 22
-                                        property color fillColor: root.isFavorite ? Constants.moePink : root.iconWhite
+                                        property color fillColor: root.isFavorite ? Theme.accent : root.iconWhite
                                         onFillColorChanged: requestPaint()
                                         onPaint: {
                                             const ctx = getContext("2d")
@@ -1382,9 +1397,11 @@ Item {
                                     blurSource: detailBg
                                     scrollParent: overview
                                     // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b, 0.22)
-                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                                       root.complementColor.b,
+                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                    borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
                                     edgeLight: 0.5
@@ -1434,9 +1451,11 @@ Item {
                                     blurSource: detailBg
                                     scrollParent: overview
                                     // 次要按钮:complement 色调玻璃,透出背景折射。
+                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b, 0.22)
-                                    borderColor: Qt.rgba(1, 1, 1, 0.28)
+                                                       root.complementColor.b,
+                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                    borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
                                     edgeLight: 0.5
@@ -1447,7 +1466,7 @@ Item {
                                 }
                                 contentItem: AppText {
                                     text: replayBtn.text
-                                    color: "white"
+                                    color: ThemeStore.isLight ? Theme.textPrimary : "white"
                                     font.pixelSize: 14
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1488,8 +1507,9 @@ Item {
                         // 透出背景 + 选中时 accent 描边。
                         blurSource: detailBg
                             scrollParent: overview
-                        glassColor: Qt.rgba(1, 1, 1, 0.06)
-                        borderColor: drop.opened ? root.accentColor : Qt.rgba(1, 1, 1, 0.15)
+                        glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
+                                                      : Qt.rgba(1, 1, 1, 0.06)
+                        borderColor: drop.opened ? root.accentColor : Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
                         edgeLight: 0.4
@@ -1567,7 +1587,7 @@ Item {
                                 radius: 10
                                 color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.98)
                                 border.width: 1
-                                border.color: Qt.rgba(1, 1, 1, 0.12)
+                                border.color: Theme.borderSoft
                             }
                             contentItem: Flickable {
                                 contentWidth: width
@@ -1587,7 +1607,9 @@ Item {
                                             radius: 8
                                             property bool sel: modelData._sel === true
                                             color: sel ? Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22)
-                                                       : (entryMa.containsMouse ? Qt.rgba(1, 1, 1, 0.06) : "transparent")
+                                                       : (entryMa.containsMouse
+                                                          ? Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.12)
+                                                          : "transparent")
                                             Rectangle {
                                                 anchors.left: parent.left
                                                 anchors.leftMargin: 12
@@ -1712,8 +1734,9 @@ Item {
                         scrollParent: overview
                         // 玻璃底色淡一点(白底微透,非黑底)——黑色太深会盖住
                         // 磨砂模糊的透亮感,淡色透出下方模糊内容才显玻璃质感。
-                        glassColor: Qt.rgba(1, 1, 1, 0.06)
-                        borderColor: Qt.rgba(1, 1, 1, 0.12)
+                        glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
+                                                      : Qt.rgba(1, 1, 1, 0.06)
+                        borderColor: Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
                         edgeLight: 0.35
@@ -1726,7 +1749,6 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 12
                             text: root.detail.overview || ""
-                            color: "white"
                             font.pixelSize: 14
                             wrapMode: Text.Wrap
                         }
@@ -1810,7 +1832,7 @@ Item {
                                                 radius: 33
                                                 color: "transparent"
                                                 border.width: peopleCard.hovered ? 2 : 0
-                                                border.color: Constants.moePink
+                                                border.color: Theme.accent
                                                 opacity: peopleCard.hovered ? 1 : 0
                                                 Behavior on opacity { NumberAnimation { duration: 160 } }
                                             }
@@ -1868,8 +1890,9 @@ Item {
                             // 媒体信息卡玻璃:透出背景,微折射。
                             blurSource: detailBg
                             scrollParent: overview
-                            glassColor: Qt.rgba(1, 1, 1, 0.05)
-                            borderColor: Qt.rgba(1, 1, 1, 0.12)
+                            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
+                                                          : Qt.rgba(1, 1, 1, 0.05)
+                            borderColor: Theme.borderSoft
                             thickness: 0
                             frostAmount: 0.15
                             edgeLight: 0.35
@@ -2042,9 +2065,14 @@ Item {
                                                 height: 22
                                                 width: badgeText.implicitWidth + 14
                                                 radius: 11
-                                                color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.15)
+                                                // 亮色系下 0.15/0.35 在浅卡面上几乎不可见,提高不透明度
+                                                color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                               root.complementColor.b,
+                                                               ThemeStore.isLight ? 0.28 : 0.15)
                                                 border.width: 1
-                                                border.color: Qt.rgba(root.complementColor.r, root.complementColor.g, root.complementColor.b, 0.35)
+                                                border.color: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                                      root.complementColor.b,
+                                                                      ThemeStore.isLight ? 0.55 : 0.35)
                                                 AppText {
                                                     id: badgeText
                                                     anchors.centerIn: parent
@@ -2072,7 +2100,7 @@ Item {
                                         radius: 11
                                         color: Theme.surface
                                         border.width: 1
-                                        border.color: Qt.rgba(1, 1, 1, 0.10)
+                                        border.color: Theme.borderSoft
                                         Column {
                                             anchors.fill: parent
                                             anchors.margins: 13
@@ -2084,7 +2112,7 @@ Item {
                                                 AppText {
                                                     anchors.left: parent.left
                                                     text: miCard.modelData.cap
-                                                    color: Constants.moePink
+                                                    color: Theme.accent
                                                     font.pixelSize: 11
                                                     font.bold: true
                                                     font.letterSpacing: 1.2
@@ -2097,7 +2125,7 @@ Item {
                                                     radius: 4
                                                     color: "transparent"
                                                     border.width: 1
-                                                    border.color: Qt.rgba(1, 1, 1, 0.25)
+                                                    border.color: Theme.borderSoft
                                                     AppText {
                                                         id: tagText
                                                         anchors.centerIn: parent
@@ -2122,7 +2150,7 @@ Item {
                                                         anchors.top: parent.top
                                                         width: kvRow.width
                                                         height: 1
-                                                        color: Qt.rgba(1, 1, 1, 0.07)
+                                                        color: Theme.borderSoft
                                                     }
                                                     AppText {
                                                         anchors.left: parent.left
@@ -2201,13 +2229,26 @@ Item {
                                     duration: 500
                                     cache: true
                                 }
+                                // 底部压深渐变,标题承白字(压在海报图上,与主题无关;
+                                // 亮色系下文字随主题变深、叠浅海报会不可读,故走图片约定)
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 26
+                                    radius: 14
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.55) }
+                                    }
+                                }
                                 AppText {
                                     anchors.bottom: parent.bottom
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.margins: 6
                                     text: similarCard.model.name
-                                    color: Theme.textPrimary
+                                    color: Theme.textOnBadge
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
@@ -2256,7 +2297,7 @@ Item {
                 // 往数字牌靠近且随其位置跟随,不再贴条边缘。
                 AppText {
                     text: "第"
-                    color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
+                    color: seasonStrip.stripHovered ? Theme.accent : Theme.textPrimary
                     font.pixelSize: 14
                     anchors.right: digitCol.left
                     anchors.rightMargin: 8
@@ -2334,7 +2375,7 @@ Item {
                 // "季" 同样锚定数字牌(左缘贴牌边 8px)。
                 AppText {
                     text: "季"
-                    color: seasonStrip.stripHovered ? Constants.moePink : Theme.textPrimary
+                    color: seasonStrip.stripHovered ? Theme.accent : Theme.textPrimary
                     font.pixelSize: 14
                     anchors.left: digitCol.right
                     anchors.leftMargin: 8
@@ -2431,7 +2472,7 @@ Item {
                                 anchors.centerIn: parent
                                 width: 28
                                 height: 28
-                                property color iconColor: episodeItem.selected ? "white" : Theme.textMuted
+                                property color iconColor: episodeItem.selected ? Theme.accent : Theme.textMuted
                                 onIconColorChanged: requestPaint()
                                 visible: (!episodeItem.model.posterId && !episodeItem.model.parentBackdropId)
                                           || thumb.status === Image.Error
@@ -2509,7 +2550,7 @@ Item {
                             id: episodeTitle
                             width: thumbBox.width
                             text: episodeItem.model.name
-                            color: episodeItem.selected ? "white" : Theme.textPrimary
+                            color: episodeItem.selected ? Theme.accent : Theme.textPrimary
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             elide: Text.ElideRight

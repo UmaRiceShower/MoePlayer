@@ -70,7 +70,6 @@ Item {
                 spacing: 12
                 AppText {
                     text: srow.label
-                    color: "white"
                     font.pixelSize: 14
                     Layout.fillWidth: true
                 }
@@ -106,16 +105,16 @@ Item {
             implicitWidth: 42
             implicitHeight: 24
             radius: 12
-            color: ssw.checked ? Constants.moePink : Qt.rgba(1, 1, 1, 0.10)
+            color: ssw.checked ? Theme.accent : Theme.borderSoft
             border.width: 1
-            border.color: ssw.checked ? Constants.moePink : Qt.rgba(1, 1, 1, 0.25)
+            border.color: ssw.checked ? Theme.accent : Theme.borderSoft
             Rectangle {
                 width: 18
                 height: 18
                 radius: 9
                 y: 3
                 x: ssw.checked ? parent.width - width - 3 : 3
-                color: "white"
+                color: Theme.accentInk
                 Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
             }
         }
@@ -157,7 +156,7 @@ Item {
             radius: 17
             color: Theme.bg
             border.width: 1
-            border.color: scombo.hovered || scombo.popup.opened ? Constants.moePink : Theme.textMuted
+            border.color: scombo.hovered || scombo.popup.opened ? Theme.accent : Theme.textMuted
         }
         contentItem: Item {
             AppText {
@@ -167,7 +166,6 @@ Item {
                 anchors.rightMargin: 6
                 anchors.verticalCenter: parent.verticalCenter
                 text: scombo.displayText
-                color: "white"
                 font.pixelSize: 13
                 elide: Text.ElideRight
             }
@@ -177,7 +175,6 @@ Item {
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
                 text: scombo.popup.opened ? "▴" : "▾"
-                color: "white"
                 font.pixelSize: 10
             }
         }
@@ -195,10 +192,10 @@ Item {
                 NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
             }
             background: Rectangle {
-                color: Qt.rgba(0.10, 0.11, 0.14, 0.92)
+                color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
                 radius: 8
                 border.width: 1
-                border.color: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.45)
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
             }
             contentItem: ListView {
                 clip: true
@@ -222,7 +219,6 @@ Item {
                     anchors.leftMargin: 10
                     anchors.verticalCenter: parent.verticalCenter
                     text: parent.parent.itemText
-                    color: "white"
                     font.pixelSize: 13
                     elide: Text.ElideRight
                 }
@@ -233,7 +229,7 @@ Item {
                     width: 6
                     height: 6
                     radius: 3
-                    color: Constants.moePink
+                    color: Theme.accent
                     visible: scombo.currentIndex === parent.parent.index
                 }
             }
@@ -241,7 +237,7 @@ Item {
             background: Rectangle {
                 radius: 4
                 color: parent.highlighted || parent.hovered
-                    ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                    ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                     : "transparent"
             }
         }
@@ -249,13 +245,68 @@ Item {
 
     // 文本/整数输入:绑 ConfigManager 键,intOnly 启用整数校验;
     // 非法值被后端拒绝(代理格式/非正整数)时编辑结束回填实际生效值。
+    // 百分比滑块:绑 ConfigManager 整数键(0-100),拖动即写;与其它控件一样
+    // 经 resync() 回填(热重载/重置后同步),右侧显示当前百分比。
+    component SettingSlider: Item {
+        id: sslider
+        required property string configKey
+        implicitWidth: 220
+        implicitHeight: 34
+        function resync() { sslide.value = ConfigManager[sslider.configKey] }
+        Component.onCompleted: root.registerSyncable(sslider)
+        Row {
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 10
+            Slider {
+                id: sslide
+                width: 180
+                from: 0
+                to: 100
+                stepSize: 5
+                value: ConfigManager[sslider.configKey]
+                onMoved: ConfigManager[sslider.configKey] = Math.round(value)
+                background: Rectangle {
+                    x: sslide.leftPadding
+                    y: sslide.topPadding + sslide.availableHeight / 2 - height / 2
+                    width: sslide.availableWidth
+                    height: 4
+                    radius: 2
+                    color: Theme.borderSoft
+                    Rectangle {
+                        width: sslide.visualPosition * parent.width
+                        height: parent.height
+                        radius: 2
+                        color: Theme.accent
+                    }
+                }
+                handle: Rectangle {
+                    x: sslide.leftPadding + sslide.visualPosition * (sslide.availableWidth - width)
+                    y: sslide.topPadding + sslide.availableHeight / 2 - height / 2
+                    implicitWidth: 16
+                    implicitHeight: 16
+                    radius: 8
+                    color: sslide.pressed ? Theme.accentDeep : Theme.accentInk
+                    border.width: 1
+                    border.color: Theme.accent
+                }
+            }
+            Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: 30
+                text: Math.round(sslide.value) + "%"
+                color: Theme.textMuted
+                font.pixelSize: 12
+            }
+        }
+    }
+
     component SettingField: TextField {
         id: sfield
         required property string configKey
         property bool intOnly: false
         width: 220
         height: 34
-        color: "white"
+        color: Theme.textPrimary
         font.pixelSize: 13
         leftPadding: 12
         rightPadding: 12
@@ -279,19 +330,28 @@ Item {
             radius: 8
             color: Theme.bg
             border.width: 1
-            border.color: sfield.activeFocus ? Constants.moePink : Theme.textMuted
+            border.color: sfield.activeFocus ? Theme.accent : Theme.textMuted
         }
     }
 
     // 表驱动设置行:label/description/控件按 items 元数据渲染;
+    // 条件显示行:某些配置项只在相关功能启用时有意义(key → 条件函数,绑定内
+    // 读取的 ConfigManager 属性会注册依赖,切换即时显隐)。
+    readonly property var rowVisibleIf: ({
+        "backgroundMeteorRate": function() { return ConfigManager.backgroundEffect === "starry" }
+    })
+
     // Repeater 注入 modelData(SettingItem 的 required 属性)。
     component SettingItem: SettingRow {
         required property var modelData
+        visible: root.rowVisibleIf[modelData.key] === undefined
+                 || root.rowVisibleIf[modelData.key]()
         label: modelData.label
         description: modelData.description
         SettingSwitch { visible: modelData.widget === "switch"; configKey: modelData.key }
         SettingCombo { visible: modelData.widget === "combo"; configKey: modelData.key; model: modelData.options }
         SettingField { visible: modelData.widget === "field"; configKey: modelData.key; intOnly: modelData.intOnly === true }
+        SettingSlider { visible: modelData.widget === "slider"; configKey: modelData.key }
     }
 
     // 设置页:纵向滚动容器,default 属性直写 Column。
@@ -329,7 +389,6 @@ Item {
 
     // 页标题(分类名)。
     component PageHeader: AppText {
-        color: "white"
         font.pixelSize: 16
         font.bold: true
     }
@@ -342,7 +401,7 @@ Item {
         blurSource: root.backgroundSource
         fullSource: true
         blurRadius: 64
-        glassColor: Qt.rgba(0.04, 0.05, 0.07, 0.55)
+        glassColor: Qt.rgba(Theme.scrimDeep.r, Theme.scrimDeep.g, Theme.scrimDeep.b, 0.55)
         border.width: 0
         MouseArea {
             anchors.fill: parent
@@ -366,8 +425,8 @@ Item {
             blurSource: root.backgroundSource
             fullSource: true
             blurRadius: 48
-            glassColor: Qt.rgba(0.10, 0.11, 0.14, 0.72)
-            borderColor: Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.35)
+            glassColor: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.72)
+            borderColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)
             radius: parent.radius
         }
 
@@ -390,12 +449,11 @@ Item {
                 spacing: 8
                 AppText {
                     text: "♥"
-                    color: Constants.moePink
+                    color: Theme.accent
                     font.pixelSize: 20
                 }
                 AppText {
                     text: "设置"
-                    color: "white"
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -410,7 +468,7 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 height: 1
-                color: Qt.rgba(1, 1, 1, 0.08)
+                color: Theme.borderSoft
             }
 
             // 两级主体:左分类列表,右设置项页。
@@ -456,7 +514,7 @@ Item {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: catItem.label
                                 font.pixelSize: 14
-                                color: catList.currentIndex === catItem.index ? "white" : Theme.textMuted
+                                color: catList.currentIndex === catItem.index ? Theme.textPrimary : Theme.textMuted
                             }
                             Rectangle {
                                 anchors.right: parent.right
@@ -465,16 +523,16 @@ Item {
                                 width: 6
                                 height: 6
                                 radius: 3
-                                color: Constants.moePink
+                                color: Theme.accent
                                 visible: catList.currentIndex === catItem.index
                             }
                         }
                         background: Rectangle {
                             radius: 8
                             color: catList.currentIndex === catItem.index
-                                   ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.25)
+                                   ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.25)
                                    : catItem.hovered
-                                     ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.12)
+                                     ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12)
                                      : "transparent"
                         }
                     }
@@ -483,7 +541,7 @@ Item {
                 Rectangle {
                     Layout.preferredWidth: 1
                     Layout.fillHeight: true
-                    color: Qt.rgba(1, 1, 1, 0.08)
+                    color: Theme.borderSoft
                 }
 
                 StackLayout {
@@ -544,7 +602,6 @@ Item {
                             }
                             AppText {
                                 text: ConfigManager.configPath
-                                color: "white"
                                 font.pixelSize: 12
                                 wrapMode: Text.WrapAnywhere
                                 width: parent.width
@@ -562,7 +619,6 @@ Item {
                         PageHeader { text: "关于" }
                         AppText {
                             text: Qt.application.name + " " + Qt.application.version
-                            color: "white"
                             font.pixelSize: 14
                         }
                         AppText {
@@ -601,7 +657,7 @@ Item {
                                 }
                                 contentItem: AppText {
                                     text: resetBtn.confirmArmed ? "确认恢复" : "恢复默认"
-                                    color: resetBtn.confirmArmed ? "white" : Constants.moePink
+                                    color: resetBtn.confirmArmed ? Theme.accentInk : Theme.accentText
                                     font.pixelSize: 13
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -610,15 +666,15 @@ Item {
                                     radius: parent.height / 2
                                     color: resetBtn.confirmArmed
                                         ? (parent.hovered
-                                           ? Qt.rgba(0.76, 0.18, 0.22, 1)
-                                           : Qt.rgba(0.87, 0.24, 0.28, 1))
+                                           ? Theme.dangerPressed
+                                           : Theme.danger)
                                         : (parent.hovered
-                                           ? Qt.rgba(Constants.moePink.r, Constants.moePink.g, Constants.moePink.b, 0.18)
+                                           ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                            : "transparent")
                                     border.width: 1
                                     border.color: resetBtn.confirmArmed
-                                        ? Qt.rgba(0.87, 0.24, 0.28, 1)
-                                        : Constants.moePink
+                                        ? Theme.danger
+                                        : Theme.accent
                                 }
                             }
                         }

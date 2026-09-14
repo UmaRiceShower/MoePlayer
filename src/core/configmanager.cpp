@@ -255,6 +255,88 @@ bool validateSearchLimit(const QVariant &v)
     return i >= 1 && i <= 100;
 }
 
+// 配色方案(与 ThemeStore.palettes 的 key 一一对应)与背景效果(ThemeStore.effects)。
+QVariantList optionsThemePalette()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("夜樱")},
+                    {QStringLiteral("key"), QStringLiteral("yozakura")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("炭黑")},
+                    {QStringLiteral("key"), QStringLiteral("sumi")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("星夜")},
+                    {QStringLiteral("key"), QStringLiteral("hoshiyo")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("雾紫")},
+                    {QStringLiteral("key"), QStringLiteral("kasumi")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("雨蓝")},
+                    {QStringLiteral("key"), QStringLiteral("ame")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("夏夜")},
+                    {QStringLiteral("key"), QStringLiteral("natsuyo")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("琥珀")},
+                    {QStringLiteral("key"), QStringLiteral("kohaku")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("奶白")},
+                    {QStringLiteral("key"), QStringLiteral("milk")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("浅樱")},
+                    {QStringLiteral("key"), QStringLiteral("hazakura")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("薄荷")},
+                    {QStringLiteral("key"), QStringLiteral("mint")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("晴空")},
+                    {QStringLiteral("key"), QStringLiteral("sora")}},
+    };
+}
+
+bool validateThemePalette(const QVariant &v)
+{
+    static const QStringList keys{QStringLiteral("yozakura"), QStringLiteral("sumi"),
+                                  QStringLiteral("hoshiyo"), QStringLiteral("kasumi"),
+                                  QStringLiteral("ame"), QStringLiteral("natsuyo"),
+                                  QStringLiteral("kohaku"), QStringLiteral("milk"),
+                                  QStringLiteral("hazakura"), QStringLiteral("mint"),
+                                  QStringLiteral("sora")};
+    return keys.contains(v.toString());
+}
+
+QVariantList optionsBackgroundEffect()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("落樱")},
+                    {QStringLiteral("key"), QStringLiteral("sakura")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("萤火")},
+                    {QStringLiteral("key"), QStringLiteral("firefly")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("星空流星")},
+                    {QStringLiteral("key"), QStringLiteral("starry")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("夜雨")},
+                    {QStringLiteral("key"), QStringLiteral("rain")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("无")},
+                    {QStringLiteral("key"), QStringLiteral("none")}},
+    };
+}
+
+bool validateBackgroundEffect(const QVariant &v)
+{
+    static const QStringList keys{QStringLiteral("sakura"), QStringLiteral("firefly"),
+                                  QStringLiteral("starry"), QStringLiteral("rain"),
+                                  QStringLiteral("none")};
+    return keys.contains(v.toString());
+}
+
+QVariantList optionsBackgroundMotion()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("静止(不刷新)")},
+                    {QStringLiteral("key"), QStringLiteral("off")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("极低频 · 12fps")},
+                    {QStringLiteral("key"), QStringLiteral("low")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("流畅 · 30fps")},
+                    {QStringLiteral("key"), QStringLiteral("high")}},
+    };
+}
+
+bool validatePercent(const QVariant &v)
+{
+    const int i = v.toInt();
+    return i >= 0 && i <= 100;
+}
+
 } // namespace MoeConfig
 
 // ---------- ConfigManager ----------
@@ -353,6 +435,9 @@ QVariantList ConfigManager::items() const
             break;
         case MoeConfig::Widget::Field:
             m.insert(QStringLiteral("widget"), QStringLiteral("field"));
+            break;
+        case MoeConfig::Widget::Slider:
+            m.insert(QStringLiteral("widget"), QStringLiteral("slider"));
             break;
         case MoeConfig::Widget::Hidden:
             break;
@@ -469,11 +554,15 @@ void ConfigManager::commit()
                                  "# 启动时读取;外部修改后自动热重载(立即生效)。\n"
                                  "# 缺失或类型不合法的键回退默认值;删除本文件即恢复出厂。\n"
                                  "# 敏感数据(账号密码/凭据)不存于此,仍由 QSettings 管理。\n"
-                                 "# 仅写用户显式配置过的键;未写的键=默认值\n");
+                                 "# 仅写用户显式配置过的键(主题高级覆盖项除外,恒列出);未写的键=默认值\n");
     QString cur;
     for (const auto &it : MoeConfig::items()) {
         // 只写用户显式配置过的键(m_overrides);未出现的键用默认,不补写。
-        if (!m_overrides.contains(QString::fromUtf8(it.name)))
+        // 例外:字符串型隐藏项(theme* 高级覆盖)总是写出 —— 它们是给用户手改的
+        // 占位与文档(空串 = 用预设值),不写出用户无从知道有哪些可调。
+        const bool advancedPlaceholder = it.widget == MoeConfig::Widget::Hidden
+                                         && it.type == MoeConfig::Type::String;
+        if (!m_overrides.contains(QString::fromUtf8(it.name)) && !advancedPlaceholder)
             continue;
         const QString section = QString::fromUtf8(it.section);
         if (section != cur) {

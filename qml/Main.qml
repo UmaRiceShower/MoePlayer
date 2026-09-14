@@ -315,7 +315,7 @@ ApplicationWindow {
         })
     }
 
-    background: MoeBackground {}
+    background: ThemedBackground {}
 
     StackView {
         id: stackView

@@ -27,9 +27,19 @@ layout(std140, binding = 0) uniform buf {
     float u_blurRadius;  // 磨砂模糊半径(px)
     float u_saturation;  // 饱和度提升
     float u_hoverGlow;   // hover 提亮
+    float u_light;       // 1 = 亮色系:加法提亮项收敛(浅底上加亮会过曝)
+    vec4 u_backColor;    // 采样透明区回退色(页面留白 = 主题底色;否则亮主题下透出黑盘)
 };
 
 layout(binding = 1) uniform sampler2D source;
+
+// 采样源内容;透明区(源内容未覆盖处)按预乘 alpha 合成到主题底色上。
+vec4 sampleScene(vec2 uv) {
+    vec4 t = texture(source, uv);
+    t.rgb += u_backColor.rgb * (1.0 - t.a);
+    t.a = 1.0;
+    return t;
+}
 
 // 圆角矩形有向距离(内负外正)。
 float sdRoundBox(vec2 p, vec2 b, float r) {
@@ -57,7 +67,7 @@ vec4 blurSample(vec2 texUV, float radiusPx) {
     vec2 step_ = radiusPx / u_texSize * 0.5;
     for (float x = -2.0; x <= 2.0; x += 1.0) {
         for (float y = -2.0; y <= 2.0; y += 1.0) {
-            sum += texture(source, texUV + vec2(x, y) * step_);
+            sum += sampleScene(texUV + vec2(x, y) * step_);
             total += 1.0;
         }
     }
@@ -97,7 +107,7 @@ void main() {
         ruv = toTexUV(hitPx);
         reflW = clamp((1.0 - normal.z) * 2.0, 0.0, 1.0);
     }
-    vec4 sharp = texture(source, ruv);
+    vec4 sharp = sampleScene(ruv);
 
     // 反射项已在上方折射分支内计算(reflW,纯磨砂时为 0)。
 
@@ -109,13 +119,14 @@ void main() {
     float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
     c.rgb = mix(vec3(luma), c.rgb, 1.0 + u_saturation);
 
-    // 边缘高光 + 反射提亮。
+    // 边缘高光 + 反射提亮(亮底收敛:浅底加亮会过曝成白边)。
     float edge = 1.0 - clamp(normal.z, 0.0, 1.0);
-    c.rgb += vec3(u_edgeLight * edge * edge + reflW * 0.15);
+    float addScale = mix(1.0, 0.35, clamp(u_light, 0.0, 1.0));
+    c.rgb += vec3(u_edgeLight * edge * edge + reflW * 0.15) * addScale;
 
-    // hover 提亮:提亮折射内容 + 边缘光,不盖白膜。
-    c.rgb *= 1.0 + u_hoverGlow * 0.35;
-    c.rgb += vec3(u_hoverGlow * edge * 0.25);
+    // hover 提亮:提亮折射内容 + 边缘光,不盖白膜(亮底同样收敛)。
+    c.rgb *= 1.0 + u_hoverGlow * mix(0.35, 0.15, clamp(u_light, 0.0, 1.0));
+    c.rgb += vec3(u_hoverGlow * edge * 0.25) * addScale;
 
     // 圆角抗锯齿 + alpha 预乘。
     float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
