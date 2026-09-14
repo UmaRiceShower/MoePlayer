@@ -64,6 +64,8 @@ bool validateThemePalette(const QVariant &v);
 QVariantList optionsBackgroundEffect();
 bool validateBackgroundEffect(const QVariant &v);
 QVariantList optionsBackgroundMotion();
+QVariantList optionsPageTransition();
+bool validatePageTransition(const QVariant &v);
 bool validatePercent(const QVariant &v);
 
 #define MoeConfig_Type_bool MoeConfig::Type::Bool
@@ -82,6 +84,7 @@ bool validatePercent(const QVariant &v);
     M(backgroundMotion, "backgroundMotion", QString, "low", "theme", "背景动效帧率(off/low/high;仅含动效的预设生效)", "界面", "背景动效", "含动效的背景按此帧率刷新:极低频几乎看不出刷新、更省,流畅更顺滑;静止预设不受影响。", Combo, optionsBackgroundMotion, nullptr) \
     M(backgroundIntensity, "backgroundIntensity", int, 100, "theme", "背景强度(百分比 0-100)", "界面", "背景强度", "背景整体强度:0 接近纯底色,100 为预设原样。", Slider, nullptr, validatePercent) \
     M(backgroundMeteorRate, "backgroundMeteorRate", int, 100, "theme", "星空流星频率(百分比,0=关)", "界面", "流星频率", "仅「星空流星」效果生效:100 = 约 3.5 秒一颗(现状),50 ≈ 7 秒一颗,0 = 不出现流星。", Slider, nullptr, validatePercent) \
+    M(pageTransition, "pageTransition", QString, "axis_x", "theme", "页面转场(axis_x/slide_up/fade/ios_slide)", "界面", "页面转场", "页面切换动画:横向轻移(Material)、纵向上浮(Kirigami)、纯淡入淡出、横滑视差(iOS)。", Combo, optionsPageTransition, validatePageTransition) \
     M(themeBg, "themeBg", QString, "", "theme", "高级自定义:窗口底色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeSurface, "themeSurface", QString, "", "theme", "高级自定义:面板/卡片底色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeTextPrimary, "themeTextPrimary", QString, "", "theme", "高级自定义:主文字色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \

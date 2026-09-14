@@ -331,6 +331,27 @@ QVariantList optionsBackgroundMotion()
     };
 }
 
+QVariantList optionsPageTransition()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("横向轻移")},
+                    {QStringLiteral("key"), QStringLiteral("axis_x")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("纵向上浮")},
+                    {QStringLiteral("key"), QStringLiteral("slide_up")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("纯淡入淡出")},
+                    {QStringLiteral("key"), QStringLiteral("fade")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("横滑视差")},
+                    {QStringLiteral("key"), QStringLiteral("ios_slide")}},
+    };
+}
+
+bool validatePageTransition(const QVariant &v)
+{
+    static const QStringList keys{QStringLiteral("axis_x"), QStringLiteral("slide_up"),
+                                  QStringLiteral("fade"), QStringLiteral("ios_slide")};
+    return keys.contains(v.toString());
+}
+
 bool validatePercent(const QVariant &v)
 {
     const int i = v.toInt();
