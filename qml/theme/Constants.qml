@@ -66,6 +66,7 @@ QtObject {
     // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.37×窗口宽);
     // 窄窗时 hero 高收缩、卡片保持满带宽,宽窗由高度预算/上限决定。
     readonly property real homeHeroWidthRatio: homeHeroCardWCap / homeHeroCardAspect / homeHeroCardH
+    readonly property int homeHeroTopPad: 40            // hero 区顶部留白(卡顶越过 48px 顶栏)
     readonly property real homeHeroPathStartX: 0.12       // 路径左弧 x 比例
     readonly property real homeHeroPathCenterX: 0.5       // 路径中弧 x 比例
     readonly property real homeHeroPathEndX: 0.88         // 路径右弧 x 比例
@@ -79,8 +80,12 @@ QtObject {
     readonly property int homeHeroTimerMs: 5000           // 自动轮播间隔
     // hero 前排(中心 ±1)保持:改动挂起上限,超时强落(小列表不会轮播走开)
     readonly property int homeHeroPendingMaxMs: 15000
-    readonly property int homeHeroTitlePx: 25             // 卡右下标题字号
-    readonly property int homeHeroYearPx: 16              // 卡右下年份字号
+    // 透视焦距 = 卡宽 × 此比:定值焦距会让大卡的透视相对变弱(侧卡相对更宽、
+    // 边距被吃掉),随卡宽缩放使全屏与窄窗的横向构图完全一致。
+    readonly property real homeHeroFocalRatio: 1.4
+    // 卡上文字随卡宽缩放(与卡同比例,宽窗不会显得字小):参考基准 784px 卡宽。
+    readonly property real homeHeroTitleRatio: 25.0 / 784.0
+    readonly property real homeHeroYearRatio: 16.0 / 784.0
 
     // ---- 媒体库节 ----
     readonly property int homeMediaCardW: 260             // 库卡宽
