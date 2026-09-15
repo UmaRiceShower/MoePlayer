@@ -537,29 +537,100 @@ Item {
     }
 
 
-    // 未登录提示条:无账号时提供服务器管理入口。
-    Rectangle {
-        visible: !AccountManager.hasAccounts
-        anchors.top: parent.top
-        anchors.topMargin: 64
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(420, parent.width - 32)
-        height: 44
-        radius: 8
-        color: Theme.surface
-        border.width: 1
-        border.color: Theme.accent
-        Row {
+    // ---- 全页空态(无可见账号时替代浏览内容)----
+    // 居中:应用图标 + 标题 + 一句说明 + 单一主 CTA(添加服务器)。
+    Item {
+        id: welcome
+        // 无可见账号 = 无账号,或全部隐藏(隐藏即视作不存在)且未露出。
+        visible: root.visibleAccountCount === 0
+        anchors.fill: parent
+
+        Column {
             anchors.centerIn: parent
-            spacing: 12
+            // 视觉中心略上抬(扣除顶栏高度)。
+            anchors.verticalCenterOffset: -root.navH / 2
+            spacing: 0
+
+            // 应用图标作徽记(专属徽标后续再设计)。
+            Image {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 96
+                height: 96
+                source: "qrc:/app/app-icon.svg"
+                sourceSize: Qt.size(192, 192)
+                fillMode: Image.PreserveAspectFit
+                mipmap: true
+            }
+
+            Item { width: 1; height: 28 }
+
             AppText {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "未添加服务器，添加后即可浏览媒体库"
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "MoePlayer"
                 color: Theme.textPrimary
+                font.pixelSize: 32
+                font.bold: true
+            }
+
+            Item { width: 1; height: 12 }
+
+            AppText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "连接你的 Emby 服务器，开始观影"
+                color: Theme.textPrimary
+                font.pixelSize: 15
+            }
+
+            Item { width: 1; height: 8 }
+
+            AppText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "登录后，媒体库、继续观看与播放历史都会在首页聚合"
+                color: Theme.textMuted
                 font.pixelSize: 13
             }
-            Button { onClicked: root.openServerManager(); text: "服务器管理" }
+
+            Item { width: 1; height: 36 }
+
+            // 主 CTA(与服务器管理页「添加」同款 pill 样式,放大一号)。
+            Button {
+                id: welcomeAddBtn
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 180
+                height: 44
+                text: "添加服务器"
+                onClicked: root.openServerManager()
+                background: Rectangle {
+                    radius: 22
+                    color: welcomeAddBtn.pressed || welcomeAddBtn.hovered
+                           ? Theme.accentDeep : Theme.accent
+                }
+                contentItem: AppText {
+                    text: welcomeAddBtn.text
+                    color: Theme.accentInk
+                    font.pixelSize: 15
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
         }
+    }
+
+    // 可见账号数(隐藏功能):0 = 无账号或全部隐藏且未露出 → 首页按
+    // "无账号"处理(显示欢迎页)。Alt+S 露出(showHidden)时全部计入。
+    // 依赖:accounts(accountsChanged)与 showHidden(hiddenChanged)。
+    property int visibleAccountCount: {
+        const list = AccountManager.accounts
+        if (AccountManager.showHidden)
+            return list.length
+        let n = 0
+        for (let i = 0; i < list.length; ++i) {
+            if (!list[i].hidden && !list[i].hiddenByFolder)
+                ++n
+        }
+        return n
     }
 
     // 库行(一个媒体库):行头文字(库名)+ 该库条目横向卡片行。

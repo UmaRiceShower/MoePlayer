@@ -8,8 +8,8 @@
 #include "constants.h"
 
 namespace {
-// 便携标记:空文件,存在即便携。
-// 配置化 —— 它本身就是"配置存在哪"的开关,不能再由配置决定。
+// 便携标记:空文件,存在即便携。不做配置化 —— 它本身就是"配置存在哪"
+// 的开关,不能再由配置决定。
 const QString kPortableMarker = QStringLiteral("portable_mode.txt");
 
 bool g_portable = false;
