@@ -1,5 +1,12 @@
 #include "playback/mpvclient.h"
 
+#if defined(Q_OS_WIN)
+// CREATE_NO_WINDOW 需要;防御宏避免 windows.h 的 min/max 宏污染本文件。
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -82,9 +89,14 @@ QString MpvClient::findMpvBinary()
     const QByteArray env = qgetenv("MOEPLAYER_MPV");
     if (!env.isEmpty())
         return QString::fromLocal8Bit(env);
-    // 发版内封:应用目录放 mpv。
+    // 发版内封:应用目录放 mpv(Windows 可执行名为 mpv.exe)。
+#ifdef Q_OS_WIN
+    const QString bundled =
+        QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("mpv.exe"));
+#else
     const QString bundled =
         QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("mpv"));
+#endif
     if (QFileInfo::exists(bundled))
         return bundled;
     // PATH 上的系统 mpv(QProcess 自行解析)。
@@ -412,11 +424,19 @@ void MpvClient::scheduleRetry(Session *s)
 
 void MpvClient::spawnMpv(Session *s)
 {
-    // 临时 unix socket(--input-ipc-server):fd 继承的 --input-ipc-client 在
-    // mpv 侧不生效,改用文件 socket + QLocalSocket(稳定,跨平台)。
+    // IPC 通道名:Linux/Unix = 临时目录下的 socket 文件;Windows = 命名管道
+    // 裸名 —— mpv 与 QLocalSocket 都会对缺失的 \\.\pipe\ 前缀自动补齐
+    // (mpv input/ipc-win.c、Qt qlocalserver_win.cpp 的 pipePath),两端传
+    // 同一个裸名即可对上,不能把盘符路径塞进管道命名空间。
+    // (fd 继承的 --input-ipc-client 在 mpv 侧不生效,故走 socket/管道。)
+#ifdef Q_OS_WIN
+    const QString sockPath = QStringLiteral("moe-mpv-") +
+                             QUuid::createUuid().toString(QUuid::WithoutBraces);
+#else
     const QString sockPath = QDir::tempPath() + QStringLiteral("/moe-mpv-") +
                              QUuid::createUuid().toString(QUuid::WithoutBraces) +
                              QStringLiteral(".sock");
+#endif
     s->sockPath = sockPath;
 
     const QString mpvBin = findMpvBinary();
@@ -455,6 +475,14 @@ void MpvClient::spawnMpv(Session *s)
         args << QStringLiteral("--http-proxy=") + proxy;
 
     s->proc = new QProcess(this);
+#ifdef Q_OS_WIN
+    // 官方 Windows mpv.exe 是 console 子系统进程:GUI 父进程启动它时,即使
+    // stdout/stderr 已重定向到管道,Windows 仍会为它分配一个控制台窗口
+    // (黑窗一闪)。CREATE_NO_WINDOW 抑制之;stdio 管道不受影响,--terminal
+    // 的 [mpv] 日志转发照常(无控制台时 mpv 回退写管道)。
+    s->proc->setCreateProcessArgumentsModifier(
+        [](QProcess::CreateProcessArguments *args) { args->flags |= CREATE_NO_WINDOW; });
+#endif
     s->proc->setProgram(mpvBin);
     s->proc->setArguments(args);
     connect(s->proc, &QProcess::finished, this, [key = s->key, this](int code, QProcess::ExitStatus) {
@@ -495,8 +523,26 @@ void MpvClient::spawnMpv(Session *s)
         if (cur && cur->proc)
             forwardLog(cur->proc->readAllStandardError());
     });
-    connect(s->proc, &QProcess::errorOccurred, this, [key = s->key, this](QProcess::ProcessError err) {
-        qWarning() << "MpvClient: mpv 启动失败" << int(err) << "key" << key;
+    connect(s->proc, &QProcess::errorOccurred, this,
+            [key = s->key, mpvBin, this](QProcess::ProcessError err) {
+        if (err != QProcess::FailedToStart) {
+            // Crashed 等:结束语义由 finished 处理器承担,这里只记录。
+            qWarning() << "MpvClient: mpv 进程错误" << int(err) << "key" << key;
+            return;
+        }
+        // 启动即失败 = 找不到可执行(或不可执行)。给出可操作指引并结束会话
+        // (否则 IPC 连接会以 150ms 无限重试;播放从未开始,静默关窗与
+        // fail() 的协商失败同语义,不回传不刷新)。
+        qWarning().noquote()
+            << "MpvClient: 无法启动 mpv(尝试:" << mpvBin << ")。"
+            << "请安装 mpv 并加入 PATH,或将其放到 MoePlayer 可执行文件同目录"
+#ifdef Q_OS_WIN
+            << "(mpv.exe)"
+#endif
+            << ",或设环境变量 MOEPLAYER_MPV 指向其完整路径";
+        Session *cur = sessionFor(key);
+        if (cur)
+            destroySession(cur, false, true);
     });
     qInfo() << "MpvClient: 启动 mpv 进程" << s->key;
     s->proc->start();
@@ -1184,8 +1230,10 @@ void MpvClient::destroySession(Session *s, bool playEnded, bool errored)
         s->sock->abort();
         s->sock->deleteLater();
     }
+#ifndef Q_OS_WIN // Windows 是命名管道,无文件可删(mpv 退出即消)
     if (!s->sockPath.isEmpty())
         QFile::remove(s->sockPath);
+#endif
     if (s->proc) {
         // 断开 finished/事件连接,再终止:lambda 捕获 Session*,禁用后再 kill
         // 避免 finished 回调用到已删除的 s。

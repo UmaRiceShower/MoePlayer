@@ -58,6 +58,22 @@ cmake --build build -j$(nproc)
 
 构建产物内嵌 QML 模块(qmldir/qmltypes)与预编译 shader(.qsb),无需额外拷贝资源。
 
+### Windows
+
+```powershell
+cmake -B build -G "Visual Studio 17 2022" -A x64
+cmake --build build --config Release
+windeployqt --qmldir qml --release --no-compiler-runtime --no-translations --dir package build\Release\MoePlayer.exe
+Copy-Item build\Release\MoePlayer.exe package\
+Copy-Item -Recurse resources\lua,resources\shaders package\
+```
+
+CI(`build` 工作流,手动触发)的 `windows` 作业产出 NSIS 安装包
+`MoePlayer-Setup-<版本>.exe`(windeployqt 运行时 + VC++ 官方运行库安装器 +
+lua/shaders + 开始菜单快捷方式与卸载器)。HTTPS 走 Qt 自带的 Schannel TLS
+后端,无需分发 OpenSSL;播放仍需外部 mpv(安装器完成页有提示:PATH 或安装
+目录下放 mpv.exe)。
+
 ## 使用
 
 1. 启动后在服务器管理页添加 Emby 服务器地址

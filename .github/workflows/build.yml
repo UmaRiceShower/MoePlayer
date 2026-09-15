@@ -41,6 +41,75 @@ jobs:
           path: dist/*.AppImage
           if-no-files-found: error
 
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 Qt 6.8
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          modules: 'qtshadertools qtwebsockets'
+          cache: true
+
+      # 不写 -G:VS 生成器名随版本变(windows-latest 自 2026-06 起是 VS 2026
+      # 镜像,已无 VS 2022 实例),让 CMake 自选最新 VS 生成器(镜像 CMake ≥4.2
+      # 支持 VS 18 2026)。多配置生成器,产物在 build\Release\。Qt 的 msvc2022
+      # 构建与 VS 2026 工具集 ABI 兼容(MSVC 2015+ 稳定 ABI)。
+      - name: 构建
+        run: |
+          cmake -B build -A x64
+          cmake --build build --config Release --parallel
+
+      - name: windeployqt 收集运行时
+        # --qmldir:扫 QML import 决定要带哪些 Qt Quick 模块(应用自身的
+        # MoePlayer.Core 已编进 exe,扫描器找不到只报无害警告)。
+        # --no-compiler-runtime:VC 运行库按 Qt 官方文档走微软官方 vc_redist
+        # 安装器(NSIS 里静默执行),不散装 DLL(授权不允许)。
+        # --no-translations:应用自带中文文案,不带 Qt 翻译。
+        # --no-opengl-sw:剔除 opengl32sw.dll(约 20MB 的软件 OpenGL 回退渲染,
+        # 仅 RHI 走 OpenGL 后端才加载;Windows 默认 D3D11,永远用不上)。
+        run: |
+          windeployqt --qmldir qml --release --no-compiler-runtime --no-translations --no-opengl-sw --dir package "build\Release\MoePlayer.exe"
+          Copy-Item "build\Release\MoePlayer.exe" package\
+          Copy-Item -Recurse "resources\lua" "package\lua"
+          Copy-Item -Recurse "resources\shaders" "package\shaders"
+          Copy-Item "LICENSE","THIRD-PARTY-NOTICES.md" package\
+
+      - name: 下载 VC++ 运行库安装器
+        # aka.ms/vc14 = 官方"最新 v14 运行库"永链(VS 2017–2026 同一家族,
+        # 实测重定向到 vs/18 的最新包),镜像换代也不用跟改。
+        run: curl.exe -L --fail -o vc_redist.x64.exe https://aka.ms/vc14/vc_redist.x64.exe
+
+      # windows-2025-vs2026 镜像不再预装 NSIS(旧镜像有),装一份用于打包。
+      # choco/nsis.install 改的是"机器 PATH"且不建 shim —— 对本作业已启动的
+      # 进程不可见,须写入 GITHUB_PATH 让后续步骤拿到;目录从机器 PATH 动态
+      # 取(含 makensis.exe 的那条),不写死安装路径。
+      - name: 安装 NSIS
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+          $nsisDir = ($machinePath -split ';' |
+                      Where-Object { Test-Path (Join-Path $_ 'makensis.exe') } |
+                      Select-Object -First 1)
+          if (-not $nsisDir) { $nsisDir = 'C:\Program Files (x86)\NSIS' }
+          Add-Content $env:GITHUB_PATH $nsisDir
+          Write-Host "makensis 目录: $nsisDir"
+
+      - name: NSIS 打包
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(MoePlayer VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          makensis /DVERSION=$ver packaging/windows-installer.nsi
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-installer
+          path: MoePlayer-Setup-*.exe
+          if-no-files-found: error
+
   deb:
     runs-on: ubuntu-22.04
     container: debian:trixie

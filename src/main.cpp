@@ -59,7 +59,11 @@ extern void qml_register_types_MoePlayer_Core();
 int main(int argc, char *argv[])
 {
     // 固定 OpenGL 场景图后端,须在 QGuiApplication 构造前设置。
+    // Windows 例外:保持默认(D3D11)—— 强制桌面 GL 在部分 Windows 驱动上
+    // 不稳,而 qsb 烘焙已含各 RHI 后端变体,D3D11 跑同一套着色器。
+#ifndef Q_OS_WIN
     qputenv("QSG_RHI_BACKEND", "opengl");
+#endif
     // Qt 6 GUI 应用默认抑制控制台日志,强制输出便于终端调试。
     qputenv("QT_FORCE_STDERR_LOGGING", "1");
 
@@ -76,11 +80,15 @@ int main(int argc, char *argv[])
     AppLog::install();
 
     // 场景图固定 OpenGL 后端(嵌入视频已交外部 mpv 进程,Qt 不渲染视频帧,
-    // 但其余 QML/ShaderEffect 仍走 OpenGL RHI)。
+    // 但其余 QML/ShaderEffect 仍走 OpenGL RHI)。Windows 不设,走默认 D3D11。
+#if !defined(Q_OS_WIN)
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
     const auto api = QQuickWindow::graphicsApi();
     qInfo().noquote() << "RHI backend:"
                       << (api == QSGRendererInterface::OpenGL ? QStringLiteral("opengl")
+                           : api == QSGRendererInterface::Direct3D11 ? QStringLiteral("d3d11")
+                           : api == QSGRendererInterface::Vulkan ? QStringLiteral("vulkan")
                                                               : QStringLiteral("other"));
     qInfo().noquote() << "QPA platform:" << QGuiApplication::platformName()
                       << "version:" << app.applicationVersion();
