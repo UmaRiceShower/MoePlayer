@@ -220,6 +220,13 @@ bool validateWheelStep(const QVariant &v)
     return v.toInt() >= 1;
 }
 
+// 键位文本:非空即可(QKeySequence 容错解析,非法键名 Qt 告警并忽略,
+// 空字符串则快捷键彻底死掉,故拒绝)。
+bool validateShortcut(const QVariant &v)
+{
+    return !v.toString().trimmed().isEmpty();
+}
+
 bool validatePageWheelStep(const QVariant &v)
 {
     return v.toInt() >= 0;

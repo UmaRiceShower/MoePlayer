@@ -67,6 +67,7 @@ QVariantList optionsBackgroundMotion();
 QVariantList optionsPageTransition();
 bool validatePageTransition(const QVariant &v);
 bool validatePercent(const QVariant &v);
+bool validateShortcut(const QVariant &v);
 
 #define MoeConfig_Type_bool MoeConfig::Type::Bool
 #define MoeConfig_Type_QString MoeConfig::Type::String
@@ -118,7 +119,13 @@ bool validatePercent(const QVariant &v);
     M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "scroll", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \
     M(superRes, "superRes", QString, "off", "video", "Anime4K 超分预设(shader 链档位;mpv 内 CTRL+0..8 可即时切换)", "播放", "超分(Anime4K)", "Anime4K shader 链档位:模式 A/B/C 为一次放大(分别优化 1080p/720p/降采样源),A+/B+/C+A 为二次放大(仅放大比 ≥2 倍时用),去噪/去模糊两档无尺寸门槛。CNN 放大 pass 要求输出大于片源 1.2 倍,窗口不够大时该段不生效(mpv 内按 CTRL+0 关闭)。", Combo, optionsSuperRes, validateSuperRes) \
     M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, optionsHistoryView, validateHistoryView) \
-    M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr)
+    M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr) \
+    M(shortcutBack, "shortcutBack", QString, "Alt+Left", "shortcut", "返回键(QKeySequence 文本;| 分隔多键位)", "快捷键", "返回", "返回上一页;浮层打开时优先关浮层。", Field, nullptr, validateShortcut) \
+    M(shortcutHome, "shortcutHome", QString, "Alt+Home", "shortcut", "回首页清栈键(| 分隔多键位)", "快捷键", "回首页", "回到首页并清空页面栈。", Field, nullptr, validateShortcut) \
+    M(shortcutSearch, "shortcutSearch", QString, "Ctrl+K|Ctrl+F|/", "shortcut", "搜索键(| 分隔多键位)", "快捷键", "搜索", "打开/关闭搜索浮层。", Field, nullptr, validateShortcut) \
+    M(shortcutSettings, "shortcutSettings", QString, "Ctrl+,", "shortcut", "设置键(| 分隔多键位)", "快捷键", "设置", "打开/关闭设置浮层。", Field, nullptr, validateShortcut) \
+    M(shortcutServerManager, "shortcutServerManager", QString, "Ctrl+O", "shortcut", "服务器管理键(| 分隔多键位)", "快捷键", "服务器管理", "打开服务器管理页。", Field, nullptr, validateShortcut) \
+    M(shortcutRevealHidden, "shortcutRevealHidden", QString, "Alt+S", "shortcut", "临时露出隐藏项键(| 分隔多键位)", "快捷键", "露出隐藏项", "临时显示已隐藏的服务器与文件夹(仅本次运行,不持久化)。", Field, nullptr, validateShortcut)
 
 // 表构建行(元数据;宏行即真相)。
 #define MOECONFIG_ITEM_ROW(n, tk, t, d, s, c, us, l, ds, w, o, v) \

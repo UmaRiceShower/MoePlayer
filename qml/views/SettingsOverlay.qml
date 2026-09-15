@@ -488,6 +488,7 @@ Item {
                         ListElement { label: "播放" }
                         ListElement { label: "媒体库" }
                         ListElement { label: "详情页" }
+                        ListElement { label: "快捷键" }
                         ListElement { label: "代理" }
                         ListElement { label: "关于" }
                     }
@@ -582,6 +583,22 @@ Item {
                         Repeater {
                             model: root.itemsFor("详情页")
                             delegate: SettingItem {}
+                        }
+                    }
+
+                    // ---- 快捷键(配置项经 items 表枚举) ----
+                    SettingsPage {
+                        PageHeader { text: "快捷键" }
+                        Repeater {
+                            model: root.itemsFor("快捷键")
+                            delegate: SettingItem {}
+                        }
+                        AppText {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            text: "键位语法:QKeySequence 文本(如 Ctrl+K、Alt+Left、/);同一功能多个键位用 | 分隔。修改即时生效,无需重启。"
+                            color: Theme.textMuted
+                            font.pixelSize: 12
                         }
                     }
 

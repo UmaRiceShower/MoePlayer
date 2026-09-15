@@ -578,7 +578,7 @@ Item {
         }
         AppText {
             anchors.verticalCenter: parent.verticalCenter
-            text: "服务器管理（Ctrl+O）"
+            text: "服务器管理"
             color: Theme.textPrimary
             font.pixelSize: 24
             font.bold: true
@@ -588,13 +588,6 @@ Item {
             text: "· " + root.visibleAccountCount
             color: Theme.textMuted
             font.pixelSize: 16
-        }
-        AppText {
-            visible: AccountManager.showHidden
-            anchors.verticalCenter: parent.verticalCenter
-            text: "已显示隐藏项（Alt+S 收起）"
-            color: Theme.accent
-            font.pixelSize: 13
         }
     }
 
