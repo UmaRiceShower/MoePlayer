@@ -247,7 +247,12 @@ private:
                                            const QString &serverUrl) const;
 
     EmbyClient *m_client;
+#ifdef Q_OS_WIN
+    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
+                         MoePlayer::kAppName, MoePlayer::kAppName};
+#else
     QSettings m_settings;
+#endif
     // 程序文档持久化(配置键 JSON + 缓存文件 JSON),注入本实例的
     // QSettings 与 CacheLocation(见 persistmap-design.md)。
     PersistMap m_persist;

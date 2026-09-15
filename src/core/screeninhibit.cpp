@@ -1,9 +1,13 @@
 #include "screeninhibit.h"
 
+#include <QGuiApplication>
+#if defined(Q_OS_UNIX)
 #include <QtDBus/QDBusConnection>
 #include <QtDBus/QDBusMessage>
 #include <QtDBus/QDBusUnixFileDescriptor>
-#include <QGuiApplication>
+#elif defined(Q_OS_WIN)
+#include <windows.h>
+#endif
 
 int ScreenInhibit::s_count = 0;
 
@@ -39,6 +43,7 @@ void ScreenInhibit::applyActive(bool on)
     if (on == m_active)
         return;
     m_active = on;
+#if defined(Q_OS_UNIX)
     const QString appName = QGuiApplication::applicationDisplayName();
 
     if (on) {
@@ -97,4 +102,18 @@ void ScreenInhibit::applyActive(bool on)
         }
         qInfo() << "ScreenInhibit: inactive";
     }
+#elif defined(Q_OS_WIN)
+    // SetThreadExecutionState:ES_CONTINUOUS 使标志持续生效;释放时只保留
+    // CONTINUOUS(恢复系统默认电源策略)。调用失败无句柄可查,仅记日志。
+    const EXECUTION_STATE st = SetThreadExecutionState(
+        ES_CONTINUOUS | (on ? (ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED) : 0));
+    if (st == NULL) {
+        qWarning("ScreenInhibit: SetThreadExecutionState failed: %lu", GetLastError());
+        return;
+    }
+    qInfo() << "ScreenInhibit:" << (on ? "active (win32)" : "inactive (win32)");
+#else
+    qWarning("ScreenInhibit: platform unsupported");
+    Q_UNUSED(on)
+#endif
 }

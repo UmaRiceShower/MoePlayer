@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QSettings>
+
+#include "core/constants.h"
 #include <QtQml/qqmlregistration.h>
 
 //! QSettings 持久化的用户设置(QML 单例 "MoePlayer.Core SettingsStore")。
@@ -25,6 +27,10 @@ signals:
     void serverUrlChanged();
 
 private:
-    // 默认构造依赖 main.cpp 中已设置的 organizationName/applicationName。
+#ifdef Q_OS_WIN
+    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
+                         MoePlayer::kAppName, MoePlayer::kAppName};
+#else
     QSettings m_settings;
+#endif
 };

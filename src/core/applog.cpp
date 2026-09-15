@@ -12,6 +12,8 @@
 #include <cstdio>
 #if defined(Q_OS_UNIX)
 #include <unistd.h>
+#elif defined(Q_OS_WIN)
+#include <io.h> // MSVC 的 _isatty/_fileno 在此(glibc 由 stdio 顺带给出)
 #endif
 
 namespace {

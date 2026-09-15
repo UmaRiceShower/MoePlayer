@@ -16,7 +16,14 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # qrc 资源路径。buildDir 由 qmlls 自动读取,无需手动配置扩展。
 set(QT_QML_GENERATE_QMLLS_INI ON)
 
-find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
+# DBus 仅用于 Linux 的待机抑制(ScreenInhibit);Windows 走 SetThreadExecutionState。
+if(UNIX)
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
+    set(MOEPLAYER_PLATFORM_LIBS Qt6::DBus)
+else()
+    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
+    set(MOEPLAYER_PLATFORM_LIBS "")
+endif()
 # 官方推荐项目默认(Qt 6.3+):开 AUTOMOC/AUTOUIC、GNUInstallDirs、RPATH,
 # 并按 REQUIRES 6.8 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
 # 不设 AUTORCC(无 .qrc)与 C++ 标准(上方手动设置,该命令不涉及)。
@@ -36,6 +43,8 @@ set_source_files_properties(qml/FuzzyMatch.qml PROPERTIES QT_QML_SINGLETON_TYPE 
 # qmldir/MoePlayer.Core.qmltypes 到 build/qml/MoePlayer/Core/,资源嵌入
 # qrc:/qt/qml/MoePlayer/Core/。NO_PLUGIN 对可执行目标自动生效。
 qt_add_executable(MoePlayer
+    # WIN32:Windows 下 GUI 子系统,不弹控制台窗口(其它平台无副作用)。
+    WIN32
     src/main.cpp
     src/core/settingsstore.cpp
     src/core/embyclient.cpp
@@ -53,6 +62,11 @@ qt_add_executable(MoePlayer
     src/models/posterprovider.cpp
     src/playback/mpvclient.cpp
 )
+
+# Windows 可执行图标(.rc 由 windeps 的 rc.exe 处理)。
+if(WIN32)
+    target_sources(MoePlayer PRIVATE packaging/moeplayer.rc)
+endif()
 
 qt_add_qml_module(MoePlayer
     URI MoePlayer.Core
@@ -150,7 +164,7 @@ target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_APP_ID="${MOEPLAYER_APP_ID}"
     # 仅 Debug 启用 QML 调试/剖析(QML Profiler / -qmljsdebugger 需要 QT_QML_DEBUG)。
     $<$<CONFIG:Debug>:QT_QML_DEBUG>)
-target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets Qt6::DBus)
+target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets ${MOEPLAYER_PLATFORM_LIBS})
 
 include(GNUInstallDirs)
 install(TARGETS MoePlayer RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
@@ -171,10 +185,14 @@ add_custom_command(TARGET MoePlayer POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders
         ${CMAKE_BINARY_DIR}/shaders
     COMMENT "Copying Anime4K shaders to build/shaders")
-install(FILES packaging/${MOEPLAYER_APP_ID}.desktop
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
-install(DIRECTORY packaging/icons/hicolor/
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor)
+# desktop 文件与 hicolor 图标仅对 Linux 包有意义(Windows 由 windeployqt
+# + NSIS 打包,exe 图标在 packaging/moeplayer.rc)。
+if(UNIX)
+    install(FILES packaging/${MOEPLAYER_APP_ID}.desktop
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+    install(DIRECTORY packaging/icons/hicolor/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor)
+endif()
 install(FILES LICENSE THIRD-PARTY-NOTICES.md
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/moeplayer)
 
