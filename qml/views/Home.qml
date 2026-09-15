@@ -335,7 +335,7 @@ Item {
         // header 高度异步变化时 ListView 不会重排条目,只把 header 顶出内容区。
         header: Item {
             id: heroCar
-            height: root.heroH + heroCar.mediaSecH
+            height: Constants.homeHeroTopPad + root.heroH + heroCar.mediaSecH
             width: pageList.width
             clip: false
             readonly property real cardH: root.heroH * Constants.homeHeroCardH
@@ -351,6 +351,7 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
+                anchors.topMargin: Constants.homeHeroTopPad
                 height: root.heroH
                 model: heroModel
                 onCurrentIndexChanged: {
@@ -387,7 +388,7 @@ Item {
                 z: 7
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
-                anchors.topMargin: root.heroH * 0.5 + heroCar.cardH / 2 + Constants.homeHeroDotsGap
+                anchors.topMargin: Constants.homeHeroTopPad + root.heroH * 0.5 + heroCar.cardH / 2 + Constants.homeHeroDotsGap
                 spacing: Constants.homeHeroDotSpacing
                 Repeater {
                     model: heroModel.count
@@ -428,7 +429,7 @@ Item {
             Column {
                 id: mediaLib
                 anchors.top: parent.top
-                anchors.topMargin: root.heroH
+                anchors.topMargin: Constants.homeHeroTopPad + root.heroH
                 width: parent.width
                 spacing: 10
                 visible: AccountManager.homeRows.count > 0
@@ -935,7 +936,7 @@ Item {
                     visible: (hcard.modelData.year || 0) > 0
                     text: hcard.modelData.year || ""
                     color: Theme.textOnBadge
-                    font.pixelSize: Constants.homeHeroYearPx
+                    font.pixelSize: Math.max(12, Math.round(heroCar.cardW * Constants.homeHeroYearRatio))
                     anchors.left: parent.left
                     anchors.bottom: parent.bottom
                 }
@@ -943,7 +944,7 @@ Item {
                     id: titleText
                     text: hcard.modelData.name || ""
                     color: Theme.textOnBadge
-                    font.pixelSize: Constants.homeHeroTitlePx
+                    font.pixelSize: Math.max(16, Math.round(heroCar.cardW * Constants.homeHeroTitleRatio))
                     font.bold: true
                     elide: Text.ElideRight
                     width: Math.min(implicitWidth, heroCar.cardW * 0.55)
@@ -969,7 +970,7 @@ Item {
                 property real w: cardContent.width
                 property real h: cardContent.height
                 property real maxAngle: 38
-                property real focal: 1100
+                property real focal: w * Constants.homeHeroFocalRatio
                 property real sideInset: 0
                 property real meshDensity: 16
                 mesh: Qt.size(16, 16)
