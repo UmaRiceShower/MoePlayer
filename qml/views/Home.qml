@@ -823,80 +823,91 @@ Item {
                     font.pixelSize: 13
                     text: "加载中…"
                 }
+                // 行悬停 ◀ ▶ 滚动钮:纯鼠标的横行浏览(拖拽仍可用)。
+                // 玻璃化但零抓取成本:blurSource = 本行海报条 rowItems(按钮是其
+                // 兄弟,不自采样;pageList 含按钮自身,不可作源),映射恒定(按钮
+                // 与行内容无相对位移)⇒ liveCapture:false + 横滚事件驱动刷新。
+                HoverHandler { id: rowStripHover }
+                FrostedGlass {
+                    id: rowPrevBtn
+                    width: 36
+                    height: 36
+                    radius: 18
+                    anchors.left: parent.left
+                    anchors.leftMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    blurSource: rowItems
+                    liveCapture: false
+                    blurRadius: 4
+                    thickness: 12
+                    visible: opacity > 0
+                    opacity: (rowStripHover.hovered && rowItems.contentX > 0) ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                    hoverGlow: rowPrevArea.hovered ? 0.35 : 0.0
+                    NavGlyph {
+                        anchors.centerIn: parent
+                        dir: 0
+                    }
+                    MouseArea {
+                        id: rowPrevArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            rowScrollAnim.stop()
+                            rowScrollAnim.to = Math.max(0, rowItems.contentX - rowItems.width * 0.85)
+                            rowScrollAnim.start()
+                        }
+                    }
+                    onVisibleChanged: if (visible) refresh()
+                }
+                FrostedGlass {
+                    id: rowNextBtn
+                    width: 36
+                    height: 36
+                    radius: 18
+                    anchors.right: parent.right
+                    anchors.rightMargin: 6
+                    anchors.verticalCenter: parent.verticalCenter
+                    blurSource: rowItems
+                    liveCapture: false
+                    blurRadius: 4
+                    thickness: 12
+                    visible: opacity > 0
+                    opacity: (rowStripHover.hovered
+                              && rowItems.contentX < rowItems.contentWidth - rowItems.width - 1) ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 150 } }
+                    hoverGlow: rowNextArea.hovered ? 0.35 : 0.0
+                    NavGlyph {
+                        anchors.centerIn: parent
+                        dir: 1
+                    }
+                    MouseArea {
+                        id: rowNextArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            rowScrollAnim.stop()
+                            rowScrollAnim.to = Math.min(rowItems.contentWidth - rowItems.width,
+                                                        rowItems.contentX + rowItems.width * 0.85)
+                            rowScrollAnim.start()
+                        }
+                    }
+                    onVisibleChanged: if (visible) refresh()
+                }
+                Connections {
+                    target: rowItems
+                    function onContentXChanged() { rowPrevBtn.refresh(); rowNextBtn.refresh() }
+                }
+                NumberAnimation {
+                    id: rowScrollAnim
+                    target: rowItems
+                    property: "contentX"
+                    duration: 260
+                    easing.type: Easing.OutCubic
+                }
             }
-    }
-
-    // iOS 毛玻璃容器(胶囊/圆):背景内容高斯模糊 + 半透明暗底 + 微光描边。
-    // 形状由 radius 决定(胶囊=height/2,圆=width/2);content 置于玻璃之上。
-    component GlassBar: Rectangle {
-        id: gbar
-        property var blurSource: null
-        property color glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.5)
-        property color borderColor: Theme.glassRim
-        color: "transparent"
-        border.width: 0
-        clip: true
-
-        // 取背后区块,降采样后高斯模糊 → 毛玻璃通透。
-        ShaderEffectSource {
-            id: gbarBg
-            sourceItem: gbar.blurSource
-            sourceRect: {
-                if (!gbarBg.sourceItem)
-                    return Qt.rect(0, 0, 0, 0)
-                const p = gbar.mapToItem(gbarBg.sourceItem, 0, 0)
-                return Qt.rect(p.x, p.y, gbar.width, gbar.height)
-            }
-            textureSize: Qt.size(Math.max(1, Math.round(gbar.width / 2)),
-                                  Math.max(1, Math.round(gbar.height / 2)))
-            live: true
-            hideSource: false
-        }
-        // 圆角遮罩:clip 是矩形裁剪,管不到圆角;模糊层四角须用 mask 裁掉。
-        Rectangle {
-            id: gbarMask
-            width: gbar.width
-            height: gbar.height
-            radius: gbar.radius
-            visible: false
-            layer.enabled: true
-            layer.smooth: true
-        }
-        MultiEffect {
-            anchors.fill: parent
-            source: gbarBg
-            maskEnabled: true
-            maskSource: gbarMask
-            maskThresholdMin: 0.5
-            maskSpreadAtMin: 1.0
-            autoPaddingEnabled: false
-            blurEnabled: true
-            blur: 1.0
-            blurMax: 22
-        }
-
-        // 玻璃底色 + 描边。
-        Rectangle {
-            anchors.fill: parent
-            color: gbar.glassColor
-            radius: gbar.radius
-            border.width: 1
-            border.color: gbar.borderColor
-        }
-        // 顶部微光:与底色同形整圆,填充随自身 radius 裁切;
-        // 半高胶囊做法顶角会伸出圆外(clip 是矩形裁剪,管不到圆角)。
-        Rectangle {
-            anchors.fill: parent
-            radius: gbar.radius
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.035)
-                                                                        : Qt.rgba(1, 1, 1, 0.08) }
-                GradientStop { position: 0.5; color: "transparent" }
-            }
-        }
-
-        default property alias content: gbarContent.data
-        Item { id: gbarContent; anchors.fill: parent }
     }
 
     // 圆形毛玻璃按钮(放大镜等):圆形玻璃底 + 居中图标。

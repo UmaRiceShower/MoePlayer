@@ -44,25 +44,20 @@ Rectangle {
         blurEnabled: true
         blur: 1.0
         blurMax: root.blurRadius
-        // 只裁圆角:MultiEffect 的 source 铺满矩形,若不遮罩会露出方角;
-        // maskSource 用白底圆角矩形的 alpha 通道,把模糊裁到 root.radius。
+        // 只裁圆角:maskSource 直传白底圆角矩形,其 alpha 通道把模糊裁到
+        // root.radius(visible:false + layer.enabled 是官方遮罩项模式,
+        // 无需再经 ShaderEffectSource 中转采样)。
         maskEnabled: true
-        maskSource: bgMask
+        maskSource: maskRect
     }
 
-    // 圆角遮罩采样:ShaderEffectSource 采样白底圆角矩形,用其 alpha 通道作 mask;
-    // hideSource 让该矩形从场景隐藏,避免显示成一块白色。
-    ShaderEffectSource {
-        id: bgMask
-        sourceItem: maskRect
-        hideSource: true
-        visible: false
-    }
     Rectangle {
         id: maskRect
         anchors.fill: parent
         radius: root.radius
         color: "white"
+        visible: false
+        layer.enabled: true
     }
 
     Rectangle {
@@ -71,5 +66,16 @@ Rectangle {
         radius: parent.radius
         border.width: 1
         border.color: root.borderColor
+    }
+
+    // 顶部微光(玻璃感的高光层):随自身 radius 裁切,亮色系掺黑。
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.035)
+                                                                    : Qt.rgba(1, 1, 1, 0.08) }
+            GradientStop { position: 0.5; color: "transparent" }
+        }
     }
 }

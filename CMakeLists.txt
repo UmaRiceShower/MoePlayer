@@ -101,6 +101,8 @@ qt_add_qml_module(MoePlayer
         qml/views/FilterChip.qml
         qml/views/SegmentedControl.qml
         qml/views/PlaybackHistoryPage.qml
+        qml/views/BackCircleButton.qml
+        qml/views/NavGlyph.qml
 )
 
 # ShaderEffect 用 qsb 编译的 shader(官方路径):资源嵌入 qrc:
@@ -152,6 +154,12 @@ qt_add_resources(MoePlayer "nav_icons"
         qml/assets/icons/dark/settings.svg
         qml/assets/icons/dark/history.svg
         qml/assets/icons/dark/server.svg
+        qml/assets/icons/chevron-left.svg
+        qml/assets/icons/chevron-right.svg
+        qml/assets/icons/chevron-up.svg
+        qml/assets/icons/dark/chevron-left.svg
+        qml/assets/icons/dark/chevron-right.svg
+        qml/assets/icons/dark/chevron-up.svg
 )
 
 # 应用图标(首页空态徽记等界面内引用):qrc:/app/app-icon.svg。

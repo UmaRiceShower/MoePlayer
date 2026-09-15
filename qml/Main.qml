@@ -588,12 +588,12 @@ ApplicationWindow {
         height: 64
         radius: 20
         color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.85)
-        AppText {
+        NavGlyph {
             anchors.centerIn: parent
-            text: gestureHint.arrow
-            color: Theme.accentInk
-            font.pixelSize: 30
-            font.bold: true
+            dir: gestureHint.arrow === "‹" ? 0 : 2
+            onAccent: true
+            width: 22
+            height: 22
         }
     }
 

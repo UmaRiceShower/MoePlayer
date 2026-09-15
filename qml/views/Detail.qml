@@ -2686,6 +2686,18 @@ Item {
         }
     }
 
+    // 可见返回钮(hero 左上角,浮于内容层之上):鼠标路径返回,
+    // 原"← 返回"文字钮移除后的回归(键盘 Alt+Left 仍可用)。
+    // 压在 hero 背景上,模糊源 = detailBg(与本页玻璃面板同款)。
+    BackCircleButton {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 24
+        anchors.topMargin: 24
+        z: 20
+        blurSource: detailBg
+    }
+
     // 继续观看列表(Resume)到达(进详情页时请求):该剧的续播目标即首个匹配项;
     // 与当前目标一致时不重复定位(避免选集栏两次跳动)。信号属 AccountManager,
     // 不可并入上方 target: EmbyClient 的块。

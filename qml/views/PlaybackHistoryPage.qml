@@ -434,12 +434,11 @@ Item {
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
-            AppText {
-                text: "♥"
-                color: Theme.accent
-                font.pixelSize: 18
+            BackCircleButton {
+                anchors.verticalCenter: parent.verticalCenter
             }
             AppText {
+                anchors.verticalCenter: parent.verticalCenter
                 text: "播放历史"
                 font.pixelSize: 17
                 font.bold: true
