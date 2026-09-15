@@ -329,7 +329,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                                 rowsTouched = true;
                             }
                             if (rowsTouched)
-                                m_homeRowsModel->setRows(m_homeRows);
+                                m_homeRowsModel->setRows(visibleHomeRows());
                             break;
                         }
                     }
@@ -402,6 +402,8 @@ QVariantList AccountManager::suggestions() const
 {
     QVariantList out;
     for (const auto &a : m_accounts) {
+        if (!m_showHidden && accountHiddenStored(a))
+            continue; // 隐藏账号的建议不进 hero(数据留在表里,露出即恢复)
         const auto it = m_homeSuggByAccount.constFind(a.id);
         if (it == m_homeSuggByAccount.constEnd())
             continue;
@@ -430,6 +432,11 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("icon"), a.icon);
         m.insert(QStringLiteral("lastUsed"), a.lastUsed);
         m.insert(QStringLiteral("authStatus"), authStatusOf(a.id));
+        // 自身标志(浮窗开关反映它)与"因所属文件夹隐藏"分开暴露:UI 需要
+        // 区分"这台被单独隐藏"与"整个文件夹被隐藏",前者才好取消。
+        m.insert(QStringLiteral("hidden"), a.hidden);
+        const FolderInfo *folder = folderById(folderIdOfAccount(a.id));
+        m.insert(QStringLiteral("hiddenByFolder"), folder && folder->hidden);
         out.append(m);
     }
     return out;
@@ -438,6 +445,106 @@ QVariantList AccountManager::accounts() const
 bool AccountManager::hasAccounts() const
 {
     return !m_accounts.isEmpty();
+}
+
+// 隐藏判定(不含 showHidden):账号自身标志或所属文件夹标志。
+bool AccountManager::accountHiddenStored(const AccountInfo &a) const
+{
+    if (a.hidden)
+        return true;
+    const FolderInfo *folder = folderById(folderIdOfAccount(a.id));
+    return folder && folder->hidden;
+}
+
+bool AccountManager::accountHidden(const QString &accountId) const
+{
+    const AccountInfo *a = accountById(accountId);
+    return a && a->hidden;
+}
+
+bool AccountManager::accountVisible(const QString &accountId) const
+{
+    const AccountInfo *a = accountById(accountId);
+    return a && (m_showHidden || !accountHiddenStored(*a));
+}
+
+bool AccountManager::folderHidden(const QString &folderId) const
+{
+    const FolderInfo *f = folderById(folderId);
+    return f && f->hidden;
+}
+
+void AccountManager::setAccountHidden(const QString &accountId, bool hidden)
+{
+    const int idx = accountIndexById(accountId);
+    if (idx < 0 || m_accounts[idx].hidden == hidden)
+        return;
+    m_accounts[idx].hidden = hidden;
+    save();
+    applyHiddenChange();
+    if (!hidden) {
+        // 刚露出:隐藏期间跳过了聚合与校验,补一轮(令牌失效会被 401 路径接手重登)。
+        checkAccountToken(accountId);
+        fetchHomeRows(m_homeLimit);
+    }
+}
+
+void AccountManager::setFolderHidden(const QString &folderId, bool hidden)
+{
+    FolderInfo *f = folderById(folderId);
+    if (!f || f->hidden == hidden)
+        return;
+    f->hidden = hidden;
+    saveFolders();
+    emit foldersChanged();
+    applyHiddenChange(); // accounts() 带 hiddenByFolder,成员卡的标识跟着变
+    if (!hidden) {
+        for (const QString &id : f->accountIds) // 成员一并补校验与聚合
+            checkAccountToken(id);
+        fetchHomeRows(m_homeLimit);
+    }
+}
+
+void AccountManager::setShowHidden(bool show)
+{
+    if (m_showHidden == show)
+        return;
+    m_showHidden = show;
+    applyHiddenChange();
+    if (show) {
+        for (const auto &a : m_accounts) // 露出前一律没校验过,补一轮
+            if (!a.token.isEmpty() && accountHiddenStored(a))
+                checkAccountToken(a.id);
+        fetchHomeRows(m_homeLimit); // 同理补聚合(隐藏账号这轮参与,数据随即可用)
+    }
+}
+
+// 首页行的可见子集:模型只喂可见账号的行。m_homeRows 保留上一轮装配结果
+// (含刚被隐藏的账号,直到下一次聚合)——露出时先顶上旧行,随后由补拉替换。
+QVariantList AccountManager::visibleHomeRows() const
+{
+    if (m_showHidden)
+        return m_homeRows;
+    QVariantList out;
+    out.reserve(m_homeRows.size());
+    for (const QVariant &v : m_homeRows) {
+        const AccountInfo *a = accountById(v.toMap().value(QStringLiteral("accountId")).toString());
+        if (!a || !accountHiddenStored(*a))
+            out.append(v);
+    }
+    return out;
+}
+
+// 隐藏状态变化后的统一收尾:行模型与推荐按可见性重过滤并通知。
+// 不重拉网络(调用方按需触发),隐藏账号的数据原样留在内存与缓存里。
+void AccountManager::applyHiddenChange()
+{
+    m_homeRowsModel->setRows(visibleHomeRows());
+    emit suggestionsUpdated();
+    // 三个信号都要发:accountsChanged 让"遍历 accounts 求可见性"的绑定重算
+    // (含 showHidden 切换),hiddenChanged 给显式监听者(QML 里的命令式重建)。
+    emit accountsChanged();
+    emit hiddenChanged();
 }
 
 QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
@@ -475,7 +582,7 @@ void AccountManager::validateTokens()
 {
     int n = 0;
     for (const auto &a : m_accounts)
-        if (!a.token.isEmpty()) {
+        if (!a.token.isEmpty() && (m_showHidden || !accountHiddenStored(a))) { // 隐藏账号不校验
             ++n;
             checkAccountToken(a.id);
         }
@@ -570,8 +677,12 @@ void AccountManager::retryNetworkAccounts()
     }
     const auto ids = m_networkAccountIds;
     qDebug() << "AccountManager: 重试网络问题账号" << ids.size() << "个";
-    for (const QString &id : ids)
+    for (const QString &id : ids) {
+        const AccountInfo *a = accountById(id);
+        if (a && !m_showHidden && accountHiddenStored(*a))
+            continue; // 隐藏账号不重试(露出后由该轮校验接手)
         checkAccountToken(id);
+    }
 }
 
 void AccountManager::ensureNetRetryTimer()
@@ -626,7 +737,7 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     // 警告 "QQmlVMEMetaObject: Internal error ... invalid context")。
     const QVariantList cached = loadHomeCache();
     m_homeRows = cached;
-    m_homeRowsModel->setRows(cached); // setRows 内部只对变化行发信号
+    m_homeRowsModel->setRows(visibleHomeRows()); // 缓存里可能有已隐藏账号的行
     // 推荐(服务器建议)缓存必须在 homeRowsReady **之前**载入:否则 hero 会先被
     // 本地聚合兜底数据填一次、随即又被推荐替换(启动时可见的一次"换一批")。
     loadHomeSuggestionCache();
@@ -636,6 +747,8 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         const AccountInfo &a = m_accounts.at(i);
         if (a.token.isEmpty())
             continue; // 无凭据的账号跳过,不参与聚合
+        if (!m_showHidden && accountHiddenStored(a))
+            continue; // 隐藏账号不拉取;露出模式下照常拉(Alt+S 后数据随即可用)
         QVariantMap order;
         order.insert(QStringLiteral("id"), a.id);
         order.insert(QStringLiteral("serverUrl"), a.serverUrl);
@@ -691,7 +804,7 @@ void AccountManager::reorderHomeRows()
     }
     // 顺序路径 out 含全部行(重排);删除路径 out 已剔除被删服的行。
     m_homeRows = out;
-    m_homeRowsModel->setRows(out);
+    m_homeRowsModel->setRows(visibleHomeRows());
 }
 
 // 播放历史拉取(见 fetchPlaybackHistory):延迟到首页聚合之后开拉,已调度
@@ -748,6 +861,8 @@ void AccountManager::startPlaybackHistoryFetch()
     for (const AccountInfo &acc : std::as_const(m_accounts)) {
         if (acc.token.isEmpty() || acc.userId.isEmpty())
             continue; // 未登录/凭据不全的账号跳过(下次启动再试)
+        if (!m_showHidden && accountHiddenStored(acc))
+            continue; // 隐藏账号不拉历史(条目按可见性过滤,见 hiddenChanged)
         const QString scope = acc.serverUrl.trimmed() + QLatin1Char('|') + acc.id;
         m_historyScopes.insert(scope);
         // 先记列表请求这一票:否则某账号先返回空结果时会被误判为"全部完成"。
@@ -973,6 +1088,8 @@ void AccountManager::refreshAccountHistory(const QString &accountId)
     const AccountInfo *acc = accountById(accountId);
     if (!acc || acc->token.isEmpty() || acc->userId.isEmpty())
         return; // 凭据不全:调用方走本地回退
+    if (!m_showHidden && accountHiddenStored(*acc))
+        return; // 隐藏账号:不拉(其条目也不展示)
     m_client->fetchResume(acc->serverUrl, accountId, acc->token, acc->userId,
                           MoePlayer::kResumeLimit);
 }
@@ -1068,10 +1185,36 @@ void AccountManager::maybeAssembleHomeRows()
             out.append(row);
         }
     }
+    // 本轮未参与(隐藏被跳过)的账号:沿用其现有行 —— 否则隐藏期间的行会被抹掉,
+    // 露出后首页要空等网络;带上后露出即时可见,随即被露出触发的重拉覆盖。
+    for (const auto &a : m_accounts) {
+        if (!accountHiddenStored(a))
+            continue;
+        bool inRound = false;
+        for (const auto &ord : m_homeAccountOrder)
+            if (ord.toMap().value(QStringLiteral("id")).toString() == a.id) {
+                inRound = true;
+                break;
+            }
+        if (inRound)
+            continue;
+        for (const auto &old : m_homeRows)
+            if (old.toMap().value(QStringLiteral("accountId")).toString() == a.id)
+                out.append(old);
+    }
+    // 按账号顺序归一(沿用行插回原位;聚合本身即按账号顺序产出)。
+    QVariantList ordered;
+    ordered.reserve(out.size());
+    for (const auto &a : m_accounts) {
+        for (const auto &row : out) {
+            if (row.toMap().value(QStringLiteral("accountId")).toString() == a.id)
+                ordered.append(row);
+        }
+    }
     // 逐行增量更新模型(setRows 内部只对变化的行发 per-row 信号),
     // 渲染只重估变化行;homeRows 快照同步供缓存与语义比较。
-    m_homeRows = out;
-    m_homeRowsModel->setRows(out);
+    m_homeRows = ordered;
+    m_homeRowsModel->setRows(visibleHomeRows());
     if (allDone)
         saveHomeCache(); // 全部完成才缓存,保证缓存是完整可依赖集合
     emit homeRowsReady();
@@ -1091,6 +1234,7 @@ QVariantList AccountManager::folders() const
         m.insert(QLatin1String("id"), f.id);
         m.insert(QLatin1String("name"), f.name);
         m.insert(QLatin1String("color"), f.color);
+        m.insert(QLatin1String("hidden"), f.hidden);
         QVariantList ids;
         for (const auto &id : f.accountIds)
             ids.append(id);
@@ -1470,6 +1614,7 @@ void AccountManager::loadFolders()
         f.id = o.value(QLatin1String("id")).toString();
         f.name = o.value(QLatin1String("name")).toString();
         f.color = o.value(QLatin1String("color")).toString();
+        f.hidden = o.value(QLatin1String("hidden")).toBool();
         const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
         for (const auto &id : ids) {
             const QString aid = id.toString();
@@ -1491,6 +1636,7 @@ void AccountManager::saveFolders()
         m.insert(QLatin1String("id"), f.id);
         m.insert(QLatin1String("name"), f.name);
         m.insert(QLatin1String("color"), f.color);
+        m.insert(QLatin1String("hidden"), f.hidden);
         m.insert(QLatin1String("accountIds"), f.accountIds); // QStringList 自动转 QVariantList
         list.append(m);
     }
@@ -1781,6 +1927,7 @@ void AccountManager::load()
         a.password = o.value(QLatin1String("password")).toString();
         a.icon = o.value(QLatin1String("icon")).toString();
         a.lastUsed = o.value(QLatin1String("lastUsed")).toVariant().toLongLong();
+        a.hidden = o.value(QLatin1String("hidden")).toBool();
         if (!a.id.isEmpty())
             m_accounts.append(a);
     }
@@ -1800,6 +1947,7 @@ void AccountManager::save()
         o.insert(QLatin1String("password"), a.password);
         o.insert(QLatin1String("icon"), a.icon);
         o.insert(QLatin1String("lastUsed"), a.lastUsed);
+        o.insert(QLatin1String("hidden"), a.hidden);
         arr.append(o);
     }
     m_settings.setValue(kAccountsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));

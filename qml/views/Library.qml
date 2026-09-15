@@ -674,6 +674,8 @@ Item {
         if (root.serverUrl === "") {
             const accs = AccountManager.accounts
             for (const a of accs) {
+                if (!AccountManager.accountVisible(a.id))
+                    continue // 隐藏服务器不参与"未指定服务器"的默认选择
                 if (AccountManager.credsForAccount(a.id).token !== "") {
                     root.serverUrl = a.serverUrl
                     root.accountId = a.id

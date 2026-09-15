@@ -645,6 +645,12 @@ ApplicationWindow {
         sequences: ["Ctrl+K"]
         onActivated: root.toggleSearch()
     }
+    // Alt+S:临时露出/收起隐藏的服务器与文件夹(仅本次运行,见
+    // AccountManager.showHidden)。露出时管理页卡片带"已隐藏"标识。
+    Shortcut {
+        sequences: ["Alt+S"]
+        onActivated: AccountManager.showHidden = !AccountManager.showHidden
+    }
     // Esc 收敛到主窗口单一处理器:两个浮层各自注册同键 Esc 会在
     // QShortcutMap 里按注册顺序冲突(先注册的 SearchOverlay 覆盖 SettingsOverlay)。
     Shortcut {

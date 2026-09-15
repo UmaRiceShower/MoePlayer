@@ -43,6 +43,13 @@ class AccountManager : public QObject
     // 每条含行条目字段 + {serverUrl, accountId}(posterId 已带服务器前缀);
     // 逐账号到位即发 suggestionsUpdated,新数据覆盖旧数据(不等待全部)。
     Q_PROPERTY(QVariantList suggestions READ suggestions NOTIFY suggestionsUpdated)
+    // 隐藏服务器(服务器管理页 Ctrl+点击浮窗 / 文件夹浮窗的开关):隐藏后
+    // 首页行、推荐、搜索目标、播放历史、管理页都不可见,且**不参与网络
+    // 聚合与 token 校验**(隐藏 = 不用它,露出时再拉)。文件夹隐藏时其成员
+    // 一并隐藏(继承,不写成员自身标志)。
+    // showHidden 是"临时露出隐藏项"的运行时开关(Alt+S,不持久化):
+    // 打开后所有页面照常显示隐藏项,便于集中管理。
+    Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY hiddenChanged)
 public:
     // history 为播放历史本地存储(拉取结果写入其中,不持有所有权)。
     explicit AccountManager(EmbyClient *client, PlaybackHistory *history,
@@ -125,6 +132,16 @@ public:
 
     // 浏览请求凭据查询:返回 {token, userId}(QML 组装无状态请求用);
     // 服务器无账号或 token 为空时返回空 map。
+    // 该账号自身标了隐藏(不含文件夹继承;浮窗开关反映此项)。
+    Q_INVOKABLE bool accountHidden(const QString &accountId) const;
+    // 该账号的可见性(自身或所属文件夹隐藏 ⇒ 不可见;showHidden 打开时恒可见)。
+    Q_INVOKABLE bool accountVisible(const QString &accountId) const;
+    Q_INVOKABLE void setAccountHidden(const QString &accountId, bool hidden);
+    Q_INVOKABLE bool folderHidden(const QString &folderId) const;
+    Q_INVOKABLE void setFolderHidden(const QString &folderId, bool hidden);
+    bool showHidden() const { return m_showHidden; }
+    void setShowHidden(bool show);
+
     Q_INVOKABLE QVariantMap credsForServer(const QString &serverUrl) const;
     // 按账号 id 取凭据(同服务器多账号时精确定位,不依赖 serverUrl 首账号)。
     Q_INVOKABLE QVariantMap credsForAccount(const QString &accountId) const;
@@ -137,6 +154,8 @@ signals:
     void accountsChanged();
     void foldersChanged();
     void layoutOrderChanged();
+    // 任意隐藏状态变化(账号/文件夹/showHidden):QML 重算过滤的依赖。
+    void hiddenChanged();
     // 登录/切换结果:ok=false 时 message 为失败原因。
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
@@ -161,6 +180,7 @@ private:
         QString password; // 混淆存储(始终保存,供 token 失效自动重登)
         QString icon; // 统一图标:本地缓存 file:// URL(MD5 命名;空 = 名称首字)。
         qint64 lastUsed = 0;
+        bool hidden = false; // 隐藏(不从界面出现、不参与网络聚合,见 hiddenChanged)
     };
 
     void load();
@@ -184,6 +204,7 @@ private:
         QString name;
         QString color; // 预设色 hex("#RRGGBB"),卡片背景用
         QStringList accountIds; // 成员账号 id,按加入顺序
+        bool hidden = false; // 隐藏:成员账号继承(见 hiddenChanged)
     };
     // 文件夹读写(独立 key,账号结构不动)。
     void loadFolders();
@@ -209,6 +230,12 @@ private:
     int folderIndexById(const QString &id) const;
     // 按账号 id 取账号(只读),找不到返回 nullptr。
     const AccountInfo *accountById(const QString &id) const;
+    // 隐藏判定(不看 showHidden):该账号自身或其文件夹配了隐藏。
+    bool accountHiddenStored(const AccountInfo &a) const;
+    // 首页行的可见子集(隐藏账号的行不展示;m_homeRows 保留全量以便露出)。
+    QVariantList visibleHomeRows() const;
+    // 隐藏状态变化后的统一收尾:过滤行/推荐并通知。
+    void applyHiddenChange();
     // 按账号 id 取索引,找不到返回 -1。
     int accountIndexById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
@@ -227,6 +254,7 @@ private:
     QList<AccountInfo> m_accounts;
     QList<FolderInfo> m_folders;
     QVariantList m_layoutOrder; // 规范化后的视觉顺序 [{type, id}](见属性注释)
+    bool m_showHidden = false; // 临时露出隐藏项(Alt+S;不持久化)
     // 待保存的登录(正在走 EmbyClient.login 的账号)。
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。

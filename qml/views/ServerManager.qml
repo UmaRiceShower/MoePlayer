@@ -53,13 +53,16 @@ Item {
         for (let i = 0; i < order.length; ++i) {
             const e = order[i]
             if (e.type === "folder") {
+                if (!root.isFolderVisible(e.id))
+                    continue // 文件夹隐藏:卡与成员都不显示(成员继承)
                 out.push(root.rowKeyOf("folder", e.id))
                 if (root.isFolderExpanded(e.id)) {
                     const ids = root.folderInfo(e.id).accountIds || []
                     for (let j = 0; j < ids.length; ++j)
-                        out.push(root.rowKeyOf("account", ids[j]))
+                        if (root.isAccountVisible(ids[j]))
+                            out.push(root.rowKeyOf("account", ids[j]))
                 }
-            } else {
+            } else if (root.isAccountVisible(e.id)) {
                 out.push(root.rowKeyOf("account", e.id))
             }
         }
@@ -119,6 +122,39 @@ Item {
     // 卡体绑定不会求值到 undefined。
     function accountInfo(id) { return root.acctCache[id] || root.emptyAccount }
     function folderInfo(id) { return root.folderCache[id] || root.emptyFolder }
+
+    // ---- 隐藏(见 AccountManager::hiddenChanged)----
+    // 隐藏项默认不出现在本页/首页/搜索/历史;Alt+S(AccountManager.showHidden)
+    // 打开时全部照常显示,此时卡片带"已隐藏"标识并压暗,便于找到再取消隐藏。
+    // 生效判定唯一来源 = AccountManager(账号自身标志/文件夹继承/showHidden
+    // 三者的组合都在 C++ 一处);本页只额外要"是否已隐藏"用于标识。
+    function isAccountHidden(id) {
+        const a = root.accountInfo(id)
+        return a.hidden === true || a.hiddenByFolder === true
+    }
+    function isAccountVisible(id) { return AccountManager.accountVisible(id) }
+    function isFolderHidden(id) { return root.folderInfo(id).hidden === true }
+    // 文件夹卡"N 台服务器"与浮窗提示同口径:隐藏成员不计入(露出时全算)。
+    function visibleMemberCount(folderId) {
+        const ids = root.folderInfo(folderId).accountIds || []
+        if (AccountManager.showHidden)
+            return ids.length
+        let n = 0
+        for (let i = 0; i < ids.length; ++i)
+            if (root.isAccountVisible(ids[i]))
+                ++n
+        return n
+    }
+    function isFolderVisible(id) { return AccountManager.showHidden || !root.isFolderHidden(id) }
+    // 顶部计数按可见账号(露出模式下 = 全部)。
+    readonly property int visibleAccountCount: {
+        const accs = AccountManager.accounts
+        let n = 0
+        for (let i = 0; i < accs.length; ++i)
+            if (root.isAccountVisible(accs[i].id))
+                ++n
+        return n
+    }
 
     // key → 模型行号(-1 = 不存在)。
     function indexOfKey(key) {
@@ -356,6 +392,7 @@ Item {
         } else {
             root.folderSelectedColor = root.folderColorById(id)
         }
+        folderHiddenSwitch.checked = id !== "" && root.folderInfo(id).hidden === true
         root.folderOpen = true
         folderNameField.forceActiveFocus()
     }
@@ -371,6 +408,7 @@ Item {
                 AccountManager.renameFolder(root.folderEditId, name)
             if (root.folderSelectedColor !== "" && root.folderSelectedColor !== root.folderColorById(root.folderEditId))
                 AccountManager.setFolderColor(root.folderEditId, root.folderSelectedColor)
+            AccountManager.setFolderHidden(root.folderEditId, folderHiddenSwitch.checked)
         }
         root.closeFolderDialog()
     }
@@ -388,6 +426,7 @@ Item {
         }
         editIconField.text = ""
         root.editError = ""
+        editHiddenSwitch.checked = root.accountInfo(id).hidden === true
         root.editOpen = true
         editNameField.forceActiveFocus()
     }
@@ -412,6 +451,7 @@ Item {
         const icon = editIconField.text.trim()
         if (icon !== "")
             AccountManager.setAccountIcon(root.editAccountId, icon)
+        AccountManager.setAccountHidden(root.editAccountId, editHiddenSwitch.checked)
         root.closeEditDialog()
     }
     // 删除:先向服务器发登出(结果忽略),再删本地数据(见
@@ -455,6 +495,33 @@ Item {
         AccountManager.addAccount(nameField.text, full, user, passField.text)
     }
 
+    // 隐藏开关(胶囊指示器,视觉与设置页 SettingSwitch 一致)。
+    component HiddenSwitch: Switch {
+        id: hsw
+        padding: 0
+        spacing: 0
+        implicitWidth: 42
+        implicitHeight: 24
+        indicator: Rectangle {
+            implicitWidth: 42
+            implicitHeight: 24
+            radius: 12
+            color: hsw.checked ? Theme.accent : Theme.borderSoft
+            border.width: 1
+            border.color: hsw.checked ? Theme.accent : Theme.borderSoft
+            Rectangle {
+                width: 18
+                height: 18
+                radius: 9
+                y: 3
+                x: hsw.checked ? parent.width - width - 3 : 3
+                color: Theme.accentInk
+                Behavior on x { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+            }
+        }
+        contentItem: Item { implicitWidth: 0; implicitHeight: 0 }
+    }
+
     onExpandedFoldersChanged: root.syncModel()
 
     Component.onCompleted: root.syncModel()
@@ -470,6 +537,9 @@ Item {
             root.syncModel()
         }
         function onLayoutOrderChanged() {
+            root.syncModel()
+        }
+        function onHiddenChanged() {
             root.syncModel()
         }
     }
@@ -515,9 +585,16 @@ Item {
         }
         AppText {
             anchors.verticalCenter: parent.verticalCenter
-            text: "· " + AccountManager.accountCount
+            text: "· " + root.visibleAccountCount
             color: Theme.textMuted
             font.pixelSize: 16
+        }
+        AppText {
+            visible: AccountManager.showHidden
+            anchors.verticalCenter: parent.verticalCenter
+            text: "已显示隐藏项（Alt+S 收起）"
+            color: Theme.accent
+            font.pixelSize: 13
         }
     }
 
@@ -715,7 +792,8 @@ Item {
                             const col = root.hexToRgba(c, 0.30)
                             return col !== "" ? col : Theme.surface
                         }
-                        opacity: Drag.active ? 0.6 : 1.0
+                        opacity: Drag.active ? 0.6
+                                               : (root.isAccountHidden(cell.id) && AccountManager.showHidden ? 0.55 : 1.0)
                         scale: card.expanded ? root.hoverScale : 1.0
                         Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                         Drag.active: dragArea.drag.active
@@ -793,18 +871,28 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 6
+                                readonly property bool hiddenTag: root.isAccountHidden(cell.id)
+                                                                 && AccountManager.showHidden
                                 AppText {
                                     text: card.modelData.name !== "" ? card.modelData.name : card.modelData.userName
                                     color: Theme.textPrimary
                                     font.pixelSize: 15
                                     font.bold: true
                                     elide: Text.ElideRight
-                                    width: parent.width - (card.modelData.authStatus === "invalid" ? 78 : 0)
+                                    width: parent.width
+                                           - (card.modelData.authStatus === "invalid" ? 78 : 0)
+                                           - (parent.hiddenTag ? 62 : 0)
                                 }
                                 AppText {
                                     visible: card.modelData.authStatus === "invalid"
                                     text: "[凭据失效]"
                                     color: Theme.danger
+                                    font.pixelSize: 12
+                                }
+                                AppText {
+                                    visible: parent.hiddenTag
+                                    text: "[已隐藏]"
+                                    color: Theme.textMuted
                                     font.pixelSize: 12
                                 }
                             }
@@ -892,7 +980,8 @@ Item {
                             const col = root.hexToRgba(fcard.modelData.color, 0.30)
                             return col !== "" ? col : Theme.surface
                         }
-                        opacity: Drag.active ? 0.6 : 1.0
+                        opacity: Drag.active ? 0.6
+                                               : (root.isFolderHidden(fcard.folderId) && AccountManager.showHidden ? 0.55 : 1.0)
                         scale: fcard.expanded ? root.hoverScale : 1.0
                         Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
                         Drag.active: farea.drag.active
@@ -988,17 +1077,29 @@ Item {
                             anchors.right: parent.right
                             anchors.rightMargin: 14
                             spacing: 4
-                            AppText {
+                            Row {
                                 width: parent.width
-                                text: fcard.modelData.name
-                                color: Theme.textPrimary
-                                font.pixelSize: 15
-                                font.bold: true
-                                elide: Text.ElideRight
+                                spacing: 6
+                                readonly property bool hiddenTag: root.isFolderHidden(fcard.folderId)
+                                                                 && AccountManager.showHidden
+                                AppText {
+                                    text: fcard.modelData.name
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 15
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    width: parent.width - (parent.hiddenTag ? 62 : 0)
+                                }
+                                AppText {
+                                    visible: parent.hiddenTag
+                                    text: "[已隐藏]"
+                                    color: Theme.textMuted
+                                    font.pixelSize: 12
+                                }
                             }
                             AppText {
                                 width: parent.width
-                                text: (fcard.modelData.accountIds ? fcard.modelData.accountIds.length : 0) + " 台服务器"
+                                text: root.visibleMemberCount(fcard.folderId) + " 台服务器"
                                 color: Theme.textMuted
                                 font.pixelSize: 12
                                 elide: Text.ElideRight
@@ -1382,6 +1483,34 @@ Item {
                     }
                 }
 
+                // 隐藏文件夹:成员服务器继承(整组从各处消失),Alt+S 可临时露出。
+                Row {
+                    visible: root.folderEditId !== ""
+                    width: parent.width
+                    spacing: 10
+                    Column {
+                        width: parent.width - 52
+                        spacing: 2
+                        AppText {
+                            text: "隐藏文件夹"
+                            color: Theme.textPrimary
+                            font.pixelSize: 14
+                        }
+                        AppText {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            text: "文件夹与其内 " + root.visibleMemberCount(root.folderEditId)
+                                  + " 台服务器一并隐藏"
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                        }
+                    }
+                    HiddenSwitch {
+                        id: folderHiddenSwitch
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                }
+
                 Row {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
@@ -1653,6 +1782,35 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                             }
                         }
+                    }
+                }
+
+                // 隐藏服务器:开启后本服务器不出现于首页/搜索/播放历史/本页,
+                // 也不参与网络聚合与 token 校验;Alt+S 可临时露出全部隐藏项。
+                Row {
+                    width: parent.width
+                    spacing: 10
+                    Column {
+                        width: parent.width - 52
+                        spacing: 2
+                        AppText {
+                            text: "隐藏服务器"
+                            color: Theme.textPrimary
+                            font.pixelSize: 14
+                        }
+                        AppText {
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            text: root.accountInfo(root.editAccountId).hiddenByFolder === true
+                                  ? "所属文件夹已隐藏:取消文件夹隐藏后才会重新出现"
+                                  : "隐藏后不出现于首页/搜索/历史，也不拉取数据（Alt+S 临时露出）；保存后生效"
+                            color: Theme.textMuted
+                            font.pixelSize: 12
+                        }
+                    }
+                    HiddenSwitch {
+                        id: editHiddenSwitch
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
 
