@@ -125,7 +125,8 @@ bool validateShortcut(const QVariant &v);
     M(shortcutSearch, "shortcutSearch", QString, "Ctrl+K|Ctrl+F|/", "shortcut", "搜索键(| 分隔多键位)", "快捷键", "搜索", "打开/关闭搜索浮层。", Field, nullptr, validateShortcut) \
     M(shortcutSettings, "shortcutSettings", QString, "Ctrl+,", "shortcut", "设置键(| 分隔多键位)", "快捷键", "设置", "打开/关闭设置浮层。", Field, nullptr, validateShortcut) \
     M(shortcutServerManager, "shortcutServerManager", QString, "Ctrl+O", "shortcut", "服务器管理键(| 分隔多键位)", "快捷键", "服务器管理", "打开服务器管理页。", Field, nullptr, validateShortcut) \
-    M(shortcutRevealHidden, "shortcutRevealHidden", QString, "Alt+S", "shortcut", "临时露出隐藏项键(| 分隔多键位)", "快捷键", "露出隐藏项", "临时显示已隐藏的服务器与文件夹(仅本次运行,不持久化)。", Field, nullptr, validateShortcut)
+    M(shortcutRevealHidden, "shortcutRevealHidden", QString, "Alt+S", "shortcut", "临时露出隐藏项键(| 分隔多键位)", "快捷键", "露出隐藏项", "临时显示已隐藏的服务器与文件夹(仅本次运行,不持久化)。", Field, nullptr, validateShortcut) \
+    M(mouseGesture, "mouseGesture", bool, true, "shortcut", "鼠标手势:中键左滑返回(false 关闭;后退侧键不受此开关影响)", "快捷键", "中键手势", "鼠标中键按住向左滑动 = 返回上一页,向上滑动 = 回首页清栈;中键按在文本框上时让位给粘贴。", Switch, nullptr, nullptr)
 
 // 表构建行(元数据;宏行即真相)。
 #define MOECONFIG_ITEM_ROW(n, tk, t, d, s, c, us, l, ds, w, o, v) \
