@@ -3,12 +3,13 @@
 #include <QObject>
 #include <QSettings>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 #include <QtQml/qqmlregistration.h>
 
 //! QSettings 持久化的用户设置(QML 单例 "MoePlayer.Core SettingsStore")。
 //! 无外部依赖,由 qmltyperegistrar 自动注册为单例(引擎创建实例;
-//! 依赖 main.cpp 中已设置的 organizationName/applicationName)。
+//! 存储路径经 AppPaths 统一分配,便携模式重定向见 apppaths.h)。
 class SettingsStore : public QObject
 {
     Q_OBJECT
@@ -27,10 +28,8 @@ signals:
     void serverUrlChanged();
 
 private:
-#ifdef Q_OS_WIN
-    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
-                         MoePlayer::kAppName, MoePlayer::kAppName};
-#else
-    QSettings m_settings;
-#endif
+    // 存储路径经 AppPaths 统一分配:便携模式(exe 旁 portable_mode.txt)
+    // 重定向到 <exeDir>/data/config/MoePlayer.ini;非便携探测取得既有
+    // 平台路径,与历史构造逐字节一致(存量配置不迁移)。详见 apppaths.h。
+    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
 };

@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSettings>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 #include <QVariantList>
 #include <QVariantMap>
@@ -65,12 +66,8 @@ signals:
 private:
     void save();
 
-#ifdef Q_OS_WIN
-    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
-                         MoePlayer::kAppName, MoePlayer::kAppName};
-#else
-    QSettings m_settings;
-#endif
+    // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
+    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
     PersistMap m_persist;
     // 条目(每条含 scope/serverUrl/accountId,便于展平与跨服去重)。
     QVariantList m_items;

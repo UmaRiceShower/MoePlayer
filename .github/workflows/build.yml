@@ -65,8 +65,9 @@ jobs:
       - name: windeployqt 收集运行时
         # --qmldir:扫 QML import 决定要带哪些 Qt Quick 模块(应用自身的
         # MoePlayer.Core 已编进 exe,扫描器找不到只报无害警告)。
-        # --no-compiler-runtime:VC 运行库按 Qt 官方文档走微软官方 vc_redist
-        # 安装器(NSIS 里静默执行),不散装 DLL(授权不允许)。
+        # --no-compiler-runtime:安装版走微软官方 vc_redist 安装器(NSIS 里
+        # 静默执行,系统级 + Windows Update 维护);便携版另行 app-local
+        # 散装 CRT DLL(两种都是微软文档允许的再分发形式)。
         # --no-translations:应用自带中文文案,不带 Qt 翻译。
         # --no-opengl-sw:剔除 opengl32sw.dll(约 20MB 的软件 OpenGL 回退渲染,
         # 仅 RHI 走 OpenGL 后端才加载;Windows 默认 D3D11,永远用不上)。
@@ -104,10 +105,35 @@ jobs:
           $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(MoePlayer VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
           makensis /DVERSION=$ver packaging/windows-installer.nsi
 
+      - name: 打包便携版 zip
+        # 免安装版:同一 package/ 树 + 便携标记 + CRT DLL app-local 散装
+        # (免安装版不能要求管理员跑 vc_redist 安装器)。在 makensis 之后
+        # 执行,标记与 CRT DLL 不会混进安装器(安装版机制保持不变)。
+        shell: pwsh
+        run: |
+          # CRT DLL(msvcp140/vcruntime140 等):从 VS 安装的 Redist 目录取
+          # (vswhere 定位;Microsoft.VC*.CRT 通配兼容各 VS 版本号)。
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $crt = Get-ChildItem "$vs\VC\Redist\MSVC\*\x64\Microsoft.VC*.CRT" -Directory |
+                 Sort-Object FullName | Select-Object -Last 1
+          if (-not $crt) { throw "未找到 VC++ Redist CRT 目录($vs\VC\Redist\MSVC)" }
+          Copy-Item "$($crt.FullName)\*.dll" package\
+          # 便携标记:存在即启用便携模式(数据存 exe 旁 data/,见 apppaths.h)。
+          New-Item -ItemType File -Path package\portable_mode.txt | Out-Null
+          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(MoePlayer VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
+          Compress-Archive -Path package\* -DestinationPath "MoePlayer-Portable-$ver.zip"
+
       - uses: actions/upload-artifact@v6
         with:
           name: windows-installer
           path: MoePlayer-Setup-*.exe
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: windows-portable
+          path: MoePlayer-Portable-*.zip
           if-no-files-found: error
 
   deb:

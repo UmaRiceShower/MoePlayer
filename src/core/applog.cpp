@@ -1,10 +1,10 @@
 #include "applog.h"
+#include "apppaths.h"
 
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QStandardPaths>
 
 #include <QtCore/qlogging.h>
 #include <QtGlobal>
@@ -107,8 +107,7 @@ void AppLog::install()
 {
     if (g_logFile)
         return;
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-                        + QStringLiteral("/logs");
+    const QString dir = AppPaths::configDir() + QStringLiteral("/logs");
     QDir().mkpath(dir);
     const QString path = dir + QStringLiteral("/moeplayer.log");
     // 启动轮转:日志过大时旧文件先删 .old 再顺延,避免 rename 覆盖失败。

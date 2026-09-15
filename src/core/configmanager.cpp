@@ -1,5 +1,6 @@
 #include "core/configmanager.h"
 
+#include "core/apppaths.h"
 #include "playback/mpvclient.h"
 
 #include <QDir>
@@ -7,7 +8,6 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QSaveFile>
-#include <QStandardPaths>
 #include <QTimer>
 
 #include <cmath>
@@ -365,8 +365,7 @@ bool validatePercent(const QVariant &v)
 ConfigManager::ConfigManager(QObject *parent)
     : QObject(parent)
 {
-    m_path = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation)
-             + QLatin1Char('/') + kConfigFileName;
+    m_path = AppPaths::configDir() + QLatin1Char('/') + kConfigFileName;
     // AppConfigLocation 目录(Qt 不保证存在)须自建,QSaveFile 写回才可打开。
     QDir().mkpath(QFileInfo(m_path).absolutePath());
 

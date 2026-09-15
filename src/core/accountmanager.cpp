@@ -10,12 +10,12 @@
 #include <QJsonObject>
 #include <QRandomGenerator>
 #include <QSaveFile>
-#include <QStandardPaths>
 #include <QUrl>
 #include <QUuid>
 
 #include <algorithm>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 #include "core/embyclient.h"
 #include "core/playbackhistory.h"
@@ -78,7 +78,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
     : QObject(parent)
     , m_client(client)
     , m_playbackHistory(history)
-    , m_persist(&m_settings, QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+    , m_persist(&m_settings, AppPaths::cacheDir())
 {
     m_homeRowsModel = new HomeRowsModel(this);
     load();
@@ -1820,7 +1820,7 @@ QString AccountManager::encodeServerKey(const QString &serverUrl)
 // 写失败返回空。
 QString AccountManager::writeIconCache(const QByteArray &imageData)
 {
-    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    const QString dir = AppPaths::cacheDir();
     if (dir.isEmpty())
         return QString();
     const QString iconDir = dir + QStringLiteral("/account-icons");
