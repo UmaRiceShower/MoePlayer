@@ -484,12 +484,117 @@ ApplicationWindow {
             root.pushDetail(itemId, posterId, title, serverUrl, accountId || root.currentAccountId)
         }
     }
-    // 设置浮层(Ctrl+S / 首页设置按钮):左分类右设置项的两级面板。
+    // 设置浮层(Ctrl+, / 首页设置按钮):左分类右设置项的两级面板。
     SettingsOverlay {
         id: settingsOverlay
         anchors.fill: parent
         visible: false
         backgroundSource: stackView
+    }
+
+    // 鼠标返回层:后退侧键与中键左滑手势 = 返回(分发规则同 Alt+Left,
+    // 见 goBack())。置顶只接中键/后退键,左键与滚轮原样穿透;文本框聚焦
+    // 时中键放行(保留中键粘贴)。中键手势开关 = ConfigManager.mouseGesture,
+    // 后退侧键不受开关影响。
+    MouseArea {
+        id: mouseNav
+        anchors.fill: parent
+        acceptedButtons: Qt.MiddleButton | Qt.BackButton
+        property point pressPos: Qt.point(0, 0)
+        property bool arming: false
+        onPressed: (mouse) => {
+            if (mouse.button === Qt.BackButton) {
+                root.goBack()
+                return
+            }
+            if (!ConfigManager.mouseGesture) {
+                mouse.accepted = false
+                return
+            }
+            // 中键粘贴让位:按压点最深子项是文本框时不接手本次按压(沿
+            // childAt 逐层下探;本层与手势提示跳过)。判定看光标下的框而
+            // 非聚焦框——搜索浮层打开即聚焦其输入框,按聚焦判会让浮层上
+            // 的手势全灭。
+            var item = null
+            var kids = root.contentItem.children
+            for (var i = kids.length - 1; i >= 0; --i) {
+                var k = kids[i]
+                if (k === mouseNav || k === gestureHint || !k.visible)
+                    continue
+                if (mouse.x >= k.x && mouse.x < k.x + k.width
+                    && mouse.y >= k.y && mouse.y < k.y + k.height) {
+                    item = k
+                    break
+                }
+            }
+            while (item) {
+                if (item instanceof TextInput || item instanceof TextEdit
+                    || item instanceof TextField || item instanceof TextArea) {
+                    mouse.accepted = false
+                    return
+                }
+                var p = item.mapFromItem(root.contentItem, mouse.x, mouse.y)
+                var child = item.childAt(p.x, p.y)
+                if (!child)
+                    break
+                item = child
+            }
+            pressPos = Qt.point(mouse.x, mouse.y)
+            arming = true
+        }
+        onPositionChanged: (mouse) => {
+            if (!arming)
+                return
+            var px = (pressPos.x - mouse.x) / 80
+            var py = (pressPos.y - mouse.y) / 80
+            if (px >= py) {
+                gestureHint.arrow = "‹"
+                gestureHint.progress = Math.min(1, px)
+            } else {
+                gestureHint.arrow = "↑"
+                gestureHint.progress = Math.min(1, py)
+            }
+        }
+        onReleased: (mouse) => {
+            if (mouse.button !== Qt.MiddleButton || !arming)
+                return
+            arming = false
+            gestureHint.progress = 0
+            var dx = mouse.x - pressPos.x
+            var dy = mouse.y - pressPos.y
+            if (dx <= -80 && Math.abs(dx) > 2 * Math.abs(dy))
+                root.goBack()
+            else if (dy <= -80 && Math.abs(dy) > 2 * Math.abs(dx))
+                stackView.pop(null)
+        }
+        onCanceled: {
+            arming = false
+            gestureHint.progress = 0
+        }
+    }
+
+    // 中键手势提示:左缘箭头随滑动进度淡入,满格即达触发阈值。
+    // 箭头方向 = 当前主导手势(‹ 返回 / ↑ 回首页)。
+    Rectangle {
+        id: gestureHint
+        property real progress: 0
+        property string arrow: "‹"
+        visible: progress > 0
+        opacity: progress
+        anchors.left: parent.left
+        anchors.leftMargin: 8
+        anchors.verticalCenter: parent.verticalCenter
+        width: 40
+        height: 64
+        radius: 20
+        color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.85)
+        AppText {
+            anchors.centerIn: parent
+            text: gestureHint.arrow
+            color: Theme.accentInk
+            font.pixelSize: 30
+            font.bold: true
+        }
     }
 
     // 首页:每行一库聚合(库海报进媒体库,条目进详情)。
