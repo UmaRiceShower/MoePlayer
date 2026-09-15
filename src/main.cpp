@@ -12,6 +12,7 @@
 #include <clocale>
 
 #include "core/accountmanager.h"
+#include "core/apppaths.h"
 #include "core/playbackhistory.h"
 #include "core/applog.h"
 #include "core/configmanager.h"
@@ -75,6 +76,10 @@ int main(int argc, char *argv[])
     app.setApplicationVersion(QStringLiteral(MOEPLAYER_VERSION));
     // 桌面集成标识:desktop 文件/图标/Wayland app_id(反向域名)。
     app.setDesktopFileName(MoePlayer::kAppId);
+    // 便携模式检测(免安装版,见 apppaths.h):exe 旁 portable_mode.txt
+    // 存在时数据改存 exe 旁 data/。须在 AppLog::install()(日志目录)
+    // 与下方所有单例(QSettings/config.toml/缓存)构造前完成。
+    AppPaths::init();
     // 文件日志:setApplicationName 后即可定位 AppConfigLocation,
     // 尽早安装让首个 qInfo(RHI backend)也落盘。
     AppLog::install();

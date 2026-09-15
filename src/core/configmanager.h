@@ -20,7 +20,7 @@ class QTimer;
 //! 存储:运行时 QVariantMap(唯一真相,数据化/导入导出/多 profile 的内核);
 //! 暴露:生成属性(getter 读 map、typed setter 转发 setValue)——QML 绑定读
 //! 保持强类型与名称检查;setValue/value 为统一读写通道。
-//! 文件:QStandardPaths::AppConfigLocation/config.toml(toml++ 读;QSaveFile
+//! 文件:AppPaths::configDir()/config.toml(toml++ 读;QSaveFile
 //! 原子写回;外部修改热重载)。敏感数据(凭据/账号)仍归 QSettings,不进 TOML。
 namespace MoeConfig {
 
@@ -154,8 +154,8 @@ inline const Item *itemFor(const QString &key)
 
 //! TOML 用户配置(QML 单例 "MoePlayer.Core ConfigManager")。
 //!
-//! 文件:QStandardPaths::AppConfigLocation/config.toml(默认
-//! ~/.config/MoePlayer/config.toml)。用户可直接编辑:启动时读取,
+//! 文件:AppPaths::configDir()/config.toml(默认 ~/.config/MoePlayer/MoePlayer/,
+//! 便携模式 = exe 旁 data/config/)。用户可直接编辑:启动时读取,
 //! 外部修改经 QFileSystemWatcher 热重载(值变化才发 NOTIFY,QML 绑定
 //! 自动更新,无需重启)。
 //!

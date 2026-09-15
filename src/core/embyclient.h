@@ -7,6 +7,7 @@
 
 #include <functional>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 #include "models/mediaitemmodel.h"
 
@@ -348,12 +349,8 @@ private:
     // 可用 QHttp1Configuration 调整)按实例计,独立实例使后台播放历史请求不与
     // 浏览/首页请求互相排队。
     QNetworkAccessManager m_bgNam;
-#ifdef Q_OS_WIN
-    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
-                         MoePlayer::kAppName, MoePlayer::kAppName};
-#else
-    QSettings m_settings;
-#endif
+    // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
+    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
     // 模型按服务器字典化(key = trimmed serverUrl):多服浏览并行互不覆盖。
     QHash<QString, MediaItemModel *> m_viewsModels;
     QHash<QString, MediaItemModel *> m_itemsModels;

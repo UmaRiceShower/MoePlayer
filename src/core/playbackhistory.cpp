@@ -2,12 +2,12 @@
 
 #include <QDateTime>
 #include <QHash>
-#include <QStandardPaths>
 
 #include <algorithm>
 #include <functional>
 #include <utility>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 
 namespace {
@@ -48,7 +48,7 @@ bool hasPlayTrace(const QVariantMap &m)
 
 PlaybackHistory::PlaybackHistory(QObject *parent)
     : QObject(parent)
-    , m_persist(&m_settings, QStandardPaths::writableLocation(QStandardPaths::CacheLocation))
+    , m_persist(&m_settings, AppPaths::cacheDir())
 {
     QVariant val;
     if (m_persist.loadCache(kCacheName, val)) {

@@ -7,6 +7,7 @@
 #include <QTimer>
 #include <QVariantList>
 
+#include "core/apppaths.h"
 #include "core/constants.h"
 #include "core/persistmap.h"
 #include "homerowsmodel.h"
@@ -247,12 +248,8 @@ private:
                                            const QString &serverUrl) const;
 
     EmbyClient *m_client;
-#ifdef Q_OS_WIN
-    QSettings m_settings{QSettings::IniFormat, QSettings::UserScope,
-                         MoePlayer::kAppName, MoePlayer::kAppName};
-#else
-    QSettings m_settings;
-#endif
+    // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
+    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
     // 程序文档持久化(配置键 JSON + 缓存文件 JSON),注入本实例的
     // QSettings 与 CacheLocation(见 persistmap-design.md)。
     PersistMap m_persist;

@@ -7,7 +7,7 @@
 class QSettings;
 
 //! 程序文档持久化统一封装:配置层 QSettings 单键 JSON + 缓存层
-//! CacheLocation/<name>.json(QSaveFile 原子写)。共享语义:
+//! 缓存根(AppPaths::cacheDir())/<name>.json(QSaveFile 原子写)。共享语义:
 //!  - 版本头 { v, data }(首版 1):无头数据(开发期历史)按当前版本原样
 //!    读出,静默兼容;v<当前 → migrate 钩子;v>当前 → 回默认 + 告警;
 //!  - 读失败回默认;错误内部统一 qWarning(key + 原因);

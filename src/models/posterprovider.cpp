@@ -15,11 +15,11 @@
 #include <QPointer>
 #include <QQuickTextureFactory>
 #include <QSemaphore>
-#include <QStandardPaths>
 #include <QThreadPool>
 #include <QUrlQuery>
 #include <QDebug>
 
+#include "core/apppaths.h"
 #include "core/accountmanager.h"
 #include "core/configmanager.h"
 #include "core/constants.h"
@@ -54,7 +54,7 @@ constexpr qint64 kCacheTtlMs = 30LL * 24 * 3600 * 1000;
 QString cacheFilePath(const QString &key)
 {
     const QByteArray h = QCryptographicHash::hash(key.toUtf8(), QCryptographicHash::Sha256).toHex();
-    return QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+    return AppPaths::cacheDir()
            + QStringLiteral("/emby-images/") + QString::fromLatin1(h) + QStringLiteral(".img");
 }
 
