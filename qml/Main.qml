@@ -622,33 +622,35 @@ ApplicationWindow {
             stackView.pop();
     }
 
-    // 快捷键:返回首页 Ctrl+F,服务器管理 Ctrl+O,设置 Ctrl+S,搜索 Ctrl+K。
-    // Alt+Left:统一在此注册(各页面不再自带);分发规则见 goBack()。
-    Shortcut {
-        sequences: ["Alt+Left"]
-        onActivated: root.goBack()
+    // 快捷键:键位可在设置「快捷键」分类改(config.toml [shortcut] 段),
+    // | 分隔多键位,修改即时生效。返回键分发规则见 goBack()。
+    function shortcutSeq(value) {
+        return String(value).split("|").filter(function (s) { return s !== "" })
     }
     Shortcut {
-        sequences: ["Ctrl+F"]
-        // pop 到根即返回首页(initialItem);已在首页时无操作。
+        sequences: shortcutSeq(ConfigManager.shortcutBack)
+        onActivated: root.goBack()
+    }
+    // 回首页清栈:pop 到根(initialItem);已在首页时无操作。
+    Shortcut {
+        sequences: shortcutSeq(ConfigManager.shortcutHome)
         onActivated: stackView.pop(null)
     }
     Shortcut {
-        sequences: ["Ctrl+O"]
+        sequences: shortcutSeq(ConfigManager.shortcutServerManager)
         onActivated: stackView.push(serverManagerPage)
     }
     Shortcut {
-        sequences: ["Ctrl+S"]
+        sequences: shortcutSeq(ConfigManager.shortcutSettings)
         onActivated: settingsOverlay.visible ? settingsOverlay.close() : settingsOverlay.open()
     }
     Shortcut {
-        sequences: ["Ctrl+K"]
+        sequences: shortcutSeq(ConfigManager.shortcutSearch)
         onActivated: root.toggleSearch()
     }
-    // Alt+S:临时露出/收起隐藏的服务器与文件夹(仅本次运行,见
-    // AccountManager.showHidden)。露出时管理页卡片带"已隐藏"标识。
+    // 临时露出隐藏项(仅本次运行,见 AccountManager.showHidden)。
     Shortcut {
-        sequences: ["Alt+S"]
+        sequences: shortcutSeq(ConfigManager.shortcutRevealHidden)
         onActivated: AccountManager.showHidden = !AccountManager.showHidden
     }
     // Esc 收敛到主窗口单一处理器:两个浮层各自注册同键 Esc 会在

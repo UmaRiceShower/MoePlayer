@@ -497,6 +497,18 @@ Item {
                         }
                         onTextChanged: root.libFilter = text
                         Keys.onEscapePressed: mediaFilter.text = ""
+                        // 回车 = 进入首个命中库(与历史页"回车 = 激活首个匹配项"同约定)。
+                        onAccepted: {
+                            const n = AccountManager.homeRows.count
+                            for (let i = 0; i < n; ++i) {
+                                const row = AccountManager.homeRows.rowAt(i)
+                                if (root.libMatch(row)) {
+                                    root.openLibrary(row.viewId, row.serverUrl,
+                                                     row.viewName, row.accountId)
+                                    break
+                                }
+                            }
+                        }
                     }
                 }
                 Item {
