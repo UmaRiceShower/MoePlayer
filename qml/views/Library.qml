@@ -853,10 +853,17 @@ Item {
         height: 42
         visible: root.browseReady
 
+        // 可见返回钮(面包屑链行首):鼠标路径返回。
+        BackCircleButton {
+            id: libBackBtn
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+        }
         // 面包屑链:服名▸媒体库▸文件夹…,负间距咬合不变(段间尖角重叠)。
         Row {
             id: crumbChain
-            anchors.left: parent.left
+            anchors.left: libBackBtn.right
+            anchors.leftMargin: 10
             anchors.right: searchBox.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
@@ -1403,6 +1410,58 @@ Item {
                 itemType: model.type
             }
         }
+    }
+
+    // 回顶浮钮:滚动超过约一屏后出现在右下,点击平滑回顶。
+    // (与 WheelStepHandler 共存:动画只写 contentY,滚轮直写随时可接管。)
+    // 玻璃源 = grid(兄弟内容,不自采样);按钮固定、映射恒定 ⇒
+    // liveCapture:false + 滚动事件驱动刷新。
+    FrostedGlass {
+        id: topBtn
+        width: 40
+        height: 40
+        radius: 20
+        anchors.right: parent.right
+        anchors.rightMargin: 28
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+        blurSource: grid
+        liveCapture: false
+        blurRadius: 5
+        thickness: 14
+        visible: opacity > 0
+        opacity: grid.contentY > grid.height * 0.8 ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: 200 } }
+        hoverGlow: topBtnArea.hovered ? 0.35 : 0.0
+        onVisibleChanged: if (visible) refresh()
+        NavGlyph {
+            anchors.centerIn: parent
+            dir: 2
+            width: 16
+            height: 16
+        }
+        MouseArea {
+            id: topBtnArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                topAnim.stop()
+                topAnim.start()
+            }
+        }
+        NumberAnimation {
+            id: topAnim
+            target: grid
+            property: "contentY"
+            to: 0
+            duration: 350
+            easing.type: Easing.OutCubic
+        }
+    }
+    Connections {
+        target: grid
+        function onContentYChanged() { if (topBtn.visible) topBtn.refresh() }
     }
 
     // ========================= 异步结果 =========================

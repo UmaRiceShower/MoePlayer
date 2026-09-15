@@ -570,11 +570,8 @@ Item {
         anchors.right: parent.right
         anchors.margins: 24
         spacing: 12
-        AppText {
+        BackCircleButton {
             anchors.verticalCenter: parent.verticalCenter
-            text: "♥"
-            color: Theme.accent
-            font.pixelSize: 24
         }
         AppText {
             anchors.verticalCenter: parent.verticalCenter

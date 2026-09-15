@@ -70,6 +70,16 @@ Rectangle {
     // 竞争,滚动中会撕裂;显式依赖在 GUI 线程同步,无撕裂。
     property Item scrollParent: null
 
+    // 自抓模式的更新策略:true = 每帧重抓(默认,跟随内容实时变化);
+    // false = 首抓一次,之后由调用方挂内容信号驱动 refresh()(如
+    // contentXChanged)——采样映射固定、只有内容会变的场景(行内滚动钮)
+    // 借此把每帧抓取降为事件驱动。共享模式(blurGroup)下本属性无意义。
+    property bool liveCapture: true
+    function refresh() {
+        if (!_sharedGlass)
+            bgSource.scheduleUpdate()
+    }
+
     // 背景采样:抓取 blurSource 在本控件覆盖区域的纹理(四周扩 sampleMargin),
 
     // 降采样让高斯更明显、更省 GPU。
@@ -131,7 +141,7 @@ Rectangle {
         // 需要高分辨率。
         textureSize: Qt.size(Math.max(1, Math.round(root._texW)),
                               Math.max(1, Math.round(root._texH)))
-        live: !root._sharedGlass
+        live: !root._sharedGlass && root.liveCapture
         hideSource: false
     }
 
