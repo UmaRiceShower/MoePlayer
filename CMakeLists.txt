@@ -154,6 +154,13 @@ qt_add_resources(MoePlayer "nav_icons"
         qml/assets/icons/dark/server.svg
 )
 
+# 应用图标(首页空态徽记等界面内引用):qrc:/app/app-icon.svg。
+set_source_files_properties(packaging/io.github.umariceshower.MoePlayer.svg
+    PROPERTIES QT_RESOURCE_ALIAS "app-icon.svg")
+qt_add_resources(MoePlayer "app_icon"
+    PREFIX "/app"
+    FILES packaging/io.github.umariceshower.MoePlayer.svg)
+
 # 子目录全量加入,qmltyperegistrar 生成的 #include <xxx.h>(按源文件
 # 的 basename include 惯例记录)才能解析;无同名头文件冲突。
 target_include_directories(MoePlayer PRIVATE src src/core src/models src/playback third_party/tomlplusplus)
