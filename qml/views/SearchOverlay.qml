@@ -24,6 +24,8 @@ Item {
             const a = list[i]
             if (a.authStatus === "invalid")
                 continue
+            if (!AccountManager.accountVisible(a.id))
+                continue // 隐藏服务器不作为搜索目标(Alt+S 露出后可搜)
             if (seen.indexOf(a.serverUrl) >= 0)
                 continue
             seen.push(a.serverUrl)
@@ -41,6 +43,8 @@ Item {
             const a = list[i]
             if (a.authStatus === "invalid")
                 continue
+            if (!AccountManager.accountVisible(a.id))
+                continue // 隐藏服务器不参与聚合搜索
             if (root.selectedServers.length > 0 && root.selectedServers.indexOf(a.serverUrl) < 0)
                 continue
             const c = AccountManager.credsForAccount(a.id)

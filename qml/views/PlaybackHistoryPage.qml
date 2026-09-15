@@ -49,6 +49,8 @@ Item {
         for (let i = 0; i < list.length; ++i) {
             if (list[i].authStatus === "invalid")
                 continue
+            if (!AccountManager.accountVisible(list[i].id))
+                continue // 隐藏服务器不进账号筛选(Alt+S 露出后可筛)
             out.push({ id: list[i].id, name: list[i].name })
         }
         return out
@@ -304,6 +306,8 @@ Item {
         for (const it of PlaybackHistory.allItems()) {
             if (root.filterAccountId !== "" && (it.accountId || "") !== root.filterAccountId)
                 continue
+            if (it.accountId !== "" && !AccountManager.accountVisible(it.accountId))
+                continue // 隐藏服务器的观看记录不展示(存储原样保留,露出即回来)
             if (!root.matchesQuery(it))
                 continue
             source.push(it)
@@ -362,6 +366,13 @@ Item {
         function onAccountsChanged() {
             if (root.filterAccountId !== "" && !root.accountOptions.some(a => a.id === root.filterAccountId))
                 root.filterAccountId = ""
+            rebuildTimer.restart()
+        }
+        function onHiddenChanged() {
+            // 露出的账号在隐藏期间没拉过列表:本页正开着的话顺手补一轮,
+            // 否则要等下次进页面才更新(条目本身一直在 store 里)。
+            if (AccountManager.showHidden)
+                root.refresh()
             rebuildTimer.restart()
         }
     }
