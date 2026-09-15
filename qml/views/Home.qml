@@ -32,6 +32,18 @@ Item {
     signal openSearch()
     signal openHistory()
 
+    // 媒体库过滤(「媒体库」标题右侧输入框):模糊子序列 + 拼音(全拼/简拼
+    // 连续子串,见 FuzzyMatch),本地即时过滤不防抖;未命中的库卡折叠为 0 宽
+    // (不重建委托、不重载图片)。匹配对象 = 库名 + 服务器名。
+    // 注意:库行不做折叠 —— 条件行高叠加 reuseItems 与模型增量更新会让
+    // ListView 重建离屏高度缓存(全量孵化行委托,实测阻塞 GUI ~600ms)。
+    property string libFilter: ""
+    function libMatch(row) {
+        const q = root.libFilter.trim()
+        if (q === "")
+            return true
+        return FuzzyMatch.hit(q, row.viewName || "") || FuzzyMatch.hit(q, row.serverName || "")
+    }
     // 聚合 hero 轮播数据:优先服务器建议(/Suggestions),按建议顺序展示;
     // 建议未到/为空时回退本地聚合(继续观看优先,不足补最新添加)。
     // ---- hero 同步:缓存先展示,后台数据到达后原位替换 ----
@@ -341,8 +353,8 @@ Item {
             readonly property real cardH: root.heroH * Constants.homeHeroCardH
             readonly property real cardW: Math.min(cardH * Constants.homeHeroCardAspect,
                                                    width * Constants.homeHeroCardWCap)
-            // 媒体库节高 = 标题隐高 + 间距 + 库卡高 + 底部留白(常量构成,稳定)。
-            readonly property real mediaSecH: mediaTitle.implicitHeight + mediaLib.spacing
+            // 媒体库节高 = 标题行高 + 间距 + 库卡高 + 底部留白(常量构成,稳定)。
+            readonly property real mediaSecH: mediaTitleRow.height + mediaLib.spacing
                                               + Constants.homeMediaCardH + Constants.homeMediaBottomPad
 
             PathView {
@@ -435,96 +447,151 @@ Item {
                 visible: AccountManager.homeRows.count > 0
                 // 底部留白:首行标题离媒体库卡片的间距与行内 12px 规则一致。
                 bottomPadding: Constants.homeMediaBottomPad
-                AppText {
-                    id: mediaTitle
-                    anchors.left: parent.left
-                    anchors.leftMargin: Constants.rowLeftMargin
-                    text: "媒体库"
-                    color: Theme.textPrimary
-                    font.pixelSize: Constants.homeMediaTitlePx
-                    font.bold: true
+                Item {
+                    id: mediaTitleRow
+                    width: parent.width
+                    height: Math.max(mediaTitle.implicitHeight, 28)
+                    AppText {
+                        id: mediaTitle
+                        anchors.left: parent.left
+                        anchors.leftMargin: Constants.rowLeftMargin
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "媒体库"
+                        color: Theme.textPrimary
+                        font.pixelSize: Constants.homeMediaTitlePx
+                        font.bold: true
+                    }
+                    // 媒体库过滤框:输入即过滤(见 root.libMatch);✕/Esc 清除。
+                    TextField {
+                        id: mediaFilter
+                        anchors.right: parent.right
+                        anchors.rightMargin: Constants.rowLeftMargin
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 200
+                        height: 28
+                        leftPadding: 12
+                        rightPadding: 26
+                        placeholderText: "过滤媒体库"
+                        placeholderTextColor: Theme.textMuted
+                        color: Theme.textPrimary
+                        font.pixelSize: 13
+                        selectByMouse: true
+                        background: Rectangle {
+                            radius: height / 2
+                            color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
+                            border.width: 1
+                            border.color: mediaFilter.activeFocus
+                                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                          : Theme.borderSoft
+                        }
+                        AppText {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "✕"
+                            visible: mediaFilter.text !== ""
+                            color: mediaFilterClearHover.hovered ? Theme.textPrimary : Theme.textMuted
+                            font.pixelSize: 12
+                            HoverHandler { id: mediaFilterClearHover; cursorShape: Qt.PointingHandCursor }
+                            TapHandler { onTapped: mediaFilter.text = "" }
+                        }
+                        onTextChanged: root.libFilter = text
+                        Keys.onEscapePressed: mediaFilter.text = ""
+                    }
                 }
                 Item {
                     width: parent.width
                     height: Constants.homeMediaCardH
                     clip: true
                     ListView {
+                        id: mediaLibs
                         anchors.fill: parent
                         orientation: ListView.Horizontal
-                        spacing: Constants.rowSpacing
+                        spacing: 0
                         header: Item { width: Constants.rowLeftMargin; height: 1 }
                         model: AccountManager.homeRows
-                        delegate: Rectangle {
-                            id: libCard
+                        // 过滤变化时回左端:原 contentX 会指向已折叠的中段(首卡被截断)。
+                        property string filterEcho: root.libFilter
+                        onFilterEchoChanged: positionViewAtBeginning()
+                        // delegate 外包一层格子:卡间距折进格子右侧,过滤折叠(宽 0)
+                        // 后不留缝隙;折叠只改尺寸,委托与图片不重建。
+                        delegate: Item {
+                            id: libCell
                             required property var modelData
-                            property bool hovered: false
-                            width: Constants.homeMediaCardW
+                            visible: root.libMatch(libCell.modelData)
+                            width: visible ? Constants.homeMediaCardW + Constants.rowSpacing : 0
                             height: Constants.homeMediaCardH
-                            radius: Constants.homeMediaCardRadius
-                            color: Theme.surface
-                            border.width: 1
-                            border.color: libCard.hovered ? Theme.accent : Theme.borderSoft
-                            Image {
-                                anchors.fill: parent
-                                source: libCard.modelData.posterId
-                                       ? "image://emby/" + libCard.modelData.posterId : ""
-                                fillMode: Image.PreserveAspectCrop
-                                cache: true
-                                asynchronous: true
-                                // 与 PosterCard 同源修复:原图全尺寸解码缩到卡面
-                                // 会毛边,解码尺寸对齐显示 + mipmap 降采样。
-                                smooth: true
-                                mipmap: true
-                                sourceSize.width: Math.max(1, Math.round(parent.width * Screen.devicePixelRatio))
-                                sourceSize.height: Math.max(1, Math.round(parent.height * Screen.devicePixelRatio))
-                                layer.enabled: true
-                                layer.smooth: true
-                                Rectangle {
-                                    id: libMask
-                                    visible: false
-                                    anchors.fill: parent
-                                    radius: Constants.homeMediaCardRadius
-                                    layer.enabled: true
-                                }
-                                layer.effect: MultiEffect {
-                                    maskEnabled: true
-                                    maskSource: libMask
-                                    maskThresholdMin: 0.5
-                                    maskSpreadAtMin: 1.0
-                                }
-                            }
-                            // 底部渐变压暗 + 库名常显(与库海报 hover 显字的机制不同)。
                             Rectangle {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                height: Constants.homeMediaGradH
+                                id: libCard
+                                property bool hovered: false
+                                width: Constants.homeMediaCardW
+                                height: Constants.homeMediaCardH
                                 radius: Constants.homeMediaCardRadius
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: "transparent" }
-                                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.65) }
+                                color: Theme.surface
+                                border.width: 1
+                                border.color: libCard.hovered ? Theme.accent : Theme.borderSoft
+                                Image {
+                                    anchors.fill: parent
+                                    source: libCell.modelData.posterId
+                                           ? "image://emby/" + libCell.modelData.posterId : ""
+                                    fillMode: Image.PreserveAspectCrop
+                                    cache: true
+                                    asynchronous: true
+                                    // 与 PosterCard 同源修复:原图全尺寸解码缩到卡面
+                                    // 会毛边,解码尺寸对齐显示 + mipmap 降采样。
+                                    smooth: true
+                                    mipmap: true
+                                    sourceSize.width: Math.max(1, Math.round(parent.width * Screen.devicePixelRatio))
+                                    sourceSize.height: Math.max(1, Math.round(parent.height * Screen.devicePixelRatio))
+                                    layer.enabled: true
+                                    layer.smooth: true
+                                    Rectangle {
+                                        id: libMask
+                                        visible: false
+                                        anchors.fill: parent
+                                        radius: Constants.homeMediaCardRadius
+                                        layer.enabled: true
+                                    }
+                                    layer.effect: MultiEffect {
+                                        maskEnabled: true
+                                        maskSource: libMask
+                                        maskThresholdMin: 0.5
+                                        maskSpreadAtMin: 1.0
+                                    }
                                 }
-                            }
-                            AppText {
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                anchors.leftMargin: Constants.homeMediaTextMargin
-                                anchors.rightMargin: Constants.homeMediaTextMargin
-                                anchors.bottomMargin: Constants.homeMediaTextBottom
-                                text: libCard.modelData.viewName
-                                color: Theme.textOnBadge
-                                font.pixelSize: Constants.homeMediaTextPx
-                                elide: Text.ElideRight
-                            }
-                            HoverHandler {
-                                onHoveredChanged: libCard.hovered = hovered
-                            }
-                            TapHandler {
-                                onTapped: root.openLibrary(libCard.modelData.viewId,
-                                                           libCard.modelData.serverUrl,
-                                                           libCard.modelData.viewName,
-                                                           libCard.modelData.accountId)
+                                // 底部渐变压暗 + 库名常显(与库海报 hover 显字的机制不同)。
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: Constants.homeMediaGradH
+                                    radius: Constants.homeMediaCardRadius
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.65) }
+                                    }
+                                }
+                                AppText {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: Constants.homeMediaTextMargin
+                                    anchors.rightMargin: Constants.homeMediaTextMargin
+                                    anchors.bottomMargin: Constants.homeMediaTextBottom
+                                    text: libCell.modelData.viewName
+                                    color: Theme.textOnBadge
+                                    font.pixelSize: Constants.homeMediaTextPx
+                                    elide: Text.ElideRight
+                                }
+                                HoverHandler {
+                                    onHoveredChanged: libCard.hovered = hovered
+                                }
+                                TapHandler {
+                                    onTapped: root.openLibrary(libCell.modelData.viewId,
+                                                               libCell.modelData.serverUrl,
+                                                               libCell.modelData.viewName,
+                                                               libCell.modelData.accountId)
+                                }
                             }
                         }
                     }
