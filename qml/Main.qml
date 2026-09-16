@@ -15,6 +15,9 @@ ApplicationWindow {
     property string currentServerUrl: ""
     // 最近浏览的账号 id(凭据精确定位;随导航更新)。
     property string currentAccountId: ""
+    // 首页过滤注入(服务器管理页点卡片写入,Home 消费即清):
+    // 值为账号显示名,落到首页过滤框(按服名命中行/卡条/hero)。
+    property string homeFilterText: ""
     // ---- 播放列表全集合 + on_load hook 协商链 ----
     // MpvClient 播放列表由全集(m3u 标题占位)构成:上/下集与播放列表菜单
     // 走 mpv 官方;占位条目经 on_load hook(moe-hook.lua)请求真实地址,
@@ -704,6 +707,11 @@ ApplicationWindow {
     Component {
         id: serverManagerPage
         ServerManager {
+            // 点服务器卡 = 回首页并把该服显示名注入首页过滤框。
+            onBrowseHome: function (serverUrl, accountId, name) {
+                root.homeFilterText = name
+                stackView.pop(null)
+            }
         }
     }
 
