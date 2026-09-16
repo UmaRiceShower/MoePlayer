@@ -14,6 +14,7 @@
 #include "core/accountmanager.h"
 #include "core/apppaths.h"
 #include "core/playbackhistory.h"
+#include "core/recentsearches.h"
 #include "core/applog.h"
 #include "core/configmanager.h"
 #include "core/constants.h"
@@ -135,6 +136,10 @@ int main(int argc, char *argv[])
     PlaybackHistory playbackHistory;
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "PlaybackHistory", &playbackHistory);
+    // 最近搜索词(缓存层持久化):无依赖,须在 QML 引用前注入。
+    RecentSearches recentSearches;
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                 "RecentSearches", &recentSearches);
     AccountManager accountManager(&embyClient, &playbackHistory);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ConfigManager", &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);

@@ -165,6 +165,7 @@ Item {
         if (root.aggTargets.length === 0) {
             root.searching = false
             root.pendingAccounts = 0
+            root._chipPending = false
         }
     }
 
@@ -205,8 +206,12 @@ Item {
         root.selectedServers = a
         root.searchNow()
     }
+    property bool _chipPending: false
+    property var _chipDone: ({})
+
     function open() {
         root.visible = true
+        root._chipPending = false
         const opts = root.serverOptions
         if (root.selectedServers.length > 0) {
             const urls = []
@@ -231,13 +236,22 @@ Item {
     Connections {
         target: EmbyClient
         function onSearchResultsReady(serverUrl, accountId) {
+            // chips 回填后:该账号组内容已换新,解锁本组(按组显示,
+            // 不闪旧词;全部到齐后清待发标记)。
+            if (root._chipPending) {
+                const d = root._chipDone
+                d[serverUrl + "|" + accountId] = true
+                root._chipDone = Object.assign({}, d)
+            }
             for (let i = 0; i < root.aggTargets.length; ++i) {
                 const t = root.aggTargets[i]
                 if (t.serverUrl === serverUrl && t.accountId === accountId) {
                     console.debug("Search: 响应", serverUrl, accountId)
                     root.pendingAccounts = Math.max(0, root.pendingAccounts - 1)
-                    if (root.pendingAccounts === 0)
+                    if (root.pendingAccounts === 0) {
                         root.searching = false
+                        root._chipPending = false
+                    }
                     return
                 }
             }
@@ -315,7 +329,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
                 leftPadding: 34
-                rightPadding: 12
+                rightPadding: 32
                 placeholderText: root.canSearch ? "搜索…(Esc 关闭)"
                                                 : "先在首页打开一个媒体库再搜索(Esc 关闭)"
                 placeholderTextColor: Theme.textMuted
@@ -324,6 +338,25 @@ Item {
                 font.pixelSize: 15
                 // 输入防抖:停止输入 300ms 后才发服务端搜索(过滤区即时触发)。
                 onTextChanged: searchDebounce.restart()
+                // 回车 = 确认这次搜索,记入最近搜索(点击结果处同样记录)。
+                onAccepted: RecentSearches.add(text)
+                // 清除:有内容时可点,清空后进入空查询态(最近搜索 chips)。
+                AppText {
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✕"
+                    visible: searchField.text !== ""
+                    color: searchClearHover.hovered ? Theme.textPrimary : Theme.textMuted
+                    font.pixelSize: 13
+                    HoverHandler {
+                        id: searchClearHover
+                        cursorShape: Qt.PointingHandCursor
+                    }
+                    TapHandler {
+                        onTapped: searchField.text = ""
+                    }
+                }
                 background: Rectangle {
                     radius: 20
                     color: Theme.bg
@@ -751,12 +784,84 @@ Item {
                 Layout.fillHeight: true
                 clip: true
 
+                // 最近搜索(空查询时展示):点词条回填重搜,✕ 移除单条;
+                // 存储在 RecentSearches(缓存层持久化,跨会话)。
+                Column {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    width: parent.width
+                    spacing: 8
+                    visible: searchField.text.trim() === "" && RecentSearches.list.length > 0
+                    AppText {
+                        text: "最近搜索"
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                    }
+                    Flow {
+                        width: parent.width
+                        spacing: 8
+                        Repeater {
+                            model: RecentSearches.list
+                            delegate: Rectangle {
+                                id: chip
+                                required property var modelData
+                                width: chipRow.implicitWidth + 22
+                                height: 28
+                                radius: 14
+                                color: chipHover.hovered ? Theme.tint
+                                                         : Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g,
+                                                                   Theme.scrimSoft.b, 0.45)
+                                border.width: 1
+                                border.color: Theme.borderSoft
+                                Row {
+                                    id: chipRow
+                                    anchors.centerIn: parent
+                                    spacing: 6
+                                    AppText {
+                                        text: chip.modelData
+                                        color: Theme.textPrimary
+                                        font.pixelSize: 13
+                                    }
+                                    AppText {
+                                        text: "✕"
+                                        color: chipDelHover.hovered ? Theme.textPrimary : Theme.textMuted
+                                        font.pixelSize: 11
+                                        HoverHandler {
+                                            id: chipDelHover
+                                            cursorShape: Qt.PointingHandCursor
+                                        }
+                                        // 子项 TapHandler 独占抓取:点 ✕ 不触发词条回填。
+                                        TapHandler {
+                                            onTapped: RecentSearches.remove(chip.modelData)
+                                        }
+                                    }
+                                }
+                                HoverHandler {
+                                    id: chipHover
+                                    cursorShape: Qt.PointingHandCursor
+                                }
+                                TapHandler {
+                                    onTapped: {
+                                        root._chipPending = true
+                                        root._chipDone = {}
+                                        searchField.text = chip.modelData
+                                        searchField.forceActiveFocus()
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // 聚合结果:每账号一组(组头 + 网格),外层 Flickable 整组滚动。
                 // 组模型 = 该账号的搜索模型(复合键,同服多账号互不覆盖)。
                 Flickable {
                     id: aggFlick
                     anchors.fill: parent
                     clip: true
+                    // 空查询整体退场:它 anchors.fill 且声明在最近搜索 chips 之后,
+                    // 不隐会盖住 chips 并吃掉点击(Flickable 按下即抓取)。
+                    visible: searchField.text.trim() !== ""
                     contentHeight: aggCol.implicitHeight
                     WheelStepHandler {
                         targetItem: aggFlick
@@ -783,7 +888,11 @@ Item {
                                     return n > 1
                                 }
                                 width: parent.width
+                                // 空组隐藏;chips 回填待发期,本组新词响应到达前
+                                // 也隐藏(旧词内容不露面,响应一组解锁一组)。
                                 visible: gmodel.count > 0
+                                         && (!root._chipPending
+                                             || root._chipDone[modelData.serverUrl + "|" + modelData.accountId] === true)
                                 spacing: 8
 
                                 // 组头:服务器/账号名 + 条数。
@@ -851,9 +960,12 @@ Item {
                                             runtimeTicks: model.runtimeTicks
                                             unplayedCount: model.unplayedCount
                                             itemType: model.type
-                                            onClicked: root.showDetail(model.id, model.posterId,
-                                                                       model.name, modelData.serverUrl,
-                                                                       modelData.accountId)
+                                            onClicked: {
+                                                RecentSearches.add(searchField.text)
+                                                root.showDetail(model.id, model.posterId,
+                                                                model.name, modelData.serverUrl,
+                                                                modelData.accountId)
+                                            }
                                         }
                                     }
                                 }
