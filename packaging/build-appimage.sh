@@ -7,6 +7,12 @@ TOOLS_DIR="$OUT_DIR/.tools"
 APPDIR="$OUT_DIR/AppDir"
 APP_ID="io.github.umariceshower.MoePlayer"
 VERSION="$(sed -n 's/^project(MoePlayer VERSION \([0-9.]*\).*/\1/p' "$SRC_DIR/CMakeLists.txt")"
+# 后缀与 CMake 同规则:环境变量优先(CI tag 构建注入,空串=正式版),
+# 未设置才回退 CMakeLists 默认值(本地构建)。
+if [ -z "${MOEPLAYER_VERSION_SUFFIX+x}" ]; then
+  MOEPLAYER_VERSION_SUFFIX="$(sed -n 's/^set(MOEPLAYER_VERSION_SUFFIX "\([^"]*\)")/\1/p' "$SRC_DIR/CMakeLists.txt")"
+fi
+VERSION="${VERSION}${MOEPLAYER_VERSION_SUFFIX}"
 
 mkdir -p "$OUT_DIR" "$TOOLS_DIR"
 

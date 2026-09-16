@@ -1,15 +1,47 @@
 name: build
 
 on:
-  # push:
-  #   branches: [main]
-  #   tags: ['v*']
-  # pull_request:
+  # 发布 = 打 tag(v0.2.0 / v0.2.0-rc.1):tag 触发四平台构建 + 建 GitHub
+  # Release(tag 含 '-' 自动标 pre-release)。workflow_dispatch 保留供
+  # 手动验证(产物带 -dev 后缀)。
+  push:
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
-  appimage:
+  # 版本解析(tag 优先,校验与 project(VERSION) 数字段一致):四个打包
+  # 作业经 needs 取 version/vnum/suffix,suffix 以环境变量注入 CMake 与
+  # AppImage 脚本。
+  version:
     runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      vnum: ${{ steps.ver.outputs.vnum }}
+      suffix: ${{ steps.ver.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: ver
+        run: |
+          proj=$(sed -n 's/^project(MoePlayer VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          suffix=$(sed -n 's/^set(MOEPLAYER_VERSION_SUFFIX "\([^"]*\)")/\1/p' CMakeLists.txt)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF#refs/tags/v}"
+            if [[ "$v" != "$proj" && "$v" != "$proj"-* ]]; then
+              echo "::error::tag $v 与 project(VERSION) $proj 不一致(数字段必须相等)"
+              exit 1
+            fi
+            suffix="${v#$proj}"   # v0.2.0 → "";v0.2.0-rc.1 → "-rc.1"
+          fi
+          echo "version=${proj}${suffix}" >> "$GITHUB_OUTPUT"
+          echo "vnum=$proj" >> "$GITHUB_OUTPUT"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "构建版本: ${proj}${suffix}"
+
+  appimage:
+    needs: version
+    runs-on: ubuntu-22.04
+    env:
+      MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
       - uses: actions/checkout@v5
 
@@ -42,7 +74,10 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: version
     runs-on: windows-latest
+    env:
+      MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
       - uses: actions/checkout@v5
 
@@ -100,10 +135,10 @@ jobs:
           Write-Host "makensis 目录: $nsisDir"
 
       - name: NSIS 打包
+        # VERSION = 完整串(文件名/字符串字段,如 0.2.0-rc.1);
+        # VERSION_NUM = 纯数字(VIProductVersion 只收四段数)。
         shell: pwsh
-        run: |
-          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(MoePlayer VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
-          makensis /DVERSION=$ver packaging/windows-installer.nsi
+        run: makensis /DVERSION=${{ needs.version.outputs.version }} /DVERSION_NUM=${{ needs.version.outputs.vnum }} packaging/windows-installer.nsi
 
       - name: 打包便携版 zip
         # 免安装版:同一 package/ 树 + 便携标记 + CRT DLL app-local 散装
@@ -121,8 +156,7 @@ jobs:
           Copy-Item "$($crt.FullName)\*.dll" package\
           # 便携标记:存在即启用便携模式(数据存 exe 旁 data/,见 apppaths.h)。
           New-Item -ItemType File -Path package\portable_mode.txt | Out-Null
-          $ver = (Select-String -Path CMakeLists.txt -Pattern 'project\(MoePlayer VERSION (\d+\.\d+\.\d+)').Matches[0].Groups[1].Value
-          Compress-Archive -Path package\* -DestinationPath "MoePlayer-Portable-$ver.zip"
+          Compress-Archive -Path package\* -DestinationPath "MoePlayer-Portable-${{ needs.version.outputs.version }}.zip"
 
       - uses: actions/upload-artifact@v6
         with:
@@ -137,8 +171,11 @@ jobs:
           if-no-files-found: error
 
   deb:
+    needs: version
     runs-on: ubuntu-22.04
     container: debian:trixie
+    env:
+      MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
       - name: 安装依赖
         run: |
@@ -163,8 +200,11 @@ jobs:
           if-no-files-found: error
 
   rpm:
+    needs: version
     runs-on: ubuntu-22.04
     container: fedora:42
+    env:
+      MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
       - name: 安装依赖
         run: |
@@ -184,3 +224,60 @@ jobs:
           name: rpm
           path: build/*.rpm
           if-no-files-found: error
+
+  # (原 flatpak.yml 并入此处:tag 发版时产物才能进同一个 Release。)
+  flatpak:
+    needs: version
+    runs-on: ubuntu-22.04
+    env:
+      MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: 安装 flatpak 与 KDE runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y flathub org.kde.Sdk//6.10 org.kde.Platform//6.10
+
+      - name: 构建 Flatpak
+        run: |
+          # flatpak-builder 用 file:// 本地镜像喂 git submodule;git >= 2.38 默认拒绝
+          git config --global protocol.file.allow always
+          # 版本后缀注入:flatpak-builder 无 --env 选项且构建沙箱不继承宿主环境,
+          # 直接写工作区 CMakeLists 的默认值(作业级 checkout,随 type:dir 源进沙箱)。
+          sed -i 's/^set(MOEPLAYER_VERSION_SUFFIX "[^"]*")/set(MOEPLAYER_VERSION_SUFFIX "'"$MOEPLAYER_VERSION_SUFFIX"'")/' CMakeLists.txt
+          grep 'MOEPLAYER_VERSION_SUFFIX "' CMakeLists.txt
+          flatpak-builder --user --force-clean --repo=repo build-flatpak \
+            packaging/flatpak/io.github.umariceshower.MoePlayer.yml
+          flatpak build-bundle repo "MoePlayer-${{ needs.version.outputs.version }}-x86_64.flatpak" \
+            io.github.umariceshower.MoePlayer
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: flatpak
+          path: MoePlayer-*.flatpak
+          if-no-files-found: error
+
+  # tag 构建收尾:汇总五平台产物建 GitHub Release(tag 含 '-' = 预发布)。
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [version, appimage, windows, deb, rpm, flatpak]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease";; esac
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "MoePlayer ${{ needs.version.outputs.version }}" \
+            --generate-notes $pre

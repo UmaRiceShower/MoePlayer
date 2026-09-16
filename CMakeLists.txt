@@ -1,6 +1,17 @@
 cmake_minimum_required(VERSION 3.21)
 project(MoePlayer VERSION 0.1.0 LANGUAGES CXX)
 
+# 预发布后缀(SemVer):开发期 "-dev",预览期 "-alpha.1"/"-beta.1"/"-rc.1",
+# 正式版清空。字符串位(关于页/rc 字符串/包文件名)用完整串,数值位
+# (rc 四段数/NSIS VIProductVersion)保持纯数字 PROJECT_VERSION。
+# CI tag 构建经环境变量覆盖(v0.2.0-rc.1 → -rc.1;正式 tag → 空串)——
+# 空串也是有效覆盖,故用 DEFINED 判存在而非判非空。
+set(MOEPLAYER_VERSION_SUFFIX "-dev")
+if(DEFINED ENV{MOEPLAYER_VERSION_SUFFIX})
+    set(MOEPLAYER_VERSION_SUFFIX "$ENV{MOEPLAYER_VERSION_SUFFIX}")
+endif()
+set(MOEPLAYER_VERSION_FULL "${PROJECT_VERSION}${MOEPLAYER_VERSION_SUFFIX}")
+
 # 桌面集成标识(反向域名):desktop 文件名、图标名、Wayland app_id 与
 # 打包(Flatpak/AppImage)统一取值,与 QSettings 路径(MOEPLAYER_NAME)解耦。
 set(MOEPLAYER_APP_ID "io.github.umariceshower.MoePlayer")
@@ -181,7 +192,7 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 # 应用名/版本单一来源:CMake project() → 编译期宏 → 运行时引用。
 # applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE
-    MOEPLAYER_VERSION="${PROJECT_VERSION}"
+    MOEPLAYER_VERSION="${MOEPLAYER_VERSION_FULL}"
     MOEPLAYER_NAME="${PROJECT_NAME}"
     MOEPLAYER_APP_ID="${MOEPLAYER_APP_ID}"
     # 仅 Debug 启用 QML 调试/剖析(QML Profiler / -qmljsdebugger 需要 QT_QML_DEBUG)。
@@ -225,15 +236,18 @@ install(FILES LICENSE THIRD-PARTY-NOTICES.md
         DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/moeplayer)
 
 set(CPACK_PACKAGE_NAME "moeplayer")
+set(CPACK_PACKAGE_VERSION "${MOEPLAYER_VERSION_FULL}")
+# RPM 的 Version 字段禁含 '-',预发布后缀映射为 '~'(0.1.0~dev 排序上仍
+# 先于正式版 0.1.0);deb 的上游版本段允许字母,直接用完整串。
+string(REPLACE "-" "~" CPACK_RPM_PACKAGE_VERSION "${MOEPLAYER_VERSION_FULL}")
 set(CPACK_PACKAGE_VENDOR "UmaRiceShower")
 set(CPACK_PACKAGE_CONTACT "UmaRiceShower")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Third-party Emby desktop client (Qt/QML, external mpv)")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/UmaRiceShower/MoePlayer")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
-set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 # 产物命名统一 MoePlayer-<版本>-linux-<架构>.<ext>(与 AppImage/Windows 同风格;
 # CI 上传走通配符,改名无联动)。
-set(CPACK_PACKAGE_FILE_NAME "MoePlayer-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
+set(CPACK_PACKAGE_FILE_NAME "MoePlayer-${CPACK_PACKAGE_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_GENERATOR "TGZ;DEB;RPM")
 
 set(CPACK_DEBIAN_PACKAGE_SECTION "video")
@@ -248,7 +262,7 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
 else()
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
-set(CPACK_DEBIAN_FILE_NAME "MoePlayer-${PROJECT_VERSION}-linux-${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
+set(CPACK_DEBIAN_FILE_NAME "MoePlayer-${CPACK_PACKAGE_VERSION}-linux-${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
 
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
