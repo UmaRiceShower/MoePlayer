@@ -225,32 +225,24 @@ jobs:
           path: build/*.rpm
           if-no-files-found: error
 
-  # (原 flatpak.yml 并入此处:tag 发版时产物才能进同一个 Release。)
   flatpak:
     needs: version
     runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      options: --privileged
     env:
       MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: 安装 flatpak 与 KDE runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y flathub org.kde.Sdk//6.10 org.kde.Platform//6.10
-
       - name: 构建 Flatpak
         run: |
-          # flatpak-builder 用 file:// 本地镜像喂 git submodule;git >= 2.38 默认拒绝
           git config --global protocol.file.allow always
-          # 版本后缀注入:flatpak-builder 无 --env 选项且构建沙箱不继承宿主环境,
-          # 直接写工作区 CMakeLists 的默认值(作业级 checkout,随 type:dir 源进沙箱)。
           sed -i 's/^set(MOEPLAYER_VERSION_SUFFIX "[^"]*")/set(MOEPLAYER_VERSION_SUFFIX "'"$MOEPLAYER_VERSION_SUFFIX"'")/' CMakeLists.txt
           grep 'MOEPLAYER_VERSION_SUFFIX "' CMakeLists.txt
-          flatpak-builder --user --force-clean --repo=repo build-flatpak \
-            packaging/flatpak/io.github.umariceshower.MoePlayer.yml
+          flatpak-builder --force-clean --disable-rofiles-fuse --repo=repo \
+            build-flatpak packaging/flatpak/io.github.umariceshower.MoePlayer.yml
           flatpak build-bundle repo "MoePlayer-${{ needs.version.outputs.version }}-x86_64.flatpak" \
             io.github.umariceshower.MoePlayer
 
