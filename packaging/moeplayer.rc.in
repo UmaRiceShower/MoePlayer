@@ -20,12 +20,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "UmaRiceShower\0"
             VALUE "FileDescription", "MoePlayer - Emby media client\0"
-            VALUE "FileVersion", "@PROJECT_VERSION@\0"
+            VALUE "FileVersion", "@MOEPLAYER_VERSION_FULL@\0"
             VALUE "InternalName", "MoePlayer\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 UmaRiceShower\0"
             VALUE "OriginalFilename", "MoePlayer.exe\0"
             VALUE "ProductName", "MoePlayer\0"
-            VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+            VALUE "ProductVersion", "@MOEPLAYER_VERSION_FULL@\0"
         END
     END
     BLOCK "VarFileInfo"

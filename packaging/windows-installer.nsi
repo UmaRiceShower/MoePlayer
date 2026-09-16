@@ -13,8 +13,13 @@
 Name "${APPNAME} ${VERSION}"
 OutFile "..\MoePlayer-Setup-${VERSION}.exe"
 
-; 安装器 exe 版本信息(属性页可见;版本号由 CI 从 CMakeLists project(VERSION) 传入)
-VIProductVersion "${VERSION}.0"
+; 安装器 exe 版本信息(属性页可见)。VERSION = 完整串(可带 -rc.1 后缀);
+; VERSION_NUM = 纯数字(CI 一并传入),VIProductVersion 只收四段数字段。
+; 本地手动 makensis 只传 /DVERSION 时回退同值(此时 VERSION 须为数字串)。
+!ifndef VERSION_NUM
+!define VERSION_NUM "${VERSION}"
+!endif
+VIProductVersion "${VERSION_NUM}.0"
 VIAddVersionKey /LANG=2052 "ProductName" "${APPNAME}"
 VIAddVersionKey /LANG=2052 "FileDescription" "${APPNAME} 安装程序"
 VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"
