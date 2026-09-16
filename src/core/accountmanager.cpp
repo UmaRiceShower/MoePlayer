@@ -1126,7 +1126,12 @@ void AccountManager::maybeAssembleHomeRows()
         const QVariantMap om = ord.toMap();
         const QString accountId = om.value(QStringLiteral("id")).toString();
         const QString serverUrl = om.value(QStringLiteral("serverUrl")).toString();
-        const QString serverName = om.value(QStringLiteral("name")).toString();
+        QString serverName = om.value(QStringLiteral("name")).toString();
+        if (serverName.isEmpty()) {
+            const int ai = accountIndexById(accountId);
+            if (ai >= 0)
+                serverName = m_accounts[ai].userName;
+        }
         const QVariantList views = m_homeViews.value(accountId);
         if (!m_homeViews.contains(accountId)) {
             // 视图仍在途:先沿用该服现有行(缓存/上轮),等壳到位再换。

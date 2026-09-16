@@ -552,6 +552,9 @@ Item {
         }
     }
 
+    // 点服务器卡:回首页并把该服显示名注入首页过滤框(Main 接)。
+    signal browseHome(string serverUrl, string accountId, string name)
+
     DropArea {
         anchors.fill: parent
         onPositionChanged: (drag) => root.updateDropTarget(drag)
@@ -929,6 +932,10 @@ Item {
                             onClicked: (mouse) => {
                                 if (mouse.modifiers & Qt.ControlModifier)
                                     root.openEditDialog(cell.id)
+                                else
+                                    root.browseHome(cell.modelData.serverUrl, cell.id,
+                                                    card.modelData.name !== "" ? card.modelData.name
+                                                                               : card.modelData.userName)
                             }
                             onReleased: {
                                 const r = root

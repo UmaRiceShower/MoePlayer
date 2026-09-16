@@ -147,10 +147,109 @@ Item {
     }
 
 
+    // ---- 过滤(顶栏过滤框:服务器/媒体库一体) ----
+    // 服务器管理页点卡片注入:Main.homeFilterText 写入(账号显示名)后
+    // 此处消费进过滤框,消费即清(同名再点能再触发)。
+    property string filterInject: ApplicationWindow.window ? ApplicationWindow.window.homeFilterText : ""
+    onFilterInjectChanged: {
+        if (root.filterInject !== "") {
+            filterField.text = root.filterInject
+            ApplicationWindow.window.homeFilterText = ""
+        }
+    }
+
+    // pageList 模型:空查询 = 原生 C++ 模型(默认态零回归——快照重建会把
+    // 聚合期的行原位更新变成整列重置);非空 = 过滤快照(行数少,重建可承受)。
+    // 不能给竖向 ListView 行加条件高度(离屏高度缓存失效 → 全量孵化委托)。
+    property var filteredRows: []
+    function rebuildRowsFilter() {
+        const q = root.libFilter.trim()
+        if (q === "") {
+            root.filteredRows = []
+            return
+        }
+        const hm = AccountManager.homeRows
+        const out = []
+        for (let i = 0; i < hm.count; ++i) {
+            const row = hm.rowAt(i)
+            if (root.libMatch(row))
+                out.push(row)
+        }
+        root.filteredRows = out
+    }
+    onLibFilterChanged: {
+        root.rebuildRowsFilter()
+        root.rebuildTop()
+    }
+    Connections {
+        target: AccountManager.homeRows
+        // 仅过滤态需要跟随模型更新(空查询 rebuild 早退)。
+        function onDataChanged() { root.rebuildRowsFilter() }
+        function onRowsInserted() { root.rebuildRowsFilter() }
+        function onRowsRemoved() { root.rebuildRowsFilter() }
+        function onModelReset() { root.rebuildRowsFilter() }
+    }
+
+    // hero 跟随过滤的条件:查询命中某服名(媒体库名的查询不动推荐)。
+    function heroFilterActive() {
+        const q = root.libFilter.trim()
+        if (q === "")
+            return false
+        const list = AccountManager.accounts
+        for (let i = 0; i < list.length; ++i)
+            if (FuzzyMatch.hit(q, list[i].name !== "" ? list[i].name : list[i].userName))
+                return true
+        return false
+    }
+    function heroServerHit(serverUrl, accountId) {
+        const list = AccountManager.accounts
+        for (let i = 0; i < list.length; ++i) {
+            const a = list[i]
+            if (a.serverUrl === serverUrl && a.id === accountId)
+                return FuzzyMatch.hit(root.libFilter.trim(), a.name !== "" ? a.name : a.userName)
+        }
+        return false
+    }
+    // 服务器快选下拉选项:可见账号显示名,按当前过滤词模糊收窄。
+    function serverPickOptions() {
+        const q = root.libFilter.trim()
+        const out = []
+        const list = AccountManager.accounts
+        for (let i = 0; i < list.length; ++i) {
+            const a = list[i]
+            if (!AccountManager.accountVisible(a.id))
+                continue
+            const nm = a.name !== "" ? a.name : a.userName
+            if (q === "" || FuzzyMatch.hit(q, nm) || FuzzyMatch.hit(q, a.serverUrl))
+                out.push(nm)
+        }
+        return out
+    }
+    // 多服(可见账号跨服务器)时媒体库卡片标注服名,单服无歧义不加。
+    readonly property bool multiServer: {
+        const list = AccountManager.accounts
+        const seen = {}
+        let n = 0
+        for (let i = 0; i < list.length; ++i) {
+            if (!AccountManager.accountVisible(list[i].id))
+                continue
+            const u = list[i].serverUrl
+            if (!seen[u]) {
+                seen[u] = true
+                ++n
+            }
+        }
+        return n > 1
+    }
+
     function rebuildTop() {
         // 服务端已按 IncludeItemTypes=Movie,Series & ImageTypes=Backdrop 过滤
         // (4.9+ 版本门控,旧版跳过),此处只管截断显示条数。
-        const sugOk = AccountManager.suggestions
+        // 过滤框命中服名时,建议与兜底候选都只取该服;媒体库名查询不动 hero。
+        const suggAll = AccountManager.suggestions
+        const sugOk = root.heroFilterActive()
+                      ? suggAll.filter(function (it) { return root.heroServerHit(it.serverUrl, it.accountId) })
+                      : suggAll
         if (sugOk.length > 0) {
             root.syncHero(sugOk.slice(0, 10), false)
             return
@@ -159,6 +258,8 @@ Item {
         const hm = AccountManager.homeRows
         for (let i = 0; i < hm.count; ++i) {
             const row = hm.rowAt(i)
+            if (!root.libMatch(row))
+                continue
             const sv = row.serverUrl || ""
             const aid = row.accountId || ""
             for (const it of (row.items || [])) {
@@ -177,6 +278,7 @@ Item {
     }
 
     Component.onCompleted: {
+        root.rebuildRowsFilter()
         if (AccountManager.hasAccounts) {
             AccountManager.validateTokens()
             AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
@@ -202,6 +304,7 @@ Item {
         height: root.navH
         width: parent.width
         AppText {
+            id: navTitle
             anchors.left: parent.left
             anchors.leftMargin: Constants.homeNavMarginL
             anchors.verticalCenter: parent.verticalCenter
@@ -209,6 +312,112 @@ Item {
             color: Theme.textPrimary
             font.pixelSize: Constants.homeNavTitlePx
             font.bold: true
+        }
+        // 过滤框(标题右):模糊过滤媒体库/服务器(拼音可),聚焦出服务器
+        // 快选下拉(点服名填入框中,过滤即按服名命中);✕/Esc 清除;
+        // 回车 = 进入首个命中库。
+        TextField {
+            id: filterField
+            anchors.left: navTitle.right
+            anchors.leftMargin: 14
+            anchors.verticalCenter: parent.verticalCenter
+            width: 220
+            height: 30
+            leftPadding: 12
+            rightPadding: 26
+            placeholderText: "过滤服务器 / 媒体库…"
+            placeholderTextColor: Theme.textMuted
+            color: Theme.textPrimary
+            font.pixelSize: 13
+            selectByMouse: true
+            background: Rectangle {
+                radius: height / 2
+                color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
+                border.width: 1
+                border.color: filterField.activeFocus
+                              ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                              : Theme.borderSoft
+            }
+            AppText {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                anchors.verticalCenter: parent.verticalCenter
+                text: "✕"
+                visible: filterField.text !== ""
+                color: filterClearHover.hovered ? Theme.textPrimary : Theme.textMuted
+                font.pixelSize: 12
+                HoverHandler { id: filterClearHover; cursorShape: Qt.PointingHandCursor }
+                TapHandler { onTapped: filterField.text = "" }
+            }
+            onTextChanged: {
+                root.libFilter = text
+                // 编辑中保持下拉展开(点选关闭后再改词要能看到新匹配)。
+                if (activeFocus && !serverPickPopup.visible)
+                    serverPickPopup.open()
+            }
+            Keys.onEscapePressed: filterField.text = ""
+            // 回车 = 进入首个命中库(与历史页"回车 = 激活首个匹配项"同约定)。
+            onAccepted: {
+                const n = AccountManager.homeRows.count
+                for (let i = 0; i < n; ++i) {
+                    const row = AccountManager.homeRows.rowAt(i)
+                    if (root.libMatch(row)) {
+                        root.openLibrary(row.viewId, row.serverUrl,
+                                         row.viewName, row.accountId)
+                        break
+                    }
+                }
+            }
+            onActiveFocusChanged: if (activeFocus) serverPickPopup.open()
+            // 服务器快选下拉:列出可见账号(显示名),输入即过滤;点选 =
+            // 服名填入框中(过滤按服名命中,行/卡条同步收窄)。
+            Popup {
+                id: serverPickPopup
+                parent: filterField
+                y: filterField.height + 6
+                width: 240
+                padding: 6
+                closePolicy: Popup.CloseOnEscape
+                background: Rectangle {
+                    color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
+                    radius: 8
+                    border.width: 1
+                    border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+                }
+                contentItem: ListView {
+                    implicitHeight: Math.min(contentHeight, 300)
+                    clip: true
+                    model: root.serverPickOptions()
+                    delegate: ItemDelegate {
+                        id: pickItem
+                        required property string modelData
+                        width: ListView.view.width
+                        height: 32
+                        padding: 0
+                        onClicked: {
+                            filterField.text = pickItem.modelData
+                            serverPickPopup.close()
+                            filterField.forceActiveFocus()
+                        }
+                        contentItem: AppText {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: parent.width - 20
+                            text: pickItem.modelData
+                            font.pixelSize: 13
+                            color: Theme.textPrimary
+                            elide: Text.ElideRight
+                        }
+                        background: Rectangle {
+                            radius: 5
+                            color: pickItem.hovered
+                                   ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                                   : "transparent"
+                        }
+                    }
+                }
+            }
         }
         // 四个按钮共用一份模糊抓取(见 GlassBlurSource):整片列表只抓一次。
         // 刷新策略 = 滚动驱动 + 定时兜底:滚轮直接写 contentY(不产生 moving/flick),
@@ -329,7 +538,7 @@ Item {
         smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: AccountManager.homeRows
+        model: root.libFilter.trim() === "" ? AccountManager.homeRows : root.filteredRows
         reuseItems: true
         cacheBuffer: 400
         // 滚轮步进走配置:页级 homeWheelStep(0=全局 ConfigManager.wheelStep,
@@ -461,55 +670,6 @@ Item {
                         font.pixelSize: Constants.homeMediaTitlePx
                         font.bold: true
                     }
-                    // 媒体库过滤框:输入即过滤(见 root.libMatch);✕/Esc 清除。
-                    TextField {
-                        id: mediaFilter
-                        anchors.right: parent.right
-                        anchors.rightMargin: Constants.rowLeftMargin
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 200
-                        height: 28
-                        leftPadding: 12
-                        rightPadding: 26
-                        placeholderText: "过滤媒体库"
-                        placeholderTextColor: Theme.textMuted
-                        color: Theme.textPrimary
-                        font.pixelSize: 13
-                        selectByMouse: true
-                        background: Rectangle {
-                            radius: height / 2
-                            color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
-                            border.width: 1
-                            border.color: mediaFilter.activeFocus
-                                          ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
-                                          : Theme.borderSoft
-                        }
-                        AppText {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "✕"
-                            visible: mediaFilter.text !== ""
-                            color: mediaFilterClearHover.hovered ? Theme.textPrimary : Theme.textMuted
-                            font.pixelSize: 12
-                            HoverHandler { id: mediaFilterClearHover; cursorShape: Qt.PointingHandCursor }
-                            TapHandler { onTapped: mediaFilter.text = "" }
-                        }
-                        onTextChanged: root.libFilter = text
-                        Keys.onEscapePressed: mediaFilter.text = ""
-                        // 回车 = 进入首个命中库(与历史页"回车 = 激活首个匹配项"同约定)。
-                        onAccepted: {
-                            const n = AccountManager.homeRows.count
-                            for (let i = 0; i < n; ++i) {
-                                const row = AccountManager.homeRows.rowAt(i)
-                                if (root.libMatch(row)) {
-                                    root.openLibrary(row.viewId, row.serverUrl,
-                                                     row.viewName, row.accountId)
-                                    break
-                                }
-                            }
-                        }
-                    }
                 }
                 Item {
                     width: parent.width
@@ -590,7 +750,9 @@ Item {
                                     anchors.leftMargin: Constants.homeMediaTextMargin
                                     anchors.rightMargin: Constants.homeMediaTextMargin
                                     anchors.bottomMargin: Constants.homeMediaTextBottom
-                                    text: libCell.modelData.viewName
+                                    text: (root.multiServer && libCell.modelData.serverName
+                                           ? libCell.modelData.serverName + " · " : "")
+                                          + libCell.modelData.viewName
                                     color: Theme.textOnBadge
                                     font.pixelSize: Constants.homeMediaTextPx
                                     elide: Text.ElideRight
