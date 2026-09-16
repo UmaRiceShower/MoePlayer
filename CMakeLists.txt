@@ -54,6 +54,7 @@ qt_add_executable(MoePlayer
     src/core/configmanager.cpp
     src/core/persistmap.cpp
     src/core/playbackhistory.cpp
+    src/core/recentsearches.cpp
     src/core/screeninhibit.cpp
     src/core/pinyinhelper.cpp
     src/core/pinyin_table.cpp

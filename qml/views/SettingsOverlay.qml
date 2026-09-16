@@ -18,7 +18,16 @@ Item {
     // 可回填控件注册表:Switch/ComboBox/TextField 的用户写入会打断
     // 初始绑定,统一经各自的 resync() 从 ConfigManager 回填。
     property var syncables: []
-    function registerSyncable(c) { root.syncables.push(c) }
+    function registerSyncable(c) {
+        root.syncables.push(c)
+        // 动态页(设置项搜索结果)的委托销毁时自动注销:死对象留在表里,
+        // 下次 open() → syncAll() 对其调 resync() 抛 TypeError,浮窗打不开。
+        c.Component.onDestruction.connect(function () {
+            const i = root.syncables.indexOf(c)
+            if (i >= 0)
+                root.syncables.splice(i, 1)
+        })
+    }
     function syncAll() {
         for (let i = 0; i < root.syncables.length; ++i)
             root.syncables[i].resync()
@@ -34,8 +43,64 @@ Item {
         return out
     }
 
+    // 设置项搜索:非空时保持两级布局,左侧只列有匹配项的分类(带匹配数),
+    // 右侧为左选分类的匹配项。
+    property string filterText: ""
+    // 匹配(模糊/拼音,与库过滤同规则):对象 = 标签+描述+分类名;
+    // section 限分类;无分类项(uiSection 空,不进界面的隐藏键)跳过。
+    function itemsMatching(query, section) {
+        const all = ConfigManager.items
+        const out = []
+        for (let i = 0; i < all.length; ++i) {
+            const it = all[i]
+            if (!it.uiSection)
+                continue
+            if (section !== undefined && it.uiSection !== section)
+                continue
+            if (FuzzyMatch.hit(query, it.label + " " + it.description + " " + it.uiSection))
+                out.push(it)
+        }
+        return out
+    }
+
+    // 过滤模式下重建分类列表:只列有匹配项的分类,标签带匹配数;
+    // 尽量保留原选中分类。「关于」无配置项,过滤时自然消失。
+    function rebuildCats() {
+        const prev = catList.currentIndex >= 0 && catModel.count > 0
+                     ? catModel.get(catList.currentIndex).section : ""
+        const q = root.filterText
+        const cats = q === ""
+            ? ["界面", "播放", "媒体库", "详情页", "快捷键", "代理", "关于"]
+            : []
+        catModel.clear()
+        if (q === "") {
+            for (let i = 0; i < cats.length; ++i)
+                catModel.append({ label: cats[i], section: cats[i] })
+        } else {
+            const named = ["界面", "播放", "媒体库", "详情页", "快捷键", "代理"]
+            for (let i = 0; i < named.length; ++i) {
+                const n = itemsMatching(q, named[i]).length
+                if (n > 0)
+                    catModel.append({ label: named[i] + " (" + n + ")", section: named[i] })
+            }
+        }
+        let idx = 0
+        if (prev !== "")
+            for (let i = 0; i < catModel.count; ++i)
+                if (catModel.get(i).section === prev) { idx = i; break }
+        catList.currentIndex = idx
+    }
+    onFilterTextChanged: rebuildCats()
+    // 过滤模式右页的当前分类(随左选联动)。
+    function currentFilterSection() {
+        return catList.currentIndex >= 0 && catModel.count > 0
+               ? catModel.get(catList.currentIndex).section : ""
+    }
+
     function open() {
         root.syncAll()
+        // 打开时清空设置项搜索:每次进入都是分类视图,状态可预期。
+        filterField.text = ""
         root.visible = true
     }
     function close() {
@@ -458,6 +523,35 @@ Item {
                     font.bold: true
                 }
                 Item { Layout.fillWidth: true }
+                // 设置项搜索:跨分类即时过滤(不防抖);Esc 清空,空时再按
+                // Esc 放行给全局关浮层。
+                TextField {
+                    id: filterField
+                    Layout.preferredWidth: 200
+                    Layout.preferredHeight: 30
+                    placeholderText: "搜索设置项…"
+                    placeholderTextColor: Theme.textMuted
+                    color: Theme.textPrimary
+                    font.pixelSize: 13
+                    selectByMouse: true
+                    leftPadding: 12
+                    rightPadding: 12
+                    background: Rectangle {
+                        radius: 15
+                        color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
+                        border.width: 1
+                        border.color: filterField.activeFocus
+                                      ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                      : Theme.borderSoft
+                    }
+                    onTextChanged: root.filterText = text.trim()
+                    Keys.onEscapePressed: (event) => {
+                        if (text !== "")
+                            text = ""
+                        else
+                            event.accepted = false
+                    }
+                }
                 AppText {
                     text: "Esc 关闭"
                     color: Theme.textMuted
@@ -481,17 +575,12 @@ Item {
                     id: catList
                     Layout.preferredWidth: 160
                     Layout.fillHeight: true
+                    // 过滤时保持可见:两级布局的左级(只列有匹配项的分类)。
                     clip: true
                     currentIndex: 0
-                    model: ListModel {
-                        ListElement { label: "界面" }
-                        ListElement { label: "播放" }
-                        ListElement { label: "媒体库" }
-                        ListElement { label: "详情页" }
-                        ListElement { label: "快捷键" }
-                        ListElement { label: "代理" }
-                        ListElement { label: "关于" }
-                    }
+                    model: ListModel { id: catModel }
+                    // 初填与过滤重建都走 rebuildCats()(过滤=只列有匹配项的分类)。
+                    Component.onCompleted: root.rebuildCats()
                     // 分类不满一列时下方空白区:点击夺走输入框焦点。
                     MouseArea {
                         z: -1
@@ -548,6 +637,7 @@ Item {
                 StackLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    visible: root.filterText === ""
                     currentIndex: catList.currentIndex
 
                     // ---- 界面(配置项经 items 表枚举) ----
@@ -695,6 +785,24 @@ Item {
                                 }
                             }
                         }
+                    }
+                }
+
+                // ---- 过滤结果页:跟随左选分类,只列该分类的匹配项 ----
+                SettingsPage {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    visible: root.filterText !== ""
+                    Repeater {
+                        model: root.filterText === "" ? []
+                                : root.itemsMatching(root.filterText, root.currentFilterSection())
+                        delegate: SettingItem {}
+                    }
+                    AppText {
+                        visible: root.filterText !== "" && catModel.count === 0
+                        text: "无匹配设置项"
+                        color: Theme.textMuted
+                        font.pixelSize: 13
                     }
                 }
             }
