@@ -15,6 +15,7 @@ finish-args:
   - --talk-name=org.freedesktop.login1
   - --talk-name=org.freedesktop.ScreenSaver
   - --filesystem=xdg-run/pipewire-0:ro
+  - --filesystem=xdg-pictures/MoePlayer:create
 
 cleanup:
   - '*.a'
