@@ -18,6 +18,7 @@
 #include <QJsonValue>
 #include <QLocalSocket>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QStringList>
 #include <QTimer>
 #include <QDir>
@@ -467,7 +468,10 @@ void MpvClient::spawnMpv(Session *s)
          << QStringLiteral("--input-default-bindings=yes")
          << QStringLiteral("--input-cursor=yes")
          << QStringLiteral("--cache=yes")
-         << QStringLiteral("--stop-screensaver=yes");
+         << QStringLiteral("--stop-screensaver=yes")
+         << QStringLiteral("--screenshot-dir=") +
+                QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
+                QStringLiteral("/MoePlayer");
     // 播放流 HTTP 代理(仅 http(s);空=直连)。https 目标走 CONNECT 隧道。
     const QString proxy = m_config ? m_config->proxy() : QString();
     if (proxy.startsWith(QStringLiteral("http://")) ||
