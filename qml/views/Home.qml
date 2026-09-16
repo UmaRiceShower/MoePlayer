@@ -242,6 +242,10 @@ Item {
         return n > 1
     }
 
+    // 页面被压栈(进详情/库/管理页)时收下拉里——Popup 挂在 Overlay 层,
+    // 不收会悬在新页面上方。
+    StackView.onStatusChanged: if (StackView.status !== StackView.Active) serverPickPopup.close()
+
     function rebuildTop() {
         // 服务端已按 IncludeItemTypes=Movie,Series & ImageTypes=Backdrop 过滤
         // (4.9+ 版本门控,旧版跳过),此处只管截断显示条数。
@@ -368,7 +372,14 @@ Item {
                     }
                 }
             }
-            onActiveFocusChanged: if (activeFocus) serverPickPopup.open()
+            // 失焦即收下拉(点框外任意处 → 全局失焦层清焦点 → 这里收口;
+            // 点下拉项不收焦点——Popup 在 Overlay 层,选中走自身 onClicked)。
+            onActiveFocusChanged: {
+                if (activeFocus)
+                    serverPickPopup.open()
+                else
+                    serverPickPopup.close()
+            }
             // 服务器快选下拉:列出可见账号(显示名),输入即过滤;点选 =
             // 服名填入框中(过滤按服名命中,行/卡条同步收窄)。
             Popup {

@@ -514,33 +514,12 @@ ApplicationWindow {
                 mouse.accepted = false
                 return
             }
-            // 中键粘贴让位:按压点最深子项是文本框时不接手本次按压(沿
-            // childAt 逐层下探;本层与手势提示跳过)。判定看光标下的框而
-            // 非聚焦框——搜索浮层打开即聚焦其输入框,按聚焦判会让浮层上
-            // 的手势全灭。
-            var item = null
-            var kids = root.contentItem.children
-            for (var i = kids.length - 1; i >= 0; --i) {
-                var k = kids[i]
-                if (k === mouseNav || k === gestureHint || !k.visible)
-                    continue
-                if (mouse.x >= k.x && mouse.x < k.x + k.width
-                    && mouse.y >= k.y && mouse.y < k.y + k.height) {
-                    item = k
-                    break
-                }
-            }
-            while (item) {
-                if (item instanceof TextInput || item instanceof TextEdit
-                    || item instanceof TextField || item instanceof TextArea) {
-                    mouse.accepted = false
-                    return
-                }
-                var p = item.mapFromItem(root.contentItem, mouse.x, mouse.y)
-                var child = item.childAt(p.x, p.y)
-                if (!child)
-                    break
-                item = child
+            // 中键粘贴让位:按压点落在文本框上时不接手本次按压。判定看
+            // 光标下的框而非聚焦框——搜索浮层打开即聚焦其输入框,按聚焦
+            // 判会让浮层上的手势全灭。
+            if (root.textInputAt(mouse.x, mouse.y)) {
+                mouse.accepted = false
+                return
             }
             pressPos = Qt.point(mouse.x, mouse.y)
             arming = true
@@ -573,6 +552,51 @@ ApplicationWindow {
         onCanceled: {
             arming = false
             gestureHint.progress = 0
+        }
+    }
+
+    // 按压点最深子项是否为文本输入框(沿 childAt 逐层下探,跳过
+    // mouseNav/gestureHint/focusGuard 观察层)。手势粘贴让位与点外
+    // 失焦共用。
+    function textInputAt(x, y) {
+        let item = null
+        const kids = root.contentItem.children
+        for (let i = kids.length - 1; i >= 0; --i) {
+            const k = kids[i]
+            if (k === mouseNav || k === gestureHint || k === focusGuard || !k.visible)
+                continue
+            if (x >= k.x && x < k.x + k.width && y >= k.y && y < k.y + k.height) {
+                item = k
+                break
+            }
+        }
+        while (item) {
+            if (item instanceof TextInput || item instanceof TextEdit
+                || item instanceof TextField || item instanceof TextArea)
+                return true
+            const p = item.mapFromItem(root.contentItem, x, y)
+            const child = item.childAt(p.x, p.y)
+            if (!child)
+                break
+            item = child
+        }
+        return false
+    }
+
+    // 文本框点外失焦(Qt Quick 无内建"点外失焦";官方焦点文档的惯用法 =
+    // 按压落在文本框外时让惰性容器 contentItem 接管焦点)。本层置顶观察
+    // 所有按压但一律拒收(mouse.accepted=false),事件原样穿透到下层。
+    // Popup 在 Overlay 层(本层之上)——点下拉项不收焦点,选中逻辑正常。
+    MouseArea {
+        id: focusGuard
+        anchors.fill: parent
+        onPressed: (mouse) => {
+            const f = root.activeFocusItem
+            if (f && (f instanceof TextInput || f instanceof TextEdit
+                      || f instanceof TextField || f instanceof TextArea)
+                    && !root.textInputAt(mouse.x, mouse.y))
+                root.contentItem.forceActiveFocus()
+            mouse.accepted = false
         }
     }
 
