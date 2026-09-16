@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream 元数据:由 CMake configure_file 生成(版本号随 project(VERSION) 注入)。 -->
+<component type="desktop-application">
+  <id>io.github.umariceshower.MoePlayer</id>
+  <launchable type="desktop-id">io.github.umariceshower.MoePlayer.desktop</launchable>
+  <name>MoePlayer</name>
+  <summary>Third-party Emby desktop client</summary>
+  <summary xml:lang="zh-CN">第三方 Emby 桌面客户端</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-only</project_license>
+  <url type="homepage">https://github.com/UmaRiceShower/MoePlayer</url>
+  <developer id="io.github.umariceshower"><name>UmaRiceShower</name></developer>
+  <content_rating type="oars-1.1"/>
+  <description>
+    <p>Browse and play your Emby library: aggregated multi-server home, fuzzy search with pinyin, playback history, and external mpv playback with Anime4K upscaling.</p>
+    <p xml:lang="zh-CN">浏览与播放 Emby 媒体库:多服务器聚合首页、拼音模糊搜索、播放历史,外部 mpv 播放(可选 Anime4K 超分)。</p>
+  </description>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Player</category>
+  </categories>
+  <keywords>
+    <keyword>emby</keyword>
+    <keyword>media</keyword>
+    <keyword>video</keyword>
+    <keyword>anime</keyword>
+  </keywords>
+  <releases>
+    <release version="@PROJECT_VERSION@" date="@MOEPLAYER_METAINFO_DATE@"/>
+  </releases>
+</component>

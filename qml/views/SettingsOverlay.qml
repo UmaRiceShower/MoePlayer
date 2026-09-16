@@ -729,7 +729,7 @@ Item {
                             font.pixelSize: 14
                         }
                         AppText {
-                            text: "萌系粉白 Emby 桌面客户端。"
+                            text: "第三方 Emby 桌面客户端。"
                             color: Theme.textMuted
                             font.pixelSize: 12
                         }
