@@ -1,0 +1,35 @@
+#include <windows.h>
+#include <winver.h>
+
+// 由 CMake configure_file 生成(build/moeplayer.rc):版本号唯一源 =
+// CMakeLists 的 project(VERSION),此处注入;图标路径为源码树绝对路径。
+IDI_ICON1 ICON "@MOEPLAYER_ICO_PATH@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @MOEPLAYER_RC_VERSION@
+ PRODUCTVERSION @MOEPLAYER_RC_VERSION@
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+ FILESUBTYPE 0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "UmaRiceShower\0"
+            VALUE "FileDescription", "MoePlayer - Emby media client\0"
+            VALUE "FileVersion", "@PROJECT_VERSION@\0"
+            VALUE "InternalName", "MoePlayer\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 UmaRiceShower\0"
+            VALUE "OriginalFilename", "MoePlayer.exe\0"
+            VALUE "ProductName", "MoePlayer\0"
+            VALUE "ProductVersion", "@PROJECT_VERSION@\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

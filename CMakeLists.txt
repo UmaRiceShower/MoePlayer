@@ -65,9 +65,14 @@ qt_add_executable(MoePlayer
     src/playback/mpvclient.cpp
 )
 
-# Windows 可执行图标(.rc 由 windeps 的 rc.exe 处理)。
+# Windows 可执行资源(.rc 由 rc.exe 处理):图标 + VERSIONINFO。
+# 版本号唯一源 = 上方 project(VERSION),经 configure_file 注入;
+# FILEVERSION/PRODUCTVERSION 须四段逗号格式。
 if(WIN32)
-    target_sources(MoePlayer PRIVATE packaging/moeplayer.rc)
+    set(MOEPLAYER_ICO_PATH "${CMAKE_CURRENT_SOURCE_DIR}/packaging/moeplayer.ico")
+    string(REPLACE "." "," MOEPLAYER_RC_VERSION "${PROJECT_VERSION}.0")
+    configure_file(packaging/moeplayer.rc.in ${CMAKE_CURRENT_BINARY_DIR}/moeplayer.rc @ONLY)
+    target_sources(MoePlayer PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/moeplayer.rc)
 endif()
 
 qt_add_qml_module(MoePlayer
@@ -202,11 +207,17 @@ add_custom_command(TARGET MoePlayer POST_BUILD
         ${CMAKE_CURRENT_SOURCE_DIR}/resources/shaders
         ${CMAKE_BINARY_DIR}/shaders
     COMMENT "Copying Anime4K shaders to build/shaders")
-# desktop 文件与 hicolor 图标仅对 Linux 包有意义(Windows 由 windeployqt
-# + NSIS 打包,exe 图标在 packaging/moeplayer.rc)。
+# desktop 文件/AppStream 元数据/hicolor 图标仅对 Linux 包有意义(Windows
+# 由 windeployqt + NSIS 打包,exe 图标与版本信息在 packaging/moeplayer.rc.in)。
+# metainfo 版本随 project(VERSION) 注入(configure_file),发行日期取构建日。
 if(UNIX)
+    string(TIMESTAMP MOEPLAYER_METAINFO_DATE "%Y-%m-%d")
+    configure_file(packaging/${MOEPLAYER_APP_ID}.metainfo.xml.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/${MOEPLAYER_APP_ID}.metainfo.xml @ONLY)
     install(FILES packaging/${MOEPLAYER_APP_ID}.desktop
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/applications)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${MOEPLAYER_APP_ID}.metainfo.xml
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/metainfo)
     install(DIRECTORY packaging/icons/hicolor/
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor)
 endif()
@@ -216,11 +227,13 @@ install(FILES LICENSE THIRD-PARTY-NOTICES.md
 set(CPACK_PACKAGE_NAME "moeplayer")
 set(CPACK_PACKAGE_VENDOR "UmaRiceShower")
 set(CPACK_PACKAGE_CONTACT "UmaRiceShower")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Emby media client with a moe dark UI (Qt/QML, external mpv)")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Third-party Emby desktop client (Qt/QML, external mpv)")
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/UmaRiceShower/MoePlayer")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE")
 set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
-set(CPACK_PACKAGE_FILE_NAME "moeplayer-${PROJECT_VERSION}-1.${CMAKE_SYSTEM_PROCESSOR}")
+# 产物命名统一 MoePlayer-<版本>-linux-<架构>.<ext>(与 AppImage/Windows 同风格;
+# CI 上传走通配符,改名无联动)。
+set(CPACK_PACKAGE_FILE_NAME "MoePlayer-${PROJECT_VERSION}-linux-${CMAKE_SYSTEM_PROCESSOR}")
 set(CPACK_GENERATOR "TGZ;DEB;RPM")
 
 set(CPACK_DEBIAN_PACKAGE_SECTION "video")
@@ -229,9 +242,15 @@ set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "mpv (>= 0.38.0), \
     qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-effects, \
     qml6-module-qtquick-layouts, qml6-module-qtquick-shapes, qml6-module-qtquick-window")
-set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+# deb 架构名与 GNU 机器名不同(x86_64→amd64),显式映射保持文件名同风格。
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
+else()
+    set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+set(CPACK_DEBIAN_FILE_NAME "MoePlayer-${PROJECT_VERSION}-linux-${CPACK_DEBIAN_PACKAGE_ARCHITECTURE}.deb")
 
-set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-or-later")
+set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_REQUIRES "mpv >= 0.38.0, qt6-qtdeclarative")
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)

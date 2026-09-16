@@ -12,6 +12,14 @@
 
 Name "${APPNAME} ${VERSION}"
 OutFile "..\MoePlayer-Setup-${VERSION}.exe"
+
+; 安装器 exe 版本信息(属性页可见;版本号由 CI 从 CMakeLists project(VERSION) 传入)
+VIProductVersion "${VERSION}.0"
+VIAddVersionKey /LANG=2052 "ProductName" "${APPNAME}"
+VIAddVersionKey /LANG=2052 "FileDescription" "${APPNAME} 安装程序"
+VIAddVersionKey /LANG=2052 "FileVersion" "${VERSION}"
+VIAddVersionKey /LANG=2052 "ProductVersion" "${VERSION}"
+VIAddVersionKey /LANG=2052 "LegalCopyright" "Copyright (C) 2026 UmaRiceShower"
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"
 RequestExecutionLevel admin
