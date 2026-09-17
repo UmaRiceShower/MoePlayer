@@ -105,6 +105,7 @@ qt_add_qml_module(MoePlayer
         qml/theme/GlassBlurSource.qml
         qml/theme/GlassPanel.qml
         qml/theme/FrostedGlass.qml
+        qml/theme/MoeScrollBar.qml
         qml/theme/ThemeStore.qml
         qml/views/Home.qml
         qml/views/Library.qml
@@ -113,7 +114,6 @@ qt_add_qml_module(MoePlayer
         qml/views/ServerManager.qml
         qml/views/SearchOverlay.qml
         qml/views/PosterCard.qml
-        qml/views/WheelStepHandler.qml
         qml/views/ServerIcon.qml
         qml/views/FilterChip.qml
         qml/views/SegmentedControl.qml

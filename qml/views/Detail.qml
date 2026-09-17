@@ -1003,15 +1003,11 @@ Item {
         // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
         Flickable {
             id: overview
+            ScrollBar.vertical: MoeScrollBar {}
             width: parent.width - (sidebar.visible ? Constants.detailSidebarW : 0)
             height: parent.height
             clip: true
             contentHeight: overviewColumn.implicitHeight
-            // 滚轮步进走配置(页级 detailWheelStep,0=全局)。
-            WheelStepHandler {
-                targetItem: overview
-                pageStep: ConfigManager.detailWheelStep
-            }
 
             Column {
                 id: overviewColumn

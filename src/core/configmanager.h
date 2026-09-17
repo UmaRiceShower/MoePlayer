@@ -53,7 +53,6 @@ bool validateTextPos(const QVariant &v);
 bool validateButtonsPos(const QVariant &v);
 bool validateProxy(const QVariant &v);
 bool validateWheelStep(const QVariant &v);
-bool validatePageWheelStep(const QVariant &v);
 bool validateSearchLimit(const QVariant &v);
 QVariantList optionsHistoryView();
 bool validateHistoryView(const QVariant &v);
@@ -110,13 +109,7 @@ bool validateShortcut(const QVariant &v);
     M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validateWheelStep) \
     M(detailTextHeight, "textHeight", int, 140, "detail", "标题+介绍区固定高度(像素,不随内容自适应;默认 140)", "详情页", "文字区高度", "标题+介绍区固定高度(px),默认 140。", Field, nullptr, validateWheelStep) \
     M(proxy, "proxy", QString, "", "network", "全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,https 目标走 CONNECT 隧道;可带 user:pass@ 认证;仅支持 HTTP,播放经 mpv --http-proxy)", "代理", "代理地址", "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连。", Field, nullptr, validateProxy) \
-    M(wheelStep, "wheelStep", int, 80, "scroll", "滚轮每格滚动距离(像素);页面级键 0 = 跟随全局", "界面", "滚轮步进", "鼠标滚轮每格滚动距离(px);所有页面默认,页面级可手改 config.toml(homeWheelStep 等)。", Field, nullptr, validateWheelStep) \
-    M(homeWheelStep, "homeWheelStep", int, 0, "scroll", "首页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(detailWheelStep, "detailWheelStep", int, 0, "scroll", "详情页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(searchWheelStep, "searchWheelStep", int, 0, "scroll", "搜索浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(settingsWheelStep, "settingsWheelStep", int, 0, "scroll", "设置浮窗滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(libraryWheelStep, "libraryWheelStep", int, 0, "scroll", "媒体库页滚轮步进覆盖(0 = 跟随全局)", "", "", "", Hidden, nullptr, validatePageWheelStep) \
-    M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "scroll", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \
+    M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "search", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \
     M(superRes, "superRes", QString, "off", "video", "Anime4K 超分预设(shader 链档位;mpv 内 CTRL+0..8 可即时切换)", "播放", "超分(Anime4K)", "Anime4K shader 链档位:模式 A/B/C 为一次放大(分别优化 1080p/720p/降采样源),A+/B+/C+A 为二次放大(仅放大比 ≥2 倍时用),去噪/去模糊两档无尺寸门槛。CNN 放大 pass 要求输出大于片源 1.2 倍,窗口不够大时该段不生效(mpv 内按 CTRL+0 关闭)。", Combo, optionsSuperRes, validateSuperRes) \
     M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, optionsHistoryView, validateHistoryView) \
     M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr) \
@@ -176,7 +169,7 @@ inline const Item *itemFor(const QString &key)
 class ConfigManager : public QObject
 {
     Q_OBJECT
-    // 17 个配置属性(单一真相在 MoeConfig 表;getter/setter 由宏生成)。
+    // 配置属性由 MoeConfig 表单一真相经宏生成(getter/setter/信号)。
     MOECONFIG_X(MOECONFIG_PROP)
     // 配置文件绝对路径(只读,供 UI 展示/排障)。
     Q_PROPERTY(QString configPath READ configPath CONSTANT)

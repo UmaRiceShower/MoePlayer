@@ -655,6 +655,7 @@ Item {
     // ---- 主体:分组时间轴(单容器虚拟化,行内自带分组头)----
     ListView {
         id: list
+        ScrollBar.vertical: MoeScrollBar {}
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: topBar.bottom

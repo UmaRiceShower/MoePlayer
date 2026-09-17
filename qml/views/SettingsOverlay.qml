@@ -422,15 +422,12 @@ Item {
     // 设置页:纵向滚动容器,default 属性直写 Column。
     component SettingsPage: ScrollView {
         id: spage
+        // 悬浮细条:不占布局,滚动/hover 显现(替代滚轮步长定制的长页导航补偿)。
+        ScrollBar.vertical: MoeScrollBar {}
         default property alias content: spageCol.data
         clip: true
         contentWidth: availableWidth
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        // 滚轮步进走配置(页级 settingsWheelStep,0=全局)。
-        WheelStepHandler {
-            targetItem: spage
-            pageStep: ConfigManager.settingsWheelStep
-        }
         // 内容容器:至少撑满视口高,让失焦层覆盖行间隙与下方空白区;
         // 点击夺走输入框焦点(editingFinished 完成提交)。
         // (Column 是定位器,子项不能用 anchors,故失焦层放外层 Item。)
