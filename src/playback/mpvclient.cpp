@@ -27,6 +27,7 @@
 
 #include "core/configmanager.h"
 #include "core/embyclient.h"
+#include "playback/mpvvideoitem.h"
 
 namespace {
 // 播放状态回传节流(与 QML Constants.progressReportMs 一致)。
@@ -43,6 +44,10 @@ constexpr int kTrackListRequestId = 998;
 constexpr int kEofCheckRequestId = 997;
 // 播放列表查询(end-file 后判定失败条目是占位还是真实集)的 request_id。
 constexpr int kPlaylistCheckRequestId = 996;
+// 面板轨道查询(播放页 refreshTracks)。
+constexpr int kTracksRequestId = 992;
+// 章节查询(播放页进度条刻度)。
+constexpr int kChaptersRequestId = 991;
 // 超分回读:glsl-shaders 挂载列表 / video-params / osd-dimensions。
 constexpr int kSuperResListRequestId = 995;
 constexpr int kSuperResVideoRequestId = 994;
@@ -75,7 +80,7 @@ void MpvClient::shutdownAll()
     for (const QString &k : keys) {
         Session *s = m_sessions.value(k);
         if (s)
-            destroySession(s, false, false);
+            destroySession(s);
     }
     m_sessions.clear();
 }
@@ -83,6 +88,127 @@ void MpvClient::shutdownAll()
 MpvClient::~MpvClient()
 {
     shutdownAll();
+}
+
+bool MpvClient::embeddedAvailable() const
+{
+    return MpvEmbeddedCore::runtimeAvailable();
+}
+
+bool MpvClient::embeddedPreferred() const
+{
+    if (!embeddedAvailable())
+        return false;
+    return !m_config || m_config->playerBackend() != QLatin1String("external");
+}
+
+void MpvClient::attachEmbedded(QObject *coreObj, const QString &itemId)
+{
+    auto *core = qobject_cast<MpvEmbeddedCore *>(coreObj);
+    if (!core) {
+        qWarning() << "MpvClient: attachEmbedded 收到非 MpvEmbeddedCore 对象";
+        return;
+    }
+    Session *s = sessionFor(itemId);
+    if (!s) {
+        qWarning() << "MpvClient: attachEmbedded 找不到会话" << itemId;
+        return;
+    }
+    if (s->embedded == core && s->ready)
+        return; 
+    core->disconnect(this);
+    s->embedded = core;
+    const QString key = s->key;
+    connect(core, &MpvEmbeddedCore::jsonReceived, this, [this, key](const QJsonObject &obj) {
+        Session *cur = sessionFor(key);
+        if (cur)
+            handleJson(cur, obj);
+    });
+    connect(core, &MpvEmbeddedCore::terminated, this, [this, key]() {
+        stopAndConsiderEnd(key, true);
+    });
+    connect(core, &QObject::destroyed, this, [this, key]() {
+        if (Session *cur = sessionFor(key))
+            cur->embedded = nullptr;
+    });
+    s->ready = true;
+    qInfo() << "MpvClient: 内嵌会话已绑定" << key;
+    flush(s);
+}
+
+void MpvClient::stop(const QString &itemId)
+{
+    stopAndConsiderEnd(itemId, false);
+}
+
+void MpvClient::refreshTracks(const QString &itemId)
+{
+    Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s)
+        return;
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("track-list")}},
+                            {QStringLiteral("request_id"), kTracksRequestId}});
+}
+
+void MpvClient::selectTrack(const QString &itemId, const QString &type, int mpvId)
+{
+    Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s)
+        return;
+    const QString prop = type == QLatin1String("audio") ? QStringLiteral("aid")
+                                                        : QStringLiteral("sid");
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("set_property"), prop,
+                                        mpvId < 0 ? QStringLiteral("no")
+                                                  : QString::number(mpvId)}}});
+    refreshTracks(s->key);
+}
+
+void MpvClient::refreshChapters(const QString &itemId)
+{
+    Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s)
+        return;
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("get_property"),
+                                        QStringLiteral("chapter-list")}},
+                            {QStringLiteral("request_id"), kChaptersRequestId}});
+}
+
+QVariantMap MpvClient::previewInfo(const QString &itemId) const
+{
+    const Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s || s->url.isEmpty())
+        return {};
+    return QVariantMap{{QStringLiteral("url"), s->url},
+                       {QStringLiteral("headers"), s->headers}};
+}
+
+void MpvClient::setEmbeddedOutputSize(const QString &itemId, double w, double h)
+{
+    Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s)
+        return;
+    s->outW = int(w);
+    s->outH = int(h);
+    if (s->superResPreset != QLatin1String("off"))
+        requestSuperResState(s);
+}
+
+void MpvClient::playEpisode(const QString &itemId, const QString &episodeId)
+{
+    Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
+    if (!s || s->playlistIds.isEmpty())
+        return;
+    const int idx = s->playlistIds.indexOf(episodeId);
+    if (idx < 0) {
+        qWarning() << "MpvClient: playEpisode 找不到条目" << episodeId;
+        return;
+    }
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("playlist-play-index"), idx}}});
 }
 
 QString MpvClient::findMpvBinary()
@@ -117,11 +243,6 @@ QString MpvClient::findScript(const QString &fileName)
     if (QFileInfo::exists(installed))
         return installed;
     return bundled; // 缺失时由 mpv --script 报错,兜底返回旁置路径。
-}
-
-QString MpvClient::findOscScript()
-{
-    return findScript(QStringLiteral("osc.lua"));
 }
 
 QString MpvClient::findMoeHookScript()
@@ -294,6 +415,11 @@ bool MpvClient::startPending(const QVariantMap &meta)
         return false; // 同条目并行播放防重(与旧 pendingPlaybackWindows 语义一致)。
     Session *s = createSession(key);
     s->meta = meta;
+    if (embeddedPreferred()) {
+        qInfo() << "MpvClient: 内嵌播放请求" << key;
+        emit embeddedPlaybackRequested(meta);
+        return true;
+    }
     spawnMpv(s);
     return true;
 }
@@ -306,7 +432,8 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
     if (!s) {
         // 理论上 startPending 已建会话;防御:直接建并起播。
         s = createSession(key.isEmpty() ? QStringLiteral("session-%1").arg(++m_nextKeyId) : key);
-        spawnMpv(s);
+        if (!embeddedPreferred())
+            spawnMpv(s);
     }
     s->meta = meta;
     s->delivered = true;
@@ -327,7 +454,7 @@ void MpvClient::fail(const QString &itemId, const QString &message)
     if (!s)
         return;
     // 协商失败:尚未起播,静默关窗(不回传、不刷新)。
-    destroySession(s, false, false);
+    destroySession(s);
 }
 
 void MpvClient::start(const QString &url, const QVariantList &headers,
@@ -351,6 +478,12 @@ void MpvClient::start(const QString &url, const QVariantList &headers,
     s->meta = meta;
     s->delivered = true;
     reportStart(s);
+    if (embeddedPreferred()) {
+        emit embeddedPlaybackRequested(meta);
+        s->url = url;
+        s->headers = headers;
+        return;
+    }
     spawnMpv(s);
     enqueueLoad(s, url, headers);
 }
@@ -441,14 +574,11 @@ void MpvClient::spawnMpv(Session *s)
     s->sockPath = sockPath;
 
     const QString mpvBin = findMpvBinary();
-    const QString osc = findOscScript();
 
     QStringList args;
     args << QStringLiteral("--input-ipc-server=") + sockPath
          << QStringLiteral("--force-window=yes")
          << QStringLiteral("--idle=yes")
-         << QStringLiteral("--osc=no")
-         << QStringLiteral("--script=") + osc
          << QStringLiteral("--script=") + findMoeHookScript()
          // 播放列表面板显示条目标题(m3u EXTINF 解析的 title;官方
          // --osd-playlist-entry,见 options.rst)。
@@ -472,6 +602,38 @@ void MpvClient::spawnMpv(Session *s)
          << QStringLiteral("--screenshot-dir=") +
                 QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
                 QStringLiteral("/MoePlayer");
+    const double resumeSec =
+        s->meta.value(QStringLiteral("resumePositionTicks")).toDouble() / kTicksPerSecond;
+    if (resumeSec > 0.0)
+        args << QStringLiteral("--start=") + QString::number(resumeSec);
+    const int subOrd = s->meta.contains(QStringLiteral("selectedSubtitleOrdinal"))
+                           ? s->meta.value(QStringLiteral("selectedSubtitleOrdinal")).toInt() : -1;
+    const QString subUrl = s->meta.value(QStringLiteral("selectedSubtitleUrl")).toString();
+    if (subOrd == -2)
+        args << QStringLiteral("--sid=no");
+    else if (subOrd >= 0 && !subUrl.isEmpty())
+        args << QStringLiteral("--sub-file=") + subUrl;
+    if (s->meta.value(QStringLiteral("selectedAudioOrdinal")).toInt() == -2)
+        args << QStringLiteral("--aid=no");
+    {
+        const QString preset = m_config ? m_config->superRes() : QStringLiteral("off");
+        const SuperResPreset *pp = superResPreset(preset);
+        if (pp && pp->fileCount > 0) {
+            QStringList chain;
+            for (int i = 0; i < pp->fileCount; ++i) {
+                const QString path = findShader(QString::fromLatin1(pp->files[i]));
+                if (QFileInfo::exists(path))
+                    chain << path;
+            }
+            if (!chain.isEmpty()) {
+#ifdef Q_OS_WIN
+                args << QStringLiteral("--glsl-shaders=") + chain.join(QLatin1Char(';'));
+#else
+                args << QStringLiteral("--glsl-shaders=") + chain.join(QLatin1Char(':'));
+#endif
+            }
+        }
+    }
     // 播放流 HTTP 代理(仅 http(s);空=直连)。https 目标走 CONNECT 隧道。
     const QString proxy = m_config ? m_config->proxy() : QString();
     if (proxy.startsWith(QStringLiteral("http://")) ||
@@ -546,7 +708,7 @@ void MpvClient::spawnMpv(Session *s)
             << ",或设环境变量 MOEPLAYER_MPV 指向其完整路径";
         Session *cur = sessionFor(key);
         if (cur)
-            destroySession(cur, false, true);
+            destroySession(cur);
     });
     qInfo() << "MpvClient: 启动 mpv 进程" << s->key;
     s->proc->start();
@@ -604,6 +766,10 @@ void MpvClient::spawnMpv(Session *s)
 
 void MpvClient::sendJson(Session *s, const QJsonObject &obj)
 {
+    if (s && s->embedded) {
+        s->embedded->sendJson(obj);
+        return;
+    }
     if (!s || !s->sock || s->sock->state() != QLocalSocket::ConnectedState) {
         qDebug() << "MpvClient: IPC 未连接,命令丢弃" << (s ? s->key : QStringLiteral("无会话"));
         return;
@@ -621,7 +787,11 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
                    << QString::fromUtf8(line.left(160));
         return;
     }
-    const QJsonObject obj = doc.object();
+    handleJson(s, doc.object());
+}
+
+void MpvClient::handleJson(Session *s, const QJsonObject &obj)
+{
     if (obj.contains(QStringLiteral("request_id"))) {
         const int rid = obj.value(QStringLiteral("request_id")).toInt();
         if (rid == kReadyRequestId) {
@@ -630,6 +800,53 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
             flush(s);
         } else if (rid == kTrackListRequestId) {
             applyTrackSelection(s, obj.value(QStringLiteral("data")).toArray());
+        } else if (rid == kChaptersRequestId) {
+            QVariantList chapters;
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            for (const QJsonValue &v : list) {
+                const QJsonObject c = v.toObject();
+                chapters.append(QVariantMap{
+                    {QStringLiteral("time"), c.value(QStringLiteral("time")).toDouble()},
+                    {QStringLiteral("title"), c.value(QStringLiteral("title")).toString()},
+                });
+            }
+            emit chaptersChanged(s->key, chapters);
+        } else if (rid == kTracksRequestId) {
+            const QVariantList audioStreams =
+                s->meta.value(QStringLiteral("audioStreams")).toList();
+            const QVariantList subStreams =
+                s->meta.value(QStringLiteral("subtitleStreams")).toList();
+            QVariantList tracks;
+            int ordA = 0, ordS = 0;
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            for (const QJsonValue &v : list) {
+                const QJsonObject t = v.toObject();
+                const QString type = t.value(QStringLiteral("type")).toString();
+                if (type != QLatin1String("audio") && type != QLatin1String("sub"))
+                    continue;
+                QString label;
+                const QVariantList &streams =
+                    type == QLatin1String("audio") ? audioStreams : subStreams;
+                const int ord = type == QLatin1String("audio") ? ordA++ : ordS++;
+                if (ord >= 0 && ord < streams.size())
+                    label = streams.at(ord).toMap()
+                                .value(QStringLiteral("displayTitle")).toString();
+                if (label.isEmpty())
+                    label = t.value(QStringLiteral("title")).toString();
+                if (label.contains(QStringLiteral("://")))
+                    label.clear(); // URL 形态的 title 不用
+                if (label.isEmpty())
+                    label = t.value(QStringLiteral("lang")).toString();
+                if (label.isEmpty())
+                    label = t.value(QStringLiteral("codec")).toString();
+                tracks.append(QVariantMap{
+                    {QStringLiteral("id"), t.value(QStringLiteral("id")).toInt()},
+                    {QStringLiteral("type"), type},
+                    {QStringLiteral("label"), label},
+                    {QStringLiteral("selected"), t.value(QStringLiteral("selected")).toBool()},
+                });
+            }
+            emit tracksChanged(s->key, tracks);
         } else if (rid == kPlaylistCheckRequestId) {
             const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
             QString filename;
@@ -650,36 +867,20 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
             s->retryIndex = index;
             scheduleRetry(s);
         } else if (rid == kEofCheckRequestId) {
-            // eof 后:最后一项才结束会话(playlist 无后续);否则 mpv 自动
-            // 载入下一项(占位 → on_load hook 重定向)。
-            const QJsonValue v = obj.value(QStringLiteral("data"));
-            if (v.isDouble()) {
-                const int pos = v.toInt();
-                // 先存 pos 再判断:stopAndConsiderEnd 会销毁会话,其后
-                // 不得再访问 s(否则 UAF)。
-                s->pendingEofPos = pos;
-                if (pos >= 0) {
-                    sendJson(s, QJsonObject{
-                                    {QStringLiteral("command"),
-                                     QJsonArray{QStringLiteral("get_property"),
-                                                QStringLiteral("playlist-count")}},
-                                    {QStringLiteral("request_id"), kEofCheckRequestId + 1},
-                                });
-                } else {
-                    // 无可查位置(空播放列表):正常结束。
-                    stopAndConsiderEnd(s->key, false);
+            // eof 应答:ended 条目在播放列表中的索引 ≥ 末位 = 播完(结束
+            // 会话);否则 mpv 自动连播下一项(占位 → on_load hook 重定向)。
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            int index = -1;
+            for (int i = 0; i < list.size(); ++i) {
+                if (list.at(i).toObject().value(QStringLiteral("id")).toInt(-1)
+                    == s->eofEntryId) {
+                    index = i;
+                    break;
                 }
-            } else {
-                stopAndConsiderEnd(s->key, false);
             }
-        } else if (rid == kEofCheckRequestId + 1) {
-            // playlist-count 响应:与 eof 时的 pos 比对。
-            const QJsonValue v = obj.value(QStringLiteral("data"));
-            const int count = v.isDouble() ? v.toInt() : 0;
-            if (s->pendingEofPos < 0 || s->pendingEofPos >= count - 1)
+            // 查不到(列表已被外部清空等)= 按播完处理。
+            if (index < 0 || index >= list.size() - 1)
                 stopAndConsiderEnd(s->key, false);
-            else
-                s->pendingEofPos = -1;
         } else if (rid == kSuperResListRequestId) {
             // glsl-shaders 回读:实际挂载数 + 是否含尺寸门槛 pass。
             const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
@@ -695,8 +896,8 @@ void MpvClient::handleLine(Session *s, const QByteArray &line)
             s->superResState.insert(QStringLiteral("videoH"), v.value(QStringLiteral("h")).toInt());
         } else if (rid == kSuperResOutputRequestId) {
             const QJsonObject v = obj.value(QStringLiteral("data")).toObject();
-            const int outW = v.value(QStringLiteral("w")).toInt();
-            const int outH = v.value(QStringLiteral("h")).toInt();
+            const int outW = s->outW > 0 ? s->outW : v.value(QStringLiteral("w")).toInt();
+            const int outH = s->outH > 0 ? s->outH : v.value(QStringLiteral("h")).toInt();
             const int vidW = s->superResState.value(QStringLiteral("videoW")).toInt();
             const int vidH = s->superResState.value(QStringLiteral("videoH")).toInt();
             const int mounted = s->superResState.value(QStringLiteral("mounted")).toInt();
@@ -766,6 +967,34 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             s->pendingFileId.clear();
         }
         s->loadIssued = true;
+        qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
+        if (s->retryCount > 0) {
+            if (s->retryPos > 0.5) {
+                qInfo() << "MpvClient: 重试成功,恢复到" << s->retryPos << "s" << s->key;
+                sendJson(s, QJsonObject{
+                                {QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("seek"), s->retryPos,
+                                            QStringLiteral("absolute")}},
+                            });
+            }
+            s->retryCount = 0;
+            s->retryIndex = -1;
+            s->retryPos = 0.0;
+        }
+        if (!s->embedded) {
+            emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
+            emit playbackContextChanged(s->meta);
+            return;
+        }
+        if (s->pendingFileId.isEmpty()) {
+            const int subOrd = s->meta.contains(QStringLiteral("selectedSubtitleOrdinal"))
+                                   ? s->meta.value(QStringLiteral("selectedSubtitleOrdinal")).toInt()
+                                   : -1;
+            const QString subUrl = s->meta.value(QStringLiteral("selectedSubtitleUrl")).toString();
+            if (subOrd >= 0 && !subUrl.isEmpty())
+                sendJson(s, QJsonObject{{QStringLiteral("command"),
+                                         QJsonArray{QStringLiteral("sub-add"), subUrl}}});
+        }
         // 续播:仅用户点播的集(meta 带 resumePositionTicks)seek 到上次
         // 位置;连播项协商不带该键,从零开始。
         if (s->meta.contains(QStringLiteral("resumePositionTicks"))) {
@@ -786,24 +1015,10 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                     QStringLiteral("track-list")}},
                         {QStringLiteral("request_id"), kTrackListRequestId},
                     });
-        qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
-        // 重试成功:恢复到失败前的位置,并复位重试状态。
-        if (s->retryCount > 0) {
-            if (s->retryPos > 0.5) {
-                qInfo() << "MpvClient: 重试成功,恢复到" << s->retryPos << "s" << s->key;
-                sendJson(s, QJsonObject{
-                                {QStringLiteral("command"),
-                                 QJsonArray{QStringLiteral("seek"), s->retryPos,
-                                            QStringLiteral("absolute")}},
-                            });
-            }
-            s->retryCount = 0;
-            s->retryIndex = -1;
-            s->retryPos = 0.0;
-        }
         // 超分:片源尺寸此时才可知,重算门槛判定(窗口够大才真跑放大链)。
         if (s->superResPreset != QLatin1String("off"))
             requestSuperResState(s);
+        refreshChapters(s->key);
         emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
@@ -826,11 +1041,14 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             return;
         }
         if (reason == QLatin1String("eof")) {
-            // 是否最后一项:查询播放位置异步判定(playlist 可能下一项已开始)。
+            // 是否最后一项:按 playlist_entry_id 在播放列表里定位(无竞态;
+            // 旧实现查 playlist-pos,应答到达时 mpv 可能已推进到下一项,
+            // 倒数第二集会被误判为最后而提前关窗)。
+            s->eofEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
             sendJson(s, QJsonObject{
                             {QStringLiteral("command"),
                              QJsonArray{QStringLiteral("get_property"),
-                                        QStringLiteral("playlist-pos")}},
+                                        QStringLiteral("playlist")}},
                             {QStringLiteral("request_id"), kEofCheckRequestId},
                         });
         }
@@ -866,7 +1084,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
 
 void MpvClient::observe(Session *s)
 {
-    // id 1/2/3:time-pos/duration/pause(回传与进度所需;UI 由 mpv osc 承担)。
+    // id 1/2/3:time-pos/duration/pause(两模式共用:回传与进度)。
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 1,
                                         QStringLiteral("time-pos")}}});
@@ -876,10 +1094,25 @@ void MpvClient::observe(Session *s)
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 3,
                                         QStringLiteral("pause")}}});
-    // id 4:glsl-shaders(mpv 内快捷键或外部改链时回读刷新超分状态)。
+    // id 4-8 只服务内嵌(超分回读/UI 镜像);外部模式 OSC 自管,不发
+    // (每个 observe = 每条变化一条 IPC 流量,外部纯浪费)。
+    if (!s->embedded)
+        return;
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 4,
                                         QStringLiteral("glsl-shaders")}}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 5,
+                                        QStringLiteral("volume")}}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 6,
+                                        QStringLiteral("speed")}}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 7,
+                                        QStringLiteral("demuxer-cache-state")}}});
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 8,
+                                        QStringLiteral("paused-for-cache")}}});
 }
 
 void MpvClient::flush(Session *s)
@@ -894,7 +1127,7 @@ void MpvClient::flush(Session *s)
         // 超分:注册快捷键 + 按配置挂载默认档位(仅一次,之后再变走配置信号)。
         initSuperRes(s);
     }
-    if (!s->url.isEmpty() && !s->loadIssued) {
+    if (!s->url.isEmpty() && !s->loadIssued && !s->listSet) {
         if (!s->headers.isEmpty()) {
             QStringList fields;
             for (const QVariant &h : s->headers)
@@ -983,6 +1216,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
             title = id;
         body2 += "#EXTINF:0," + title.toUtf8() + "\n";
         body2 += (k == 0 ? url.toUtf8() : ("moe://ep/" + id.toUtf8())) + "\n";
+        s->playlistIds << id;
     }
     f.write(body2);
     f.close();
@@ -1205,17 +1439,23 @@ void MpvClient::stopAndConsiderEnd(QString key, bool errored)
     // 结束前补一次停止回传(把最后位置写给服务器)。
     reportStopped(s);
     const bool played = s->loadIssued;
-    destroySession(s, false, false);
+    destroySession(s);
     if (played)
         emit playbackFinished(key, errored);
 }
 
-void MpvClient::destroySession(Session *s, bool playEnded, bool errored)
+void MpvClient::destroySession(Session *s)
 {
-    Q_UNUSED(playEnded);
-    Q_UNUSED(errored);
     if (!s)
         return;
+    if (s->embedded) {
+        // 内嵌:停播并断开(核心是 QML Item 子对象,不随会话销毁)。
+        s->embedded->disconnect(this);
+        s->embedded->sendJson(QJsonObject{
+            {QStringLiteral("command"),
+             QJsonArray{QStringLiteral("stop")}}});
+        s->embedded = nullptr;
+    }
     if (s->pingTimer) {
         s->pingTimer->stop();
         s->pingTimer->deleteLater();
@@ -1238,6 +1478,8 @@ void MpvClient::destroySession(Session *s, bool playEnded, bool errored)
     if (!s->sockPath.isEmpty())
         QFile::remove(s->sockPath);
 #endif
+    if (!s->m3uPath.isEmpty())
+        QFile::remove(s->m3uPath);
     if (s->proc) {
         // 断开 finished/事件连接,再终止:lambda 捕获 Session*,禁用后再 kill
         // 避免 finished 回调用到已删除的 s。
@@ -1373,7 +1615,7 @@ void MpvClient::applySuperRes(Session *s, const QString &presetId, bool announce
 
 void MpvClient::requestSuperResState(Session *s)
 {
-    if (!s || !s->ready)
+    if (!s || !s->ready || !s->embedded)
         return;
     // 回读三件套:实际挂载列表、片源尺寸、输出(VO)尺寸。
     sendJson(s, QJsonObject{{QStringLiteral("command"),

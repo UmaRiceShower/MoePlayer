@@ -8,6 +8,9 @@
 #include <QtCore/qlogging.h>
 #include <QtGlobal>
 
+#include <QMutex>
+#include <QMutexLocker>
+
 #include <cstdio>
 #if defined(Q_OS_UNIX)
 #include <unistd.h>
@@ -20,6 +23,8 @@ namespace {
 constexpr int kKeepLogFiles = 10;
 
 QFile *g_logFile = nullptr;
+// 多线程写保护:mpv 内嵌模式的事件线程与 GUI 线程会并发打日志。
+QMutex g_logMutex;
 // 级别过滤:按严重度(DEBUG < INFO < WARN < ERROR < FATAL)丢弃低于
 // g_minLevel 的消息。注意 QtMsgType 数值不是严重度顺序(QtDebugMsg=0,
 // QtWarningMsg=1, QtCriticalMsg=2, QtFatalMsg=3, QtInfoMsg=4——Info 数值
@@ -72,6 +77,7 @@ void messageHandler(QtMsgType type, const QMessageLogContext &ctx, const QString
 {
     if (severity(type) < severity(g_minLevel))
         return;
+    const QMutexLocker lk(&g_logMutex);
     // 时间戳只算一次:终端(重定向时)与日志文件共用,时序一致。
     const QString ts = QDateTime::currentDateTime()
                            .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
