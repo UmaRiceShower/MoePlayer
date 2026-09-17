@@ -697,17 +697,6 @@ Item {
                             color: "transparent"
                             border.width: 2
                             border.color: plusHover.containsMouse ? Theme.accent : Theme.textMuted
-                            
-                            Rectangle {
-                                anchors.fill: parent
-                                anchors.margins: -3
-                                radius: 15
-                                color: "transparent"
-                                border.width: plusHover.containsMouse ? 2 : 0
-                                border.color: Theme.accent
-                                opacity: plusHover.containsMouse ? 0.35 : 0
-                                Behavior on opacity { NumberAnimation { duration: 120 } }
-                            }
 
                             Canvas {
                                 id: plusIcon
@@ -797,18 +786,6 @@ Item {
                         border.color: card.modelData.authStatus === "invalid" ? Theme.danger
                                       : (cell.dropTarget ? Theme.accent
                                       : (card.hovered ? Theme.accent : Theme.bg))
-                        Rectangle {
-                            z: -1
-                            anchors.centerIn: parent
-                            width: parent.width
-                            height: parent.height
-                            radius: parent.radius
-                            color: "transparent"
-                            border.width: card.hovered ? 3 : 0
-                            border.color: Theme.accent
-                            opacity: card.hovered ? 0.35 : 0
-                            Behavior on opacity { NumberAnimation { duration: 120 } }
-                        }
 
                         NumberAnimation {
                             id: cardSettleX
@@ -989,18 +966,6 @@ Item {
                         border.color: cell.dropTarget ? Theme.accent
                                       : (fcard.isOpen ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                                       : (fcard.hovered ? Theme.accent : Theme.bg))
-                        Rectangle {
-                            z: -1
-                            anchors.centerIn: parent
-                            width: parent.width
-                            height: parent.height
-                            radius: parent.radius
-                            color: "transparent"
-                            border.width: fcard.hovered ? 3 : 0
-                            border.color: Theme.accent
-                            opacity: fcard.hovered ? 0.35 : 0
-                            Behavior on opacity { NumberAnimation { duration: 120 } }
-                        }
 
                         NumberAnimation {
                             id: folderSettleX
