@@ -71,7 +71,6 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
     app.setApplicationName(MoePlayer::kAppName);
-    app.setOrganizationName(MoePlayer::kAppName);
     // 版本号来自 CMake project(VERSION),经 MOEPLAYER_VERSION 编译期注入,
     // 全局 applicationVersion() 与 UA/认证头共用,无第二处副本。
     app.setApplicationVersion(QStringLiteral(MOEPLAYER_VERSION));
