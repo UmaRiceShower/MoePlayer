@@ -16,7 +16,7 @@ QtObject {
             bg: "#0D0F1A", surface: "#171A29",
             textPrimary: "#ECEFF7", textMuted: "#8A90A6",
             accent: "#FFABCA", accentSoft: "#FFD7E6", accentDeep: "#D67FA6",
-            accentGlow: "#59FFABCA", accentInk: "#FFF2F7", accentWarm: "#FFC76B",
+            accentGlow: "#59FFABCA", accentInk: "#694653", accentWarm: "#FFC76B",
             baseTop: "#0A0E1C", baseBottom: "#20153A",
             vignette: 0.25
         },
@@ -26,7 +26,7 @@ QtObject {
             bg: "#0B0B0E", surface: "#15151A",
             textPrimary: "#E8E8EC", textMuted: "#8A8A92",
             accent: "#B9B9C6", accentSoft: "#DEDEE6", accentDeep: "#7A7A88",
-            accentGlow: "#59B9B9C6", accentInk: "#F4F4F8", accentWarm: "#C9A96B",
+            accentGlow: "#59B9B9C6", accentInk: "#4A4A4F", accentWarm: "#C9A96B",
             baseTop: "#0A0A0D", baseBottom: "#141419",
             vignette: 0.22
         },
@@ -36,7 +36,7 @@ QtObject {
             bg: "#090B14", surface: "#131627",
             textPrimary: "#EBEEF8", textMuted: "#8A90A8",
             accent: "#A8C4FF", accentSoft: "#D6E2FF", accentDeep: "#6E8FD6",
-            accentGlow: "#59A8C4FF", accentInk: "#F4F8FF", accentWarm: "#FFD9A0",
+            accentGlow: "#59A8C4FF", accentInk: "#455069", accentWarm: "#FFD9A0",
             baseTop: "#05070F", baseBottom: "#0D1330",
             vignette: 0.30
         },
@@ -46,7 +46,7 @@ QtObject {
             bg: "#101117", surface: "#1A1B22",
             textPrimary: "#ECEBF0", textMuted: "#8F8E99",
             accent: "#B3A6C9", accentSoft: "#E2DCF0", accentDeep: "#7E7194",
-            accentGlow: "#59B3A6C9", accentInk: "#F5F2FA", accentWarm: "#D8C79A",
+            accentGlow: "#59B3A6C9", accentInk: "#423D4A", accentWarm: "#D8C79A",
             baseTop: "#0B0C12", baseBottom: "#191720",
             vignette: 0.22
         },
@@ -56,7 +56,7 @@ QtObject {
             bg: "#0C0F16", surface: "#161B26",
             textPrimary: "#E9EDF5", textMuted: "#89909F",
             accent: "#92B4DE", accentSoft: "#CCDEF4", accentDeep: "#5E7FA8",
-            accentGlow: "#5992B4DE", accentInk: "#EFF5FC", accentWarm: "#FFD9A0",
+            accentGlow: "#5992B4DE", accentInk: "#374454", accentWarm: "#FFD9A0",
             baseTop: "#080B12", baseBottom: "#151E30",
             vignette: 0.26
         },
@@ -66,7 +66,7 @@ QtObject {
             bg: "#0A0F0B", surface: "#141B14",
             textPrimary: "#EDF2EA", textMuted: "#8D998C",
             accent: "#D8E88A", accentSoft: "#EFF6C8", accentDeep: "#9AAF56",
-            accentGlow: "#59D8E88A", accentInk: "#F6FADE", accentWarm: "#FFD08A",
+            accentGlow: "#59D8E88A", accentInk: "#5F663D", accentWarm: "#FFD08A",
             baseTop: "#060C0A", baseBottom: "#0F1E15",
             vignette: 0.28
         },
@@ -76,7 +76,7 @@ QtObject {
             bg: "#120E0A", surface: "#1E1712",
             textPrimary: "#F3EDE6", textMuted: "#9A9188",
             accent: "#F5B971", accentSoft: "#FFE0B8", accentDeep: "#C08A45",
-            accentGlow: "#59F5B971", accentInk: "#FFF4E6", accentWarm: "#FF9E6B",
+            accentGlow: "#59F5B971", accentInk: "#644C2E", accentWarm: "#FF9E6B",
             baseTop: "#100B08", baseBottom: "#241812",
             vignette: 0.26
         },

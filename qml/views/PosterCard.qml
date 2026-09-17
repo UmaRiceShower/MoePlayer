@@ -294,7 +294,7 @@ Item {
                 }
                 AppText {
                     text: root.rating.toFixed(1)
-                    color: Theme.accentInk
+                    color: Theme.textOnBadge
                     font.pixelSize: 10
                 }
             }

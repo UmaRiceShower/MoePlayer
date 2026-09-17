@@ -18,7 +18,7 @@ Button {
     background: Rectangle {
         radius: 16
         color: root.active
-               ? (root.hovered ? Theme.accentSoft : Theme.accent)
+               ? (root.hovered ? Theme.accentHover : Theme.accent)
                : (root.hovered ? Theme.surface : Theme.bg)
         border.width: 1
         border.color: root.active
