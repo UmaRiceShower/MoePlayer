@@ -15,6 +15,7 @@
 #include <QPointer>
 #include <QQuickTextureFactory>
 #include <QSemaphore>
+#include <QThread>
 #include <QThreadPool>
 #include <QUrlQuery>
 #include <QDebug>
@@ -208,22 +209,43 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
             qDebug().noquote() << "Poster: 磁盘缓存解码失败,回源" << path;
         }
     }
-    // 2) 回源:占闸(后台阻塞无碍);QNAM 在本线程创建使用(线程亲和)。
+    // 2) 回源:占闸(后台阻塞无碍);thread_local QNAM —— 栈对象会让每张
+    // 图付全额 TCP+TLS 握手、零连接复用;
+    // 线程池线程长寿,复用自然建立,且不破线程亲和。
     g_fetchGate.acquire();
-    QNetworkAccessManager nam;
+    thread_local QNetworkAccessManager nam;
     // 配置代理(空 = 直连)。不走系统代理:Emby 多为局域网服务,且 Qt 在
     // Linux 上不识别 no_proxy,显式指定避免意外走系统代理。
     nam.setProxy(proxy);
-    nam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    nam.setTransferTimeout(MoePlayer::kImageTimeoutMs);
     QNetworkRequest req(url);
+    // h1:与 API 同口径(独立连接,防御性)
+    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     if (!token.isEmpty())
         req.setRawHeader(MoePlayer::kHeaderToken, token.toUtf8());
-    QNetworkReply *reply = nam.get(req);
-    QEventLoop loop;
-    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec(); // 本线程等待(后台线程,不阻塞 GUI)
+    // 有界重试:仅传输层失败(无 HTTP 状态码)重试一次;4xx/5xx 是服务器
+    // 明确应答,重试无义。停摆掐断的连接可能半死,重试换新连接。
+    QNetworkReply *reply = nullptr;
+    for (int attempt = 0; attempt < 2 && !reply; ++attempt) {
+        if (attempt > 0) {
+            qInfo().noquote() << "Poster: 传输层失败,换连接重试" << url.toString();
+            nam.clearAccessCache(); // 丢弃半死连接,强制新建
+            QThread::msleep(500);
+        }
+        reply = nam.get(req);
+        QEventLoop loop;
+        QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+        loop.exec(); // 本线程等待(后台线程,不阻塞 GUI)
+        const bool transportFail =
+            reply->error() != QNetworkReply::NoError
+            && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 0;
+        if (transportFail && attempt == 0) {
+            reply->deleteLater();
+            reply = nullptr; // 触发重试
+        }
+    }
     const bool ok = reply->error() == QNetworkReply::NoError;
     // 失败/超时(abort)时 reply 的 QIODevice 已关闭,此时 readAll 会报
     // "device not open";仅成功时读取,失败只取错误描述。
