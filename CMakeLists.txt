@@ -31,21 +31,17 @@ set(QT_QML_GENERATE_QMLLS_INI ON)
 if(UNIX)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
     set(MOEPLAYER_PLATFORM_LIBS Qt6::DBus)
-    # 内嵌播放(Linux):libmpv + GL render API。找到即启用
-    # MOEPLAYER_HAVE_LIBMPV;找不到自动退回纯外部 mpv 模式。
-    find_package(PkgConfig)
-    if(PkgConfig_FOUND)
-        pkg_check_modules(MPV IMPORTED_TARGET mpv)
-    endif()
-    # 只取头文件路径(运行时 dlopen libmpv.so.2,不链接):deb/rpm/AppImage
-    # 均无硬依赖,缺库静默回外部 mpv 模式。
-    if(MPV_FOUND)
-        list(APPEND MOEPLAYER_PLATFORM_INCLUDES ${MPV_INCLUDE_DIRS})
-    endif()
 else()
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
     set(MOEPLAYER_PLATFORM_LIBS "")
 endif()
+# 内嵌播放:libmpv + GL render API,全平台启用(运行时按平台装载
+# libmpv.so.2 / mpv-2.dll,缺库静默回外部 mpv 模式;见 mpvvideoitem)。
+# 头文件 vendored 于 third_party/mpv(客户端 ABI v2 稳定,ISC 许可),
+# 构建期不依赖系统 libmpv-dev ⇒ CI/打包无需装头包,产物无硬依赖。
+set(MPV_FOUND TRUE)
+set(MOEPLAYER_PLATFORM_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/include)
+
 # 官方推荐项目默认(Qt 6.3+):开 AUTOMOC/AUTOUIC、GNUInstallDirs、RPATH,
 # 并按 REQUIRES 6.8 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
 # 不设 AUTORCC(无 .qrc)与 C++ 标准(上方手动设置,该命令不涉及)。

@@ -11,6 +11,8 @@ MoePlayer is licensed under the GNU General Public License, version 3
 
 ## libmpv / mpv
 - Used for media playback (external process, or dynamic library via render API embedding).
+- `third_party/mpv/include/mpv/{client,render,render_gl}.h`: client API headers
+  vendored from the mpv source tree (ISC license; runtime-loaded, not linked).
 - Built by the distribution with the default GPLv2+ configuration.
 - License: GNU General Public License v2 or later.
 - Copyright: see https://github.com/mpv-player/mpv/blob/master/Copyright
