@@ -50,7 +50,16 @@ else
 fi
 export OUTPUT="$OUT_DIR/MoePlayer-${VERSION}-x86_64.AppImage"
 
+EXTRA_LIBS=()
+if LIBMPV="$(ldconfig -p | awk '/libmpv\.so\.2 /{print $NF; exit}')" && [ -n "$LIBMPV" ]; then
+    EXTRA_LIBS+=(--library "$LIBMPV")
+    echo "已内置 libmpv:$LIBMPV"
+else
+    echo "提示:未找到 libmpv.so.2,产物不含内嵌播放(apt install libmpv2 可启用)" >&2
+fi
+
 "$TOOLS_DIR/linuxdeploy.AppImage" --appdir "$APPDIR" --plugin qt --output appimage \
+    "${EXTRA_LIBS[@]}" \
     --desktop-file "$APPDIR/usr/share/applications/$APP_ID.desktop" \
     --icon-file "$APPDIR/usr/share/icons/hicolor/512x512/apps/$APP_ID.png"
 
