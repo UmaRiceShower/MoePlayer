@@ -1286,7 +1286,6 @@ Item {
     // --- 主体:选中媒体库的条目网格(填充头部以下空间) ---
     GridView {
         id: grid
-        ScrollBar.vertical: MoeScrollBar {}
         // 复用 cell 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
         reuseItems: true
         cacheBuffer: 800
@@ -1402,6 +1401,15 @@ Item {
             }
         }
     }
+    // 贴边滚动条:视图有内缩边距,attached 会随之内缩;
+    // 条作页面级兄弟锚到窗口右缘,手动绑定驱动。
+    MoeScrollBar {
+        view: grid
+        anchors.right: parent.right
+        anchors.top: grid.top
+        anchors.bottom: grid.bottom
+    }
+
 
     // 回顶浮钮:滚动超过约一屏后出现在右下,点击平滑回顶。
     // 玻璃源 = grid(兄弟内容,不自采样);按钮固定、映射恒定 ⇒

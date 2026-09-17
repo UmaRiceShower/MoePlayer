@@ -655,7 +655,6 @@ Item {
     // ---- 主体:分组时间轴(单容器虚拟化,行内自带分组头)----
     ListView {
         id: list
-        ScrollBar.vertical: MoeScrollBar {}
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: topBar.bottom
@@ -886,6 +885,15 @@ Item {
             }
         }
     }
+    // 贴边滚动条:视图有内缩边距,attached 会随之内缩;
+    // 条作页面级兄弟锚到窗口右缘,手动绑定驱动。
+    MoeScrollBar {
+        view: list
+        anchors.right: parent.right
+        anchors.top: list.top
+        anchors.bottom: list.bottom
+    }
+
 
     // ---- 空态 ----
     Column {

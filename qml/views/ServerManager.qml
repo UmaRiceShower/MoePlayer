@@ -634,7 +634,6 @@ Item {
 
         GridView {
             id: vgrid
-            ScrollBar.vertical: MoeScrollBar {}
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.topMargin: -root.hoverPadY
@@ -1898,5 +1897,17 @@ Item {
                 }
             }
         }
+    }
+
+    // 贴边滚动条:网格有内缩边距,attached 会随之内缩;条作页面级
+    // 兄弟锚到窗口右缘,手动绑定驱动。
+    MoeScrollBar {
+        view: vgrid
+        anchors.right: parent.right
+        // 纵向锚同级兄弟 gridArea(header 以下到页底):vgrid 在 gridArea
+        // 内,是侄级,锚定违规(锚只能对父/兄弟);其负 hoverPad 边距也
+        // 不该带给滚动条。
+        anchors.top: gridArea.top
+        anchors.bottom: gridArea.bottom
     }
 }
