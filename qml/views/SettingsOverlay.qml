@@ -350,7 +350,7 @@ Item {
                     implicitWidth: 16
                     implicitHeight: 16
                     radius: 8
-                    color: sslide.pressed ? Theme.accentDeep : Theme.accentInk
+                    color: sslide.pressed ? Theme.accentDeep : Theme.accent
                     border.width: 1
                     border.color: Theme.accent
                 }
@@ -761,7 +761,7 @@ Item {
                                 }
                                 contentItem: AppText {
                                     text: resetBtn.confirmArmed ? "确认恢复" : "恢复默认"
-                                    color: resetBtn.confirmArmed ? Theme.accentInk : Theme.accentText
+                                    color: resetBtn.confirmArmed ? Theme.textOnBadge : Theme.accentText
                                     font.pixelSize: 13
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter

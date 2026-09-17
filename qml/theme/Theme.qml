@@ -17,6 +17,11 @@ QtObject {
     readonly property color accentDeep: ThemeStore.accentDeep   // 深强调:按压/深色描边
     readonly property color accentGlow: ThemeStore.accentGlow   // 带 alpha 的光晕/投影
     readonly property color accentInk: ThemeStore.accentInk     // 强调底上的文字
+    // 实心强调控件 hover 填充:朝 ink 的反方向走——暗色系(深 ink)变浅
+    // (accentSoft),亮色系(白 ink)变深(accentDeep)。反着走会让 hover 态
+    // 文字不可读(实踩:ink 压 accentDeep ≈2.4:1)。
+    readonly property color accentHover: ThemeStore.isLight ? ThemeStore.accentDeep
+                                                            : ThemeStore.accentSoft
     readonly property color accentWarm: ThemeStore.accentWarm   // 次级暖强调(徽标/收藏点缀)
     // 强调色作**小字**用:亮色系下鲜艳 accent 对浅底仅 3.6~4.3:1(< 4.5 小字口径),
     // 取 accentDeep(≈5.5:1);暗色系里 accent 对深底本就达标,保持鲜艳值。

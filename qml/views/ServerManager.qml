@@ -1348,7 +1348,7 @@ Item {
                     onClicked: root.submitAdd()
                     background: Rectangle {
                         radius: 18
-                        color: addBtn.hovered ? Theme.accentDeep : Theme.accent
+                        color: addBtn.hovered ? Theme.accentHover : Theme.accent
                         border.width: 0
                     }
                     contentItem: AppText {
@@ -1519,7 +1519,7 @@ Item {
                         onClicked: root.saveFolder()
                         background: Rectangle {
                             radius: 18
-                            color: folderOkBtn.hovered ? Theme.accentDeep : Theme.accent
+                            color: folderOkBtn.hovered ? Theme.accentHover : Theme.accent
                             border.width: 0
                         }
                         contentItem: AppText {
@@ -1822,7 +1822,7 @@ Item {
                         onClicked: root.submitEdit()
                         background: Rectangle {
                             radius: 18
-                            color: editSaveBtn.hovered ? Theme.accentDeep : Theme.accent
+                            color: editSaveBtn.hovered ? Theme.accentHover : Theme.accent
                             border.width: 0
                         }
                         contentItem: AppText {
