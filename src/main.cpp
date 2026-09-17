@@ -89,7 +89,8 @@ int main(int argc, char *argv[])
     AppLog::install();
 
     // 场景图固定 OpenGL 后端(内嵌播放的 libmpv GL render 依赖它;
-    // QML/ShaderEffect 也走 OpenGL RHI)。Windows 不设,走默认 D3D11。
+    // QML/ShaderEffect 也走 OpenGL RHI)。Windows 默认 D3D11 —— 若配置选了
+    // 内嵌后端,在 ConfigManager 就绪后再切 OpenGL(见下)。
 #if !defined(Q_OS_WIN)
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 #endif
@@ -125,6 +126,17 @@ int main(int argc, char *argv[])
     // 用户配置:无依赖,但须随应用启动即初始化(生成/读取 TOML 配置并挂
     // 热重载监视),不能等 QML 首次引用(惰性)才落盘,故同样显式构造注入。
     ConfigManager configManager;
+#ifdef Q_OS_WIN
+    // Windows 内嵌:libmpv render API 只有 GL 一路。注意 Qt6 事实(windows-
+    // graphics.html 原文):ANGLE 自 Qt6 起不再随附,OpenGL on Windows 恒为
+    // WGL 桌面 GL(AA_UseOpenGLES 无效果)⇒ render_gl.h「Windows 硬解互操作
+    // 须 ANGLE」在 Qt6 栈上不可满足,d3d11va 直连缺席,硬解走 copy-back
+    // (mpv auto-safe 默认即此,功能无损);真退化边缘 = 烂驱动下 Qt 动态 GL
+    // 落 opengl32sw(llvmpipe 整窗软渲染)。
+    // 必须在首个窗口创建前切;配置读 ConfigManager(须在构造之后)。
+    if (configManager.playerBackend() == QLatin1String("embedded"))
+        QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
+#endif
     EmbyClient embyClient;
     // 全局代理(配置为空 = 直连):先按初始配置应用,热重载(用户手改
     // config.toml)后经 proxyChanged 再应用,新请求即时生效。

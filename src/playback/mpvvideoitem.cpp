@@ -20,11 +20,11 @@
 
 namespace {
 
-// ---------- libmpv 运行时装载(dlopen)----------
-// 内嵌是可选增强:构建只依赖头文件(pkg-config 的 CFLAGS),运行时 dlopen
-// libmpv.so.2(API/ABI 自 libmpv 2.0 起稳定)。找不到库 = 外部模式兜底,
-// deb/rpm/AppImage 均无硬依赖(AppImage 不会把 mpv+ffmpeg 拖进包)。
-// Windows 同理可拓展(mpv-2.dll),本期不做。
+// ---------- libmpv 运行时装载 ----------
+// 内嵌是可选增强:头文件 vendored(third_party/mpv,ABI v2 稳定),运行时
+// 装载动态库 —— 找不到库 = 外部模式兜底,各平台包均无硬依赖。
+// Linux: libmpv.so.2;Windows: mpv-2.dll(官方发行包名;源码构建产物名
+// libmpv-2.dll 一并尝试)。QLibrary 搜索 PATH 与 exe 旁置目录。
 struct MpvApi
 {
 #define MOE_MPV_FN(ret, name, args) ret (*name) args = nullptr;
@@ -58,13 +58,29 @@ struct MpvApi
     {
         static const MpvApi api = [] {
             MpvApi a;
-            // soname 固定 libmpv.so.2(client API 2.x);CLI 的 mpv 0.41 即此。
+            // 按平台候选名逐个尝试;client API 2.x 起 ABI 稳定。
             // QLibrary 不可拷贝:堆上建,装载成功后有意常驻(永不卸载)。
-            auto *lib = new QLibrary(QStringLiteral("libmpv.so.2"));
-            if (!lib->load()) {
-                delete lib;
-                return a;
+            QLibrary *lib = nullptr;
+#ifdef Q_OS_WIN
+            // 官方 compile-windows.md 的构建产物名 = libmpv-2.dll(优先);
+            // 部分发行包名 mpv-2.dll;libmpv.dll 兜底(符号不全会被下方
+            // all 检查拒收,不会误装 API v1)。
+            const QStringList candidates{QStringLiteral("libmpv-2.dll"),
+                                         QStringLiteral("mpv-2.dll"),
+                                         QStringLiteral("libmpv.dll")};
+#else
+            const QStringList candidates{QStringLiteral("libmpv.so.2")};
+#endif
+            for (const QString &name : candidates) {
+                auto *tryLib = new QLibrary(name);
+                if (tryLib->load()) {
+                    lib = tryLib;
+                    break;
+                }
+                delete tryLib;
             }
+            if (!lib)
+                return a;
             bool all = true;
 #define MOE_MPV_FN(ret, name, args) \
             a.name = reinterpret_cast<ret (*) args>(lib->resolve(#name)); \
@@ -243,11 +259,22 @@ QJsonValue nodeToJson(const mpv_node *n)
     }
 }
 
-void *mpvGetProcAddress(void * /*ctx*/, const char *name)
+void *mpvGetProcAddress(void *ctxOpaque, const char *name)
 {
-    // render 线程调用时 GL 上下文必已 current。
-    QOpenGLContext *ctx = QOpenGLContext::currentContext();
-    return ctx ? reinterpret_cast<void *>(ctx->getProcAddress(name)) : nullptr;
+    // render_gl.h 明言 libmpv 不会自己加载/解析 GL 库 ⇒ 回调是义务。
+    // ctx = 创建渲染上下文时捕获的共享 QOpenGLContext(比 currentContext()
+    // 可靠:mpv 内部线程调本回调时 currentContext 可能为空;getProcAddress
+    // 本身不要求 current——Linux 走 GLX/EGL,Windows 走 WGL;WGL 的
+    // wglGetProcAddress 不返回 GL 1.1 标准函数指针(render_gl.h 警告),
+    // Qt 已在内部兜底(qtbase windows 平台插件
+    // qwindowsglcontext.cpp QWindowsGLContext::getProcAddress:返回
+    // null/无效指针时回落 QWindowsOpengl32DLL::resolve 即 opengl32.dll
+    // 的 GetProcAddress)——正好满足 render_gl.h 的 compensate 要求。
+    auto *ctx = static_cast<QOpenGLContext *>(ctxOpaque);
+    if (ctx)
+        return reinterpret_cast<void *>(ctx->getProcAddress(name));
+    QOpenGLContext *cur = QOpenGLContext::currentContext();
+    return cur ? reinterpret_cast<void *>(cur->getProcAddress(name)) : nullptr;
 }
 
 } // namespace
@@ -271,7 +298,10 @@ static bool renderIntoFbo(MpvRenderResources &res, int fbo, int w, int h,
     if (!res.mpv)
         return false;
     if (!res.ctx) {
-        mpv_opengl_init_params glInit{mpvGetProcAddress, nullptr};
+        // 此刻共享 GL 上下文必 current(render 线程);捕获它供回调用,
+        // 免依赖 mpv 调用线程的 current 状态。
+        mpv_opengl_init_params glInit{mpvGetProcAddress,
+                                      QOpenGLContext::currentContext()};
         mpv_render_param params[] = {
             {MPV_RENDER_PARAM_API_TYPE, const_cast<char *>(MPV_RENDER_API_TYPE_OPENGL)},
             {MPV_RENDER_PARAM_OPENGL_INIT_PARAMS, &glInit},
@@ -355,7 +385,7 @@ bool MpvEmbeddedCore::start(const QString &hookScript)
     if (m_res->mpv)
         return true;
     if (!MpvApi::get().ok) {
-        qInfo() << "MpvEmbeddedCore: libmpv.so.2 不可用,内嵌模式禁用";
+        qInfo() << "MpvEmbeddedCore: libmpv 动态库不可用,内嵌模式禁用";
         return false;
     }
     mpv_handle *mpv = mpv_create();

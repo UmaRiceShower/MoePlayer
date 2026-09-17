@@ -37,7 +37,7 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_PAGE_LICENSE "..\LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_TEXT "${APPNAME} 已安装。$\r$\n$\r$\n提示:播放需要 mpv —— 未安装时请将 mpv.exe 所在目录加入 PATH,或把 mpv.exe 放到 $INSTDIR。"
+!define MUI_FINISHPAGE_TEXT "${APPNAME} 已安装。$\r$\n$\r$\n提示:外部播放需要 mpv.exe(加入 PATH 或放到 $INSTDIR);内嵌播放另需 libmpv-2.dll(或 mpv-2.dll,放到 $INSTDIR)。$\r$\n两者均来自 mpv 官方 Windows 构建。"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES

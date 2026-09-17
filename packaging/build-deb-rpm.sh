@@ -13,7 +13,7 @@ docker run --rm -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "$WORK:/src" -w
   set -e
   apt-get update -qq
   apt-get install -y -qq cmake ninja-build g++ dpkg-dev file \
-    qt6-base-dev qt6-declarative-dev qt6-websockets-dev qt6-shadertools-dev libmpv-dev
+    qt6-base-dev qt6-declarative-dev qt6-websockets-dev qt6-shadertools-dev
   cmake -B build-deb -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
   cmake --build build-deb --parallel "$(nproc)"
   cd build-deb && cpack -G DEB
@@ -25,7 +25,7 @@ echo "==> RPM(Fedora 42,Qt 6.9)"
 docker run --rm -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" -v "$WORK:/src" -w /src fedora:42 bash -c '
   set -e
   dnf install -y -q cmake ninja-build gcc-c++ rpm-build \
-    qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwebsockets-devel qt6-qtshadertools-devel mpv-libs-devel
+    qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwebsockets-devel qt6-qtshadertools-devel
   cmake -B build-rpm -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
   cmake --build build-rpm --parallel "$(nproc)"
   cd build-rpm && cpack -G RPM
