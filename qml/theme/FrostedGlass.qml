@@ -195,16 +195,11 @@ Rectangle {
         property real u_light: ThemeStore.isLight ? 1.0 : 0.0
         // 采样透明区(页面留白)回退到主题底色:亮主题下否则透出黑盘
         property color u_backColor: ThemeStore.background.baseTop
+        // 玻璃底色与亮描边都进 shader:描边画在 SDF 边缘且叠于底色之上
+        // (QML 覆盖层 Rectangle 的 border 与玻璃体是两次独立绘制,读作双环)。
+        property color u_glassColor: root.glassColor
+        property color u_rimColor: root.borderColor
         fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/glass-refract.frag.qsb"
-    }
-
-    // 玻璃底色 + 亮描边(在折射之上)。
-    Rectangle {
-        anchors.fill: parent
-        radius: root.radius
-        color: root.glassColor
-        border.width: 1
-        border.color: root.borderColor
     }
 
     // 外侧投影:沿下/侧缘的软阴影,把玻璃从背景「抬」起来(浮起立体感)。

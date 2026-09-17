@@ -29,6 +29,8 @@ layout(std140, binding = 0) uniform buf {
     float u_hoverGlow;   // hover 提亮
     float u_light;       // 1 = 亮色系:加法提亮项收敛(浅底上加亮会过曝)
     vec4 u_backColor;    // 采样透明区回退色(页面留白 = 主题底色;否则亮主题下透出黑盘)
+    vec4 u_glassColor;   // 玻璃底色(叠加在折射内容之上;a 控制强度)
+    vec4 u_rimColor;     // 亮描边色(画在 SDF 边缘上,叠于底色之上;a=0 关闭)
 };
 
 layout(binding = 1) uniform sampler2D source;
@@ -127,6 +129,13 @@ void main() {
     // hover 提亮:提亮折射内容 + 边缘光,不盖白膜(亮底同样收敛)。
     c.rgb *= 1.0 + u_hoverGlow * mix(0.35, 0.15, clamp(u_light, 0.0, 1.0));
     c.rgb += vec3(u_hoverGlow * edge * 0.25) * addScale;
+
+    // 玻璃底色叠加(原 QML 覆盖层,并入 shader 保证描边不被底色罩暗)。
+    c.rgb = mix(c.rgb, u_glassColor.rgb, u_glassColor.a);
+
+    // 亮描边:画在 SDF 边缘(玻璃真实边缘)的 1px 带
+    float rim = 1.0 - smoothstep(0.0, 1.5, -d);   // -d = 到边缘的距离(px)
+    c.rgb = mix(c.rgb, u_rimColor.rgb, rim * u_rimColor.a);
 
     // 圆角抗锯齿 + alpha 预乘。
     float alpha = 1.0 - smoothstep(-0.5, 0.5, d);
