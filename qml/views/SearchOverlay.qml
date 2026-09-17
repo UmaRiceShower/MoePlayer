@@ -857,16 +857,13 @@ Item {
                 // 组模型 = 该账号的搜索模型(复合键,同服多账号互不覆盖)。
                 Flickable {
                     id: aggFlick
+                    ScrollBar.vertical: MoeScrollBar {}
                     anchors.fill: parent
                     clip: true
                     // 空查询整体退场:它 anchors.fill 且声明在最近搜索 chips 之后,
                     // 不隐会盖住 chips 并吃掉点击(Flickable 按下即抓取)。
                     visible: searchField.text.trim() !== ""
                     contentHeight: aggCol.implicitHeight
-                    WheelStepHandler {
-                        targetItem: aggFlick
-                        pageStep: ConfigManager.searchWheelStep
-                    }
                     Column {
                         id: aggCol
                         width: parent.width

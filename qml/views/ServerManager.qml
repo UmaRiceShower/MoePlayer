@@ -634,6 +634,7 @@ Item {
 
         GridView {
             id: vgrid
+            ScrollBar.vertical: MoeScrollBar {}
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.topMargin: -root.hoverPadY

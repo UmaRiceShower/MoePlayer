@@ -541,6 +541,7 @@ Item {
     // 整页可滚动(主流:hero + 所有库行随页面上下滚动)。
     ListView {
         id: pageList
+        ScrollBar.vertical: MoeScrollBar {}
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -552,12 +553,6 @@ Item {
         model: root.libFilter.trim() === "" ? AccountManager.homeRows : root.filteredRows
         reuseItems: true
         cacheBuffer: 400
-        // 滚轮步进走配置:页级 homeWheelStep(0=全局 ConfigManager.wheelStep,
-        // 默认 150;设置浮窗只调全局,页面级手改 config.toml)。
-        WheelStepHandler {
-            targetItem: pageList
-            pageStep: ConfigManager.homeWheelStep
-        }
 
         // 行间间距:标题与上一行海报间距(14)>= 标题与自身海报间距(12)。
         spacing: Constants.homeRowGap

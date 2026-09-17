@@ -99,8 +99,8 @@ QString sectionIntro(const QString &section)
         return QStringLiteral("# 详情页\n");
     if (section == QLatin1String("network"))
         return QStringLiteral("# 网络(代理仅 HTTP;播放经 mpv --http-proxy)\n");
-    if (section == QLatin1String("scroll"))
-        return QStringLiteral("# 滚轮(页面级 0 = 跟随全局 wheelStep)\n");
+    if (section == QLatin1String("search"))
+        return QStringLiteral("# 搜索\n");
     return {};
 }
 
@@ -227,10 +227,6 @@ bool validateShortcut(const QVariant &v)
     return !v.toString().trimmed().isEmpty();
 }
 
-bool validatePageWheelStep(const QVariant &v)
-{
-    return v.toInt() >= 0;
-}
 
 QVariantList optionsHistoryView()
 {
