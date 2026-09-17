@@ -248,7 +248,7 @@ Item {
             id: scomboPopup
             y: scombo.height + 4
             width: scombo.width
-            implicitHeight: contentItem.implicitHeight
+            implicitHeight: Math.min(contentItem.implicitHeight, 360) + topPadding + bottomPadding
             padding: 6
             enter: Transition {
                 NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
@@ -403,7 +403,8 @@ Item {
     // 条件显示行:某些配置项只在相关功能启用时有意义(key → 条件函数,绑定内
     // 读取的 ConfigManager 属性会注册依赖,切换即时显隐)。
     readonly property var rowVisibleIf: ({
-        "backgroundMeteorRate": function() { return ConfigManager.backgroundEffect === "starry" }
+        "backgroundMeteorRate": function() { return ConfigManager.backgroundEffect === "starry" },
+        "playerBackend": function() { return MpvClient.embeddedAvailable() }
     })
 
     // Repeater 注入 modelData(SettingItem 的 required 属性)。

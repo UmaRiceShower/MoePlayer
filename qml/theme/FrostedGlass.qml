@@ -38,6 +38,9 @@ Rectangle {
     property real hoverGlow: 0.0
     // 描边色(比玻璃更亮,营造边缘反光;亮色系换压深一档的 rim)。
     property color borderColor: Theme.glassRim
+    // rim/边缘光的边掩码(上,右,下,左;1=画 0=不画):贴边全宽的条把
+    // 顶着窗框的三边光关掉,只留内侧沿。
+    property vector4d rimMask: Qt.vector4d(1, 1, 1, 1)
     // ---- 边缘折射(液体玻璃凸透镜,SDF 法线 + Snell) ----
     // 玻璃边缘隆起厚度(px):≥短边一半时整个截面隆起(参考胶囊玻璃);0≈平面。
     property real thickness: 14
@@ -199,6 +202,7 @@ Rectangle {
         // (QML 覆盖层 Rectangle 的 border 与玻璃体是两次独立绘制,读作双环)。
         property color u_glassColor: root.glassColor
         property color u_rimColor: root.borderColor
+        property vector4d u_rimMask: root.rimMask
         fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/glass-refract.frag.qsb"
     }
 

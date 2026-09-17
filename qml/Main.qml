@@ -177,10 +177,16 @@ ApplicationWindow {
     }
     // qmllint enable missing-property
 
-    // 外部 mpv 播放结束(播完/出错/用户关窗):重拉当前页面已看/进度。
-    // MpvClient 是外部 mpv 进程后端(main.cpp 注册的单例)。
+    // 播放结束(播完/出错/用户关窗;外部 mpv 进程与内嵌 libmpv 两后端
+    // 都经此信号):重拉当前页面已看/进度。MpvClient = 统一后端单例。
     Connections {
         target: MpvClient
+        // 内嵌播放(libmpv):每次播放开一个独立顶层窗口(多窗并发;
+        // 窗口自管生命周期,关窗即停播,onClosed 自毁)。
+        function onEmbeddedPlaybackRequested(meta) {
+            console.info("Main: 内嵌播放窗口", meta.itemId)
+            playerWinComp.createObject(root, { "meta": meta })
+        }
         function onPlaybackFinished(itemId, error) {
             console.info("Main: 播放结束", itemId, "error:", error)
             // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
@@ -649,6 +655,11 @@ ApplicationWindow {
                 root.pushDetail(itemId, posterId, title, serverUrl, accountId)
             }
         }
+    }
+
+    Component {
+        id: playerWinComp
+        PlayerWindow {}
     }
 
     Component {

@@ -31,6 +31,7 @@ layout(std140, binding = 0) uniform buf {
     vec4 u_backColor;    // 采样透明区回退色(页面留白 = 主题底色;否则亮主题下透出黑盘)
     vec4 u_glassColor;   // 玻璃底色(叠加在折射内容之上;a 控制强度)
     vec4 u_rimColor;     // 亮描边色(画在 SDF 边缘上,叠于底色之上;a=0 关闭)
+    vec4 u_rimMask;      // rim/边缘光的边掩码(上,右,下,左;贴边条关顶着窗框的边)
 };
 
 layout(binding = 1) uniform sampler2D source;
@@ -124,7 +125,12 @@ void main() {
     // 边缘高光 + 反射提亮(亮底收敛:浅底加亮会过曝成白边)。
     float edge = 1.0 - clamp(normal.z, 0.0, 1.0);
     float addScale = mix(1.0, 0.35, clamp(u_light, 0.0, 1.0));
-    c.rgb += vec3(u_edgeLight * edge * edge + reflW * 0.15) * addScale;
+    // 边缘高光吃同款边掩码(贴边条的窗框边不发光)。
+    vec2 dEdgeL = half_ - abs(px);
+    float maskXL = px.x > 0.0 ? u_rimMask.y : u_rimMask.w;
+    float maskYL = px.y > 0.0 ? u_rimMask.z : u_rimMask.x;
+    float edgeMask = dEdgeL.x < dEdgeL.y ? maskXL : maskYL;
+    c.rgb += vec3(u_edgeLight * edge * edge * edgeMask + reflW * 0.15) * addScale;
 
     // hover 提亮:提亮折射内容 + 边缘光,不盖白膜(亮底同样收敛)。
     c.rgb *= 1.0 + u_hoverGlow * mix(0.35, 0.15, clamp(u_light, 0.0, 1.0));
@@ -135,6 +141,11 @@ void main() {
 
     // 亮描边:画在 SDF 边缘(玻璃真实边缘)的 1px 带
     float rim = 1.0 - smoothstep(0.0, 1.5, -d);   // -d = 到边缘的距离(px)
+    // 边掩码:按最近边取权重(角部取较近边,0/1 掩码下分界不可见)。
+    vec2 dEdge = half_ - abs(px);                  // x=距左右边 y=距上下边(px)
+    float maskX = px.x > 0.0 ? u_rimMask.y : u_rimMask.w; // 右/左
+    float maskY = px.y > 0.0 ? u_rimMask.z : u_rimMask.x; // 下/上
+    rim *= dEdge.x < dEdge.y ? maskX : maskY;
     c.rgb = mix(c.rgb, u_rimColor.rgb, rim * u_rimColor.a);
 
     // 圆角抗锯齿 + alpha 预乘。

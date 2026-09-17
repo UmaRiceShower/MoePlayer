@@ -252,6 +252,22 @@ bool validateSuperRes(const QVariant &v)
     return MpvClient::superResPreset(v.toString()) != nullptr;
 }
 
+QVariantList optionsPlayerBackend()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("内嵌(应用内播放)")},
+                    {QStringLiteral("key"), QStringLiteral("embedded")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("外部 mpv 窗口")},
+                    {QStringLiteral("key"), QStringLiteral("external")}},
+    };
+}
+
+bool validatePlayerBackend(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("embedded") || s == QLatin1String("external");
+}
+
 bool validateSearchLimit(const QVariant &v)
 {
     const int i = v.toInt();

@@ -13,11 +13,12 @@ class QLocalSocket;
 class QTimer;
 class EmbyClient;
 class ConfigManager;
+class MpvEmbeddedCore;
 
 //! 外部 mpv 进程客户端(路线2)。
 //!
-//! 点播放即 spawn 系统 mpv 二进制(`--force-window`,`osc=no` + 项目自带的
-//! 官方 osc.lua 经 `--script` 加载,由 mpv 原生窗口自绘 OSD/控制栏),Qt 不再
+//! 点播放即 spawn 系统 mpv 二进制(`--force-window` + 内建 OSC 自绘
+//! OSD/控制栏;moe-hook.lua 经 `--script` 加载承担连播换集),Qt 不再
 //! 渲染视频。经 `--input-ipc-server`(临时 unix socket)用 mpv JSON IPC 控制/订阅。
 //!
 //! Emby 播放状态回传(Start/Progress/Stopped/Ping)在此承接(原自绘播放窗口的逻辑):起播上报、每 progressReportMs(项目 10s)进度节流、
@@ -38,8 +39,7 @@ public:
     static QString findMpvBinary();
     // 查找随包脚本:应用目录旁置 lua/(开发 build/ 与 AppImage/Flatpak)→ 系统安装
     static QString findScript(const QString &fileName);
-    // osc.lua(官方控制栏)与 moe-hook.lua(on_load 占位重定向)。
-    static QString findOscScript();
+    // moe-hook.lua(on_load 占位重定向);界面用 mpv 内建 OSC。
     static QString findMoeHookScript();
 
     // 查找随包 shader(Anime4K):应用目录旁置 shaders/(开发 build/ 与
@@ -106,11 +106,41 @@ public:
                                        const QVariantMap &meta,
                                        const QString &subtitleUrl = {});
 
+    // ---- 内嵌播放(libmpv)----
+    Q_INVOKABLE bool embeddedAvailable() const;
+    // PlayerPage 的 MpvVideoItem 就绪后绑定会话:core 属 QML 侧(item 子
+    // 对象),本类不接管所有权。itemId 定位 startPending 预建的会话。
+    Q_INVOKABLE void attachEmbedded(QObject *coreObj, const QString &itemId);
+    // 用户主动停止(返回键/关闭播放页):回传 Stopped 并销毁会话。
+    Q_INVOKABLE void stop(const QString &itemId);
+
+    // ---- 内嵌播放页面板数据 ----
+    // 拉当前 track-list → tracksChanged(itemId, [{id,type,title,lang,codec,
+    // selected}]);file-loaded 选轨后页面应重拉。
+    Q_INVOKABLE void refreshTracks(const QString &itemId);
+    // 选轨:type = "audio"/"sub",mpvId = track-list 的数字 id(-1 = 关)。
+    Q_INVOKABLE void selectTrack(const QString &itemId, const QString &type, int mpvId);
+    // 直跳选集:episodeId 须在本次 setEpisodeList 的播放列表内(旋转序
+    // 已存,内部映射成 playlist-play-index)。
+    Q_INVOKABLE void playEpisode(const QString &itemId, const QString &episodeId);
+    // 进度条预览:当前片的播放地址与流头(供预览实例 loadfile;空 = 无)。
+    Q_INVOKABLE QVariantMap previewInfo(const QString &itemId) const;
+    // 内嵌渲染输出尺寸(libmpv 无 osd-dimensions 概念,超分门槛判定用
+    // 渲染目标尺寸;PlayerWindow 尺寸变化时上报)。
+    Q_INVOKABLE void setEmbeddedOutputSize(const QString &itemId, double w, double h);
+
 signals:
+    // 内嵌模式点播放:Main 据此 push PlayerPage(不 spawn 外部进程)。
+    void embeddedPlaybackRequested(const QVariantMap &meta);
+    // refreshTracks 应答:轨道列表(每集 file-loaded 后页面重拉刷新)。
+    void tracksChanged(const QString &itemId, const QVariantList &tracks);
+    // refreshChapters 应答:[{time,title}](mpv chapter-list,秒)。
+    void chaptersChanged(const QString &itemId, const QVariantList &chapters);
     // 文件加载完成(可续播/seek)。
     void playbackStarted(const QString &itemId);
-    // 当前播放集上下文(连播:QML 据 meta 查全集序列、协商下一集再
-    // enqueueNext;meta.itemId 为实际播放中的集,可能不同于会话键)。
+    // 当前播放集上下文(连播换集后广播;meta.itemId 为实际播放中的集,
+    // 可能不同于会话键。连播由 moe-hook on_load 占位请求驱动:mpv 侧
+    // script-message → episodeUrlRequested → deliverEpisodeUrl)。
     void playbackContextChanged(const QVariantMap &meta);
     // 播放列表占位条目请求(moe-hook on_load):QML 协商该集真实地址后
     // deliverEpisodeUrl 回发。
@@ -130,13 +160,17 @@ private:
         QString pendingFileId;
         // QML 协商结果缓存(id -> meta):file-loaded 按 pendingFileId 归位。
         QHash<QString, QVariantMap> episodeMeta;
-        // eof 结束判定(playlist-pos → count 两次查询间的暂存)。
-        int pendingEofPos = -1;
+        // eof 结束判定:播完条目的 playlist_entry_id(按 id 在播放列表
+        // 定位,无 playlist-pos 的推进竞态)。
+        int eofEntryId = -1;
         // 全集列表已灌入(第 0 条 = 当前集真 URL,经播放列表播放)。
         bool listSet = false;
         // --input-ipc-server 文件 socket(fd 继承的 --input-ipc-client 在 mpv
         // 侧不生效,改用文件 socket + QLocalSocket,稳定且跨平台)。
         QLocalSocket *sock = nullptr;
+        // 内嵌会话:libmpv 核心(PlayerPage 的 MpvVideoItem 子对象,本类
+        // 不拥有);非空时 sendJson 走它的 JSON 模拟层,不 spawn 进程。
+        MpvEmbeddedCore *embedded = nullptr;
         QString sockPath;          // 临时 socket 文件(销毁时清理)
         QTimer *connectRetry = nullptr;
         QByteArray buf;
@@ -161,6 +195,11 @@ private:
         int failedEntryId = -1;
         QTimer *retryTimer = nullptr;
         QString m3uPath;           // 播放列表 m3u(重试时重新灌入)
+        // 播放列表旋转序的条目 id(第 0 条 = 点播集):选集面板直跳映射
+        // episodeId → playlist-play-index 用。
+        QStringList playlistIds;
+        // 内嵌渲染输出尺寸(QML 上报;0 = 未知,回退 osd-dimensions)。
+        int outW = 0, outH = 0;
         // 超分(Anime4K):当前档位、spawn 默认档位/快捷键是否已下发、
         // 最近一次回读结果(挂载数、两侧尺寸、门槛判定)。
         QString superResPreset = QStringLiteral("off");
@@ -170,8 +209,14 @@ private:
 
     Session *sessionFor(const QString &key) const;
     Session *createSession(const QString &key);
-    // 结束并销毁会话;ended=true 表示因播放结束(需回传+信号),否则静默清理。
-    void destroySession(Session *s, bool playEnded, bool errored);
+    // 内嵌优先判定:编译带 libmpv + 配置非 external。
+    bool embeddedPreferred() const;
+    // handleLine 的 JSON 解析与分发分离:内嵌核心直接交 QJsonObject。
+    void handleJson(Session *s, const QJsonObject &obj);
+    // 章节表:file-loaded 时主动推送 → chaptersChanged(仅内部调用)。
+    void refreshChapters(const QString &itemId);
+    // 结束并销毁会话(清理资源;结束语义与回传由 stopAndConsiderEnd 承担)。
+    void destroySession(Session *s);
     void spawnMpv(Session *s);
     // 加载失败后按退避策略重试失败条目(快速几次后转慢速,等网络恢复)。
     void scheduleRetry(Session *s);

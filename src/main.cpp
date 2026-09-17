@@ -24,6 +24,7 @@
 #include "models/colorprovider.h"
 #include "models/posterprovider.h"
 #include "playback/mpvclient.h"
+#include "playback/mpvvideoitem.h"
 
 namespace {
 // QML 模块版本(major, minor):QML 侧 import 不带版本,仅 C++ 注册使用;
@@ -70,6 +71,9 @@ int main(int argc, char *argv[])
     qputenv("QT_FORCE_STDERR_LOGGING", "1");
 
     QGuiApplication app(argc, argv);
+    // libmpv 硬性要求 LC_NUMERIC=C(client.h;Qt6 在 QCoreApplication 构造
+    // 时按环境 setlocale(LC_ALL,""),须拨回,否则 mpv_create 拒绝初始化)。
+    std::setlocale(LC_NUMERIC, "C");
     app.setApplicationName(MoePlayer::kAppName);
     // 版本号来自 CMake project(VERSION),经 MOEPLAYER_VERSION 编译期注入,
     // 全局 applicationVersion() 与 UA/认证头共用,无第二处副本。
@@ -84,8 +88,8 @@ int main(int argc, char *argv[])
     // 尽早安装让首个 qInfo(RHI backend)也落盘。
     AppLog::install();
 
-    // 场景图固定 OpenGL 后端(嵌入视频已交外部 mpv 进程,Qt 不渲染视频帧,
-    // 但其余 QML/ShaderEffect 仍走 OpenGL RHI)。Windows 不设,走默认 D3D11。
+    // 场景图固定 OpenGL 后端(内嵌播放的 libmpv GL render 依赖它;
+    // QML/ShaderEffect 也走 OpenGL RHI)。Windows 不设,走默认 D3D11。
 #if !defined(Q_OS_WIN)
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
 #endif
@@ -154,11 +158,15 @@ int main(int argc, char *argv[])
     ScreenInhibit screenInhibit;
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "ScreenInhibit", &screenInhibit);
-    // 外部 mpv 进程客户端(路线2):点播放即 spawn 系统 mpv + 官方 osc.lua,
-    // 经 JSON IPC 控制/订阅、承接 Emby 播放状态回传。须在 QML 引用前注入。
+    // 播放客户端(双后端):外部 = spawn 系统 mpv(内建 OSC);内嵌 =
+    // libmpv(GL render,PlayerWindow)。JSON IPC 语义两后端统一。须在
+    // QML 引用前注入。
     MpvClient mpvClient(&embyClient, &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "MpvClient", &mpvClient);
+    // 内嵌播放视频表面(libmpv GL render;无 libmpv 的构建为空壳)。
+    qmlRegisterType<MpvVideoItem>("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
+                                  "MpvVideoItem");
 
     // 启动日志:当前网络代理(直连/HTTP),便于确认配置生效。
     const QNetworkProxy appProxy = configManager.proxyObject();

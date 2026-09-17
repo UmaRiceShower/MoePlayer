@@ -31,6 +31,17 @@ set(QT_QML_GENERATE_QMLLS_INI ON)
 if(UNIX)
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
     set(MOEPLAYER_PLATFORM_LIBS Qt6::DBus)
+    # 内嵌播放(Linux):libmpv + GL render API。找到即启用
+    # MOEPLAYER_HAVE_LIBMPV;找不到自动退回纯外部 mpv 模式。
+    find_package(PkgConfig)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(MPV IMPORTED_TARGET mpv)
+    endif()
+    # 只取头文件路径(运行时 dlopen libmpv.so.2,不链接):deb/rpm/AppImage
+    # 均无硬依赖,缺库静默回外部 mpv 模式。
+    if(MPV_FOUND)
+        list(APPEND MOEPLAYER_PLATFORM_INCLUDES ${MPV_INCLUDE_DIRS})
+    endif()
 else()
     find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
     set(MOEPLAYER_PLATFORM_LIBS "")
@@ -74,6 +85,7 @@ qt_add_executable(MoePlayer
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvclient.cpp
+    src/playback/mpvvideoitem.cpp
 )
 
 # Windows 可执行资源(.rc 由 rc.exe 处理):图标 + VERSIONINFO。
@@ -118,6 +130,7 @@ qt_add_qml_module(MoePlayer
         qml/views/FilterChip.qml
         qml/views/SegmentedControl.qml
         qml/views/PlaybackHistoryPage.qml
+        qml/views/PlayerWindow.qml
         qml/views/BackCircleButton.qml
         qml/views/NavGlyph.qml
 )
@@ -177,6 +190,26 @@ qt_add_resources(MoePlayer "nav_icons"
         qml/assets/icons/dark/chevron-left.svg
         qml/assets/icons/dark/chevron-right.svg
         qml/assets/icons/dark/chevron-up.svg
+        qml/assets/icons/play.svg
+        qml/assets/icons/pause.svg
+        qml/assets/icons/next.svg
+        qml/assets/icons/prev.svg
+        qml/assets/icons/volume.svg
+        qml/assets/icons/mute.svg
+        qml/assets/icons/fullscreen.svg
+        qml/assets/icons/dark/play.svg
+        qml/assets/icons/dark/pause.svg
+        qml/assets/icons/dark/next.svg
+        qml/assets/icons/dark/prev.svg
+        qml/assets/icons/dark/volume.svg
+        qml/assets/icons/dark/mute.svg
+        qml/assets/icons/dark/fullscreen.svg
+        qml/assets/icons/episodes.svg
+        qml/assets/icons/audio.svg
+        qml/assets/icons/subtitle.svg
+        qml/assets/icons/dark/episodes.svg
+        qml/assets/icons/dark/audio.svg
+        qml/assets/icons/dark/subtitle.svg
 )
 
 # 应用图标(首页空态徽记等界面内引用):qrc:/app/app-icon.svg。
@@ -193,10 +226,12 @@ target_include_directories(MoePlayer PRIVATE src src/core src/models src/playbac
 # applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${MOEPLAYER_VERSION_FULL}"
+    $<$<BOOL:${MPV_FOUND}>:MOEPLAYER_HAVE_LIBMPV>
     MOEPLAYER_NAME="${PROJECT_NAME}"
     MOEPLAYER_APP_ID="${MOEPLAYER_APP_ID}"
     # 仅 Debug 启用 QML 调试/剖析(QML Profiler / -qmljsdebugger 需要 QT_QML_DEBUG)。
     $<$<CONFIG:Debug>:QT_QML_DEBUG>)
+target_include_directories(MoePlayer PRIVATE ${MOEPLAYER_PLATFORM_INCLUDES})
 target_link_libraries(MoePlayer PRIVATE Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2 Qt6::Network Qt6::WebSockets ${MOEPLAYER_PLATFORM_LIBS})
 
 include(GNUInstallDirs)
@@ -267,6 +302,9 @@ set(CPACK_DEBIAN_FILE_NAME "MoePlayer-${CPACK_PACKAGE_VERSION}-linux-${CPACK_DEB
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
 set(CPACK_RPM_PACKAGE_REQUIRES "mpv >= 0.38.0, qt6-qtdeclarative")
+# 内嵌播放(libmpv)为运行时装载的可选增强:缺库回外部模式,故 Suggests。
+set(CPACK_RPM_PACKAGE_SUGGESTS "mpv-libs")
+set(CPACK_DEBIAN_PACKAGE_SUGGESTS "libmpv2")
 set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
 
 include(CPack)

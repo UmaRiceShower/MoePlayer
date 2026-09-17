@@ -63,7 +63,7 @@ modules:
         tag: 0.17.5
         commit: 4a05d8127f525943ebf45fdc6497c9e665947f0d
 
-  # mpv 的脚本引擎(osc.lua/moe-hook.lua 必需):KDE SDK 无 lua。
+  # mpv 的脚本引擎(moe-hook.lua 必需;内嵌模式同):KDE SDK 无 lua。
   # 定义取自 Flathub shared-modules 的 luajit(lua 5.2 的 make install
   # 只装静态库,链接 mpv 时会缺 -llua5.2)。
   - name: luajit
@@ -96,7 +96,7 @@ modules:
   - name: mpv
     buildsystem: meson
     config-opts:
-      - -Dlibmpv=false
+      - -Dlibmpv=true
       - -Dcplayer=true
       - -Dlua=enabled
       - -Dpulse=enabled
