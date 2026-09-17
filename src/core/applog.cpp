@@ -4,7 +4,6 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
-#include <QFileInfo>
 
 #include <QtCore/qlogging.h>
 #include <QtGlobal>
@@ -17,8 +16,8 @@
 #endif
 
 namespace {
-// 轮转阈值:单文件超过 1MB 时启动轮转(旧文件顺延 .old,留 1 份)。
-constexpr qint64 kRotateBytes = 1024 * 1024;
+// 每会话一个时间戳日志文件,启动时保留最新 N 个
+constexpr int kKeepLogFiles = 10;
 
 QFile *g_logFile = nullptr;
 // 级别过滤:按严重度(DEBUG < INFO < WARN < ERROR < FATAL)丢弃低于
@@ -107,18 +106,18 @@ void AppLog::install()
 {
     if (g_logFile)
         return;
-    const QString dir = AppPaths::configDir() + QStringLiteral("/logs");
+    const QString dir = AppPaths::stateDir() + QStringLiteral("/logs");
     QDir().mkpath(dir);
-    const QString path = dir + QStringLiteral("/moeplayer.log");
-    // 启动轮转:日志过大时旧文件先删 .old 再顺延,避免 rename 覆盖失败。
-    const QFileInfo info(path);
-    if (info.exists() && info.size() > kRotateBytes) {
-        QFile::remove(path + QStringLiteral(".old"));
-        if (!QFile::rename(path, path + QStringLiteral(".old")))
-            fprintf(stderr, "AppLog: 日志轮转失败(无法重命名 %s)\n", qPrintable(path));
-    }
+    // 清理:文件名时间戳升序,从最旧删起,保留最新 N 份。
+    const QStringList files = QDir(dir).entryList({QStringLiteral("moeplayer-*.log")},
+                                                  QDir::Files, QDir::Name);
+    for (int i = 0; i + kKeepLogFiles < files.size(); ++i)
+        QFile::remove(dir + QLatin1Char('/') + files.at(i));
+    // 毫秒后缀防同秒双开撞名。
+    const QString path = dir + QStringLiteral("/moeplayer-%1.log")
+        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz")));
     auto *file = new QFile(path);
-    if (file->open(QIODevice::WriteOnly | QIODevice::Append))
+    if (file->open(QIODevice::WriteOnly))
         g_logFile = file;
     else {
         // handler 尚未安装,不能用 qWarning;直接写 stderr 告知。
