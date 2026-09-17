@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QSettings>
 #include <QStandardPaths>
 
 #include "constants.h"
@@ -55,25 +56,24 @@ QString AppPaths::cacheDir()
     return QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
 }
 
-QString AppPaths::settingsFilePath()
+QString AppPaths::stateDir()
 {
     if (g_portable)
-        return configDir() + QLatin1Char('/') + MoePlayer::kAppName
-               + QStringLiteral(".ini");
-    // 非便携:探测构造取得既有路径 —— 与四个持有者原先的平台分支构造参数
-    // 完全同源,逐字节一致。探测只构造读取,不写文件(未 sync 不落盘)。
-    // 缓存于首次调用(单线程初始化阶段,无并发)。
-    static const QString path = [] {
+        return QCoreApplication::applicationDirPath() + QStringLiteral("/data/state");
+    return QStandardPaths::writableLocation(QStandardPaths::StateLocation);
+}
+
+QString AppPaths::settingsFilePath()
+{
+    // 全部模式统一:显式落在 configDir() 下(应用目录内),不再依赖
+    // QSettings 默认布局(旧默认的 org 层由 init() 的迁移上提)。
 #ifdef Q_OS_WIN
-        QSettings probe{QSettings::IniFormat, QSettings::UserScope,
-                        MoePlayer::kAppName, MoePlayer::kAppName};
+    return configDir() + QStringLiteral("/MoePlayer.ini");
 #else
-        QSettings probe{QSettings::NativeFormat, QSettings::UserScope,
-                        MoePlayer::kAppName, MoePlayer::kAppName};
+    if (g_portable)
+        return configDir() + QStringLiteral("/MoePlayer.ini");
+    return configDir() + QStringLiteral("/MoePlayer.conf");
 #endif
-        return probe.fileName();
-    }();
-    return path;
 }
 
 QSettings::Format AppPaths::settingsFormat()

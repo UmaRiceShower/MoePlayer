@@ -155,7 +155,7 @@ inline const Item *itemFor(const QString &key)
 
 //! TOML 用户配置(QML 单例 "MoePlayer.Core ConfigManager")。
 //!
-//! 文件:AppPaths::configDir()/config.toml(默认 ~/.config/MoePlayer/MoePlayer/,
+//! 文件:AppPaths::configDir()/config.toml(默认 ~/.config/MoePlayer/,
 //! 便携模式 = exe 旁 data/config/)。用户可直接编辑:启动时读取,
 //! 外部修改经 QFileSystemWatcher 热重载(值变化才发 NOTIFY,QML 绑定
 //! 自动更新,无需重启)。
