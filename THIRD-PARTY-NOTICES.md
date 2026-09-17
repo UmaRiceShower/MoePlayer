@@ -13,13 +13,13 @@ MoePlayer is licensed under the GNU General Public License, version 3
 - Used for media playback (external process, or dynamic library via render API embedding).
 - `third_party/mpv/include/mpv/{client,render,render_gl}.h`: client API headers
   vendored from the mpv source tree (ISC license; runtime-loaded, not linked).
-- Windows installer/portable zip and the AppImage bundle a prebuilt libmpv
-  (`libmpv-2.dll` from shinchiro mpv-winbuild-cmake releases; `libmpv.so.2`
-  from the distro package). mpv is GPLv2-or-later; complete corresponding
-  sources and build scripts: https://github.com/shinchiro/mpv-winbuild-cmake
-  and https://github.com/mpv-player/mpv (and the distribution's source
-  packages for the AppImage copy, which is built by the distribution with
-  its default configuration).
+- Windows installer/portable zip bundles a prebuilt `libmpv-2.dll` from
+  shinchiro mpv-winbuild-cmake releases; the AppImage bundles `libmpv.so.2`
+  built from upstream source in CI (mpv v0.41.0 + ffmpeg 7.1.5, see
+  packaging/build-libmpv-linux.sh). mpv is GPLv2-or-later; complete
+  corresponding sources and build scripts:
+  https://github.com/shinchiro/mpv-winbuild-cmake,
+  https://github.com/mpv-player/mpv and https://ffmpeg.org.
 - License: GNU General Public License v2 or later.
 - Copyright: see https://github.com/mpv-player/mpv/blob/master/Copyright
 
