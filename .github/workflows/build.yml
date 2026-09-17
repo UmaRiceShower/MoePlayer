@@ -58,7 +58,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake ninja-build file libgl1-mesa-dev libegl1-mesa-dev \
             libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-xcb-dev libxrender-dev libxi-dev libxcomposite-dev libxdamage-dev \
+            libx11-xcb-dev libxrender-dev libxi-dev libxcomposite-dev libxdamage-dev libmpv2 \
             libxext-dev libxfixes-dev libxrandr-dev libxcb1-dev libxcb-cursor-dev \
             libxcb-icccm4-dev libxcb-keysyms1-dev libxcb-render-util0-dev \
             libxcb-shape0-dev libxcb-xfixes0-dev libxcb-xkb-dev libxcb-randr0-dev \
@@ -112,6 +112,26 @@ jobs:
           Copy-Item -Recurse "resources\lua" "package\lua"
           Copy-Item -Recurse "resources\shaders" "package\shaders"
           Copy-Item "LICENSE","THIRD-PARTY-NOTICES.md" package\
+
+      - name: 拉取 libmpv(shinchiro 官方完整版)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rel = gh api repos/shinchiro/mpv-winbuild-cmake/releases/latest | ConvertFrom-Json
+          # 日期段以数字开头:排除 x86_64-v3 变体(pre-Haswell CPU 会非法指令崩)
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-[0-9].*\.7z$' } | Select-Object -First 1
+          if (-not $asset) { throw "shinchiro 最新 release 没有 mpv-dev-x86_64 资产" }
+          Write-Host "来源: $($asset.name)"
+          Invoke-WebRequest -Uri $asset.browser_download_url -OutFile mpv-dev.7z
+          7z x mpv-dev.7z -ompv-dev | Out-Null
+          $dll = Get-ChildItem mpv-dev -Recurse -Filter libmpv-2.dll | Select-Object -First 1
+          if (-not $dll) { throw "压缩包里没有 libmpv-2.dll" }
+          $size = $dll.Length
+          if ($size -lt 60MB) { throw "libmpv-2.dll 只有 $size 字节,不是完整版" }
+          Copy-Item $dll.FullName "package\libmpv-2.dll"
+          Write-Host "libmpv-2.dll $([math]::Round($size/1MB,1))MB 已进 package"
 
       - name: 下载 VC++ 运行库安装器
         # aka.ms/vc14 = 官方"最新 v14 运行库"永链(VS 2017–2026 同一家族,
