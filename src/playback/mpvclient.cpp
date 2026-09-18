@@ -406,9 +406,16 @@ MpvClient::Session *MpvClient::createSession(const QString &key)
     return s;
 }
 
+QString MpvClient::sessionKeyFor(const QVariantMap &meta)
+{
+    const QString item = meta.value(QStringLiteral("itemId")).toString();
+    const QString acc = meta.value(QStringLiteral("accountId")).toString();
+    return acc.isEmpty() ? item : acc + QLatin1Char('|') + item;
+}
+
 bool MpvClient::startPending(const QVariantMap &meta)
 {
-    QString key = meta.value(QStringLiteral("itemId")).toString();
+    QString key = sessionKeyFor(meta);
     if (key.isEmpty())
         key = QStringLiteral("session-%1").arg(++m_nextKeyId);
     if (m_sessions.contains(key))
@@ -427,7 +434,7 @@ bool MpvClient::startPending(const QVariantMap &meta)
 void MpvClient::deliver(const QString &url, const QVariantList &headers,
                         const QVariantMap &meta)
 {
-    const QString key = meta.value(QStringLiteral("itemId")).toString();
+    const QString key = sessionKeyFor(meta);
     Session *s = sessionFor(key);
     if (!s) {
         // 理论上 startPending 已建会话;防御:直接建并起播。
@@ -453,6 +460,15 @@ void MpvClient::fail(const QString &itemId, const QString &message)
 {
     Q_UNUSED(message);
     Session *s = sessionFor(itemId);
+    if (!s) {
+        // 宽松:调用方(协商失败信号)只有裸 itemId,按后缀 "|itemId" 补配。
+        for (auto it = m_sessions.constBegin(); it != m_sessions.constEnd(); ++it) {
+            if (it.key().endsWith(QLatin1Char('|') + itemId)) {
+                s = it.value();
+                break;
+            }
+        }
+    }
     if (!s)
         return;
     // 协商失败:尚未起播,静默关窗(不回传、不刷新)。
@@ -462,7 +478,7 @@ void MpvClient::fail(const QString &itemId, const QString &message)
 void MpvClient::start(const QString &url, const QVariantList &headers,
                       const QVariantMap &meta)
 {
-    QString key = meta.value(QStringLiteral("itemId")).toString();
+    QString key = sessionKeyFor(meta);
     if (key.isEmpty())
         key = QStringLiteral("session-%1").arg(++m_nextKeyId);
     if (m_sessions.contains(key)) {
@@ -988,8 +1004,16 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             s->retryIndex = -1;
             s->retryPos = 0.0;
         }
+        // 文件就绪即查 track-list,匹配 Emby 所选轨(两模式共享;外部经
+        // IPC 同样可行——修正外部模式正数 ordinal 选轨静默丢弃的缺口)。
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("get_property"),
+                                    QStringLiteral("track-list")}},
+                        {QStringLiteral("request_id"), kTrackListRequestId},
+                    });
         if (!s->embedded) {
-            emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
+            emit playbackStarted(s->key, s->meta.value(QStringLiteral("itemId")).toString());
             emit playbackContextChanged(s->meta);
             return;
         }
@@ -1014,19 +1038,11 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                            QStringLiteral("absolute")}},
                             });
         }
-        // 文件就绪后查 track-list,匹配 Emby 所选轨(标题/语言/编码/序号)
-        // 得到 mpv 数字 id 再 set aid/sid(aid/sid 仅接受数字 id)。
-        sendJson(s, QJsonObject{
-                        {QStringLiteral("command"),
-                         QJsonArray{QStringLiteral("get_property"),
-                                    QStringLiteral("track-list")}},
-                        {QStringLiteral("request_id"), kTrackListRequestId},
-                    });
         // 超分:片源尺寸此时才可知,重算门槛判定(窗口够大才真跑放大链)。
         if (s->superResPreset != QLatin1String("off"))
             requestSuperResState(s);
         refreshChapters(s->key);
-        emit playbackStarted(s->meta.value(QStringLiteral("itemId")).toString());
+            emit playbackStarted(s->key, s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
     }
@@ -1461,9 +1477,10 @@ void MpvClient::stopAndConsiderEnd(QString key, bool errored)
     // 结束前补一次停止回传(把最后位置写给服务器)。
     reportStopped(s);
     const bool played = s->loadIssued;
+    const QString bareId = s->meta.value(QStringLiteral("itemId")).toString();
     destroySession(s);
     if (played)
-        emit playbackFinished(key, errored);
+        emit playbackFinished(key, bareId, errored);
 }
 
 void MpvClient::destroySession(Session *s)
