@@ -7,7 +7,6 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSaveFile>
-#include <QSettings>
 
 #include <QtGlobal>
 
@@ -17,36 +16,9 @@ constexpr auto kVKey = "v";
 constexpr auto kDataKey = "data";
 } // namespace
 
-PersistMap::PersistMap(QSettings *settings, const QString &cacheBase)
-    : m_settings(settings)
-    , m_cacheBase(cacheBase)
+PersistMap::PersistMap(QString cacheBase)
+    : m_cacheBase(std::move(cacheBase))
 {
-}
-
-bool PersistMap::loadSettings(const QString &key, QVariant &out, const QVariant &def)
-{
-    if (m_settings->status() != QSettings::NoError) {
-        qWarning().noquote() << "PersistMap: 配置读取失败"
-                             << "status" << int(m_settings->status());
-        out = def;
-        return false;
-    }
-    const QString raw = m_settings->value(key).toString();
-    if (raw.isEmpty())
-        return false; // 缺键:首次启动常态,静默回默认
-    return loadInner(raw, def, out, key);
-}
-
-bool PersistMap::saveSettings(const QString &key, const QVariant &value)
-{
-    m_settings->setValue(key, QString::fromUtf8(saveInner(value)));
-    m_settings->sync();
-    if (m_settings->status() != QSettings::NoError) {
-        qWarning().noquote() << "PersistMap: 配置写入失败" << key
-                             << "status" << int(m_settings->status());
-        return false;
-    }
-    return true;
 }
 
 bool PersistMap::loadCache(const QString &name, QVariant &out)
@@ -92,9 +64,9 @@ bool PersistMap::loadInner(const QString &raw, const QVariant &def, QVariant &ou
         return false;
     }
     // 无头数据(JSON 数组或无 v 键对象):按当前版本原样读出,静默兼容。
-    // ★ 保护存量数据,勿删:QSettings 键(folders/layoutOrder/accounts)与未
-    //   迁移介质可能长期保持无头(写回只在数据变化时发生);删掉会让存量
-    //   读成"损坏"回默认(如文件夹从 UI 消失)。这是现状兼容,不是历史迁移链。
+    // ★ 保护存量数据,勿删:首版即带头之前的缓存文件可能长期保持无头
+    //   (写回只在数据变化时发生);删掉会把存量读成"损坏"回默认。
+    //   这是现状兼容,不是历史迁移链。
     if (doc.isArray() || !doc.object().contains(QLatin1String(kVKey))) {
         out = doc.toVariant();
         return true;

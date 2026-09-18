@@ -3,7 +3,6 @@
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QJsonArray>
-#include <QSettings>
 
 #include <functional>
 
@@ -384,7 +383,6 @@ private:
     // 浏览/首页请求互相排队。
     QNetworkAccessManager m_bgNam;
     // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
-    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
     // 模型按服务器字典化(key = trimmed serverUrl):多服浏览并行互不覆盖。
     QHash<QString, MediaItemModel *> m_viewsModels;
     QHash<QString, MediaItemModel *> m_itemsModels;

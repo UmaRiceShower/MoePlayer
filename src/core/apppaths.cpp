@@ -3,7 +3,6 @@
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QSettings>
 #include <QStandardPaths>
 
 #include "constants.h"
@@ -71,26 +70,3 @@ QString AppPaths::dataDir()
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 }
 
-QString AppPaths::settingsFilePath()
-{
-    // 全部模式统一:显式落在 configDir() 下(应用目录内),不再依赖
-    // QSettings 默认布局(旧默认的 org 层由 init() 的迁移上提)。
-#ifdef Q_OS_WIN
-    return configDir() + QStringLiteral("/MoePlayer.ini");
-#else
-    if (g_portable)
-        return configDir() + QStringLiteral("/MoePlayer.ini");
-    return configDir() + QStringLiteral("/MoePlayer.conf");
-#endif
-}
-
-QSettings::Format AppPaths::settingsFormat()
-{
-    if (g_portable)
-        return QSettings::IniFormat;
-#ifdef Q_OS_WIN
-    return QSettings::IniFormat;
-#else
-    return QSettings::NativeFormat;
-#endif
-}

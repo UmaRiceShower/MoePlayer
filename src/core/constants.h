@@ -9,13 +9,11 @@
 //! (页面尺寸与阈值两侧各自定义,数值一致)。
 namespace MoePlayer {
 
-// 应用名(CMake project 注入):用于 QSettings 存储路径、UA/认证头客户端名、
+// 应用名(CMake project 注入):用于存储路径、UA/认证头客户端名、
 // 单实例锁文件名与窗口标题。改动即变更配置存储路径,需评估迁移。
 inline const QString kAppName = QStringLiteral(MOEPLAYER_NAME);
-// 默认服务器地址(用户可覆盖):embyclient 默认值与 settingsstore 共用。
-inline const QString kDefaultServerUrl = QStringLiteral("http://127.0.0.1:8096");
 // 桌面集成标识(反向域名,CMake 注入):desktop 文件名、图标名与 Wayland
-// app_id 统一取值;QSettings 路径仍由 kAppName 决定,两者解耦。
+// app_id 统一取值,与 kAppName 解耦。
 inline const QString kAppId = QStringLiteral(MOEPLAYER_APP_ID);
 // 常规 API 请求超时(ms)。
 inline constexpr int kNetworkTimeoutMs = 20000;
@@ -79,8 +77,6 @@ inline const QByteArray kHeaderUserAgent = QByteArrayLiteral("User-Agent");
 // Emby URL 参数:流地址附带 api_key,mpv 拉流无需自定义请求头。
 inline const QString kApiKeyParam = QStringLiteral("api_key");
 
-// QSettings 键:服务器地址(embyclient 与 settingsstore 共用)。
-inline const QString kSettingsServerUrlKey = QStringLiteral("network/serverUrl");
 
 // 统一 User-Agent:应用名/版本(Emby 取流与 API 请求共用,不用 Qt 默认 UA)。
 inline QString userAgent()

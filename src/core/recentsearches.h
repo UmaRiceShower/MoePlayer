@@ -7,8 +7,8 @@
 #include "persistmap.h"
 
 //! 最近搜索词(全局单例,QML 名 RecentSearches):全局搜索框的历史记录。
-//! 存储 = PersistMap 缓存层(CacheLocation/recent-searches.json,只读
-//! 缓存侧,QSettings 侧传空);最多 10 条,新词置前、去重(大小写敏感,
+//! 存储 = PersistMap 缓存层(DataLocation/recent-searches.json);
+//! 最多 10 条,新词置前、去重(大小写敏感,
 //! 与搜索行为一致)。
 class RecentSearches : public QObject
 {

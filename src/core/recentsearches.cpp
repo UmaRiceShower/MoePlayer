@@ -5,7 +5,7 @@
 RecentSearches::RecentSearches(QObject *parent)
     : QObject(parent)
     // 用户行为数据
-    , m_persist(nullptr, AppPaths::dataDir())
+    , m_persist(AppPaths::dataDir())
 {
     QVariant v;
     if (m_persist.loadCache(QStringLiteral("recent-searches"), v))
