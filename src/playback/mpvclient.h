@@ -101,7 +101,9 @@ public:
     // on_load hook 应答:占位条目经 moe-url 请求,QML 协商后的真实地址、
     // 流头、元数据与(可选)外挂字幕 URL;meta 供 file-loaded 归位/选轨。
     // url 为空 = 协商失败:通知 hook 继续(占位加载失败,mpv 跳过该条)。
-    Q_INVOKABLE void deliverEpisodeUrl(const QString &itemId, const QString &url,
+    // sessionKey = 会话键(当前播放集 itemId):多窗并发时把应答路由回
+    // 发起 hook 的会话(此前按 m_active,多会话会答错/挂起)。
+    Q_INVOKABLE void deliverEpisodeUrl(const QString &sessionKey, const QString &itemId, const QString &url,
                                        const QVariantList &headers,
                                        const QVariantMap &meta,
                                        const QString &subtitleUrl = {});
@@ -144,7 +146,7 @@ signals:
     void playbackContextChanged(const QVariantMap &meta);
     // 播放列表占位条目请求(moe-hook on_load):QML 协商该集真实地址后
     // deliverEpisodeUrl 回发。
-    void episodeUrlRequested(const QString &itemId);
+    void episodeUrlRequested(const QString &sessionKey, const QString &itemId);
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
     void playbackFinished(const QString &itemId, bool error);
     // 超分回读结果(state 同 superResStatus):挂载数与尺寸门槛判定。

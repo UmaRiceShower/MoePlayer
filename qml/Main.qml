@@ -30,6 +30,7 @@ ApplicationWindow {
     property var _pendingChain: null
     // 当前播放集上下文(playbackContextChanged 更新)。
     property var _curMeta: null
+    property var _sessionMeta: ({}) // 会话键(集 itemId)→ meta;换集协商按会话取
     // 本次播放的账号(Detail 随 playWindowRequested 下推):playbackReady 的
     // meta 不含 accountId,交付时并入,供按集续链/全季拉取按账号定位。
     property string _playAccountId: ""
@@ -46,7 +47,7 @@ ApplicationWindow {
     // 在途协商:id -> true(防重复)。
     property var _pendingUrls: ({})
     // hook 等待应答:id -> true(moe-hook on_load 已 defer)。
-    property var _wantedUrls: ({})
+    property var _wantedUrls: ({}) // itemId → { session: 会话键 }
 
     // 播放上下文进链:找下一集(跨季全集序列),存在则协商其播放地址。
     // 守卫用 seriesId(协商 meta 无 type 字段;Episode 才有 seriesId,电影为空)。
@@ -60,7 +61,8 @@ ApplicationWindow {
             console.info("Main: 全集序列未就绪,拉取后进链", meta.seriesId)
             // 集详情直达(未经过剧集详情时全集序列尚未拉取):拉一次,
             // 等 allEpisodesReady 再进链;避免"找不到下一集"静默断链。
-            const c0 = AccountManager.credsForServer(meta.serverUrl)
+            const c0 = meta.accountId ? AccountManager.credsForAccount(meta.accountId)
+                                                  : AccountManager.credsForServer(meta.serverUrl)
             if (c0.token !== "") {
                 root._pendingChain = meta
                 EmbyClient.fetchAllEpisodes(meta.serverUrl,
@@ -79,15 +81,15 @@ ApplicationWindow {
         }
         if (nextId) {
             console.debug("Main: 预取下集", nextId)
-            root.fetchEpisodeUrl(nextId) // 预取下集(命中 hook 时零等待)。
+            root.fetchEpisodeUrl(nextId, meta.itemId) // 预取下集(命中 hook 时零等待)。
         } else {
             console.info("Main: 剧集末尾,无下一集", meta.itemId)
         }
     }
 
     // 协商任意集:缓存命中直接应答;否则发起(防重)。
-    function fetchEpisodeUrl(id) {
-        const meta = root._curMeta
+    function fetchEpisodeUrl(id, sessionKey) {
+        const meta = (sessionKey && root._sessionMeta[sessionKey]) || root._curMeta
         if (!meta || meta.serverUrl === "")
             return
         if (root._epUrlCache[id]) {
@@ -100,13 +102,16 @@ ApplicationWindow {
             return
         }
         root._pendingUrls[id] = true
-        const c = AccountManager.credsForServer(meta.serverUrl)
+        // 凭据按会话账号(accountId 优先;缺省才回退服务器首个有效账号)。
+        const c = meta.accountId ? AccountManager.credsForAccount(meta.accountId)
+                                 : AccountManager.credsForServer(meta.serverUrl)
         if (c.token === "") {
             console.warn("Main: 协商凭据缺失,放行占位", id)
             delete root._pendingUrls[id]
             if (root._wantedUrls[id]) {
+                const w = root._wantedUrls[id]
                 delete root._wantedUrls[id]
-                MpvClient.deliverEpisodeUrl(id, "", [], {})
+                MpvClient.deliverEpisodeUrl(w.session, id, "", [], {})
             }
             return
         }
@@ -117,16 +122,17 @@ ApplicationWindow {
     }
 
     // hook 等待应答:有缓存立刻回发(含外挂字幕 URL),没有则去协商。
-    function serveEpisodeUrl(id) {
+    function serveEpisodeUrl(id, sessionKey) {
         const e = root._epUrlCache[id]
         if (!e) {
-            root.fetchEpisodeUrl(id)
+            root.fetchEpisodeUrl(id, sessionKey)
             return
         }
         if (root._wantedUrls[id]) {
             console.debug("Main: 应答 hook", id)
+            const w = root._wantedUrls[id]
             delete root._wantedUrls[id]
-            MpvClient.deliverEpisodeUrl(id, e.url, e.headers, e.meta,
+            MpvClient.deliverEpisodeUrl(w.session, id, e.url, e.headers, e.meta,
                                         e.meta.selectedSubtitleUrl || "")
         }
     }
@@ -205,6 +211,8 @@ ApplicationWindow {
         function onPlaybackContextChanged(meta) {
             console.info("Main: 切集", meta.itemId)
             root._curMeta = meta
+            if (meta.itemId)
+                root._sessionMeta[meta.itemId] = meta
             root._curAudioOrdinal = meta.selectedAudioOrdinal
             root._curSubtitleOrdinal = meta.selectedSubtitleOrdinal
             root._curSubtitleUrl = meta.selectedSubtitleUrl || ""
@@ -215,10 +223,10 @@ ApplicationWindow {
             root.scheduleNextEpisode(meta) // 预取下一集
         }
         // 播放列表面板点集/上/下集 → mpv on_load hook 请求真实地址。
-        function onEpisodeUrlRequested(itemId) {
+        function onEpisodeUrlRequested(sessionKey, itemId) {
             console.info("Main: hook 请求集", itemId)
-            root._wantedUrls[itemId] = true
-            root.serveEpisodeUrl(itemId)
+            root._wantedUrls[itemId] = { session: sessionKey }
+            root.serveEpisodeUrl(itemId, sessionKey)
         }
     }
     // 连播协商响应(与 Detail 的主动播放协商并存:按在途缓存区分)。
@@ -273,7 +281,7 @@ ApplicationWindow {
                 m.accountId = root._playAccountId || root.currentAccountId
             console.info("Main: 协商就绪入缓存", id)
             root._epUrlCache[id] = { url: url, headers: headers, meta: m }
-            root.serveEpisodeUrl(id)
+            root.serveEpisodeUrl(id, "")
         }
         function onPlaybackFailed(serverUrl, itemId, message) {
             // 协商失败:hook 若在等,放行占位(加载失败,mpv 跳过该条)。
@@ -281,8 +289,9 @@ ApplicationWindow {
                 console.warn("Main: 协商失败,放行占位", itemId, message)
                 delete root._pendingUrls[itemId]
                 if (root._wantedUrls[itemId]) {
+                    const w = root._wantedUrls[itemId]
                     delete root._wantedUrls[itemId]
-                    MpvClient.deliverEpisodeUrl(itemId, "", [], {})
+                    MpvClient.deliverEpisodeUrl(w.session, itemId, "", [], {})
                 }
             }
         }
@@ -730,7 +739,9 @@ ApplicationWindow {
                     // allEpisodesReady 后建列表再播(避免单条回落)。
                     root._deliverPending = true
                     root._deliverMeta = meta
-                    const c = AccountManager.credsForServer(meta.serverUrl)
+        // 凭据按会话账号(accountId 优先;缺省才回退服务器首个有效账号)。
+        const c = meta.accountId ? AccountManager.credsForAccount(meta.accountId)
+                                 : AccountManager.credsForServer(meta.serverUrl)
                     if (c.token !== "")
                         EmbyClient.fetchAllEpisodes(meta.serverUrl,
                                                     meta.accountId || root.currentAccountId,

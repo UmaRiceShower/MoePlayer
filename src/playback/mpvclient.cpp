@@ -439,6 +439,8 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
     s->delivered = true;
     reportStart(s);
     qInfo() << "MpvClient: deliver" << key << (s->listSet ? QStringLiteral("列表") : QStringLiteral("单条"));
+    s->url = url;
+    s->headers = headers;
     if (s->listSet) {
         // 全集播放列表模式:setEpisodeList 的 loadlist replace 已播第 0 条
         // (当前集真 URL);无需再 loadfile。
@@ -479,9 +481,9 @@ void MpvClient::start(const QString &url, const QVariantList &headers,
     s->delivered = true;
     reportStart(s);
     if (embeddedPreferred()) {
-        emit embeddedPlaybackRequested(meta);
         s->url = url;
         s->headers = headers;
+        emit embeddedPlaybackRequested(meta);
         return;
     }
     spawnMpv(s);
@@ -962,8 +964,13 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         // 首集(用户点播)保持会话初值(pendingFileId 为空)。
         if (!s->pendingFileId.isEmpty()) {
             const QVariantMap pm = s->episodeMeta.value(s->pendingFileId);
-            if (!pm.isEmpty())
+            if (!pm.isEmpty()) {
+                const QString oldSid = s->meta.value(QStringLiteral("playSessionId")).toString();
                 s->meta = pm;
+                if (!pm.value(QStringLiteral("playSessionId")).toString().isEmpty()
+                    && pm.value(QStringLiteral("playSessionId")).toString() != oldSid)
+                    reportStart(s);
+            }
             s->pendingFileId.clear();
         }
         s->loadIssued = true;
@@ -1063,7 +1070,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         if (args.size() >= 2 && args.at(0).toString() == QLatin1String("moe-url")) {
             s->pendingFileId = args.at(1).toString();
             qInfo() << "MpvClient: hook 请求" << s->pendingFileId;
-            emit episodeUrlRequested(s->pendingFileId);
+            emit episodeUrlRequested(s->key, s->pendingFileId);
         } else if (args.size() >= 1 && args.at(0).toString() == QLatin1String("moe-keys-request")) {
             // 脚本就绪晚于本类连接时的补发请求(moe-hook.lua 加载即发一次)。
             sendSuperResKeys(s);
@@ -1193,6 +1200,13 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
         s->episodeMeta.insert(currentItemId, meta);
     // 写 m3u:条目标题(m3u EXTINF,mpv demux_playlist.c 解析为 playlist
     // entry title,经 --osd-playlist-entry=title 显示)+ 占位地址
+    // 可重复调用(重播同集/续链):清旧播放表 + 删旧 m3u(否则 ids 翻倍、
+    // 旧文件泄漏)。
+    s->playlistIds.clear();
+    if (!s->m3uPath.isEmpty()) {
+        QFile::remove(s->m3uPath);
+        s->m3uPath.clear();
+    }
     // moe://ep/<id>(on_load hook 重定向)。
     const QString path = QDir::tempPath() + QStringLiteral("/moe-ep-") +
                          QUuid::createUuid().toString(QUuid::WithoutBraces) +
@@ -1212,6 +1226,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
         const QVariantMap m = episodes.at(i).toMap();
         const QString id = m.value(QStringLiteral("id")).toString();
         QString title = m.value(QStringLiteral("title")).toString();
+        title.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
         if (title.isEmpty())
             title = id;
         body2 += "#EXTINF:0," + title.toUtf8() + "\n";
@@ -1243,12 +1258,13 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
     qInfo() << "MpvClient: 下发 loadlist" << s->key;
 }
 
-void MpvClient::deliverEpisodeUrl(const QString &itemId, const QString &url,
+void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &itemId,
+                                  const QString &url,
                                   const QVariantList &headers,
                                   const QVariantMap &meta,
                                   const QString &subtitleUrl)
 {
-    Session *s = m_active;
+    Session *s = sessionFor(sessionKey);
     if (!s || !s->ready) {
         qDebug() << "MpvClient: deliverEpisodeUrl 跳过(无活跃会话/未就绪)" << itemId;
         return;
@@ -1304,13 +1320,19 @@ void MpvClient::reportStart(Session *s)
     if (!s->pingTimer) {
         s->pingTimer = new QTimer(this);
         s->pingTimer->setInterval(kPingMs);
-        const QString serverUrl =
-            s->meta.value(QStringLiteral("serverUrl")).toString();
-        const QString userId = s->meta.value(QStringLiteral("userId")).toString();
-        connect(s->pingTimer, &QTimer::timeout, this,
-                [this, serverUrl, token, userId, sid]() {
-                    m_emby->reportPlaybackPing(serverUrl, token, userId, sid);
-                });
+        // 按会话键现取 meta:换集后 Ping 跟随当前集(不再钉死首集)。
+        const QString key = s->key;
+        connect(s->pingTimer, &QTimer::timeout, this, [this, key]() {
+            Session *cur = sessionFor(key);
+            if (!cur)
+                return;
+            const QString sid0 = cur->meta.value(QStringLiteral("playSessionId")).toString();
+            if (sid0.isEmpty())
+                return;
+            m_emby->reportPlaybackPing(cur->meta.value(QStringLiteral("serverUrl")).toString(),
+                                       cur->meta.value(QStringLiteral("token")).toString(),
+                                       cur->meta.value(QStringLiteral("userId")).toString(), sid0);
+        });
         s->pingTimer->start();
     }
 }
