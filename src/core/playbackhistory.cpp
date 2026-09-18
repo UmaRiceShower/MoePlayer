@@ -62,16 +62,17 @@ void PlaybackHistory::setItems(const QString &serverUrl, const QString &accountI
                                const QVariantList &items)
 {
     const QString scope = scopeOf(serverUrl, accountId);
-    // 列表端点不返回播放次数/上次播放时间:同一条目旧值保留(明细补全的
-    // 结果不因重拉列表丢失)。
+    // 语义 = 整段替换该 scope:不在新列表里的旧行一律丢弃,仅同 id 旧行
+    // 的 playCount/lastPlayedAt/dateFetched 捐赠给新行(列表端点不返回
+    // 这三个字段)。深档行存活靠调用方每轮全量重取(窗口页+过滤段逐页取全),
+    // 勿据此裁剪拉取页数——裁了就是静默丢档。
     QHash<QString, QVariantMap> merged;
     for (const QVariant &v : std::as_const(m_items)) {
         const QVariantMap m = v.toMap();
         if (m.value(QStringLiteral("scope")).toString() != scope)
             continue;
-        // 保留判据 = 入库判据(hasPlayTrace):只要这条曾有过播放痕迹就跨列表刷新
-        // 保留。列表刷新只带回最近一页,而更早的行(逐页回补得来,没有精确时间戳)
-        // 与"想看/在看"的行都不在页内,若按"有时间戳/次数"保留会被整体重写清掉。
+        // 捐赠对象筛选 = 入库判据(hasPlayTrace):只有曾播过的旧行才有资格
+        // 把三字段捐给同 id 新行(无痕迹旧行直接弃)。
         if (hasPlayTrace(m))
             merged.insert(m.value(QStringLiteral("id")).toString(), m);
     }
@@ -153,10 +154,12 @@ void PlaybackHistory::upsertItems(const QString &serverUrl, const QString &accou
         m.insert(QStringLiteral("accountId"), accountId);
         if (!hasPlayTrace(m))
             continue; // Resume 的"下一未看集"占位等无痕迹行不入库(见 hasPlayTrace)
-        const auto it = indexById.constFind(m.value(QStringLiteral("id")).toString());
+        const QString id = m.value(QStringLiteral("id")).toString();
+        const auto it = indexById.constFind(id);
         if (it == indexById.constEnd()) {
             if (m.value(QStringLiteral("seq")).toInt() == 0)
                 m.insert(QStringLiteral("seq"), nextSeq++);
+            indexById.insert(id, m_items.size()); // 批内同 id 后收覆盖前收
             m_items.append(m);
             continue;
         }
@@ -264,7 +267,15 @@ void PlaybackHistory::renameScopeServer(const QString &accountId, const QString 
 void PlaybackHistory::removeScope(const QString &serverUrl, const QString &accountId)
 {
     const QString scope = scopeOf(serverUrl, accountId);
-    if (m_fetchedAt.remove(scope) == 0)
+    m_fetchedAt.remove(scope);
+    bool had = false;
+    for (const QVariant &v : std::as_const(m_items)) {
+        if (v.toMap().value(QStringLiteral("scope")).toString() == scope) {
+            had = true;
+            break;
+        }
+    }
+    if (!had)
         return;
     QVariantList kept;
     for (const QVariant &v : std::as_const(m_items)) {
