@@ -29,12 +29,15 @@ Item {
     readonly property string viewMode: ConfigManager.historyView
     readonly property bool aggregate: ConfigManager.historyAggregate
     // 网格:卡宽/卡高/行高与列数(列数变化才重建行,见 onColumnsChanged)。
-    readonly property real cardW: Constants.gridCardW(Math.max(1, list.width),
+    // hoverPad:卡 hover 放大(1.06)溢出预留;卡宽按 list.width 减两侧预留算,
+    // 保证末列右缘也有等量空隙,溢出不被 ListView clip 裁(同首页卡条做法)。
+    readonly property int hoverPad: 8
+    readonly property real cardW: Constants.gridCardW(Math.max(1, list.width - 2 * root.hoverPad),
                                                       Constants.cellMinW, Constants.cellMaxW)
     readonly property int cardH: Constants.gridCardH(root.cardW)
     readonly property int gridRowH: root.cardH + 12
     readonly property int columns: Math.max(1, Math.floor(
-        Math.max(1, list.width) / Constants.gridCellW(Math.max(1, list.width),
+        Math.max(1, list.width - 2 * root.hoverPad) / Constants.gridCellW(Math.max(1, list.width - 2 * root.hoverPad),
                                                       Constants.cellMinW, Constants.cellMaxW)))
 
     // 宽度变化时立即捕获的锚点(见 onColumnsChanged):交给去抖后的重建使用。
@@ -654,6 +657,9 @@ Item {
         anchors.margins: root.pageMargin
         anchors.topMargin: 12
         clip: true
+        // 首末行卡的 hover 放大溢出预留(clip 边界即裁切线)。
+        header: Item { width: 1; height: root.hoverPad }
+        footer: Item { width: 1; height: root.hoverPad }
         reuseItems: true
         cacheBuffer: 800
         model: root.rows
@@ -694,6 +700,7 @@ Item {
             // 网格行:一行 N 张卡(列数随窗口宽变化,见 columns)
             Row {
                 anchors.left: parent.left
+                anchors.leftMargin: root.hoverPad
                 anchors.top: parent.top
                 spacing: Constants.cellGap
                 visible: rowItem.modelData.kind === "cards"
