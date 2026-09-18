@@ -948,6 +948,8 @@ Item {
                     spacing: Constants.rowSpacing
                     // 首卡左缘内移(hover 放大横向溢出的一半),避免被 clip 裁切。
                     header: Item { width: Constants.homeRowHoverPad / 2; height: 1 }
+                    // 末卡右缘同理(滚到行尾 hover 末卡时)。
+                    footer: Item { width: Constants.homeRowHoverPad / 2; height: 1 }
                     // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
                     reuseItems: true
                     cacheBuffer: 600

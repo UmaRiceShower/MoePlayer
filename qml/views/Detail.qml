@@ -2201,6 +2201,9 @@ Item {
                         orientation: ListView.Horizontal
                         spacing: 12
                         clip: true
+                        // 首/末卡 hover 放大(1.05)水平溢出 2.8px 预留(clip 边界即裁切线)。
+                        header: Item { width: 4; height: 1 }
+                        footer: Item { width: 4; height: 1 }
                         model: EmbyClient.similarModelFor(root.serverUrl, root.accountId, root.itemId)
                         delegate: Item {
                             id: similarCard

@@ -1633,7 +1633,6 @@ void AccountManager::addAccountToFolder(const QString &folderId, const QString &
     // accounts(账号进文件夹块,首页聚合跟随视觉)。
     removeFromLayoutOrder(QLatin1String("account"), accountId);
     const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-        save();
     save();
     if (acctChanged) {
         reorderHomeRows();
