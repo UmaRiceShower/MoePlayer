@@ -160,6 +160,10 @@ int main(int argc, char *argv[])
     embyClient.setBaseUrlResolver([&accountManager](const QString &serverUrl, const QString &userId) {
         return accountManager.activeUrlFor(serverUrl, userId);
     });
+    // 图片 id 前缀 = 账号 id(不可变身份)。
+    embyClient.setAccountIdResolver([&accountManager](const QString &serverUrl, const QString &userId) {
+        return accountManager.accountIdFor(serverUrl, userId);
+    });
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ConfigManager", &configManager);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "EmbyClient", &embyClient);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "AccountManager", &accountManager);

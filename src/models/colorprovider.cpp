@@ -37,10 +37,10 @@ public:
 
     void run() override
     {
-        QString serverUrl, token, itemId, tag, kind;
+        QString token;
         QVariantMap roles;
-        if (m_posters->resolveImageId(m_posterId, &serverUrl, &token, &itemId, &tag, &kind)) {
-            const QUrl url = PosterProvider::imageUrl(serverUrl, itemId, tag, kind);
+        const QUrl url = m_posters->resolvedImageUrl(m_posterId, &token);
+        if (!url.isEmpty()) {
             QString err;
             const QImage img = PosterProvider::loadImageSync(url, token, &err, m_posters->proxy());
             if (!img.isNull())

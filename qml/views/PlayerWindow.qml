@@ -34,7 +34,7 @@ Window {
         const sid = meta.serverUrl || ""
         if (sid === "")
             return null
-        const m = EmbyClient.allEpisodesModelFor(sid)
+        const m = EmbyClient.allEpisodesModelFor(sid, meta.accountId || "", meta.seriesId || "")
         for (let i = 0; i < m.count; i++) {
             const it = m.itemAt(i)
             if (it.id === root.currentItemId)
@@ -190,8 +190,9 @@ Window {
         target: EmbyClient
         // 全集模型异步后于开窗:到达后重算双行标题(开窗时查空模型会
         // 落单行兜底,这里补刷新)。
-        function onAllEpisodesReady(serverUrl) {
-            if (serverUrl === (root.meta.serverUrl || ""))
+        function onAllEpisodesReady(serverUrl, accountId, seriesId) {
+            if (serverUrl === (root.meta.serverUrl || "")
+                && seriesId === (root.meta.seriesId || ""))
                 root.refreshTitle()
         }
     }
@@ -702,7 +703,7 @@ Window {
                 height: parent.height - 30
                 clip: true
                 model: root.panel === "episodes" && (root.meta.serverUrl || "") !== ""
-                       ? EmbyClient.allEpisodesModelFor(root.meta.serverUrl) : null
+                       ? EmbyClient.allEpisodesModelFor(root.meta.serverUrl, root.meta.accountId || "", root.meta.seriesId || "") : null
                 delegate: Rectangle {
                     required property int index
                     width: epList.width
