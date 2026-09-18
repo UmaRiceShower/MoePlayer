@@ -101,7 +101,8 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
         qWarning().noquote() << "Poster: 图片地址无效" << id;
         return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
     }
-    const QUrl url = imageUrl(serverUrl, itemId, tag, kind, requestedSize);
+    // 多线路:展示键是身份 serverUrl,取图走当前线路(工作地址)。
+    const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl), itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
         QMutexLocker locker(&g_memMutex);

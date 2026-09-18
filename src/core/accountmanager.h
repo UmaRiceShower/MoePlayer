@@ -143,6 +143,13 @@ public:
     // 该账号的可见性(自身或所属文件夹隐藏 ⇒ 不可见;showHidden 打开时恒可见)。
     Q_INVOKABLE bool accountVisible(const QString &accountId) const;
     Q_INVOKABLE void setAccountHidden(const QString &accountId, bool hidden);
+    // 线路表整体替换(编辑浮窗保存路径);url 归一化(去尾斜杠)、按 url 去重。
+    Q_INVOKABLE void setAccountLines(const QString &accountId, const QVariantList &lines);
+    Q_INVOKABLE void setActiveLine(const QString &accountId, int index);
+    // 工作地址:该账号当前线路(无线路/越界 = serverUrl)。userId 消歧同服
+    // 多账号;空 userId 取该服首个账号。所有请求的基址收口(EmbyClient
+    // resolver、海报、取流都走这)。
+    QString activeUrlFor(const QString &serverUrl, const QString &userId = QString()) const;
     Q_INVOKABLE bool folderHidden(const QString &folderId) const;
     Q_INVOKABLE void setFolderHidden(const QString &folderId, bool hidden);
     bool showHidden() const { return m_showHidden; }
@@ -187,6 +194,10 @@ private:
         QString icon; // 统一图标:本地缓存 file:// URL(MD5 命名;空 = 名称首字)。
         qint64 lastUsed = 0;
         bool hidden = false; // 隐藏(不从界面出现、不参与网络聚合,见 hiddenChanged)
+        // 多线路(同一服务器的替代入口:直连/CDN/内网)。身份键恒为
+        // serverUrl(登录地址),线路只是工作地址;请求经 activeUrlFor 收口。
+        QVariantList lines; // [{name,url}]
+        int activeLine = -1; // -1 = 主地址(登录地址);0..N-1 = 线路下标
     };
 
     void load();

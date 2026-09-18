@@ -221,7 +221,9 @@ QNetworkRequest EmbyClient::makeRequest(const QString &serverUrl, const QString 
                                         const QString &userId, const QString &path,
                                         bool json) const
 {
-    QNetworkRequest req(QUrl(serverUrl.trimmed() + path));
+    const QString base = m_baseUrlResolver ? m_baseUrlResolver(serverUrl.trimmed(), userId)
+                                           : serverUrl.trimmed();
+    QNetworkRequest req(QUrl(base + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     req.setRawHeader(MoePlayer::kHeaderAuth, authHeaderFor(userId, token).toUtf8());
@@ -269,7 +271,9 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
                           std::function<void(const QJsonDocument &)> onOk,
                           std::function<void()> onFail, const QString &what)
 {
-    QNetworkRequest req(QUrl(serverUrl.trimmed() + path));
+    // 登录发生在账号建立之前(还没有线路表),基址原样即可。
+    const QString base = serverUrl.trimmed();
+    QNetworkRequest req(QUrl(base + path));
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     // 认证头无 token 版本:Emby 4.9 的 AuthenticateByName 要求携带
@@ -1474,7 +1478,10 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  }
 
                  // 补全 server 前缀,并在 URL 中附带 api_key,使 mpv 拉流无需自定义请求头。
-                 const auto absUrl = [key](QString p) { return absolutePlaybackUrl(key, p); };
+                 const auto absUrl = [this, key, userId](QString p) {
+                     const QString base = m_baseUrlResolver ? m_baseUrlResolver(key, userId) : key;
+                     return absolutePlaybackUrl(base, p);
+                 };
                  const auto withApiKey = [token](QString u) { return withApiKeyParam(token, u); };
 
                  // 流地址一律取自 PlaybackInfo 响应,优先顺序:
@@ -1491,7 +1498,9 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      url = absUrl(transcode);
                      playMethod = QStringLiteral("Transcode");
                  } else if (directPlay) {
-                     url = key + QStringLiteral("/Videos/%1/stream?static=true&MediaSourceId=%2")
+                     const QString playBase = m_baseUrlResolver ? m_baseUrlResolver(key, userId)
+                                                                : key;
+                     url = playBase + QStringLiteral("/Videos/%1/stream?static=true&MediaSourceId=%2")
                                       .arg(itemId, selectedMediaSourceId);
                  } else {
                      const QString msg = QStringLiteral("该条目无可用直连/转码方案");
