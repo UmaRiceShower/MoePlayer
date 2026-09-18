@@ -236,6 +236,31 @@ qint64 PlaybackHistory::fetchedAt(const QString &serverUrl, const QString &accou
     return m_fetchedAt.value(scopeOf(serverUrl, accountId)).toLongLong();
 }
 
+void PlaybackHistory::renameScopeServer(const QString &accountId, const QString &oldUrl,
+                                        const QString &newUrl)
+{
+    const QString oldScope = scopeOf(oldUrl, accountId);
+    const QString newScope = scopeOf(newUrl, accountId);
+    bool changed = false;
+    for (auto &v : m_items) {
+        QVariantMap m = v.toMap();
+        if (m.value(QStringLiteral("scope")).toString() != oldScope)
+            continue;
+        m.insert(QStringLiteral("scope"), newScope);
+        m.insert(QStringLiteral("serverUrl"), newUrl);
+        v = m;
+        changed = true;
+    }
+    if (m_fetchedAt.contains(oldScope)) {
+        m_fetchedAt.insert(newScope, m_fetchedAt.take(oldScope));
+        changed = true;
+    }
+    if (changed) {
+        m_dirty = true;
+        flush();
+    }
+}
+
 void PlaybackHistory::removeScope(const QString &serverUrl, const QString &accountId)
 {
     const QString scope = scopeOf(serverUrl, accountId);

@@ -352,6 +352,7 @@ const QString &accountId) const;
     // 由调用方与当前展示比较后决定是否重建(相同则跳过,避免无意义重建)。
     QVariantList loadHomeCache();
     void saveHomeCache();
+    void saveHomeCacheWithout(const QString &accountId);
     // 推荐(服务器建议)缓存:启动先展示上次推荐,后台各服回执逐账号覆盖替换。
     // 载入丢弃已删账号的切片;与当前内容一致不 emit(hero 无重建)。
     void loadHomeSuggestionCache();
