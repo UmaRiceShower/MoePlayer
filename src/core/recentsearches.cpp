@@ -4,8 +4,8 @@
 
 RecentSearches::RecentSearches(QObject *parent)
     : QObject(parent)
-    // 只用缓存层(loadCache/saveCache);QSettings 侧传空,settings 方法不可调。
-    , m_persist(nullptr, AppPaths::cacheDir())
+    // 用户行为数据
+    , m_persist(nullptr, AppPaths::dataDir())
 {
     QVariant v;
     if (m_persist.loadCache(QStringLiteral("recent-searches"), v))

@@ -623,6 +623,18 @@ void AccountManager::onTokenChecked(const QString &accountId, int result)
             emit accountsChanged();
         if (m_networkAccountIds.isEmpty())
             m_netRetryTimer.stop();
+        {
+            const int idx = accountIndexById(accountId);
+            if (idx >= 0) {
+                AccountInfo &a = m_accounts[idx];
+                if (!a.icon.isEmpty() && !QFileInfo::exists(QUrl(a.icon).toLocalFile())) {
+                    qInfo() << "AccountManager: 图标文件失踪,重拉" << accountId;
+                    a.icon.clear();
+                    m_serverIconOwner.insert(a.serverUrl, a.id);
+                    m_client->fetchServerIcon(a.serverUrl);
+                }
+            }
+        }
         return;
     }
     if (result == 2) {
@@ -1819,13 +1831,14 @@ QString AccountManager::encodeServerKey(const QString &serverUrl)
         QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
 }
 
-// 图标图片落盘本地缓存(CacheLocation/account-icons/):文件名 = 内容 MD5
+// 图标图片落盘用户数据目录(DataLocation/account-icons/):账号身份的一部分,
+// 文件名 = 内容 MD5
 // (同图同文件,跨账号去重),后缀统一 .img(Qt Image 按内容解码)。返回
 // file:// URL(QML Image.source 裸绝对路径会被 qrc 解析失败,须显式 file://),
 // 写失败返回空。
 QString AccountManager::writeIconCache(const QByteArray &imageData)
 {
-    const QString dir = AppPaths::cacheDir();
+    const QString dir = AppPaths::dataDir();
     if (dir.isEmpty())
         return QString();
     const QString iconDir = dir + QStringLiteral("/account-icons");

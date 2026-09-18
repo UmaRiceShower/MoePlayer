@@ -21,6 +21,10 @@ public:
     //! 状态根(日志等):便携 = <exeDir>/data/state;否则 StateLocation。
     static QString stateDir();
 
+    //! 用户数据根:便携 = <exeDir>/data/share;
+    //! 内容不因清缓存而丢。
+    static QString dataDir();
+
     //! QSettings 文件:configDir()/MoePlayer.ini(Windows/便携)或 .conf
     //! (Linux);显式路径,不经 QSettings 默认布局(空 org 单层)。
     static QString settingsFilePath();
