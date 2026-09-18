@@ -36,7 +36,7 @@ Button {
         }
     }
     contentItem: AppText {
-        text: (root.active && root.showHeart ? "♥ " : "") + root.label
+        text: root.label
         color: root.active ? Theme.accentInk : Theme.textPrimary
         font.pixelSize: 13
         horizontalAlignment: Text.AlignHCenter

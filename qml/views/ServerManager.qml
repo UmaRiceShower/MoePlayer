@@ -544,9 +544,44 @@ Item {
         }
     }
 
+    // 右键菜单:与设置页下拉同套令牌(scrim 底 + accent 描边 + 淡入),
+    // 不用原生 Menu/MenuItem 默认样式。
     Menu {
         id: blankMenu
-        MenuItem {
+        padding: 6
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+        }
+        background: Rectangle {
+            implicitWidth: 170
+            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
+            radius: 8
+            border.width: 1
+            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+        }
+        delegate: MenuItem {
+            id: menuItem
+            implicitHeight: 32
+            padding: 0
+            background: Rectangle {
+                radius: 6
+                color: menuItem.highlighted ? Theme.tint : "transparent"
+            }
+            contentItem: AppText {
+                text: menuItem.text
+                font.pixelSize: 13
+                color: menuItem.highlighted ? Theme.accent : Theme.textPrimary
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: 10
+            }
+        }
+        // 注意:Menu.delegate 只对 Action 子项生效(官方文档原文
+        // "used to create items to present actions");直接声明的
+        // MenuItem 子项会绕开 delegate 落回原生样式。
+        Action {
             text: "新建文件夹…"
             onTriggered: root.openFolderDialog("")
         }
@@ -1179,12 +1214,6 @@ Item {
                 Row {
                     spacing: 8
                     AppText {
-                        text: "♥"
-                        color: Theme.accent
-                        font.pixelSize: 24
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    AppText {
                         text: "添加服务器"
                         color: Theme.textPrimary
                         font.pixelSize: 20
@@ -1382,12 +1411,6 @@ Item {
                 Row {
                     spacing: 8
                     AppText {
-                        text: "♥"
-                        color: Theme.accent
-                        font.pixelSize: 24
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
-                    AppText {
                         text: root.folderEditId === "" ? "新建文件夹" : "重命名文件夹"
                         color: Theme.textPrimary
                         font.pixelSize: 20
@@ -1580,12 +1603,6 @@ Item {
 
                 Row {
                     spacing: 8
-                    AppText {
-                        text: "♥"
-                        color: Theme.accent
-                        font.pixelSize: 24
-                        anchors.verticalCenter: parent.verticalCenter
-                    }
                     AppText {
                         text: "修改服务器"
                         color: Theme.textPrimary
