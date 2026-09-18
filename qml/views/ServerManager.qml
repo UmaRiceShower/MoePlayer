@@ -223,6 +223,10 @@ Item {
     // 落点判定(拖动过程中):与最终 drop 语义一致,只有"有意义的落点"才
     // 高亮(无操作不高亮)。
     function updateDropTarget(drop) {
+        if (ConfigManager.serverManagerView === "tree") {
+            root.updateTreeDropTarget(drop.x, drop.y)
+            return
+        }
         const fromKind = root.kindOfKey(root.pressKey)
         const fromId = root.idOfKey(root.pressKey)
         let next = ""
@@ -242,10 +246,8 @@ Item {
                     if (t.kind === "folder") {
                         if (fromFolder !== t.id)
                             next = t.key
-                    } else {
-                        const toFolder = AccountManager.folderIdOfAccount(t.id)
-                        if (fromFolder !== toFolder || (fromFolder === "" && fromId !== t.id))
-                            next = t.key
+                    } else if (fromId !== t.id) {
+                        next = t.key
                     }
                 }
             }
@@ -259,6 +261,10 @@ Item {
     // 排序、落到文件夹卡或成员卡 = 加入/转移、落到空白 = 拖出;文件夹:落点
     // 文件夹或账号卡 = 排序,空白 = 不动。
     function applyDrop(x, y) {
+        if (ConfigManager.serverManagerView === "tree") {
+            root.applyTreeDrop(x, y)
+            return
+        }
         const fromKind = root.kindOfKey(root.pressKey)
         const fromId = root.idOfKey(root.pressKey)
         if (fromKind === "" || fromId === "")
@@ -304,8 +310,12 @@ Item {
         }
         const toFolder = AccountManager.folderIdOfAccount(t.id)
         if (fromFolder === toFolder) {
-            if (fromFolder === "" && fromId !== t.id)
+            if (fromId === t.id)
+                return
+            if (fromFolder === "")
                 root.moveLayoutElement("account", fromId, "account", t.id)
+            else
+                AccountManager.moveAccountInFolder(fromFolder, fromId, t.id)
             return
         }
         if (toFolder !== "") {
@@ -325,15 +335,249 @@ Item {
         const from = order.findIndex(e => e.type === type && e.id === id)
         if (from < 0)
             return
+        const toOrig = beforeType === "" ? -1
+                     : order.findIndex(e => e.type === beforeType && e.id === beforeId)
         order.splice(from, 1)
         let to = 0
         if (beforeType !== "") {
             to = order.findIndex(e => e.type === beforeType && e.id === beforeId)
             if (to < 0)
                 to = order.length
+            else if (toOrig > from)
+                to += 1
         }
         order.splice(to, 0, { type: type, id: id })
         AccountManager.setLayoutOrder(order)
+    }
+
+    // 新建文件夹的插入目标(layoutOrder 的 before 语义;"@end"= 末尾)。
+    function folderInsertTarget(x, y) {
+        const t = root.dropTargetAt(x, y)
+        if (!t)
+            return { beforeType: "@end", beforeId: "" }
+        if (t.kind === "plus")
+            return { beforeType: "", beforeId: "" } // 最前
+        // 展开文件夹的「末尾」= layoutOrder 中该夹的后继元素之前。
+        function afterFolder(fid) {
+            const order = AccountManager.layoutOrder
+            for (let i = 0; i < order.length; ++i) {
+                if (order[i].type === "folder" && order[i].id === fid) {
+                    if (i + 1 < order.length)
+                        return { beforeType: order[i + 1].type, beforeId: order[i + 1].id }
+                    break
+                }
+            }
+            return { beforeType: "@end", beforeId: "" }
+        }
+        if (t.kind === "folder")
+            return root.isFolderExpanded(t.id) ? afterFolder(t.id)
+                                               : { beforeType: "folder", beforeId: t.id }
+        const f = AccountManager.folderIdOfAccount(t.id)
+        if (f !== "" && root.isFolderExpanded(f))
+            return afterFolder(f)
+        return { beforeType: "account", beforeId: t.id }
+    }
+    // 树状模式的新建落点:行上 = 该元素之前(展开文件夹行/成员行 = 夹
+    // 末尾);行间边界 = 边界吸附后的位置。
+    function folderInsertTargetTree(x, y) {
+        const t = root.treeDropAt(x, y)
+        if (!t)
+            return { beforeType: "@end", beforeId: "" }
+        if (t.zone === "boundary")
+            return root.boundaryToLayout(t.boundary)
+        if (t.kind === "plus")
+            return { beforeType: "", beforeId: "" }
+        if (t.kind === "folder")
+            return root.isFolderExpanded(t.id) ? root.folderInsertTargetAfterFolder(t.id)
+                                               : { beforeType: "folder", beforeId: t.id }
+        const f = AccountManager.folderIdOfAccount(t.id)
+        if (f !== "" && root.isFolderExpanded(f))
+            return root.folderInsertTargetAfterFolder(f)
+        return { beforeType: "account", beforeId: t.id }
+    }
+    function createFolderAt(x, y) {
+        const tgt = ConfigManager.serverManagerView === "tree"
+                    ? root.folderInsertTargetTree(x, y) : root.folderInsertTarget(x, y)
+        const newId = AccountManager.addFolder("", "") // 空名自动命名 + 随机预设色
+        if (newId === "")
+            return
+        root.moveLayoutElement("folder", newId, tgt.beforeType, tgt.beforeId)
+        root.openFolderDialog(newId) // 直接命名
+    }
+
+    // ---- 树状(长条)视图的拖拽落点 ----
+    // 线性序列:行高 root.treeRowH + 间距 root.treeRowGap。落点 =
+    // 「行间边界 b ∈ [0..N]」(半行判定)+ 「文件夹行区」(账号落到文件夹行
+    // = 入夹)。指示线经 dropInsertY(内容坐标)画出。
+    readonly property int treeRowH: 44
+    readonly property int treeRowGap: 6
+    readonly property int treeRowPitch: treeRowH + treeRowGap
+
+    function treeDropAt(x, y) {
+        if (vmodel.count === 0)
+            return null
+        const p = treeList.contentItem.mapFromItem(root, x, y)
+        const f = (p.y + root.treeRowGap / 2) / root.treeRowPitch
+        let b = Math.floor(f) // 行号
+        const frac = f - b
+        if (b < 0)
+            b = 0
+        if (b >= vmodel.count)
+            return { zone: "boundary", boundary: vmodel.count }
+        const r = vmodel.get(b)
+        if (frac < 0.35)
+            return { zone: "boundary", boundary: b }
+        if (frac > 0.65)
+            return { zone: "boundary", boundary: b + 1 }
+        return { zone: "row", key: r.key, kind: r.kind, id: r.id, index: b }
+    }
+
+    // 边界 b → layoutOrder 的 before 语义(文件夹拖拽/未分组账号用)。
+    // 成员行边界吸附到其夹的边界:首成员之前 = 夹之后(不允许进夹)。
+    function boundaryToLayout(b) {
+        if (b <= 0)
+            return { beforeType: "", beforeId: "" } // 最前
+        if (b >= vmodel.count)
+            return { beforeType: "@end", beforeId: "" }
+        const r = vmodel.get(b)
+        if (r.kind === "plus")
+            return { beforeType: "", beforeId: "" }
+        if (r.kind === "folder")
+            return { beforeType: "folder", beforeId: r.id }
+        const f = AccountManager.folderIdOfAccount(r.id)
+        if (f === "")
+            return { beforeType: "account", beforeId: r.id }
+        // 成员行:吸附到其夹之后(= 夹的 layoutOrder 后继之前)
+        return root.folderInsertTargetAfterFolder(f)
+    }
+    function folderInsertTargetAfterFolder(fid) {
+        const order = AccountManager.layoutOrder
+        for (let i = 0; i < order.length; ++i) {
+            if (order[i].type === "folder" && order[i].id === fid) {
+                if (i + 1 < order.length)
+                    return { beforeType: order[i + 1].type, beforeId: order[i + 1].id }
+                break
+            }
+        }
+        return { beforeType: "@end", beforeId: "" }
+    }
+
+    // 高亮语义与网格一致:落在哪行 = 占据其位,该行高亮;末尾/空白
+    // 不高亮(与网格"占位卡不预高亮"同口径)。
+    function updateTreeDropTarget(x, y) {
+        const fromKind = root.kindOfKey(root.pressKey)
+        const fromId = root.idOfKey(root.pressKey)
+        let next = ""
+        const t = root.treeDropAt(x, y)
+        if (fromKind !== "" && fromId !== "" && t) {
+            if (t.zone === "row") {
+                if (t.key !== root.pressKey
+                    && ((fromKind === "account" && (t.kind === "folder" || t.kind === "account"))
+                        || (fromKind === "folder" && t.kind === "folder")))
+                    next = t.key
+            } else if (t.boundary < vmodel.count) {
+                const r = vmodel.get(t.boundary)
+                if (r.key !== root.pressKey && r.kind !== "plus")
+                    next = r.key
+            }
+        }
+        if (next !== root.dropTargetKey)
+            root.dropTargetKey = next
+    }
+
+    function applyTreeDrop(x, y) {
+        const fromKind = root.kindOfKey(root.pressKey)
+        const fromId = root.idOfKey(root.pressKey)
+        if (fromKind === "" || fromId === "")
+            return
+        const t = root.treeDropAt(x, y)
+        if (fromKind === "folder") {
+            if (AccountManager.folders.findIndex(f => f.id === fromId) < 0)
+                return
+            if (!t)
+                return
+            if (t.zone === "row") {
+                if (t.kind === "folder" && t.id !== fromId)
+                    root.moveLayoutElement("folder", fromId, "folder", t.id)
+                return // 落在账号行/plus:不动
+            }
+            const tgt = root.boundaryToLayout(t.boundary)
+            root.moveLayoutElement("folder", fromId, tgt.beforeType, tgt.beforeId)
+            return
+        }
+        if (AccountManager.accounts.findIndex(a => a.id === fromId) < 0)
+            return
+        const fromFolder = AccountManager.folderIdOfAccount(fromId)
+        if (!t || (t.zone === "boundary" && t.boundary >= vmodel.count)) {
+            // 末尾空白:成员 = 拖出到未分组末尾;未分组 = 移到末尾
+            if (fromFolder !== "")
+                AccountManager.removeAccountFromFolder(fromId)
+            else
+                root.moveLayoutElement("account", fromId, "@end", "")
+            return
+        }
+        if (t.zone === "row") {
+            if (t.kind === "folder") {
+                if (fromFolder !== t.id)
+                    AccountManager.addAccountToFolder(t.id, fromId)
+                return
+            }
+            if (t.kind === "account" && t.id !== fromId) {
+                const toFolder = AccountManager.folderIdOfAccount(t.id)
+                if (fromFolder === toFolder) {
+                    if (fromFolder !== "")
+                        AccountManager.moveAccountInFolder(fromFolder, fromId, t.id)
+                    else
+                        root.moveLayoutElement("account", fromId, "account", t.id)
+                } else if (toFolder !== "") {
+                    AccountManager.addAccountToFolder(toFolder, fromId, t.id)
+                } else {
+                    if (fromFolder !== "")
+                        AccountManager.removeAccountFromFolder(fromId)
+                    root.moveLayoutElement("account", fromId, "account", t.id)
+                }
+            }
+            return
+        }
+        // 行间边界
+        const b = t.boundary
+        if (b > 0 && b < vmodel.count) {
+            const r = vmodel.get(b)
+            if (r.kind === "account") {
+                const bf = AccountManager.folderIdOfAccount(r.id)
+                if (bf !== "") {
+                    // 成员行边界 = 夹内定位
+                    if (fromFolder === bf)
+                        AccountManager.moveAccountInFolder(bf, fromId, r.id)
+                    else
+                        AccountManager.addAccountToFolder(bf, fromId, r.id)
+                    return
+                }
+            }
+        }
+        // 首成员行上沿(边界落在文件夹行与首成员之间)= 入夹开头
+        if (b > 0 && b <= vmodel.count) {
+            const above = b > 0 ? vmodel.get(b - 1) : null
+            if (above && above.kind === "folder" && root.isFolderExpanded(above.id)) {
+                const members = root.folderInfo(above.id).accountIds || []
+                const first = members.length > 0 ? members[0] : ""
+                if (first !== "") {
+                    if (fromFolder === above.id)
+                        AccountManager.moveAccountInFolder(above.id, fromId, first)
+                    else
+                        AccountManager.addAccountToFolder(above.id, fromId, first)
+                    return
+                }
+                if (fromFolder !== above.id)
+                    AccountManager.addAccountToFolder(above.id, fromId)
+                return
+            }
+        }
+        // 顶层位置
+        const tgt = root.boundaryToLayout(b)
+        if (fromFolder !== "")
+            AccountManager.removeAccountFromFolder(fromId)
+        root.moveLayoutElement("account", fromId, tgt.beforeType, tgt.beforeId)
     }
 
     // ---- 文件夹(分类) ----
@@ -583,7 +827,68 @@ Item {
         // MenuItem 子项会绕开 delegate 落回原生样式。
         Action {
             text: "新建文件夹…"
-            onTriggered: root.openFolderDialog("")
+            onTriggered: root.createFolderAt(root.pendingMenuX, root.pendingMenuY)
+        }
+    }
+
+    // 卡片右键菜单(账号卡/文件夹卡共用):设置 / 新建文件夹 / 删除。
+    // 新建文件夹按菜单打开时的坐标定位(见 createFolderAt)。
+    property string menuKind: ""
+    property string menuId: ""
+    property int pendingMenuX: 0
+    property int pendingMenuY: 0
+    function openCardMenu(kind, id, item, x, y) {
+        root.menuKind = kind
+        root.menuId = id
+        root.pendingMenuX = x
+        root.pendingMenuY = y
+        cardMenu.popup(item, x, y)
+    }
+    Menu {
+        id: cardMenu
+        padding: 6
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+        }
+        background: Rectangle {
+            implicitWidth: 170
+            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
+            radius: 8
+            border.width: 1
+            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+        }
+        delegate: MenuItem {
+            id: cardMenuItem
+            implicitHeight: 32
+            padding: 0
+            background: Rectangle {
+                radius: 6
+                color: cardMenuItem.highlighted ? Theme.tint : "transparent"
+            }
+            contentItem: AppText {
+                text: cardMenuItem.text
+                font.pixelSize: 13
+                color: cardMenuItem.highlighted ? Theme.accent : Theme.textPrimary
+                verticalAlignment: Text.AlignVCenter
+                leftPadding: 10
+            }
+        }
+        Action {
+            text: "设置"
+            onTriggered: root.menuKind === "folder" ? root.openFolderDialog(root.menuId)
+                                                    : root.openEditDialog(root.menuId)
+        }
+        Action {
+            text: "新建文件夹…"
+            onTriggered: root.createFolderAt(root.pendingMenuX, root.pendingMenuY)
+        }
+        Action {
+            text: "删除"
+            onTriggered: root.menuKind === "folder" ? AccountManager.removeFolder(root.menuId)
+                                                    : AccountManager.removeAccount(root.menuId)
         }
     }
 
@@ -602,7 +907,7 @@ Item {
     }
 
     Row {
-        id: header
+        id: headerRow
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
@@ -626,10 +931,21 @@ Item {
         }
     }
 
+    // 视图:网格 / 树状(持久化 config.toml,与播放历史页同款)
+    SegmentedControl {
+        anchors.top: headerRow.top
+        anchors.right: parent.right
+        anchors.rightMargin: 24
+        anchors.topMargin: 6
+        options: [{ value: "grid", label: "网格" }, { value: "tree", label: "树状" }]
+        currentValue: ConfigManager.serverManagerView
+        onActivated: (value) => ConfigManager.serverManagerView = value
+    }
+
 
     Item {
         id: gridArea
-        anchors.top: header.bottom
+        anchors.top: headerRow.bottom
         anchors.topMargin: 20
         anchors.left: parent.left
         anchors.right: parent.right
@@ -642,7 +958,11 @@ Item {
             id: blankArea
             anchors.fill: parent
             acceptedButtons: Qt.RightButton
-            onClicked: (mouse) => blankMenu.popup(blankArea, mouse.x, mouse.y)
+            onClicked: (mouse) => {
+                root.pendingMenuX = mouse.x
+                root.pendingMenuY = mouse.y
+                blankMenu.popup(blankArea, mouse.x, mouse.y)
+            }
         }
 
         Column {
@@ -669,6 +989,7 @@ Item {
 
         GridView {
             id: vgrid
+            visible: ConfigManager.serverManagerView !== "tree"
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.topMargin: -root.hoverPadY
@@ -914,7 +1235,7 @@ Item {
                             id: dragArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                             preventStealing: true
                             drag {
                                 target: card
@@ -933,6 +1254,10 @@ Item {
                                     root.hoveredKey = ""
                             }
                             onPressed: (mouse) => {
+                                if (mouse.button === Qt.RightButton) {
+                                    root.openCardMenu("account", cell.id, card, mouse.x, mouse.y)
+                                    return
+                                }
                                 hoverTimer.stop()
                                 card.expanded = false
                                 if (root.hoveredKey === cell.key)
@@ -942,6 +1267,8 @@ Item {
                                 root.dragActive = true
                             }
                             onClicked: (mouse) => {
+                                if (mouse.button === Qt.RightButton)
+                                    return
                                 if (mouse.modifiers & Qt.ControlModifier)
                                     root.openEditDialog(cell.id)
                                 else
@@ -1117,7 +1444,7 @@ Item {
                             id: farea
                             anchors.fill: parent
                             hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
                             preventStealing: true
                             drag {
                                 target: fcard
@@ -1136,6 +1463,10 @@ Item {
                                     root.hoveredKey = ""
                             }
                             onPressed: (mouse) => {
+                                if (mouse.button === Qt.RightButton) {
+                                    root.openCardMenu("folder", cell.id, fcard, mouse.x, mouse.y)
+                                    return
+                                }
                                 fcardHoverTimer.stop()
                                 fcard.expanded = false
                                 if (root.hoveredKey === cell.key)
@@ -1145,6 +1476,8 @@ Item {
                                 root.dragActive = true
                             }
                             onClicked: (mouse) => {
+                                if (mouse.button === Qt.RightButton)
+                                    return
                                 // Ctrl+点击打开修改浮窗(重命名/删除);普通点击
                                 // 展开/收起成员。拖动超过 threshold 后不触发 click。
                                 if (mouse.modifiers & Qt.ControlModifier)
@@ -1876,6 +2209,222 @@ Item {
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
+                }
+            }
+        }
+    }
+
+    // ---- 树状(长条)视图 ----
+    ListView {
+        id: treeList
+        visible: ConfigManager.serverManagerView === "tree"
+        anchors.top: gridArea.top
+        anchors.bottom: gridArea.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.leftMargin: 24
+        anchors.rightMargin: 40 // 让出页面滚动条
+        clip: true
+        model: vmodel
+        interactive: !root.dragActive
+        spacing: root.treeRowGap
+        ScrollBar.vertical: MoeScrollBar {}
+        // 空白区右键 = 新建文件夹(ListView 会拦截落不到 blankArea);
+        // 只收右键,左键滚动/行交互不受影响。
+        TapHandler {
+            acceptedButtons: Qt.RightButton
+            onTapped: (eventPoint) => {
+                const gp = mapToItem(root, eventPoint.position.x, eventPoint.position.y)
+                root.pendingMenuX = gp.x
+                root.pendingMenuY = gp.y
+                blankMenu.popup(treeList, eventPoint.position.x, eventPoint.position.y)
+            }
+        }
+        add: Transition {
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: root.fadeDuration; easing.type: Easing.OutCubic }
+        }
+        remove: Transition {
+            NumberAnimation { property: "opacity"; to: 0; duration: root.fadeDuration; easing.type: Easing.OutCubic }
+        }
+        displaced: Transition {
+            NumberAnimation { properties: "y"; duration: root.moveDuration; easing.type: Easing.OutCubic }
+        }
+
+        delegate: Item {
+            id: trow
+            required property int index
+            required property string key
+            required property string kind
+            required property string id
+            readonly property var modelData: trow.kind === "folder"
+                                             ? root.folderInfo(trow.id) : root.accountInfo(trow.id)
+            readonly property bool isFolder: trow.kind === "folder"
+            readonly property bool isPlus: trow.kind === "plus"
+            // 成员行:其父夹展开时紧随夹行;分支线画在最末成员前断开
+            readonly property string parentFolder: trow.kind === "account"
+                                                   ? AccountManager.folderIdOfAccount(trow.id) : ""
+            readonly property bool isMember: parentFolder !== ""
+            readonly property bool dropTarget: root.dropTargetKey === trow.key
+            width: treeList.width
+            height: root.treeRowH
+            // 拖动中抬到兄弟行之上(否则被后续行盖住,读作"到了下方")
+            z: root.dragKey === trow.key ? 10 : 1
+
+            Rectangle {
+                id: bar
+                width: trow.width
+                height: root.treeRowH
+                radius: 8
+                color: trow.dropTarget ? Theme.tintStrong
+                     : tarea.containsMouse ? Theme.tint : Theme.surface
+                border.width: trow.dropTarget ? 1 : 0
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+                opacity: (root.dragKey === trow.key) ? 0.85 : 1.0
+                Behavior on color { ColorAnimation { duration: 120 } }
+
+                Drag.active: tarea.drag.active
+                Drag.source: bar
+                Drag.hotSpot.x: width / 2
+                Drag.hotSpot.y: height / 2
+
+                Row {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12 + (trow.isMember ? 26 : 0)
+                    anchors.rightMargin: 12
+                    spacing: 10
+
+                    // 夹色块(文件夹行)
+                    Rectangle {
+                        visible: trow.isFolder
+                        width: 10
+                        height: 10
+                        radius: 3
+                        anchors.verticalCenter: parent.verticalCenter
+                        color: root.hexToRgba(trow.isFolder ? trow.modelData.color : "", 1) || Theme.accent
+                    }
+                    // 账号小图标
+                    ServerIcon {
+                        visible: trow.kind === "account"
+                        width: 24
+                        height: 24
+                        anchors.verticalCenter: parent.verticalCenter
+                        icon: trow.kind === "account" ? trow.modelData.icon : ""
+                        fallbackText: trow.kind === "account"
+                                      ? (trow.modelData.name !== "" ? trow.modelData.name : trow.modelData.userName).charAt(0) : ""
+                    }
+                    AppText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: trow.isPlus ? "添加服务器"
+                            : trow.isFolder ? trow.modelData.name
+                            : (trow.modelData.name !== "" ? trow.modelData.name : trow.modelData.userName)
+                        color: Theme.textPrimary
+                        font.pixelSize: 14
+                        font.bold: trow.isFolder
+                        elide: Text.ElideRight
+                    }
+                    AppText {
+                        visible: trow.isFolder
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "· " + root.visibleMemberCount(trow.id) + " 台"
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                    }
+                    AppText {
+                        visible: trow.kind === "account"
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: trow.modelData.userName + " · " + trow.modelData.serverUrl
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                    AppText {
+                        visible: trow.kind === "account" && trow.modelData.authStatus === "invalid"
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "[凭据失效]"
+                        color: Theme.danger
+                        font.pixelSize: 12
+                    }
+                    AppText {
+                        visible: !trow.isPlus && ((trow.kind === "account" && root.isAccountHidden(trow.id))
+                                                  || (trow.isFolder && root.isFolderHidden(trow.id)))
+                                 && AccountManager.showHidden
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "[已隐藏]"
+                        color: Theme.textMuted
+                        font.pixelSize: 12
+                    }
+                }
+                // 文件夹展开箭头(右缘)
+                NavGlyph {
+                    visible: trow.isFolder
+                    anchors.right: parent.right
+                    anchors.rightMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    dir: 2
+                    rotation: root.isFolderExpanded(trow.id) ? 0 : 180
+                    width: 12
+                    height: 12
+                }
+
+                MouseArea {
+                    id: tarea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    preventStealing: true
+                    drag {
+                        target: trow.isPlus ? null : bar
+                        axis: Drag.YAxis
+                        threshold: 8
+                    }
+                    onPressed: (mouse) => {
+                        if (mouse.button === Qt.RightButton) {
+                            if (!trow.isPlus)
+                                root.openCardMenu(trow.kind, trow.id, bar, mouse.x, mouse.y)
+                            return
+                        }
+                        if (trow.isPlus)
+                            return
+                        root.pressKey = trow.key
+                        root.dragKey = trow.key
+                        root.dragActive = true
+                    }
+                    onClicked: (mouse) => {
+                        if (mouse.button === Qt.RightButton)
+                            return
+                        if (trow.isPlus) {
+                            root.openAddDialog()
+                            return
+                        }
+                        if (trow.isFolder) {
+                            if (mouse.modifiers & Qt.ControlModifier)
+                                root.openFolderDialog(trow.id)
+                            else
+                                root.toggleFolder(trow.id)
+                            return
+                        }
+                        if (mouse.modifiers & Qt.ControlModifier)
+                            root.openEditDialog(trow.id)
+                        else
+                            root.browseHome(trow.modelData.serverUrl, trow.id,
+                                            trow.modelData.name !== "" ? trow.modelData.name
+                                                                       : trow.modelData.userName)
+                    }
+                    onReleased: {
+                        root.dragActive = false
+                        bar.Drag.drop()
+                        root.dragKey = ""
+                        treeSettle.start() // 行归位
+                    }
+                }
+                // 归位动画(拖完回弹到模型位)
+                PropertyAnimation {
+                    id: treeSettle
+                    target: bar
+                    property: "y"
+                    to: 0
+                    duration: 200
+                    easing.type: Easing.OutCubic
                 }
             }
         }

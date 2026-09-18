@@ -55,6 +55,8 @@ bool validateProxy(const QVariant &v);
 bool validateWheelStep(const QVariant &v);
 bool validateSearchLimit(const QVariant &v);
 QVariantList optionsHistoryView();
+QVariantList optionsServerManagerView();
+bool validateServerManagerView(const QVariant &v);
 bool validateHistoryView(const QVariant &v);
 QVariantList optionsSuperRes();
 bool validateSuperRes(const QVariant &v);
@@ -115,6 +117,7 @@ bool validateShortcut(const QVariant &v);
     M(superRes, "superRes", QString, "off", "video", "Anime4K 超分预设(shader 链档位;mpv 内 CTRL+0..8 可即时切换)", "播放", "超分(Anime4K)", "Anime4K shader 链档位:模式 A/B/C 为一次放大(分别优化 1080p/720p/降采样源),A+/B+/C+A 为二次放大(仅放大比 ≥2 倍时用),去噪/去模糊两档无尺寸门槛。CNN 放大 pass 要求输出大于片源 1.2 倍,窗口不够大时该段不生效(mpv 内按 CTRL+0 关闭)。", Combo, optionsSuperRes, validateSuperRes) \
     M(playerBackend, "playerBackend", QString, "embedded", "video", "播放后端:embedded(内嵌 libmpv,QML 界面)/external(外部 mpv 进程,内建 OSC 界面)", "播放", "播放后端", "内嵌:视频在应用窗口内渲染,界面为应用主题的控制层(官方安装包/AppImage 已自带 libmpv;其余场景缺库自动回退外部);外部:弹独立 mpv 窗口(需自备 mpv,mpv 原生 OSC)。", Combo, optionsPlayerBackend, validatePlayerBackend) \
     M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, optionsHistoryView, validateHistoryView) \
+    M(serverManagerView, "serverManagerView", QString, "grid", "servermanager", "服务器管理视图:grid(网格)/tree(树状)", "", "", "", Hidden, optionsServerManagerView, validateServerManagerView) \
     M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr) \
     M(shortcutBack, "shortcutBack", QString, "Alt+Left", "shortcut", "返回键(QKeySequence 文本;| 分隔多键位)", "快捷键", "返回", "返回上一页;浮层打开时优先关浮层。", Field, nullptr, validateShortcut) \
     M(shortcutHome, "shortcutHome", QString, "Alt+Home", "shortcut", "回首页清栈键(| 分隔多键位)", "快捷键", "回首页", "回到首页并清空页面栈。", Field, nullptr, validateShortcut) \

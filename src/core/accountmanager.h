@@ -127,9 +127,14 @@ public:
     // 账号所在文件夹 id(空串 = 未分组)。
     Q_INVOKABLE QString folderIdOfAccount(const QString &accountId) const;
     // 把账号加入文件夹(已在目标文件夹则忽略;已在其他文件夹则转移)。
-    Q_INVOKABLE void addAccountToFolder(const QString &folderId, const QString &accountId);
+    // beforeAccountId 非空 = 插到该成员之前(默认末尾)。
+    Q_INVOKABLE void addAccountToFolder(const QString &folderId, const QString &accountId,
+                                        const QString &beforeAccountId = QString());
     // 从所在文件夹移除账号(回到未分组);不在任何文件夹则忽略。
     Q_INVOKABLE void removeAccountFromFolder(const QString &accountId);
+    // 文件夹内排序:把 accountId 移到 beforeAccountId 之前(空 = 末尾)。
+    Q_INVOKABLE void moveAccountInFolder(const QString &folderId, const QString &accountId,
+                             const QString &beforeAccountId);
 
     // 浏览请求凭据查询:返回 {token, userId}(QML 组装无状态请求用);
     // 服务器无账号或 token 为空时返回空 map。

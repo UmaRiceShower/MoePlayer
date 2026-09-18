@@ -242,6 +242,20 @@ bool validateHistoryView(const QVariant &v)
     return s == QLatin1String("timeline") || s == QLatin1String("grid");
 }
 
+QVariantList optionsServerManagerView()
+{
+    return { QVariantMap{ { QStringLiteral("label"), QStringLiteral("网格") },
+                          { QStringLiteral("key"), QStringLiteral("grid") } },
+             QVariantMap{ { QStringLiteral("label"), QStringLiteral("树状") },
+                          { QStringLiteral("key"), QStringLiteral("tree") } } };
+}
+
+bool validateServerManagerView(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("grid") || s == QLatin1String("tree");
+}
+
 QVariantList optionsSuperRes()
 {
     return MpvClient::superResOptions();
