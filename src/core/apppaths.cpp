@@ -30,7 +30,8 @@ void AppPaths::init()
     // 无法持久化 —— 告警并继续(应用仍可运行),不致命。
     const QString root = exeDir + QStringLiteral("/data");
     if (!QDir().mkpath(root + QStringLiteral("/config"))
-        || !QDir().mkpath(root + QStringLiteral("/cache"))) {
+        || !QDir().mkpath(root + QStringLiteral("/cache"))
+        || !QDir().mkpath(root + QStringLiteral("/share"))) {
         qWarning().noquote() << "AppPaths: 便携数据目录创建失败(位置不可写?),"
                                 "配置与缓存将无法持久化:" << root;
     }
@@ -61,6 +62,13 @@ QString AppPaths::stateDir()
     if (g_portable)
         return QCoreApplication::applicationDirPath() + QStringLiteral("/data/state");
     return QStandardPaths::writableLocation(QStandardPaths::StateLocation);
+}
+
+QString AppPaths::dataDir()
+{
+    if (g_portable)
+        return QCoreApplication::applicationDirPath() + QStringLiteral("/data/share");
+    return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
 }
 
 QString AppPaths::settingsFilePath()
