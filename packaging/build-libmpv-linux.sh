@@ -8,14 +8,6 @@ LIBPLACEBO_VER=7.360.1
 JOBS="$(nproc)"
 WORK="$PREFIX-src"
 
-# 版本戳:同版本同配置跳过(配合 CI actions/cache 摊销编译时间)
-STAMP="$PREFIX/.stamp-mpv$MPV_VER-ffmpeg$FFMPEG_VER-lp$LIBPLACEBO_VER"
-if [ -f "$STAMP" ]; then
-    echo "已构建($STAMP),跳过"
-    exit 0
-fi
-
-# CI(jammy)装依赖
 if command -v apt-get >/dev/null; then
     sudo apt-get update -qq
     sudo apt-get install -y --no-install-recommends \
@@ -23,6 +15,13 @@ if command -v apt-get >/dev/null; then
         libass-dev libluajit-5.1-dev libfontconfig-dev libharfbuzz-dev libfribidi-dev \
         libdav1d-dev libgnutls28-dev zlib1g-dev
     pip3 install --quiet --upgrade meson
+fi
+
+# 版本戳:同版本同配置跳过(配合 CI actions/cache 摊销编译时间)
+STAMP="$PREFIX/.stamp-mpv$MPV_VER-ffmpeg$FFMPEG_VER-lp$LIBPLACEBO_VER"
+if [ -f "$STAMP" ]; then
+    echo "已构建($STAMP),跳过"
+    exit 0
 fi
 
 mkdir -p "$WORK" "$PREFIX"

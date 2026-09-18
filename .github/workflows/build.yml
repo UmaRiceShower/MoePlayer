@@ -71,8 +71,7 @@ jobs:
           path: /opt/moeplayer-libmpv
           key: libmpv-src-${{ hashFiles('packaging/build-libmpv-linux.sh') }}
 
-      - name: 源码构建 libmpv(ffmpeg+mpv,首次约 20 分钟,其后走缓存)
-        if: steps.libmpv-cache.outputs.cache-hit != 'true'
+      - name: 源码构建 libmpv(ffmpeg+mpv)
         run: ./packaging/build-libmpv-linux.sh
 
       - name: 构建 AppImage

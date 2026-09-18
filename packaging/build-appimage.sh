@@ -48,6 +48,15 @@ if [ -n "$EXTRA_PLUGINS" ]; then
 else
     echo "警告:未找到 Wayland 平台插件,产物仅支持 X11/XWayland" >&2
 fi
+WGEGL="$QT_PLUGINS_DIR/wayland-graphics-integration-client/libqt-plugin-wayland-egl.so"
+if [ -f "$WGEGL" ]; then
+    mkdir -p "$APPDIR/usr/plugins/wayland-graphics-integration-client"
+    cp "$WGEGL" "$APPDIR/usr/plugins/wayland-graphics-integration-client/"
+    echo "已补拷 wayland-egl 集成插件"
+else
+    echo "警告:未找到 wayland-egl 集成插件,wayland 下将无 GL" >&2
+fi
+
 export OUTPUT="$OUT_DIR/MoePlayer-${VERSION}-x86_64.AppImage"
 
 EXTRA_LIBS=()
