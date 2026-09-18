@@ -64,7 +64,6 @@ qt_add_executable(MoePlayer
     # WIN32:Windows 下 GUI 子系统,不弹控制台窗口(其它平台无副作用)。
     WIN32
     src/main.cpp
-    src/core/settingsstore.cpp
     src/core/embyclient.cpp
     src/core/accountmanager.cpp
     src/core/applog.cpp

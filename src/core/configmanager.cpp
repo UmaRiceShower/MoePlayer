@@ -606,7 +606,7 @@ void ConfigManager::commit()
     QString out = QStringLiteral("# MoePlayer 用户配置(TOML)\n"
                                  "# 启动时读取;外部修改后自动热重载(立即生效)。\n"
                                  "# 缺失或类型不合法的键回退默认值;删除本文件即恢复出厂。\n"
-                                 "# 敏感数据(账号密码/凭据)不存于此,仍由 QSettings 管理。\n"
+                                 "# 敏感数据(账号密码/凭据)不存于此,由 accounts.json(0600)管理。\n"
                                  "# 仅写用户显式配置过的键(主题高级覆盖项除外,恒列出);未写的键=默认值\n");
     QString cur;
     for (const auto &it : MoeConfig::items()) {

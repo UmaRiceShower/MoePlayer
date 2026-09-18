@@ -1,6 +1,5 @@
 #pragma once
 
-#include <QSettings>
 #include <QString>
 
 class AppPaths
@@ -25,11 +24,4 @@ public:
     //! 内容不因清缓存而丢。
     static QString dataDir();
 
-    //! QSettings 文件:configDir()/MoePlayer.ini(Windows/便携)或 .conf
-    //! (Linux);显式路径,不经 QSettings 默认布局(空 org 单层)。
-    static QString settingsFilePath();
-
-    //! 与 settingsFilePath() 配套的格式:便携恒 IniFormat;非便携
-    //! Windows = IniFormat(现行),Linux = NativeFormat(现行)。
-    static QSettings::Format settingsFormat();
 };

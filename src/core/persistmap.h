@@ -4,27 +4,19 @@
 #include <QString>
 #include <QVariant>
 
-class QSettings;
-
-//! 程序文档持久化统一封装:配置层 QSettings 单键 JSON + 缓存层
-//! 缓存根(AppPaths::cacheDir())/<name>.json(QSaveFile 原子写)。共享语义:
+//! 程序文档持久化统一封装(缓存层):缓存根(AppPaths::cacheDir())
+//! /<name>.json(QSaveFile 原子写)。共享语义:
 //!  - 版本头 { v, data }(首版 1):无头数据(开发期历史)按当前版本原样
 //!    读出,静默兼容;v<当前 → migrate 钩子;v>当前 → 回默认 + 告警;
 //!  - 读失败回默认;错误内部统一 qWarning(key + 原因);
 //!  - 缺键/缺文件 = 首次启动常态,静默回默认(不告警);
-//!  - 缓存损坏(坏 JSON/版本回退)= 可重建件,删除重来。
+//!  - 读失败(坏 JSON/版本不符)= 回默认,文件保留待下次写覆盖。
 //! 域转换(struct↔QVariantMap)由调用方做,本类不碰业务结构。
 class PersistMap
 {
 public:
-    explicit PersistMap(QSettings *settings, const QString &cacheBase);
+    explicit PersistMap(QString cacheBase);
     PersistMap(const PersistMap &) = delete; // 单实例归属,防拷贝
-
-    // 配置层:QSettings 单键 JSON;写后 sync()+status()==NoError 检查
-    // (失败 qWarning并返回 false)。读失败(缺键静默/坏 JSON/版本回退
-    // qWarning)out 置 def 并返回 false。
-    bool loadSettings(const QString &key, QVariant &out, const QVariant &def);
-    bool saveSettings(const QString &key, const QVariant &value);
 
     // 缓存层:CacheLocation/<name>.json;QSaveFile 原子写。文件缺失静默
     // 返回 false(首次启动常态);损坏(坏 JSON/版本回退)删除文件重来
@@ -48,6 +40,5 @@ private:
     // 版本迁移钩子:默认空实现 + qWarning;未来结构变更在此按版本逐级挂。
     void migrate(int fromVer, QVariant &data);
 
-    QSettings *m_settings;
     QString m_cacheBase;
 };

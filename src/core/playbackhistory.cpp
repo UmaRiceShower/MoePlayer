@@ -48,7 +48,7 @@ bool hasPlayTrace(const QVariantMap &m)
 
 PlaybackHistory::PlaybackHistory(QObject *parent)
     : QObject(parent)
-    , m_persist(&m_settings, AppPaths::cacheDir())
+    , m_persist(AppPaths::cacheDir())
 {
     QVariant val;
     if (m_persist.loadCache(kCacheName, val)) {

@@ -40,10 +40,7 @@ static bool suggestionsSupported(const QString &version)
 
 
 namespace {
-// QSettings 键。
-const QString kAccountsKey = QStringLiteral("accounts/list");
-const QString kFoldersKey = QStringLiteral("accounts/folders");
-const QString kLayoutOrderKey = QStringLiteral("accounts/layoutOrder");
+
 // 混淆用固定 key(仅做简单保护,不构成加密)。
 const QByteArray kObfuscationKey = QByteArrayLiteral("MoePlayer-account-v1");
 // 文件夹预设色(hex):新建随机/修改选择 UI 共用,顺序即 UI 展示顺序。
@@ -79,12 +76,10 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
     : QObject(parent)
     , m_client(client)
     , m_playbackHistory(history)
-    , m_persist(&m_settings, AppPaths::cacheDir())
+    , m_persist(AppPaths::cacheDir())
 {
     m_homeRowsModel = new HomeRowsModel(this);
-    load();
-    loadFolders();
-    loadLayoutOrder();
+    load(); // accounts.json 一次性读出(账号/文件夹/布局)
 
     // 网络问题账号定期重试:先 token 再账密,恢复后清除标记。
     m_netRetryTimer.setInterval(kNetRetryIntervalMs);
@@ -161,7 +156,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                 // 账号名后续由 serverPublicInfoReceived 按 id 回填,不入库去重。
                 m_accounts.append(acc);
                 m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), acc.id));
-                persistLayoutOrder();
+        save();
                 save();
                 emit accountsChanged();
                 qInfo() << "AccountManager: 账号添加成功" << acc.id << "on" << acc.serverUrl;
@@ -587,7 +582,7 @@ void AccountManager::setFolderHidden(const QString &folderId, bool hidden)
     if (!f || f->hidden == hidden)
         return;
     f->hidden = hidden;
-    saveFolders();
+    save();
     emit foldersChanged();
     applyHiddenChange(); // accounts() 带 hiddenByFolder,成员卡的标识跟着变
     if (!hidden) {
@@ -1336,7 +1331,7 @@ void AccountManager::maybeAssembleHomeRows()
 
 // ---- 服务器文件夹(分类)----
 // 纯视觉分组:不影响账号列表/首页聚合顺序,只决定服务器管理页的展示
-// 归属。持久化于 QSettings 独立 key(accounts/folders),账号结构不动。
+// 归属。持久化于 accounts.json(folders 段),账号结构不动。
 
 QVariantList AccountManager::folders() const
 {
@@ -1478,9 +1473,9 @@ void AccountManager::setLayoutOrder(const QVariantList &order)
     const bool foldersReordered = reorderFoldersToLayout(cleaned);
     const bool accountsReordered = reorderAccountsToVisual(cleaned);
     m_layoutOrder = cleaned;
-    persistLayoutOrder();
+        save();
     if (foldersReordered) {
-        saveFolders();
+        save();
         emit foldersChanged();
     }
     if (accountsReordered) {
@@ -1492,31 +1487,7 @@ void AccountManager::setLayoutOrder(const QVariantList &order)
     emit layoutOrderChanged();
 }
 
-void AccountManager::loadLayoutOrder()
-{
-    // 缺键 → 空序,setLayoutOrder 合成默认(全部文件夹 + 全部未分组账号
-    // 按 accounts 顺序),与升级前视觉一致;有 key → 读入经 setLayoutOrder
-    // 规范化(过滤已删账号/文件夹、重复项、成员账号项,补全缺失),持久化。
-    QVariantList order;
-    QVariant val;
-    if (m_persist.loadSettings(kLayoutOrderKey, val, QVariantList()))
-        order = val.toList();
-    QVariantList parsed;
-    for (const auto &v : order) {
-        const QVariantMap m = v.toMap();
-        const QString type = m.value(QLatin1String("type")).toString();
-        const QString id = m.value(QLatin1String("id")).toString();
-        if (type == QLatin1String("folder") || type == QLatin1String("account"))
-            parsed.append(makeLayoutEntry(type, id));
-    }
-    setLayoutOrder(parsed);
-}
 
-void AccountManager::persistLayoutOrder()
-{
-    // m_layoutOrder 即 QVariantList(每项 {type, id}),直接整体序列化。
-    m_persist.saveSettings(kLayoutOrderKey, m_layoutOrder);
-}
 
 void AccountManager::removeFromLayoutOrder(const QString &type, const QString &id)
 {
@@ -1560,8 +1531,8 @@ QString AccountManager::addFolder(const QString &name, const QString &color)
     }
     m_folders.append(f);
     m_layoutOrder.append(makeLayoutEntry(QLatin1String("folder"), f.id));
-    persistLayoutOrder();
-    saveFolders();
+        save();
+    save();
     emit foldersChanged();
     return f.id;
 }
@@ -1590,8 +1561,8 @@ void AccountManager::removeFolder(const QString &id)
                 m_layoutOrder.insert(pos, makeLayoutEntry(QLatin1String("account"), members.at(k)));
         }
         const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-        persistLayoutOrder();
-        saveFolders();
+        save();
+        save();
         if (acctChanged) {
             reorderHomeRows();
             save();
@@ -1612,7 +1583,7 @@ void AccountManager::renameFolder(const QString &id, const QString &name)
     if (n.isEmpty() || f->name == n)
         return;
     f->name = n;
-    saveFolders();
+    save();
     emit foldersChanged();
 }
 
@@ -1625,7 +1596,7 @@ void AccountManager::setFolderColor(const QString &id, const QString &color)
     if (c.isEmpty() || f->color == c)
         return;
     f->color = c;
-    saveFolders();
+    save();
     emit foldersChanged();
 }
 
@@ -1665,8 +1636,8 @@ void AccountManager::addAccountToFolder(const QString &folderId, const QString &
     // accounts(账号进文件夹块,首页聚合跟随视觉)。
     removeFromLayoutOrder(QLatin1String("account"), accountId);
     const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-    persistLayoutOrder();
-    saveFolders();
+        save();
+    save();
     if (acctChanged) {
         reorderHomeRows();
         save();
@@ -1693,7 +1664,7 @@ void AccountManager::moveAccountInFolder(const QString &folderId, const QString 
     else if (toOrig > fromIdx)
         pos += 1;
     f->accountIds.insert(pos, accountId);
-    saveFolders();
+    save();
     emit foldersChanged();
 }
 
@@ -1706,8 +1677,8 @@ void AccountManager::removeAccountFromFolder(const QString &accountId)
         // 紧接 setLayoutOrder 调整(同步执行,无渲染中间态)。
         m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), accountId));
         const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-        persistLayoutOrder();
-        saveFolders();
+        save();
+        save();
         if (acctChanged) {
             reorderHomeRows();
             save();
@@ -1739,46 +1710,7 @@ AccountManager::FolderInfo *AccountManager::folderById(const QString &id)
     return i >= 0 ? &m_folders[i] : nullptr;
 }
 
-void AccountManager::loadFolders()
-{
-    QVariant val;
-    if (!m_persist.loadSettings(kFoldersKey, val, QVariantList()))
-        return; // 缺键/损坏:空文件夹(缺键静默,损坏已由 PersistMap 告警)
-    const QJsonArray arr = QJsonArray::fromVariantList(val.toList());
-    for (const auto &v : arr) {
-        const QJsonObject o = v.toObject();
-        FolderInfo f;
-        f.id = o.value(QLatin1String("id")).toString();
-        f.name = o.value(QLatin1String("name")).toString();
-        f.color = o.value(QLatin1String("color")).toString();
-        f.hidden = o.value(QLatin1String("hidden")).toBool();
-        const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
-        for (const auto &id : ids) {
-            const QString aid = id.toString();
-            // 防御:引用已删除账号的成员记录直接丢弃。
-            if (!accountById(aid) || f.accountIds.contains(aid))
-                continue;
-            f.accountIds.append(aid);
-        }
-        if (!f.id.isEmpty())
-            m_folders.append(f);
-    }
-}
 
-void AccountManager::saveFolders()
-{
-    QVariantList list;
-    for (const auto &f : m_folders) {
-        QVariantMap m;
-        m.insert(QLatin1String("id"), f.id);
-        m.insert(QLatin1String("name"), f.name);
-        m.insert(QLatin1String("color"), f.color);
-        m.insert(QLatin1String("hidden"), f.hidden);
-        m.insert(QLatin1String("accountIds"), f.accountIds); // QStringList 自动转 QVariantList
-        list.append(m);
-    }
-    m_persist.saveSettings(kFoldersKey, list);
-}
 
 // 设置图标:来源可为远程 URL(下载字节)或本地图片(file:///已有路径,
 // 直接读字节);统一落盘 MD5 命名本地缓存后写 icon。来源空 → 清除 icon
@@ -2024,7 +1956,7 @@ void AccountManager::removeAccount(const QString &id)
     m_accounts.erase(it, m_accounts.end());
     // 视觉顺序同步:未分组账号项移除(成员账号不在序列中)。
     removeFromLayoutOrder(QLatin1String("account"), id);
-    persistLayoutOrder();
+        save();
     // 成员表同步:残留已删 id 会被视觉序展平计入,重排时取不到账号。
     bool foldersTouched = false;
     for (auto &f : m_folders) {
@@ -2032,7 +1964,7 @@ void AccountManager::removeAccount(const QString &id)
             foldersTouched = true;
     }
     if (foldersTouched) {
-        saveFolders();
+        save();
         emit foldersChanged();
     }
     // 播放历史:删号即撤出本轮拉取(防批次永远等不到收尾),并清除该账号
@@ -2072,8 +2004,18 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
 
 void AccountManager::load()
 {
-    const QJsonArray arr =
-        QJsonDocument::fromJson(m_settings.value(kAccountsKey).toString().toUtf8()).array();
+    const QString path = AppPaths::configDir() + QStringLiteral("/accounts.json");
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return; // 首次启动无文件:常态,静默
+    const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+    const QJsonObject data = doc.object().value(QStringLiteral("data")).toObject();
+    if (data.isEmpty()) {
+        if (!doc.isNull())
+            qWarning().noquote() << "AccountManager: accounts.json 结构异常,回空" << path;
+        return;
+    }
+    const QJsonArray arr = data.value(QStringLiteral("accounts")).toArray();
     for (const auto &v : arr) {
         const QJsonObject o = v.toObject();
         AccountInfo a;
@@ -2092,6 +2034,35 @@ void AccountManager::load()
         if (!a.id.isEmpty())
             m_accounts.append(a);
     }
+    // 文件夹(成员引用已删账号的记录丢弃)
+    const QJsonArray farr = data.value(QStringLiteral("folders")).toArray();
+    for (const auto &v : farr) {
+        const QJsonObject o = v.toObject();
+        FolderInfo fdr;
+        fdr.id = o.value(QLatin1String("id")).toString();
+        fdr.name = o.value(QLatin1String("name")).toString();
+        fdr.color = o.value(QLatin1String("color")).toString();
+        fdr.hidden = o.value(QLatin1String("hidden")).toBool();
+        const QJsonArray ids = o.value(QLatin1String("accountIds")).toArray();
+        for (const auto &id : ids) {
+            const QString aid = id.toString();
+            if (!accountById(aid) || fdr.accountIds.contains(aid))
+                continue;
+            fdr.accountIds.append(aid);
+        }
+        if (!fdr.id.isEmpty())
+            m_folders.append(fdr);
+    }
+    // 布局序(经 setLayoutOrder 规范化:滤已删项/重复/成员项,补缺失)
+    QVariantList parsed;
+    for (const auto &v : data.value(QStringLiteral("layoutOrder")).toArray()) {
+        const QVariantMap m = v.toObject().toVariantMap();
+        const QString type = m.value(QLatin1String("type")).toString();
+        const QString id = m.value(QLatin1String("id")).toString();
+        if (type == QLatin1String("folder") || type == QLatin1String("account"))
+            parsed.append(makeLayoutEntry(type, id));
+    }
+    setLayoutOrder(parsed);
 }
 
 void AccountManager::save()
@@ -2113,10 +2084,42 @@ void AccountManager::save()
         o.insert(QLatin1String("activeLine"), a.activeLine);
         arr.append(o);
     }
-    m_settings.setValue(kAccountsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
-    m_settings.sync();
-    if (m_settings.status() != QSettings::NoError)
-        qWarning() << "AccountManager: 账号配置写入失败" << int(m_settings.status());
+    // folders 段
+    QJsonArray farr;
+    for (const auto &f : m_folders) {
+        QJsonObject o;
+        o.insert(QLatin1String("id"), f.id);
+        o.insert(QLatin1String("name"), f.name);
+        o.insert(QLatin1String("color"), f.color);
+        o.insert(QLatin1String("hidden"), f.hidden);
+        o.insert(QLatin1String("accountIds"), QJsonArray::fromStringList(f.accountIds));
+        farr.append(o);
+    }
+    const QJsonObject root{
+        { QStringLiteral("v"), 1 },
+        { QStringLiteral("data"),
+          QJsonObject{
+              { QStringLiteral("accounts"), arr },
+              { QStringLiteral("folders"), farr },
+              { QStringLiteral("layoutOrder"), QJsonArray::fromVariantList(m_layoutOrder) },
+          } },
+    };
+    // 凭据文件:原子写 + 0600(token/密码在内,组/其他不可读)。
+    // QSaveFile::setPermissions 是 Qt 6.12+ 的 override,6.11 落基类空转
+    // (commit 后仍 644)→ commit 后显式补,任何版本都生效。
+    const QString path = AppPaths::configDir() + QStringLiteral("/accounts.json");
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QSaveFile f(path);
+    if (!f.open(QIODevice::WriteOnly)) {
+        qWarning().noquote() << "AccountManager: accounts.json 打开失败" << f.errorString();
+        return;
+    }
+    f.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    if (!f.commit()) {
+        qWarning().noquote() << "AccountManager: accounts.json 写入失败" << f.errorString();
+        return;
+    }
+    QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner);
 }
 
 QString AccountManager::obfuscate(const QString &plain)

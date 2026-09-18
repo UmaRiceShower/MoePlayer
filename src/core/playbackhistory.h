@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QObject>
-#include <QSettings>
 
 #include "core/apppaths.h"
 #include "core/constants.h"
@@ -71,7 +70,6 @@ private:
     void save();
 
     // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
-    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
     PersistMap m_persist;
     // 条目(每条含 scope/serverUrl/accountId,便于展平与跨服去重)。
     QVariantList m_items;

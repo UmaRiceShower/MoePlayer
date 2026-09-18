@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QQueue>
-#include <QSettings>
 #include <QSet>
 #include <QTimer>
 #include <QVariantList>
@@ -27,12 +26,12 @@ class AccountManager : public QObject
     Q_PROPERTY(int accountCount READ accountCount NOTIFY accountsChanged)
     // 服务器文件夹(分类):纯视觉分组,不影响账号列表与首页聚合顺序。
     // 每项 {id, name, accountIds:[账号id按加入顺序]}。成员卡展开时跟在
-    // 文件夹卡后,收起时隐藏。持久化于 QSettings(accounts/folders)。
+    // 文件夹卡后,收起时隐藏。持久化于 accounts.json(folders 段)。
     Q_PROPERTY(QVariantList folders READ folders NOTIFY foldersChanged)
     // 管理页视觉顺序(混合序列):顶层元素 = 文件夹块 + 未分组账号,
     // 每项 {type: "folder"|"account", id};成员账号跟随所属文件夹块
     // (顺序 = 该文件夹 accountIds 加入顺序),不在序列中。顺序即管理页
-    // 展示顺序,持久化于 QSettings(accounts/layoutOrder);账号视觉顺序
+    // 展示顺序,持久化于 accounts.json(layoutOrder 段);账号视觉顺序
     // (展平:各文件夹块成员 + 未分组账号)恒等于 accounts 顺序,首页
     // 聚合与视觉一致。
     Q_PROPERTY(QVariantList layoutOrder READ layoutOrder NOTIFY layoutOrderChanged)
@@ -226,11 +225,7 @@ private:
         bool hidden = false; // 隐藏:成员账号继承(见 hiddenChanged)
     };
     // 文件夹读写(独立 key,账号结构不动)。
-    void loadFolders();
-    void saveFolders();
     // 视觉顺序读写(accounts/layoutOrder,见 layoutOrder 属性)。
-    void loadLayoutOrder();
-    void persistLayoutOrder();
     // 展平视觉账号顺序:遍历 layoutOrder,folder 项 → 其成员(按
     // accountIds 加入顺序),account 项 → 该账号。与 accounts 顺序
     // 恒一致(首页聚合跟随视觉)。
@@ -267,9 +262,8 @@ const QString &accountId) const;
 
     EmbyClient *m_client;
     // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
-    QSettings m_settings{AppPaths::settingsFilePath(), AppPaths::settingsFormat()};
-    // 程序文档持久化(配置键 JSON + 缓存文件 JSON),注入本实例的
-    // QSettings 与 CacheLocation(见 persistmap-design.md)。
+
+    // 缓存文件 JSON 持久化(CacheLocation;账号域走 accounts.json,不经此类)。
     PersistMap m_persist;
     QList<AccountInfo> m_accounts;
     QList<FolderInfo> m_folders;

@@ -20,7 +20,6 @@
 #include "core/constants.h"
 #include "core/embyclient.h"
 #include "core/screeninhibit.h"
-#include "core/settingsstore.h"
 #include "models/colorprovider.h"
 #include "models/posterprovider.h"
 #include "playback/mpvclient.h"
@@ -82,7 +81,7 @@ int main(int argc, char *argv[])
     app.setDesktopFileName(MoePlayer::kAppId);
     // 便携模式检测(免安装版,见 apppaths.h):exe 旁 portable_mode.txt
     // 存在时数据改存 exe 旁 data/。须在 AppLog::install()(日志目录)
-    // 与下方所有单例(QSettings/config.toml/缓存)构造前完成。
+    // 与下方所有单例(accounts.json/config.toml/缓存)构造前完成。
     AppPaths::init();
     // 文件日志:setApplicationName 后即可定位 AppConfigLocation,
     // 尽早安装让首个 qInfo(RHI backend)也落盘。
@@ -111,7 +110,7 @@ int main(int argc, char *argv[])
     }
 
     // 向 QML 暴露 C++ 类型与单例。
-    // 无依赖/无共享实例需求的类型(SettingsStore/MediaItemModel 等)由
+    // 无依赖/无共享实例需求的类型(MediaItemModel 等)由
     // qmltyperegistrar 经 QML_ELEMENT/QML_SINGLETON/QML_NAMED_ELEMENT 自动注册
     // 到 MoePlayer.Core。生成的注册函数 qml_register_types_MoePlayer_Core() 由
     // qmltyperegistrations.cpp 中的 QQmlModuleRegistration 静态注册,理论上引擎

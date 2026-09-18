@@ -21,7 +21,7 @@ class QTimer;
 //! 暴露:生成属性(getter 读 map、typed setter 转发 setValue)——QML 绑定读
 //! 保持强类型与名称检查;setValue/value 为统一读写通道。
 //! 文件:AppPaths::configDir()/config.toml(toml++ 读;QSaveFile
-//! 原子写回;外部修改热重载)。敏感数据(凭据/账号)仍归 QSettings,不进 TOML。
+//! 原子写回;外部修改热重载)。敏感数据(凭据/账号)仍归 accounts.json,不进 TOML。
 namespace MoeConfig {
 
 enum class Type { Bool, String, Int };
@@ -169,8 +169,8 @@ inline const Item *itemFor(const QString &key)
 //! 后端 toml++ v3.4.0(third_party/tomlplusplus,MIT 单头);写回用
 //! QSaveFile 原子替换(临时文件 + rename,崩溃不损坏旧配置)。
 //!
-//! 范围约定:敏感数据(账号密码/凭据)与服务器地址仍由 QSettings
-//! (SettingsStore/AccountManager)管理,不落入明文 TOML;本类只管
+//! 范围约定:敏感数据(账号密码/凭据)与服务器地址仍由 accounts.json
+//! 由 AccountManager 的 accounts.json(0600)管理,不落入明文 TOML;本类只管
 //! 用户可自定义的展示/浏览设置。
 class ConfigManager : public QObject
 {
