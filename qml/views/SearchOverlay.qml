@@ -307,15 +307,10 @@ Item {
             anchors.margins: 16
             spacing: 10
 
-            // 标题行:强化浮层身份,增加萌系粉色爱心。
+            // 标题行
             Row {
                 Layout.fillWidth: true
                 spacing: 8
-                AppText {
-                    text: "♥"
-                    color: Theme.accent
-                    font.pixelSize: 20
-                }
                 AppText {
                     text: "全局搜索"
                     font.pixelSize: 18
@@ -373,14 +368,6 @@ Item {
                         opacity: searchField.activeFocus ? 0.35 : 0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
                     }
-                }
-                AppText {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "♥"
-                    color: searchField.activeFocus ? Theme.accent : Theme.textMuted
-                    font.pixelSize: 16
                 }
             }
 
@@ -745,13 +732,6 @@ Item {
                 spacing: 6
                 visible: statusText.text !== ""
                 AppText {
-                    text: "♥"
-                    color: Theme.accent
-                    font.pixelSize: 12
-                    opacity: 0.75
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                AppText {
                     id: statusText
                     color: searchField.text.length === 0 ? Theme.textMuted : Theme.textPrimary
                     font.pixelSize: 12
@@ -896,12 +876,6 @@ Item {
                                 Row {
                                     width: parent.width
                                     spacing: 6
-                                    AppText {
-                                        text: "♥"
-                                        color: Theme.accent
-                                        font.pixelSize: 14
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
                                     AppText {
                                         anchors.verticalCenter: parent.verticalCenter
                                         font.pixelSize: 14

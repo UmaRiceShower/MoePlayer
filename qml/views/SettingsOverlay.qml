@@ -511,11 +511,6 @@ Item {
                 Layout.fillWidth: true
                 spacing: 8
                 AppText {
-                    text: "♥"
-                    color: Theme.accent
-                    font.pixelSize: 20
-                }
-                AppText {
                     text: "设置"
                     font.pixelSize: 18
                     font.bold: true

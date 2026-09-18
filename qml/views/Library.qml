@@ -1205,14 +1205,6 @@ Item {
                     Behavior on opacity { NumberAnimation { duration: 120 } }
                 }
             }
-            AppText {
-                anchors.left: parent.left
-                anchors.leftMargin: 10
-                anchors.verticalCenter: parent.verticalCenter
-                text: "♥"
-                color: searchBox.activeFocus ? Theme.accent : Theme.textMuted
-                font.pixelSize: 16
-            }
             onTextChanged: searchDebounce.restart()
             // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
             Timer {

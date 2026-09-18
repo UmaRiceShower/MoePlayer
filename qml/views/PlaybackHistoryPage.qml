@@ -476,14 +476,6 @@ Item {
                               ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
                               : Theme.borderSoft
             }
-            AppText {
-                anchors.left: parent.left
-                anchors.leftMargin: 10
-                anchors.verticalCenter: parent.verticalCenter
-                text: "♥"
-                color: searchField.activeFocus ? Theme.accent : Theme.textMuted
-                font.pixelSize: 13
-            }
             // 清除:有内容时可点;Esc 同样清除(焦点在框内时)。
             AppText {
                 anchors.right: parent.right
