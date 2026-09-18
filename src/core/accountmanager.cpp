@@ -354,6 +354,11 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
     connect(m_client, &EmbyClient::serverViewsReceived, this,
             [this](const QString &serverUrl, const QString &accountId, const QVariantList &views) {
                 const AccountInfo *a = accountById(accountId);
+                if (!a && m_homeReqGen.value(accountId) == m_homeGen) {
+                    --m_homePending;
+                    maybeAssembleHomeRows();
+                    return;
+                }
                 if (!a || m_homeReqGen.value(accountId) != m_homeGen)
                     return; // 无对应账号或属过期代次,丢弃
                 if (m_homeViews.contains(accountId))
@@ -383,8 +388,15 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
     connect(m_client, &EmbyClient::serverItemsReceived, this,
             [this](const QString &serverUrl, const QString &accountId,
                    const QString &viewId, const QVariantList &items) {
-                if (accountIndexById(accountId) < 0 || m_homeReqGen.value(accountId) != m_homeGen)
-                    return; // 无对应账号或属过期代次,丢弃
+                if (accountIndexById(accountId) < 0) {
+                    if (m_homeReqGen.value(accountId) == m_homeGen) {
+                        --m_homePending; // 删号在途票结算(同 views 回调)
+                        maybeAssembleHomeRows();
+                    }
+                    return;
+                }
+                if (m_homeReqGen.value(accountId) != m_homeGen)
+                    return; // 过期代次,丢弃
                 const QString key = accountId + QLatin1Char('|') + viewId;
                 if (m_homeRowByKey.contains(key))
                     return; // 本代已处理(旧代残留),避免重复递减计数
@@ -609,7 +621,9 @@ QVariantList AccountManager::visibleHomeRows() const
     out.reserve(m_homeRows.size());
     for (const QVariant &v : m_homeRows) {
         const AccountInfo *a = accountById(v.toMap().value(QStringLiteral("accountId")).toString());
-        if (!a || !accountHiddenStored(*a))
+        if (!a)
+            continue;
+        if (!accountHiddenStored(*a))
             out.append(v);
     }
     return out;
@@ -1862,6 +1876,18 @@ void AccountManager::saveHomeCache()
     m_persist.saveCache(kHomeCacheName, m_homeRows);
 }
 
+// 删号后重写:过滤掉该账号的行并落盘(空表也落——否则缓存原样复活
+// 幽灵行;saveHomeCache 的空表早退是给正常聚合用的,不适用删号)。
+void AccountManager::saveHomeCacheWithout(const QString &accountId)
+{
+    QVariantList rows;
+    for (const QVariant &v : m_homeRows) {
+        if (v.toMap().value(QStringLiteral("accountId")).toString() != accountId)
+            rows.append(v);
+    }
+    m_persist.saveCache(kHomeCacheName, rows);
+}
+
 // 推荐缓存:上次各账号的服务器建议。启动先展示,后台回执逐账号覆盖替换。
 void AccountManager::loadHomeSuggestionCache()
 {
@@ -2015,6 +2041,7 @@ void AccountManager::removeAccount(const QString &id)
     m_playbackHistory->removeScope(serverUrl, id);
     m_client->dropServerModels(serverUrl); // 清理该服浏览模型,防无界增长
     reorderHomeRows(); // 被删服的行一并移除,本地重排不重拉网络(见 moveAccount)
+    saveHomeCacheWithout(id); // 缓存同步剔除(否则下次启动幽灵行复活)
     save();
     emit accountsChanged();
     emit homeRowsReady();
@@ -2026,9 +2053,17 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
     for (auto &a : m_accounts) {
         if (a.id != id)
             continue;
+        const QString oldUrl = a.serverUrl;
         a.name = name.trimmed();
         a.serverUrl = serverUrl.trimmed();
         a.userName = userName.trimmed();
+        // 地址变更:旧身份数据不迁即死(模型键/历史 scope 都含 serverUrl)——
+        // 历史 scope 迁移 + 旧模型整清 + 首页重聚合。
+        if (oldUrl != a.serverUrl) {
+            m_playbackHistory->renameScopeServer(id, oldUrl, a.serverUrl);
+            m_client->dropServerModels(oldUrl);
+            fetchHomeRows(m_homeLimit);
+        }
         save();
         emit accountsChanged();
         return;

@@ -58,6 +58,10 @@ public:
     Q_INVOKABLE void flush();
     // 删除某账号的历史(账号被删除时调用,立即落盘)。
     void removeScope(const QString &serverUrl, const QString &accountId);
+    // 账号地址变更:该账号 scope 的 serverUrl 段迁移(条目 scope/serverUrl
+    // 字段与 fetchedAt 键同改),立即落盘。
+    void renameScopeServer(const QString &accountId, const QString &oldUrl,
+                           const QString &newUrl);
 
 signals:
     // 条目内容变化(列表到位或明细补全),UI 据此刷新。
