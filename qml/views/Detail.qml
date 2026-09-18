@@ -206,9 +206,13 @@ Item {
                 ? root.detail.positionTicks : 0
         root.playItem(root.itemId, t)
     }
+    // 本页剧集 id(剧集页 = 自身 id;集页 = 父剧 id):模型范围键用。
+    function pageSeriesId() {
+        return root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
+    }
     // 剧集页播放:跨季续播(全部集里第一条有进度的),否则第一集。
     function playSeries() {
-        const model = EmbyClient.allEpisodesModelFor(root.serverUrl)
+        const model = EmbyClient.allEpisodesModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         let target = null
         // 优先续播目标(NextUp,与详情定位/按钮文案同源)。
         if (root._resumeEpisodeId) {
@@ -342,14 +346,14 @@ Item {
             // 续播目标(继续观看列表优先,NextUp 兜底)与季模型就绪后定位。
             root._resumePending = true
             root._nextUpReady = false
-            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.id)
+            EmbyClient.fetchSeasons(root.serverUrl, root.accountId, c.token, c.userId, d.id)
             // 全部集(跨季):供"继续观看"定位目标集,并回写本地播放历史。
             EmbyClient.fetchAllEpisodes(root.serverUrl, root.accountId, c.token, c.userId, d.id)
             // 服务器继续观看列表(按上次播放倒序,含"下一未看集"),进详情页拉一次。
             AccountManager.refreshAccountHistory(root.accountId)
-            EmbyClient.fetchNextUp(root.serverUrl, c.token, c.userId, d.id, 1)
+            EmbyClient.fetchNextUp(root.serverUrl, root.accountId, c.token, c.userId, d.id, 1)
         } else if (d.type === "Episode" && d.seriesId) {
-            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, d.seriesId)
+            EmbyClient.fetchSeasons(root.serverUrl, root.accountId, c.token, c.userId, d.seriesId)
         } else {
             // 电影等无选集:detail 到达即渲染完整结构。
             root.loaded = true
@@ -357,7 +361,7 @@ Item {
         // 相似推荐(剧集/电影/分集都拉,空则整段隐藏)。
         // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
         root.similarStale = true
-        EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
+        EmbyClient.fetchSimilar(root.serverUrl, root.accountId, c.token, c.userId, root.itemId)
     }
     // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
     // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
@@ -382,7 +386,7 @@ Item {
         const seriesId = root.detail.type === "Series" ? root.detail.id : root.detail.seriesId
         if (seriesId && seasonId) {
             const c = root.creds()
-            EmbyClient.fetchEpisodes(root.serverUrl, c.token, c.userId, seriesId, seasonId)
+            EmbyClient.fetchEpisodes(root.serverUrl, root.accountId, c.token, c.userId, seriesId, seasonId)
         }
         // 明确换季才回顶(列表从头展示);原地换集触发的重拉链保留位置。
         if (resetScroll)
@@ -401,7 +405,7 @@ Item {
     }
     // 季号 → 季 id(集条目无 seasonId role,经季号在季模型中映射)。
     function seasonIdByNo(no) {
-        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        const m = EmbyClient.seasonsModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         for (let i = 0; i < m.count; i++) {
             if (m.itemAt(i).seasonNo === no)
                 return m.itemAt(i).id
@@ -412,7 +416,7 @@ Item {
     function scrollToResumeEpisode() {
         if (!root._resumeEpisodeId)
             return
-        const m = EmbyClient.episodesModelFor(root.serverUrl)
+        const m = EmbyClient.episodesModelFor(root.serverUrl, root.accountId, root.currentSeasonId)
         for (let i = 0; i < m.count; i++) {
             if (m.itemAt(i).id === root._resumeEpisodeId) {
                 const idx = i
@@ -457,7 +461,7 @@ Item {
     }
     // 当前选中季的季号(seasons 模型中按 currentSeasonId 查;未选中返回 0)。
     function currentSeasonNo() {
-        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        const m = EmbyClient.seasonsModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         for (let i = 0; i < m.count; ++i) {
             if (m.itemAt(i).id === root.currentSeasonId)
                 return m.itemAt(i).seasonNo
@@ -466,7 +470,7 @@ Item {
     }
     // 提取服务器实际返回的季号列表(升序;季号可能不连续,如 1-17、23)。
     function refreshSeasonNos() {
-        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        const m = EmbyClient.seasonsModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         const arr = []
         for (let i = 0; i < m.count; ++i)
             arr.push(m.itemAt(i).seasonNo)
@@ -510,7 +514,7 @@ Item {
     // 点击确认:候选即实际存在的季 → 直接按季号定位并跳转。
     function confirmSeason() {
         const target = root.seasonCandidate
-        const m = EmbyClient.seasonsModelFor(root.serverUrl)
+        const m = EmbyClient.seasonsModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         let bestId = ""
         for (let i = 0; i < m.count; ++i) {
             if (m.itemAt(i).seasonNo === target) {
@@ -534,10 +538,10 @@ Item {
         const c = root.creds()
         const seriesId = root.detail.type === "Series" ? root.detail.id : root.detail.seriesId
         if (seriesId)
-            EmbyClient.fetchSeasons(root.serverUrl, c.token, c.userId, seriesId)
+            EmbyClient.fetchSeasons(root.serverUrl, root.accountId, c.token, c.userId, seriesId)
         if (root.detail.type === "Series")
             EmbyClient.fetchAllEpisodes(root.serverUrl, root.accountId, c.token, c.userId, root.detail.id)
-        EmbyClient.fetchSimilar(root.serverUrl, c.token, c.userId, root.itemId)
+        EmbyClient.fetchSimilar(root.serverUrl, root.accountId, c.token, c.userId, root.itemId)
     }
 
 
@@ -2181,7 +2185,7 @@ Item {
                     anchors.leftMargin: Constants.detailSectionMargin
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 8
-                    visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl).count > 0
+                    visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl, root.accountId, root.itemId).count > 0
                     opacity: root.textFade * visible
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
@@ -2197,7 +2201,7 @@ Item {
                         orientation: ListView.Horizontal
                         spacing: 12
                         clip: true
-                        model: EmbyClient.similarModelFor(root.serverUrl)
+                        model: EmbyClient.similarModelFor(root.serverUrl, root.accountId, root.itemId)
                         delegate: Item {
                             id: similarCard
                             // 同上:required 声明让 qmllint 识别 C++ 模型的 model 角色访问。
@@ -2402,7 +2406,7 @@ Item {
                 clip: true
                 focus: true
                 keyNavigationWraps: true
-                model: EmbyClient.episodesModelFor(root.serverUrl)
+                model: EmbyClient.episodesModelFor(root.serverUrl, root.accountId, root.currentSeasonId)
                 layer.enabled: true
                 layer.effect: ShaderEffect {
                     property real u_margin: Constants.detailEpisodeRowMargin / episodeList.height
@@ -2585,11 +2589,12 @@ Item {
             }
             root.refreshSeriesPlayText()
         }
-        function onSeasonsReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onSeasonsReceived(serverUrl, accountId, seriesId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId
+                || seriesId !== root.pageSeriesId())
                 return
             console.debug("Detail: 分季到达")
-            const model = EmbyClient.seasonsModelFor(root.serverUrl)
+            const model = EmbyClient.seasonsModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
             let seasonId = ""
             // 优先保持当前季(重拉/pop 回来不丢失用户选择),其次集详情的季,再第一季。
             if (root.currentSeasonId) {
@@ -2623,9 +2628,9 @@ Item {
                 root.loaded = true // 无季/无分集:选集就绪,直接渲染结构
         }
         // 续播目标到达(seasons 先到时补定位;seasons 后到时由其处理)。
-        function onNextUpReceived(serverUrl, seriesId, items) {
+        function onNextUpReceived(serverUrl, accountId, seriesId, items) {
             const series = root.detail.type === "Series" ? root.detail.id : (root.detail.seriesId || "")
-            if (serverUrl !== root.serverUrl || seriesId !== series)
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId || seriesId !== series)
                 return
             root._nextUpReady = true
             if (!items || items.length === 0) {
@@ -2646,8 +2651,9 @@ Item {
             }
             root.applyResumeTarget(first.seasonNo || 0, first.episodeNo || 0, first.id || "")
         }
-        function onEpisodesReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onEpisodesReceived(serverUrl, accountId, seasonId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId
+                || seasonId !== root.currentSeasonId)
                 return
             console.debug("Detail: 分集到达")
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
@@ -2656,8 +2662,9 @@ Item {
             // 上次播放的集滚到首个可见(仅展示,不自动播放)。
             root.scrollToResumeEpisode()
         }
-        function onSimilarReady(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onSimilarReady(serverUrl, accountId, itemId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId
+                || itemId !== root.itemId)
                 return
             // 新条目推荐已填充模型,恢复显示。
             root.similarStale = false

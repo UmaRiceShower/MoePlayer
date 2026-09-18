@@ -414,7 +414,7 @@ QVariantList AccountManager::suggestions() const
             m.insert(QStringLiteral("accountId"), a.id);
             const QString pid = m.value(QStringLiteral("posterId")).toString();
             if (!pid.isEmpty())
-                m.insert(QStringLiteral("posterId"), serverPosterId(a.serverUrl, pid));
+                m.insert(QStringLiteral("posterId"), serverPosterId(a.id, pid));
             out.append(m);
         }
     }
@@ -540,10 +540,22 @@ void AccountManager::setActiveLine(const QString &accountId, int index)
     emit accountsChanged();
 }
 
+QString AccountManager::accountIdFor(const QString &serverUrl, const QString &userId) const
+{
+    for (const auto &a : m_accounts) {
+        if (normLineUrl(a.serverUrl) != normLineUrl(serverUrl))
+            continue;
+        if (!userId.isEmpty() && a.userId != userId)
+            continue;
+        return a.id;
+    }
+    return QString();
+}
+
 QString AccountManager::activeUrlFor(const QString &serverUrl, const QString &userId) const
 {
     for (const auto &a : m_accounts) {
-        if (a.serverUrl != serverUrl)
+        if (normLineUrl(a.serverUrl) != normLineUrl(serverUrl))
             continue;
         if (!userId.isEmpty() && a.userId != userId)
             continue;
@@ -617,11 +629,11 @@ void AccountManager::applyHiddenChange()
 
 QVariantMap AccountManager::credsForServer(const QString &serverUrl) const
 {
-    const QString url = serverUrl.trimmed();
+    const QString url = normLineUrl(serverUrl); // 归一化(去空白+尾斜杠)
     // 同服务器多账号:优先未标失效的(首个有效 token);全失效时取首个。
     for (int pass = 0; pass < 2; ++pass) {
         for (const auto &a : m_accounts) {
-            if (a.serverUrl != url || a.token.isEmpty())
+            if (normLineUrl(a.serverUrl) != url || a.token.isEmpty())
                 continue;
             if (pass == 0 && m_invalidAccountIds.contains(a.id))
                 continue;
@@ -642,6 +654,7 @@ QVariantMap AccountManager::credsForAccount(const QString &accountId) const
     QVariantMap m;
     m.insert(QStringLiteral("token"), a->token);
     m.insert(QStringLiteral("userId"), a->userId);
+    m.insert(QStringLiteral("serverUrl"), a->serverUrl);
     return m;
 }
 
@@ -957,7 +970,7 @@ void AccountManager::startPlaybackHistoryFetch()
 }
 
 QVariantList AccountManager::historyItemsWithPosterIds(const QVariantList &items,
-                                                        const QString &serverUrl) const
+                                                        const QString &accountId) const
 {
     QVariantList out;
     out.reserve(items.size());
@@ -965,10 +978,10 @@ QVariantList AccountManager::historyItemsWithPosterIds(const QVariantList &items
         QVariantMap m = v.toMap();
         const QString pid = m.value(QStringLiteral("posterId")).toString();
         if (!pid.isEmpty())
-            m.insert(QStringLiteral("posterId"), serverPosterId(serverUrl, pid));
+            m.insert(QStringLiteral("posterId"), serverPosterId(accountId, pid));
         const QString sid = m.value(QStringLiteral("seriesPosterId")).toString();
         if (!sid.isEmpty())
-            m.insert(QStringLiteral("seriesPosterId"), serverPosterId(serverUrl, sid));
+            m.insert(QStringLiteral("seriesPosterId"), serverPosterId(accountId, sid));
         out.append(m);
     }
     return out;
@@ -1050,7 +1063,7 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     m_historyPages.remove(scope);
     m_historyPhase.remove(scope);
     // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
-    const QVariantList stored = historyItemsWithPosterIds(accum, serverUrl);
+    const QVariantList stored = historyItemsWithPosterIds(accum, accountId);
     // 变更检测:先留一份本地旧条目再整体覆盖(见 PlaybackHistory::setItems)。
     // 列表端点不返回上次播放时间,故以 (id, 观看进度, 已看) 是否有变化、以及
     // 时间戳是否已知为判据,只对"新增/有变化/尚无时间戳"的条目逐条补明细;
@@ -1179,7 +1192,7 @@ void AccountManager::onResumeReceived(const QString &serverUrl, const QString &a
 {
     if (!items.isEmpty() && accountById(accountId)) {
         m_playbackHistory->upsertItems(serverUrl, accountId,
-                                       historyItemsWithPosterIds(items, serverUrl));
+                                       historyItemsWithPosterIds(items, accountId));
         m_historyFlushTimer.start();
     }
     // 空列表(失败/确无目标)照常转发:调用方按"无目标"处理并走其它回退。
@@ -1194,7 +1207,7 @@ void AccountManager::onAllEpisodesParsed(const QString &serverUrl, const QString
         return;
     // 逐季分集回写:选集栏的展示仍走 EmbyClient 的全季模型,这里只补本地记录。
     m_playbackHistory->upsertItems(serverUrl, accountId,
-                                   historyItemsWithPosterIds(items, serverUrl));
+                                   historyItemsWithPosterIds(items, accountId));
     m_historyFlushTimer.start();
 }
 
@@ -1237,7 +1250,7 @@ void AccountManager::maybeAssembleHomeRows()
                     QVariantMap it = items.at(i).toMap();
                     const QString pid = it.value(QStringLiteral("posterId")).toString();
                     if (!pid.isEmpty())
-                        it.insert(QStringLiteral("posterId"), serverPosterId(serverUrl, pid));
+                        it.insert(QStringLiteral("posterId"), serverPosterId(accountId, pid));
                     items[i] = it;
                 }
             } else {
@@ -1908,19 +1921,19 @@ void AccountManager::saveHomeSuggestionCache()
         qInfo() << "AccountManager: 推荐缓存已写" << out.size() << "个账号";
 }
 
-QString AccountManager::serverPosterId(const QString &serverUrl, const QString &posterId)
+QString AccountManager::serverPosterId(const QString &accountId, const QString &posterId)
 {
     if (posterId.isEmpty())
         return QString();
-    // 跨服务器海报 id:<encodeServerKey(serverUrl)>~<itemId>~<tag>,
-    // 与 PosterProvider 的解析约定一致。
-    return encodeServerKey(serverUrl) + QLatin1Char('~') + posterId;
+    // 跨服务器海报 id:<encodeServerKey(accountId)>~<itemId>~<tag>
+    // (账号 id 为不可变身份,改地址/切线路免疫),与 PosterProvider 约定一致。
+    return encodeServerKey(accountId) + QLatin1Char('~') + posterId;
 }
 
-QString AccountManager::encodeServerKey(const QString &serverUrl)
+QString AccountManager::encodeServerKey(const QString &accountId)
 {
     // Base64URL(无填充):输出仅含字母数字与 - _,可安全放进 image:// URL。
-    return QString::fromLatin1(serverUrl.toUtf8().toBase64(
+    return QString::fromLatin1(accountId.toUtf8().toBase64(
         QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals));
 }
 

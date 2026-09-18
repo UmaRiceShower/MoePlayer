@@ -53,7 +53,9 @@ ApplicationWindow {
     function scheduleNextEpisode(meta) {
         if (!meta || meta.seriesId === "" || meta.serverUrl === "")
             return
-        const model = EmbyClient.allEpisodesModelFor(meta.serverUrl)
+        const model = EmbyClient.allEpisodesModelFor(meta.serverUrl,
+                                              meta.accountId || root.currentAccountId,
+                                              meta.seriesId)
         if (model.count === 0) {
             console.info("Main: 全集序列未就绪,拉取后进链", meta.seriesId)
             // 集详情直达(未经过剧集详情时全集序列尚未拉取):拉一次,
@@ -134,7 +136,9 @@ ApplicationWindow {
     function syncEpisodeList(meta) {
         if (!meta || meta.seriesId === "" || meta.serverUrl === "")
             return false
-        const model = EmbyClient.allEpisodesModelFor(meta.serverUrl)
+        const model = EmbyClient.allEpisodesModelFor(meta.serverUrl,
+                                              meta.accountId || root.currentAccountId,
+                                              meta.seriesId)
         if (model.count === 0) {
             console.info("Main: 全集模型未就绪,播放列表待建")
             return false // 模型未就绪(_pendingChain 兜底重拉)
@@ -220,9 +224,10 @@ ApplicationWindow {
     // 连播协商响应(与 Detail 的主动播放协商并存:按在途缓存区分)。
     Connections {
         target: EmbyClient
-        function onAllEpisodesReady(serverUrl) {
+        function onAllEpisodesReady(serverUrl, accountId, seriesId) {
             // 集详情直达场景:全集序列就绪后重试进链/重排列表。
-            if (root._pendingChain && root._pendingChain.serverUrl === serverUrl) {
+            if (root._pendingChain && root._pendingChain.serverUrl === serverUrl
+                && root._pendingChain.seriesId === seriesId) {
                 console.info("Main: 全集就绪,重建连播链")
                 const m = root._pendingChain
                 root._pendingChain = null
@@ -700,7 +705,9 @@ ApplicationWindow {
                 // 后按当前集索引开播 → on_load hook 重定向真实地址;所有条目
                 // 标题一致。电影/无序列:直接 deliver。
                 if (meta.seriesId && meta.seriesId !== "") {
-                    const model = EmbyClient.allEpisodesModelFor(meta.serverUrl)
+                    const model = EmbyClient.allEpisodesModelFor(meta.serverUrl,
+                                              meta.accountId || root.currentAccountId,
+                                              meta.seriesId)
                     if (model.count > 0) {
                         const list = []
                         let idx = -1

@@ -42,7 +42,7 @@ QStringList requiredHeaders(const QJsonObject &source)
 // 一致(id/name/type/posterId/backdropId/positionTicks/played/year/runtimeTicks/
 // rating/favorite/unplayedCount);posterId 不带服务器前缀(调用方补),
 // backdropId 直接带前缀(请求时即知服务器)。
-QVariantMap parseHomeItem(const QJsonObject &o, const QString &serverUrl)
+QVariantMap parseHomeItem(const QJsonObject &o, const QString &idPrefix)
 {
     const QString tag = o.value(QLatin1String("ImageTags"))
                             .toObject().value(QLatin1String("Primary")).toString();
@@ -59,8 +59,9 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &serverUrl)
     // 服务器返回默认背景)。部分服务器列表路由不回 BackdropImageTags,
     // 但 /Items/{id}/Images/Backdrop 端点仍可取到;Series/Season 取自身,
     // Episode 取父级剧集(ParentBackdropItemId)。提供器格式
-    // <encodeServerKey(serverUrl)>~<itemId>~<tag>~Backdrop,tag 空则用默认背景。
-    const QString prefix = AccountManager::encodeServerKey(serverUrl);
+    // <前缀>~<itemId>~<tag>~Backdrop,tag 空则用默认背景;前缀由调用方给
+    // (encodeServerKey(accountId),账号 id 为不可变身份)。
+    const QString prefix = idPrefix;
     const QString iid = o.value(QLatin1String("Id")).toString();
     const QJsonArray btags = o.value(QLatin1String("BackdropImageTags")).toArray();
     const QString btag = btags.isEmpty() ? QString() : btags.first().toString();
@@ -103,9 +104,9 @@ qint64 parseEmbyDateMs(const QString &iso)
 // 解析播放历史条目:在首页条目字段(海报/背景键、进度、已看等,卡片可直接
 // 消费)之上补剧集定位、进度百分比与服务器给出的顺序 seq。播放次数与上次
 // 播放时间不在列表端点返回,由 fetchItemUserData 补全。
-QVariantMap parseHistoryItem(const QJsonObject &o, const QString &serverUrl, int seq)
+QVariantMap parseHistoryItem(const QJsonObject &o, const QString &idPrefix, int seq)
 {
-    QVariantMap m = parseHomeItem(o, serverUrl);
+    QVariantMap m = parseHomeItem(o, idPrefix);
     const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
     m.insert(QStringLiteral("seriesId"), o.value(QLatin1String("SeriesId")).toString());
     m.insert(QStringLiteral("seriesName"), o.value(QLatin1String("SeriesName")).toString());
@@ -202,9 +203,23 @@ QString withApiKeyParam(const QString &token, QString u)
 }
 } // namespace
 
-void EmbyClient::fillItems(MediaItemModel *model, const QJsonDocument &doc,
-                             bool append, bool withPosters)
+QString EmbyClient::idPrefixFor(const QString &serverUrl, const QString &userId) const
 {
+    // 账号 id 为唯一前缀来源(不兼容旧 serverUrl 铸码——裁决);解析不到
+    // 说明调用链没带来账号,告警(产出的 id 会解析失败,不该静默)。
+    QString id;
+    if (m_accountIdResolver)
+        id = m_accountIdResolver(serverUrl, userId);
+    if (id.isEmpty())
+        qWarning() << "Emby: 海报前缀无账号归属" << serverUrl << userId;
+    return AccountManager::encodeServerKey(id);
+}
+
+void EmbyClient::fillItems(MediaItemModel *model, const QJsonDocument &doc,
+                             bool append, bool withPosters, const QString &serverUrl,
+                             const QString &userId)
+{
+    model->setServerPrefix(idPrefixFor(serverUrl, userId));
     const QJsonArray items = doc.object().value(QLatin1String("Items")).toArray();
     if (append)
         model->appendItems(items, withPosters);
@@ -356,50 +371,61 @@ void EmbyClient::del(const QString &serverUrl, const QString &token, const QStri
     });
 }
 
-// ---------- 模型按服务器字典化 ----------
-
-MediaItemModel *EmbyClient::viewsModelFor(const QString &serverUrl)
+// ---------- 模型按 服务器|账号(|范围) 复合键字典化 ----------
+QString EmbyClient::modelKey(const QString &serverUrl, const QString &accountId,
+                             const QString &scopeId)
 {
-    const QString key = serverUrl.trimmed();
+    QString k = serverUrl.trimmed() + QLatin1Char('\n') + accountId;
+    if (!scopeId.isEmpty())
+        k += QLatin1Char('\n') + scopeId;
+    return k;
+}
+
+MediaItemModel *EmbyClient::viewsModelFor(const QString &serverUrl, const QString &accountId)
+{
+    const QString key = modelKey(serverUrl, accountId);
     if (!m_viewsModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_viewsModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_viewsModels.insert(key, m); }
     return m_viewsModels.value(key);
 }
 
-MediaItemModel *EmbyClient::itemsModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::itemsModelFor(const QString &serverUrl, const QString &accountId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId);
     if (!m_itemsModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_itemsModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_itemsModels.insert(key, m); }
     return m_itemsModels.value(key);
 }
 
-MediaItemModel *EmbyClient::seasonsModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::seasonsModelFor(const QString &serverUrl, const QString &accountId, const QString &seriesId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId, seriesId);
     if (!m_seasonsModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_seasonsModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_seasonsModels.insert(key, m); }
     return m_seasonsModels.value(key);
 }
 
-MediaItemModel *EmbyClient::episodesModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::episodesModelFor(const QString &serverUrl, const QString &accountId, const QString &seasonId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId, seasonId);
     if (!m_episodesModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_episodesModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_episodesModels.insert(key, m); }
     return m_episodesModels.value(key);
 }
 
 QString EmbyClient::searchKeyFor(const QString &serverUrl, const QString &accountId)
 {
-    const QString url = serverUrl.trimmed();
-    return accountId.isEmpty() ? url : url + QLatin1Char('\n') + accountId;
+    // 键恒为 url\naccountId(accountId 必填;无裸键形态)。
+    return serverUrl.trimmed() + QLatin1Char('\n') + accountId;
 }
 
 QString EmbyClient::searchKeyServerUrl(const QString &key)
 {
-    const int i = key.indexOf(QLatin1Char('\n'));
-    return i < 0 ? key : key.left(i);
+    return key.left(key.indexOf(QLatin1Char('\n')));
+}
+QString EmbyClient::searchKeyAccountId(const QString &key)
+{
+    return key.mid(key.indexOf(QLatin1Char('\n')) + 1);
 }
 
 MediaItemModel *EmbyClient::searchModelFor(const QString &serverUrl, const QString &accountId)
@@ -411,58 +437,67 @@ MediaItemModel *EmbyClient::searchModelForKey(const QString &key)
 {
     if (!m_searchModels.contains(key)) {
         auto *m = new MediaItemModel(this);
-        m->setServerPrefix(AccountManager::encodeServerKey(searchKeyServerUrl(key)));
+        m->setServerPrefix(AccountManager::encodeServerKey(searchKeyAccountId(key)));
         m_searchModels.insert(key, m);
     }
     return m_searchModels.value(key);
 }
 
-MediaItemModel *EmbyClient::similarModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::similarModelFor(const QString &serverUrl, const QString &accountId, const QString &itemId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId, itemId);
     if (!m_similarModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_similarModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_similarModels.insert(key, m); }
     return m_similarModels.value(key);
 }
 
-MediaItemModel *EmbyClient::allEpisodesModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::allEpisodesModelFor(const QString &serverUrl, const QString &accountId, const QString &seriesId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId, seriesId);
     if (!m_allEpisodesModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_allEpisodesModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_allEpisodesModels.insert(key, m); }
     return m_allEpisodesModels.value(key);
 }
 
-MediaItemModel *EmbyClient::genresModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::genresModelFor(const QString &serverUrl, const QString &accountId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId);
     if (!m_genresModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_genresModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_genresModels.insert(key, m); }
     return m_genresModels.value(key);
 }
 
-MediaItemModel *EmbyClient::foldersModelFor(const QString &serverUrl)
+MediaItemModel *EmbyClient::foldersModelFor(const QString &serverUrl, const QString &accountId)
 {
-    const QString key = serverUrl.trimmed();
+    const QString key = modelKey(serverUrl, accountId);
     if (!m_foldersModels.contains(key))
-        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(key)); m_foldersModels.insert(key, m); }
+        { auto *m = new MediaItemModel(this); m->setServerPrefix(AccountManager::encodeServerKey(accountId)); m_foldersModels.insert(key, m); }
     return m_foldersModels.value(key);
 }
 
 void EmbyClient::dropServerModels(const QString &serverUrl)
 {
-    const QString key = serverUrl.trimmed();
-    delete m_viewsModels.take(key);
-    delete m_itemsModels.take(key);
-    delete m_seasonsModels.take(key);
-    delete m_episodesModels.take(key);
-    delete m_searchModels.take(key);
-    delete m_similarModels.take(key);
-    delete m_allEpisodesModels.take(key);
-    delete m_genresModels.take(key);
-    delete m_foldersModels.take(key);
-    m_itemsSeq.remove(key);
-    m_searchSeq.remove(key);
+    // 复合键前缀(serverUrl\n…)整服清理。
+    const QString prefix = serverUrl.trimmed() + QLatin1Char('\n');
+    const auto dropBy = [&](auto &dict) {
+        for (auto it = dict.begin(); it != dict.end();) {
+            if (it.key().startsWith(prefix)) {
+                delete it.value();
+                it = dict.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    };
+    dropBy(m_viewsModels);
+    dropBy(m_itemsModels);
+    dropBy(m_seasonsModels);
+    dropBy(m_episodesModels);
+    dropBy(m_searchModels);
+    dropBy(m_similarModels);
+    dropBy(m_allEpisodesModels);
+    dropBy(m_genresModels);
+    dropBy(m_foldersModels);
 }
 
 // ---------- 登录与公开信息 ----------
@@ -653,18 +688,20 @@ void EmbyClient::validateToken(const QString &serverUrl, const QString &token,
 
 // ---------- 浏览(按服务器路由) ----------
 
-void EmbyClient::fetchViews(const QString &serverUrl, const QString &token, const QString &userId)
+void EmbyClient::fetchViews(const QString &serverUrl, const QString &accountId,
+                            const QString &token, const QString &userId)
 {
     const QString key = serverUrl.trimmed();
     get(key, token, userId, userPath(userId, QStringLiteral("/Views")),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(viewsModelFor(key), doc, false);
-            qInfo() << "Emby: views =" << viewsModelFor(key)->count() << "on" << key;
-            emit viewsReceived(key);
+        [this, key, userId, accountId](const QJsonDocument &doc) {
+            fillItems(viewsModelFor(key, accountId), doc, false, true, key, userId);
+            qInfo() << "Emby: views =" << viewsModelFor(key, accountId)->count() << "on" << key;
+            emit viewsReceived(key, accountId);
         }, nullptr, QStringLiteral("获取媒体库视图"));
 }
 
-void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, const QString &userId,
+void EmbyClient::fetchItems(const QString &serverUrl, const QString &accountId,
+                            const QString &token, const QString &userId,
                             const QString &viewId, int startIndex, int limit,
                             const QString &sortBy, const QString &sortOrder,
                             const QString &genres, const QString &years,
@@ -700,24 +737,26 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &token, cons
         q.addQueryItem(QStringLiteral("SearchTerm"), searchTerm);
     q.addQueryItem(QStringLiteral("StartIndex"), QString::number(qMax(0, startIndex)));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize))); // Emby 单页上限 200
-    const int seq = ++m_itemsSeq[key]; // 序号按服务器隔离,并行浏览不互相丢弃
+    // 序号按 服|账号 复合键隔离:同服多账号并行浏览互不丢弃。
+    const QString mkey = modelKey(key, accountId);
+    const int seq = ++m_itemsSeq[mkey];
     get(key, token, userId, userPath(userId, QStringLiteral("/Items?%1").arg(q.toString())),
-        [this, key, startIndex, seq](const QJsonDocument &doc) {
+        [this, key, mkey, userId, accountId, startIndex, seq](const QJsonDocument &doc) {
             // 视图快速切换时可能已有更新的请求,过期响应直接丢弃。
-            if (seq != m_itemsSeq.value(key))
+            if (seq != m_itemsSeq.value(mkey))
                 return;
             const QJsonObject o = doc.object();
             const int total = o.value(QLatin1String("TotalRecordCount")).toInt(0);
-            MediaItemModel *model = itemsModelFor(key);
-            fillItems(model, doc, startIndex != 0);
+            MediaItemModel *model = itemsModelFor(key, accountId);
+            fillItems(model, doc, startIndex != 0, true, key, userId);
             model->setTotal(total);
             qInfo() << "Emby: items =" << model->count() << "/" << total << "on" << key;
-            emit itemsReceived(key);
+            emit itemsReceived(key, accountId);
         }, nullptr, QStringLiteral("获取媒体库条目"));
 }
 
-void EmbyClient::fetchGenres(const QString &serverUrl, const QString &token,
-                             const QString &userId, const QString &viewId)
+void EmbyClient::fetchGenres(const QString &serverUrl, const QString &accountId,
+                             const QString &token, const QString &userId, const QString &viewId)
 {
     const QString key = serverUrl.trimmed();
     // /Genres 为全局分类端点,ParentId 限定库/文件夹;Genre 是 BaseItemDto
@@ -726,15 +765,15 @@ void EmbyClient::fetchGenres(const QString &serverUrl, const QString &token,
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
     get(key, token, userId, QStringLiteral("/Genres?%1").arg(q.toString()),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(genresModelFor(key), doc, false);
-            qInfo() << "Emby: genres =" << genresModelFor(key)->count() << "on" << key;
-            emit genresReceived(key);
+        [this, key, userId, accountId](const QJsonDocument &doc) {
+            fillItems(genresModelFor(key, accountId), doc, false, true, key, userId);
+            qInfo() << "Emby: genres =" << genresModelFor(key, accountId)->count() << "on" << key;
+            emit genresReceived(key, accountId);
         }, nullptr, QStringLiteral("获取类型分类"));
 }
 
-void EmbyClient::fetchYears(const QString &serverUrl, const QString &token,
-                            const QString &userId, const QString &viewId)
+void EmbyClient::fetchYears(const QString &serverUrl, const QString &accountId,
+                            const QString &token, const QString &userId, const QString &viewId)
 {
     const QString key = serverUrl.trimmed();
     // /Years 返回轻量 TagItem(实测兼容实现仅 Name,无 Id),经信号返回
@@ -743,16 +782,16 @@ void EmbyClient::fetchYears(const QString &serverUrl, const QString &token,
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
     get(key, token, userId, QStringLiteral("/Years?%1").arg(q.toString()),
-        [this, key](const QJsonDocument &doc) {
+        [this, key, accountId](const QJsonDocument &doc) {
             QStringList names;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 names.append(v.toObject().value(QLatin1String("Name")).toString());
-            emit yearsReceived(key, names);
+            emit yearsReceived(key, accountId, names);
         }, nullptr, QStringLiteral("获取年份分类"));
 }
 
-void EmbyClient::fetchFolders(const QString &serverUrl, const QString &token,
-                              const QString &userId, const QString &viewId)
+void EmbyClient::fetchFolders(const QString &serverUrl, const QString &accountId,
+                              const QString &token, const QString &userId, const QString &viewId)
 {
     const QString key = serverUrl.trimmed();
     // 当前层顶层子文件夹(分组入口):不 Recursive 只取本层,拿到 Id 后
@@ -765,10 +804,10 @@ void EmbyClient::fetchFolders(const QString &serverUrl, const QString &token,
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Ascending"));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
     get(key, token, userId, userPath(userId, QStringLiteral("/Items?%1").arg(q.toString())),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(foldersModelFor(key), doc, false, false);
-            qInfo() << "Emby: folders =" << foldersModelFor(key)->count() << "on" << key;
-            emit foldersReceived(key);
+        [this, key, userId, accountId](const QJsonDocument &doc) {
+            fillItems(foldersModelFor(key, accountId), doc, false, false, key, userId);
+            qInfo() << "Emby: folders =" << foldersModelFor(key, accountId)->count() << "on" << key;
+            emit foldersReceived(key, accountId);
         }, nullptr, QStringLiteral("获取子文件夹"));
 }
 
@@ -784,12 +823,12 @@ void EmbyClient::setFavorite(const QString &serverUrl, const QString &token, con
         del(serverUrl, token, userId, path, [](const QJsonDocument &) {}, QStringLiteral("取消收藏"));
 }
 
-void EmbyClient::search(const QString &serverUrl, const QString &token, const QString &userId,
+void EmbyClient::search(const QString &serverUrl, const QString &accountId,
+                        const QString &token, const QString &userId,
                         const QString &term, const QString &itemTypes, const QString &years,
-                        const QString &filters, int startIndex, int limit,
-                        const QString &accountId)
+                        const QString &filters, int startIndex, int limit)
 {
-    // 复合键:同服务器多账号各一部模型/序号;空 accountId = 单服旧行为。
+    // 复合键:同服务器多账号各一部模型/序号;accountId 必填。
     const QString key = searchKeyFor(serverUrl, accountId);
     const QString url = searchKeyServerUrl(key);
     if (term.trimmed().isEmpty()) {
@@ -835,6 +874,7 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
                 arr = trimmed;
             }
             auto *m = searchModelForKey(key);
+            m->setServerPrefix(AccountManager::encodeServerKey(accountId));
             if (startIndex == 0)
                 m->setItems(arr, true);
             else
@@ -855,20 +895,22 @@ void EmbyClient::search(const QString &serverUrl, const QString &token, const QS
         }, QStringLiteral("搜索"));
 }
 
-void EmbyClient::fetchSeasons(const QString &serverUrl, const QString &token, const QString &userId,
+void EmbyClient::fetchSeasons(const QString &serverUrl, const QString &accountId,
+                              const QString &token, const QString &userId,
                               const QString &seriesId)
 {
     const QString key = serverUrl.trimmed();
     get(key, token, userId,
         QStringLiteral("/Shows/%1/Seasons?Fields=PrimaryImageAspectRatio").arg(seriesId),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(seasonsModelFor(key), doc, false);
-            qInfo() << "Emby: seasons =" << seasonsModelFor(key)->count() << "on" << key;
-            emit seasonsReceived(key);
+        [this, key, userId, accountId, seriesId](const QJsonDocument &doc) {
+            fillItems(seasonsModelFor(key, accountId, seriesId), doc, false, true, key, userId);
+            qInfo() << "Emby: seasons =" << seasonsModelFor(key, accountId, seriesId)->count() << "on" << key;
+            emit seasonsReceived(key, accountId, seriesId);
         }, nullptr, QStringLiteral("获取剧集分季"));
 }
 
-void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &token, const QString &userId,
+void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &accountId,
+                               const QString &token, const QString &userId,
                                const QString &seriesId, const QString &seasonId)
 {
     const QString key = serverUrl.trimmed();
@@ -877,10 +919,10 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &token, c
         // 响应条目里整个 UserData 键都不存在),已看徽标/进度条/续播位置依赖它。
         QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&UserId=%3&Fields=UserData,PrimaryImageAspectRatio")
             .arg(seriesId, seasonId, userId),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(episodesModelFor(key), doc, false);
-            qInfo() << "Emby: episodes =" << episodesModelFor(key)->count() << "on" << key;
-            emit episodesReceived(key);
+        [this, key, userId, accountId, seasonId](const QJsonDocument &doc) {
+            fillItems(episodesModelFor(key, accountId, seasonId), doc, false, true, key, userId);
+            qInfo() << "Emby: episodes =" << episodesModelFor(key, accountId, seasonId)->count() << "on" << key;
+            emit episodesReceived(key, accountId, seasonId);
         }, nullptr, QStringLiteral("获取分集"));
 }
 
@@ -890,7 +932,7 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
                                   const QString &token, const QString &userId)
 {
     get(serverUrl, token, userId, userPath(userId, QStringLiteral("/Views")),
-        [this, serverUrl, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, userId, accountId](const QJsonDocument &doc) {
             QVariantList out;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
                 const QJsonObject o = v.toObject();
@@ -929,10 +971,10 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items?%2").arg(userId, q.toString()),
-        [this, serverUrl, viewId, viewName, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, userId, viewId, viewName, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                items.append(parseHomeItem(v.toObject(), serverUrl));
+                items.append(parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId)));
             // 正常路径(有条目)记 debug(默认滤,避免聚合刷屏);空结果记
             // info——多账号/多库聚合时空行常指向库权限或空库,需定位到
             // 账号与库(同服多账号可见库不同)。
@@ -964,7 +1006,7 @@ void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &a
             QVariantList out;
             int seq = 0;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
+                out.append(parseHistoryItem(v.toObject(), AccountManager::encodeServerKey(accountId), seq++));
             const int total = doc.object().value(QLatin1String("TotalRecordCount")).toInt();
             qInfo() << "Emby: playbackHistory =" << out.size() << "startIndex" << from
                     << "总数" << total << "on" << serverUrl;
@@ -1012,11 +1054,11 @@ void EmbyClient::fetchResume(const QString &serverUrl, const QString &accountId,
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items/Resume?%2").arg(userId, q.toString()),
-        [this, serverUrl, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, userId, accountId](const QJsonDocument &doc) {
             QVariantList out;
             int seq = 0;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
+                out.append(parseHistoryItem(v.toObject(), AccountManager::encodeServerKey(accountId), seq++));
             qInfo() << "Emby: resume =" << out.size() << "on" << serverUrl;
             emit resumeReceived(serverUrl, accountId, out);
         },
@@ -1025,7 +1067,8 @@ void EmbyClient::fetchResume(const QString &serverUrl, const QString &accountId,
         QStringLiteral("拉取继续观看"), true /*后台连接池*/);
 }
 
-void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,
+void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &accountId,
+                             const QString &token,
                              const QString &userId, const QString &seriesId, int limit)
 {
     QUrlQuery q;
@@ -1033,7 +1076,7 @@ void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,
     q.addQueryItem(QStringLiteral("SeriesId"), seriesId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(qBound(1, limit, 20)));
     get(serverUrl, token, userId, QStringLiteral("/Shows/NextUp?%1").arg(q.toString()),
-        [this, serverUrl, seriesId](const QJsonDocument &doc) {
+        [this, serverUrl, seriesId, accountId](const QJsonDocument &doc) {
             QVariantList out;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray()) {
                 const QJsonObject o = v.toObject();
@@ -1047,10 +1090,10 @@ void EmbyClient::fetchNextUp(const QString &serverUrl, const QString &token,
                 out.append(m);
             }
             qInfo() << "Emby: nextUp =" << out.size() << "on" << serverUrl << "series" << seriesId;
-            emit nextUpReceived(serverUrl, seriesId, out);
+            emit nextUpReceived(serverUrl, accountId, seriesId, out);
         },
         // 失败:发空列表,详情页回退第一季(原因经 serverRequestFailed 通知)。
-        [this, serverUrl, seriesId] { emit nextUpReceived(serverUrl, seriesId, QVariantList()); },
+        [this, serverUrl, accountId, seriesId] { emit nextUpReceived(serverUrl, accountId, seriesId, QVariantList()); },
         QStringLiteral("获取续播集"));
 }
 
@@ -1074,10 +1117,10 @@ void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString 
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Suggestions?%2").arg(userId, q.toString()),
-        [this, serverUrl, accountId](const QJsonDocument &doc) {
+        [this, serverUrl, userId, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                items.append(parseHomeItem(v.toObject(), serverUrl));
+                items.append(parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId)));
             qInfo() << "Emby: serverSuggestions =" << items.size() << "on" << serverUrl;
             emit serverSuggestionsReceived(serverUrl, accountId, items);
         },
@@ -1127,7 +1170,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
         [this, key, token, userId](const QJsonDocument &doc) {
             const QJsonObject o = doc.object();
             const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
-            const QString prefix = AccountManager::encodeServerKey(key);
+            const QString prefix = idPrefixFor(key, userId);
             const QString id = o.value(QLatin1String("Id")).toString();
             QVariantMap m;
             m.insert(QStringLiteral("id"), id);
@@ -1255,7 +1298,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             pq.addQueryItem(QStringLiteral("Ids"), parentIds.join(QLatin1Char(',')));
             pq.addQueryItem(QStringLiteral("Fields"), QStringLiteral("PrimaryImageAspectRatio,ImageTags"));
             get(key, token, userId, userPath(userId, QStringLiteral("/Items?%1").arg(pq.toString())),
-                [this, key, m, parentIds](const QJsonDocument &pdoc) mutable {
+                [this, key, userId, m, parentIds](const QJsonDocument &pdoc) mutable {
                     const QJsonArray arr = pdoc.object().value(QLatin1String("Items")).toArray();
                     bool found = false;
                     for (const QString &want : parentIds) {
@@ -1268,7 +1311,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                                                      .value(QLatin1String("Primary")).toString();
                             if (a > 0 && a <= 0.75 && !ptag.isEmpty()) {
                                 m.insert(QStringLiteral("posterId"),
-                                         AccountManager::encodeServerKey(key) + QLatin1Char('~')
+                                         idPrefixFor(key, userId) + QLatin1Char('~')
                                              + want + QLatin1Char('~') + ptag + QStringLiteral("~Primary"));
                                 found = true;
                             }
@@ -1284,18 +1327,18 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
         }, nullptr, QStringLiteral("获取条目详情"));
 }
 
-void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &token,
-                              const QString &userId, const QString &itemId)
+void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &accountId,
+                              const QString &token, const QString &userId, const QString &itemId)
 {
     const QString key = serverUrl.trimmed();
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("Fields"), MoePlayer::kListFields);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kSearchLimit));
     get(key, token, userId, QStringLiteral("/Items/%1/Similar?%2").arg(itemId, q.toString()),
-        [this, key](const QJsonDocument &doc) {
-            fillItems(similarModelFor(key), doc, false);
-            qInfo() << "Emby: similar =" << similarModelFor(key)->count() << "on" << key;
-            emit similarReady(key);
+        [this, key, userId, accountId, itemId](const QJsonDocument &doc) {
+            fillItems(similarModelFor(key, accountId, itemId), doc, false, true, key, userId);
+            qInfo() << "Emby: similar =" << similarModelFor(key, accountId, itemId)->count() << "on" << key;
+            emit similarReady(key, accountId, itemId);
         }, nullptr, QStringLiteral("获取相似推荐"));
 }
 
@@ -1309,15 +1352,15 @@ void EmbyClient::fetchAllEpisodes(const QString &serverUrl, const QString &accou
         // UserId 必带:UserData 只在该参数存在时返回(见 fetchEpisodes)。
         QStringLiteral("/Shows/%1/Episodes?UserId=%2&Fields=UserData,PrimaryImageAspectRatio")
             .arg(seriesId, userId),
-        [this, key, serverUrl, accountId, seriesId](const QJsonDocument &doc) {
-            fillItems(allEpisodesModelFor(key), doc, false);
+        [this, key, serverUrl, userId, accountId, seriesId](const QJsonDocument &doc) {
+            fillItems(allEpisodesModelFor(key, accountId, seriesId), doc, false, true, key, userId);
             // 同批解析为播放历史条目(含剧集归属),供调用方回写本地。
             QVariantList out;
             int seq = 0;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                out.append(parseHistoryItem(v.toObject(), serverUrl, seq++));
-            qInfo() << "Emby: allEpisodes =" << allEpisodesModelFor(key)->count() << "on" << key;
-            emit allEpisodesReady(key);
+                out.append(parseHistoryItem(v.toObject(), AccountManager::encodeServerKey(accountId), seq++));
+            qInfo() << "Emby: allEpisodes =" << allEpisodesModelFor(key, accountId, seriesId)->count() << "on" << key;
+            emit allEpisodesReady(key, accountId, seriesId);
             emit allEpisodesParsed(serverUrl, accountId, seriesId, out);
         }, nullptr, QStringLiteral("获取剧集全部分集"));
 }

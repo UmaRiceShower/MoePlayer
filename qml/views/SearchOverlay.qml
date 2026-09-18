@@ -158,9 +158,9 @@ Item {
         root.pendingAccounts = root.aggTargets.length
         for (let i = 0; i < root.aggTargets.length; ++i) {
             const t = root.aggTargets[i]
-            EmbyClient.search(t.serverUrl, t.token, t.userId, searchField.text,
+            EmbyClient.search(t.serverUrl, t.accountId, t.token, t.userId, searchField.text,
                               root.typesParam(), root.yearsParam(), root.filtersParam(),
-                              0, ConfigManager.searchLimitPerAccount, t.accountId)
+                              0, ConfigManager.searchLimitPerAccount)
         }
         if (root.aggTargets.length === 0) {
             root.searching = false

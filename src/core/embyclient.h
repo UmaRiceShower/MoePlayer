@@ -33,19 +33,30 @@ public:
     // 收口点:makeRequest(API)与播放取流 URL 构造。
     using BaseUrlResolver = std::function<QString(const QString &serverUrl, const QString &userId)>;
     void setBaseUrlResolver(BaseUrlResolver fn) { m_baseUrlResolver = std::move(fn); }
+    // 海报 id 前缀铸账号 id(不可变身份,改地址/切线路免疫);无回退。
+    using AccountIdResolver = std::function<QString(const QString &serverUrl, const QString &userId)>;
+    void setAccountIdResolver(AccountIdResolver fn) { m_accountIdResolver = std::move(fn); }
 
-    // 按服务器取模型(首次访问创建);账号删除时用 dropServerModels 清理。
-    Q_INVOKABLE MediaItemModel *viewsModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *seasonsModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl);
+    // 模型按 服务器|账号 复合键(库权限/UserData 均按账号,同服多账号
+    // 不可共享);剧集范围模型再叠 seriesId/seasonId/itemId(叠页不互踩)。
+    Q_INVOKABLE MediaItemModel *viewsModelFor(const QString &serverUrl, const QString &accountId);
+    Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl, const QString &accountId);
+    Q_INVOKABLE MediaItemModel *seasonsModelFor(const QString &serverUrl, const QString &accountId,
+                                                const QString &seriesId);
+    Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl, const QString &accountId,
+                                                 const QString &seasonId);
     Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl,
-                                               const QString &accountId = QString());
-    Q_INVOKABLE MediaItemModel *similarModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *allEpisodesModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *genresModelFor(const QString &serverUrl);
-    Q_INVOKABLE MediaItemModel *foldersModelFor(const QString &serverUrl);
+                                               const QString &accountId);
+    Q_INVOKABLE MediaItemModel *similarModelFor(const QString &serverUrl, const QString &accountId,
+                                                const QString &itemId);
+    Q_INVOKABLE MediaItemModel *allEpisodesModelFor(const QString &serverUrl, const QString &accountId,
+                                                    const QString &seriesId);
+    Q_INVOKABLE MediaItemModel *genresModelFor(const QString &serverUrl, const QString &accountId);
+    Q_INVOKABLE MediaItemModel *foldersModelFor(const QString &serverUrl, const QString &accountId);
     Q_INVOKABLE void dropServerModels(const QString &serverUrl);
+    // 复合键:serverUrl\naccountId[\nscopeId]。
+    static QString modelKey(const QString &serverUrl, const QString &accountId,
+                            const QString &scopeId = QString());
 
     // 服务器公开信息(/System/Info/Public,无需认证),取 ServerName。
     Q_INVOKABLE void fetchServerPublicInfo(const QString &serverUrl);
@@ -78,7 +89,8 @@ public:
     Q_INVOKABLE void logout(const QString &serverUrl, const QString &token,
                             const QString &userId);
     // 获取用户媒体库视图(/Users/{id}/Views),填充该服务器的 viewsModel。
-    Q_INVOKABLE void fetchViews(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchViews(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                 const QString &userId);
     // 获取视图条目(/Users/{id}/Items,分页),填充该服务器的 itemsModel。
     // startIndex=0 替换模型否则追加;TotalRecordCount 写入 totalCount。
@@ -87,7 +99,8 @@ public:
     // 为库内搜索关键词(SearchTerm,空串不传);配合 ParentId(视图或子
     // 文件夹 id)即库内多维筛选。注意:实测 4.9.5.0 带 SearchTerm 时
     // 忽略 SortBy/SortOrder(固定相关度排序)。
-    Q_INVOKABLE void fetchItems(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchItems(const QString &serverUrl, const QString &accountId,
+                              const QString &token,
                                 const QString &userId, const QString &viewId,
                                 int startIndex, int limit,
                                 const QString &sortBy = QStringLiteral("DateModified"),
@@ -99,15 +112,18 @@ public:
                                 const QString &searchTerm = QString());
     // 库内类型枚举(/Genres?ParentId=,Genre 为 BaseItemDto 带 Id/图),
     // 填充该服务器的 genresModel(名称即 Genres 过滤参数值)。
-    Q_INVOKABLE void fetchGenres(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchGenres(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                  const QString &userId, const QString &viewId);
     // 库内年份枚举(/Years?ParentId=,TagItem 仅 Name,兼容实现无 Id),
     // 结果经 yearsReceived(serverUrl, names) 返回,QML 端过滤脏值/排序。
-    Q_INVOKABLE void fetchYears(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchYears(const QString &serverUrl, const QString &accountId,
+                              const QString &token,
                                 const QString &userId, const QString &viewId);
     // 当前层顶层子文件夹(/Users/{id}/Items?ParentId=&IncludeItemTypes=Folder,
     // 不 Recursive),填充该服务器的 foldersModel,供分组下钻入口。
-    Q_INVOKABLE void fetchFolders(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchFolders(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                   const QString &userId, const QString &viewId);
     // 收藏/取消收藏(/Users/{id}/FavoriteItems/{itemId} POST/DELETE)。
     Q_INVOKABLE void setFavorite(const QString &serverUrl, const QString &token,
@@ -118,19 +134,21 @@ public:
     // (实测 4.9.5.0 忽略 SortBy/SortOrder),故无排序参数。
     // startIndex=0 替换结果,>0 追加(分页);Limit 内部 +1 探针,多出的
     // 1 条截断并置 model.hasMore 供"加载更多"。
-    Q_INVOKABLE void search(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void search(const QString &serverUrl, const QString &accountId,
+                            const QString &token,
                             const QString &userId, const QString &term,
                             const QString &itemTypes = QString(),
                             const QString &years = QString(),
                             const QString &filters = QString(),
                             int startIndex = 0,
-                            int limit = MoePlayer::kSearchLimit,
-                            const QString &accountId = QString());
+                            int limit = MoePlayer::kSearchLimit);
     // 剧集分季列表(/Shows/{id}/Seasons),填充该服务器的 seasonsModel。
-    Q_INVOKABLE void fetchSeasons(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchSeasons(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                   const QString &userId, const QString &seriesId);
     // 指定季分集列表(/Shows/{id}/Episodes),填充该服务器的 episodesModel。
-    Q_INVOKABLE void fetchEpisodes(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchEpisodes(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                    const QString &userId, const QString &seriesId,
                                    const QString &seasonId);
     // 拉取指定服务器的视图列表(首页聚合,不走模型,结果经 serverViewsReceived)。
@@ -145,7 +163,8 @@ public:
                                       int limit);
     // 拉取剧集续播目标(服务器 NextUp:优先最近观看未看完的集,其次下一个未看集),
     // 结果经 nextUpReceived 返回,用于详情页定位上次播放的季/集。
-    Q_INVOKABLE void fetchNextUp(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchNextUp(const QString &serverUrl, const QString &accountId,
+                                 const QString &token,
                                  const QString &userId, const QString &seriesId, int limit);
     // 拉取播放历史列表(服务器按条目 LastPlayedDate 倒序返回,顺序有效;
     // 条目字段与首页条目一致,另带剧集定位与顺序 seq)。列表端点不返回
@@ -186,7 +205,8 @@ public:
     Q_INVOKABLE void fetchItemDetail(const QString &serverUrl, const QString &token,
                                      const QString &userId, const QString &itemId);
     // 相似推荐(/Items/{id}/Similar),填充该服务器的 similarModel,发 similarReady。
-    Q_INVOKABLE void fetchSimilar(const QString &serverUrl, const QString &token,
+    Q_INVOKABLE void fetchSimilar(const QString &serverUrl, const QString &accountId,
+                                const QString &token,
                                   const QString &userId, const QString &itemId);
     // 剧集全部集(/Shows/{id}/Episodes 不带 SeasonId),供跨季续播查找;
     // accountId 用于把解析结果回写播放历史(见 allEpisodesParsed)。
@@ -221,18 +241,18 @@ public:
 
 signals:
     // 浏览结果按服务器路由(页面据此判断是否自己的请求)。
-    void viewsReceived(const QString &serverUrl);
-    void itemsReceived(const QString &serverUrl);
-    void searchResultsReady(const QString &serverUrl, const QString &accountId = QString());
-    void seasonsReceived(const QString &serverUrl);
-    void episodesReceived(const QString &serverUrl);
-    void similarReady(const QString &serverUrl);
-    void allEpisodesReady(const QString &serverUrl);
+    void viewsReceived(const QString &serverUrl, const QString &accountId);
+    void itemsReceived(const QString &serverUrl, const QString &accountId);
+    void searchResultsReady(const QString &serverUrl, const QString &accountId);
+    void seasonsReceived(const QString &serverUrl, const QString &accountId, const QString &seriesId);
+    void episodesReceived(const QString &serverUrl, const QString &accountId, const QString &seasonId);
+    void similarReady(const QString &serverUrl, const QString &accountId, const QString &itemId);
+    void allEpisodesReady(const QString &serverUrl, const QString &accountId, const QString &seriesId);
     // 库内分类枚举结果(见 fetchGenres/fetchYears/fetchFolders):
     // genres/folders 填模型发 serverUrl;years 轻量返回名称列表。
-    void genresReceived(const QString &serverUrl);
-    void yearsReceived(const QString &serverUrl, const QStringList &years);
-    void foldersReceived(const QString &serverUrl);
+    void genresReceived(const QString &serverUrl, const QString &accountId);
+    void yearsReceived(const QString &serverUrl, const QString &accountId, const QStringList &years);
+    void foldersReceived(const QString &serverUrl, const QString &accountId);
     // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
     void itemDetailReady(const QString &serverUrl, const QVariantMap &detail);
     // 登录成功:携带目标服务器与凭据(AccountManager 存账号 / 页面直连浏览)。
@@ -258,7 +278,8 @@ signals:
                              const QString &viewId, const QVariantList &items);
     // 续播目标(见 fetchNextUp):items 字段 id/name/seasonNo/episodeNo;
     // 失败/无目标发空列表。
-    void nextUpReceived(const QString &serverUrl, const QString &seriesId,
+    void nextUpReceived(const QString &serverUrl, const QString &accountId,
+                        const QString &seriesId,
                         const QVariantList &items);
     // 播放历史列表(见 fetchPlaybackHistory):ok=false 表示请求失败(items 为空),
     // 调用方据此保留既有存储(空列表也可能只是"该账号确无播放记录",两者不可混)。
@@ -302,13 +323,18 @@ signals:
 
 private:
     BaseUrlResolver m_baseUrlResolver;
+    AccountIdResolver m_accountIdResolver;
+    // 图片 id 前缀:账号 id(无回退;解析不到告警)。
+    QString idPrefixFor(const QString &serverUrl, const QString &userId) const;
     // 按显式服务器/凭据拼接路径与认证头。
     QNetworkRequest makeRequest(const QString &serverUrl, const QString &token,
                                 const QString &userId, const QString &path, bool json) const;
     // 解析 Emby Items 响应的 "Items" 数组到模型(setItems 或 appendItems;
     // withPosters 控制是否解析 ImageTags.Primary,文件夹等无海报类型传 false)。
-    static void fillItems(MediaItemModel *model, const QJsonDocument &doc,
-                          bool append, bool withPosters = true);
+    // 图片 id 前缀按取数账号铸(身份不可变);每次填充前更新模型前缀。
+    void fillItems(MediaItemModel *model, const QJsonDocument &doc,
+                   bool append, bool withPosters, const QString &serverUrl,
+                   const QString &userId);
     // 拼 "/Users/{userId}{rest}"(rest 须以 / 开头)。
     static QString userPath(const QString &userId, const QString &rest);
     // 下载图标 URL 图片字节(无认证,Emby /web/ 静态资源):成功发字节、
@@ -345,6 +371,7 @@ private:
     static QString searchKeyFor(const QString &serverUrl, const QString &accountId);
     // 复合键还原服务器地址(模型图片前缀、信号路由都用真实 URL)。
     static QString searchKeyServerUrl(const QString &key);
+    static QString searchKeyAccountId(const QString &key);
     // 按复合键取/建模型(内部统一入口,公开 searchModelFor 只做键编码)。
     MediaItemModel *searchModelForKey(const QString &key);
     // 解析 HTML 的图标 link 标签:apple-touch-icon 优先(192x192),其次

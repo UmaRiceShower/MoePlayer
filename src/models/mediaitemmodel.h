@@ -66,7 +66,7 @@ public:
     int totalCount() const { return m_total; }
     bool hasMore() const { return m_hasMore; }
 
-    // 设置海报服务器前缀(encodeServerKey(serverUrl)),此后填充的海报
+    // 设置海报服务器前缀(encodeServerKey(accountId)),此后填充的海报
     // id 形如 <前缀>~<itemId>~<tag>;无状态浏览下所有海报必须带前缀,
     // PosterProvider 据此路由到对应服务器的凭据。
     void setServerPrefix(const QString &prefix) { m_serverPrefix = prefix; }

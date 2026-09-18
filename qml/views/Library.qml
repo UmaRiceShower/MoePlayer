@@ -567,7 +567,7 @@ Item {
         root.busy = true
         console.debug("Library: fetchPage", startIndex, "parent", root.currentParentId())
         const c = root.creds()
-        EmbyClient.fetchItems(root.serverUrl, c.token, c.userId, root.currentParentId(),
+        EmbyClient.fetchItems(root.serverUrl, root.accountId, c.token, c.userId, root.currentParentId(),
                               startIndex, Constants.pageSize,
                               root.currentSortBy, root.currentSortOrder,
                               root.currentGenres, root.currentYears,
@@ -580,9 +580,9 @@ Item {
             return
         root.fetchPage(0)
         const c = root.creds()
-        EmbyClient.fetchGenres(root.serverUrl, c.token, c.userId, root.currentParentId())
-        EmbyClient.fetchYears(root.serverUrl, c.token, c.userId, root.currentParentId())
-        EmbyClient.fetchFolders(root.serverUrl, c.token, c.userId, root.currentParentId())
+        EmbyClient.fetchGenres(root.serverUrl, root.accountId, c.token, c.userId, root.currentParentId())
+        EmbyClient.fetchYears(root.serverUrl, root.accountId, c.token, c.userId, root.currentParentId())
+        EmbyClient.fetchFolders(root.serverUrl, root.accountId, c.token, c.userId, root.currentParentId())
     }
     // 筛选变化:仅重拉条目第一页(分类栏本身不变)。
     function refetch() {
@@ -679,10 +679,10 @@ Item {
             }
         }
         if (root.browseReady) {
-            root.vm = EmbyClient.viewsModelFor(root.serverUrl)
-            root.im = EmbyClient.itemsModelFor(root.serverUrl)
-            root.gm = EmbyClient.genresModelFor(root.serverUrl)
-            root.fm = EmbyClient.foldersModelFor(root.serverUrl)
+            root.vm = EmbyClient.viewsModelFor(root.serverUrl, root.accountId)
+            root.im = EmbyClient.itemsModelFor(root.serverUrl, root.accountId)
+            root.gm = EmbyClient.genresModelFor(root.serverUrl, root.accountId)
+            root.fm = EmbyClient.foldersModelFor(root.serverUrl, root.accountId)
             // 无状态化后视图不会预载,主动拉取(onViewsReceived 后应用目标库)。
             const c = root.creds()
             // 置 busy:fetchViews 返回前视图未就绪、applyView 尚未执行,
@@ -690,7 +690,7 @@ Item {
             // (空提示条件 !busy)。清除由 onViewsReceived → applyView →
             // fetchPage(置 busy 保持)或 onErrorOccurred 负责。
             root.busy = true
-            EmbyClient.fetchViews(root.serverUrl, c.token, c.userId)
+            EmbyClient.fetchViews(root.serverUrl, root.accountId, c.token, c.userId)
             if (root.restore && root.restore.viewId !== "") {
                 // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
                 root.currentSortBy = root.restore.sortBy
@@ -1459,8 +1459,8 @@ Item {
     // 浏览结果:按服务器路由(仅处理本页服务器的响应)。
     Connections {
         target: EmbyClient
-        function onViewsReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onViewsReceived(serverUrl, accountId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
             if (root.vm && root.vm.count > 0)
                 root.applyView(root.initialViewId)
@@ -1468,8 +1468,8 @@ Item {
             // 已置 busy=true,由 onItemsReceived/onErrorOccurred 清除;
             // 曾在此清空导致加载期间 busy=false 误显"暂无条目"。
         }
-        function onItemsReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onItemsReceived(serverUrl, accountId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
             statusText.text = "已加载 " + root.im.count + " / "
                               + root.im.totalCount + " 个条目"
@@ -1484,8 +1484,8 @@ Item {
                 root.pendingRestoreY = 0
             }
         }
-        function onGenresReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onGenresReceived(serverUrl, accountId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
             // 同步类型分面模型(FilterPanel 用 ListModel;"全部类型"为首项)。
             genreFilterModel.clear()
@@ -1498,8 +1498,8 @@ Item {
                 root.currentGenres = ""
             }
         }
-        function onYearsReceived(serverUrl, names) {
-            if (serverUrl !== root.serverUrl)
+        function onYearsReceived(serverUrl, accountId, names) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
             // 过滤脏年份(实测 nayo 返回 "1"),只用于区间有效性校验。
             const set = new Set()
@@ -1517,8 +1517,8 @@ Item {
                 }
             }
         }
-        function onFoldersReceived(serverUrl) {
-            if (serverUrl !== root.serverUrl)
+        function onFoldersReceived(serverUrl, accountId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
             // 当前段下拉的子文件夹列表随 fm 模型自动刷新,无额外动作。
         }

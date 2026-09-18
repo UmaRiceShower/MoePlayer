@@ -150,6 +150,8 @@ public:
     // 多账号;空 userId 取该服首个账号。所有请求的基址收口(EmbyClient
     // resolver、海报、取流都走这)。
     QString activeUrlFor(const QString &serverUrl, const QString &userId = QString()) const;
+    // 反解账号 id(serverUrl+userId → id;空 = 未匹配)。
+    QString accountIdFor(const QString &serverUrl, const QString &userId) const;
     Q_INVOKABLE bool folderHidden(const QString &folderId) const;
     Q_INVOKABLE void setFolderHidden(const QString &folderId, bool hidden);
     bool showHidden() const { return m_showHidden; }
@@ -159,8 +161,8 @@ public:
     // 按账号 id 取凭据(同服务器多账号时精确定位,不依赖 serverUrl 首账号)。
     Q_INVOKABLE QVariantMap credsForAccount(const QString &accountId) const;
 
-    // 跨服务器海报 id 前缀编码(URL 安全):<encodeServerKey(serverUrl)>~<itemId>~<tag>。
-    static QString encodeServerKey(const QString &serverUrl);
+    // 海报 id 前缀编码(账号 id,URL 安全):<encodeServerKey(accountId)>~<itemId>~<tag>。
+    static QString encodeServerKey(const QString &accountId);
     static QString decodeServerKey(const QString &key);
 
 signals:
@@ -256,12 +258,12 @@ private:
     // 按账号 id 取索引,找不到返回 -1。
     int accountIndexById(const QString &id) const;
     // 为行/条目海报 id 加服务器前缀(跨服务器海报用)。
-    static QString serverPosterId(const QString &serverUrl, const QString &posterId);
+    static QString serverPosterId(const QString &accountId, const QString &posterId);
     // 播放历史条目入库前统一补海报前缀:历史条目来自分集/继续观看等端点,
     // posterId 一律不带前缀(见 EmbyClient::parseHomeItem 的契约),而
     // image://emby/ 需要前缀(backdropId 已自带,不处理)。
     QVariantList historyItemsWithPosterIds(const QVariantList &items,
-                                           const QString &serverUrl) const;
+const QString &accountId) const;
 
     EmbyClient *m_client;
     // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。

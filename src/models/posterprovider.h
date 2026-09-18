@@ -10,7 +10,7 @@ class AccountManager;
 class ConfigManager;
 
 //! 异步图片提供器,注册为 "image://emby/<id>"。
-//! 无状态浏览下海报 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>
+//! 无状态浏览下海报 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>
 //! (模型填充时统一加前缀),提供器按前缀路由到对应服务器的账号 token。
 //! 请求路径 /Items/{id}/Images/Primary(maxWidth + tag + api_key)。
 class PosterProvider : public QQuickAsyncImageProvider
@@ -26,10 +26,12 @@ public:
     QQuickImageResponse *requestImageResponse(const QString &id,
                                               const QSize &requestedSize) override;
 
-    // 解析海报 id 前缀路由(serverUrl/token/itemId/tag/kind),ColorProvider 复用。
+    // 解析海报 id 前缀路由(serverUrl/token/userId/itemId/tag/kind),ColorProvider 复用。
     // 返回 false = 缺前缀/凭据,不发起请求。
     bool resolveImageId(const QString &id, QString *serverUrl, QString *token,
-                        QString *itemId, QString *tag, QString *kind) const;
+                        QString *userId, QString *itemId, QString *tag, QString *kind) const;
+    // 一体化:解析 id → 当前线路的取图 URL(失败返回空 QUrl)。
+    QUrl resolvedImageUrl(const QString &id, QString *token) const;
     // 按解析结果构造回源 URL(缓存键稳定;maxWidth 按 kind 分级取固定厚档,
     // 与显示尺寸解耦 —— URL 恒定,窗口缩放不重拉;显示缩放由客户端
     // Image.sourceSize 负责,故 requestedSize 保留但未参与构造)。

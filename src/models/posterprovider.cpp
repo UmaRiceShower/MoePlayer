@@ -96,13 +96,15 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
     Q_UNUSED(requestedSize)
-    QString serverUrl, token, itemId, tag, kind;
-    if (!resolveImageId(id, &serverUrl, &token, &itemId, &tag, &kind)) {
+    QString serverUrl, token, userId, itemId, tag, kind;
+    if (!resolveImageId(id, &serverUrl, &token, &userId, &itemId, &tag, &kind)) {
         qWarning().noquote() << "Poster: 图片地址无效" << id;
         return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
     }
-    // 多线路:展示键是身份 serverUrl,取图走当前线路(工作地址)。
-    const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl), itemId, tag, kind, requestedSize);
+    // 多线路:取图走当前线路(activeUrlFor 收口;userId 为解析阶段同账号
+    // 凭据,同服多账号不串)。
+    const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl, userId),
+                              itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     {
         QMutexLocker locker(&g_memMutex);
@@ -112,7 +114,7 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     return new PosterResponse(url, token, proxy());
 }
 
-bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token,
+bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token, QString *userId,
                                     QString *itemId, QString *tag, QString *kind) const
 {
     if (serverUrl)
@@ -125,7 +127,7 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
         tag->clear();
     if (kind)
         kind->clear();
-    // 无状态浏览下图片 id 一律为 <encodeServerKey(serverUrl)>~<itemId>~<tag>~<kind>
+    // 无状态浏览下图片 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>~<kind>
     // (模型/详情填充时统一加前缀),按前缀路由到对应服务器凭据;
     // kind 为图片类型(Primary/Backdrop/Thumb),缺省 Primary 向后兼容旧三段 id。
     // 缺前缀/凭据的 id 直接失败(不发起请求)。
@@ -134,8 +136,12 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
         return false;
     const int s1 = id.indexOf(QLatin1Char('~'));
     const int s2 = id.indexOf(QLatin1Char('~'), s1 + 1);
-    const QString url = AccountManager::decodeServerKey(id.left(s1));
-    const QString tok = m_accounts->credsForServer(url).value(QStringLiteral("token")).toString();
+    // 前缀 = 账号 id(不可变身份,改地址/切线路免疫)。
+    const QVariantMap creds0 = m_accounts->credsForAccount(
+        AccountManager::decodeServerKey(id.left(s1)));
+    const QString url = creds0.value(QStringLiteral("serverUrl")).toString();
+    const QString tok = creds0.value(QStringLiteral("token")).toString();
+    const QString uid = creds0.value(QStringLiteral("userId")).toString();
     const QString iid = QUrl::fromPercentEncoding(id.mid(s1 + 1, s2 - s1 - 1).toUtf8());
     // 末段 "<tag>" 或 "<tag>~<kind>";kind 白名单外一律回退 Primary。
     QString tg;
@@ -157,6 +163,8 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
         *serverUrl = url;
     if (token)
         *token = tok;
+    if (userId)
+        *userId = uid;
     if (itemId)
         *itemId = iid;
     if (tag)
@@ -164,6 +172,14 @@ bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QStri
     if (kind)
         *kind = kd;
     return true;
+}
+
+QUrl PosterProvider::resolvedImageUrl(const QString &id, QString *token) const
+{
+    QString serverUrl, userId, itemId, tag, kind;
+    if (!resolveImageId(id, &serverUrl, token, &userId, &itemId, &tag, &kind))
+        return QUrl();
+    return imageUrl(m_accounts->activeUrlFor(serverUrl, userId), itemId, tag, kind);
 }
 
 QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
