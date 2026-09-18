@@ -156,7 +156,6 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                 // 账号名后续由 serverPublicInfoReceived 按 id 回填,不入库去重。
                 m_accounts.append(acc);
                 m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), acc.id));
-        save();
                 save();
                 emit accountsChanged();
                 qInfo() << "AccountManager: 账号添加成功" << acc.id << "on" << acc.serverUrl;
@@ -1284,7 +1283,7 @@ void AccountManager::maybeAssembleHomeRows()
             row.insert(QStringLiteral("serverUrl"), serverUrl);
             row.insert(QStringLiteral("serverName"), serverName);
             row.insert(QStringLiteral("posterId"),
-                       serverPosterId(serverUrl,
+                       serverPosterId(accountId,
                                       vm.value(QStringLiteral("posterId")).toString()));
             // loading:新鲜未到位(占位/缓存回退);到位后 false。
             row.insert(QStringLiteral("items"), items);
@@ -1473,7 +1472,7 @@ void AccountManager::setLayoutOrder(const QVariantList &order)
     const bool foldersReordered = reorderFoldersToLayout(cleaned);
     const bool accountsReordered = reorderAccountsToVisual(cleaned);
     m_layoutOrder = cleaned;
-        save();
+    save();
     if (foldersReordered) {
         save();
         emit foldersChanged();
@@ -1531,7 +1530,6 @@ QString AccountManager::addFolder(const QString &name, const QString &color)
     }
     m_folders.append(f);
     m_layoutOrder.append(makeLayoutEntry(QLatin1String("folder"), f.id));
-        save();
     save();
     emit foldersChanged();
     return f.id;
@@ -1561,7 +1559,6 @@ void AccountManager::removeFolder(const QString &id)
                 m_layoutOrder.insert(pos, makeLayoutEntry(QLatin1String("account"), members.at(k)));
         }
         const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-        save();
         save();
         if (acctChanged) {
             reorderHomeRows();
@@ -1677,7 +1674,6 @@ void AccountManager::removeAccountFromFolder(const QString &accountId)
         // 紧接 setLayoutOrder 调整(同步执行,无渲染中间态)。
         m_layoutOrder.append(makeLayoutEntry(QLatin1String("account"), accountId));
         const bool acctChanged = reorderAccountsToVisual(m_layoutOrder);
-        save();
         save();
         if (acctChanged) {
             reorderHomeRows();
