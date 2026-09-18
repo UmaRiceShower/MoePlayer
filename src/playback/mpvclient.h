@@ -139,7 +139,7 @@ signals:
     // refreshChapters 应答:[{time,title}](mpv chapter-list,秒)。
     void chaptersChanged(const QString &itemId, const QVariantList &chapters);
     // 文件加载完成(可续播/seek)。
-    void playbackStarted(const QString &itemId);
+    void playbackStarted(const QString &sessionKey, const QString &itemId);
     // 当前播放集上下文(连播换集后广播;meta.itemId 为实际播放中的集,
     // 可能不同于会话键。连播由 moe-hook on_load 占位请求驱动:mpv 侧
     // script-message → episodeUrlRequested → deliverEpisodeUrl)。
@@ -148,7 +148,8 @@ signals:
     // deliverEpisodeUrl 回发。
     void episodeUrlRequested(const QString &sessionKey, const QString &itemId);
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
-    void playbackFinished(const QString &itemId, bool error);
+    // 双轴:sessionKey 路由会话,itemId 为真实集 id(换集后随实际播放变)。
+    void playbackFinished(const QString &sessionKey, const QString &itemId, bool error);
     // 超分回读结果(state 同 superResStatus):挂载数与尺寸门槛判定。
     void superResStateChanged(const QString &itemId, const QVariantMap &state);
 
@@ -245,6 +246,9 @@ private:
     // (避免两个事件源——QProcess::finished 与 QLocalSocket::readyRead——都对
     // 同一裸 Session* 触发时,后到者访问已释放对象)。key 按值传入:
     // destroySession 会释放 s->key 成员,须在函数内保留独立副本再 emit。
+    // 会话键 = accountId|itemId(账号空 = 裸 itemId);起始集定死,
+    // 换集不换键(会话路由恒走它,当前集 id 仅展示用)。
+    static QString sessionKeyFor(const QVariantMap &meta);
     void stopAndConsiderEnd(QString key, bool errored);
 
     EmbyClient *m_emby = nullptr;

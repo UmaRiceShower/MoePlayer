@@ -30,6 +30,10 @@ Window {
     property string titleMain: meta.displayName || meta.seriesName || ""
     property string titleSub: ""
     // 当前集信息(选集模型按 currentItemId 查;驱动标题双行与高亮)。
+    // 会话键(起始集定死):账号|起始集 itemId;MpvClient 会话路由恒用它,
+    // currentItemId(换集后变)只做展示与选集定位。
+    readonly property string sessionKey: (meta.accountId ? meta.accountId + "|" : "")
+                                         + (meta.itemId || "")
     function episodeInfo() {
         const sid = meta.serverUrl || ""
         if (sid === "")
@@ -86,23 +90,23 @@ Window {
             root.panel = ""
             return true
         }
-        MpvClient.stop(root.meta.itemId || "")
+        MpvClient.stop(root.sessionKey)
         closeSelf() // 未起播时 stop 不发信号,直接自关
         return true
     }
 
     // 系统点窗框 X:等同 goBack(停播回传 Stopped)。
-    onClosing: MpvClient.stop(root.meta.itemId || "")
+    onClosing: MpvClient.stop(root.sessionKey)
 
     function togglePause() {
-        MpvClient.setPause(!video.paused, root.meta.itemId || "")
+        MpvClient.setPause(!video.paused, root.sessionKey)
     }
     function seekBy(delta) {
-        MpvClient.command(["seek", delta, "relative"], root.meta.itemId || "")
+        MpvClient.command(["seek", delta, "relative"], root.sessionKey)
     }
     function adjustVolume(delta) {
         const v = Math.max(0, Math.min(100, Math.round(video.volume + delta)))
-        MpvClient.setVolume(v, root.meta.itemId || "")
+        MpvClient.setVolume(v, root.sessionKey)
         osd.showVolume(v)
     }
     function toggleFullscreen() {
@@ -115,7 +119,7 @@ Window {
         const speeds = [1.0, 1.25, 1.5, 2.0, 0.5]
         let i = speeds.findIndex(s => Math.abs(s - video.speed) < 0.01)
         const next = speeds[(i + 1) % speeds.length]
-        MpvClient.command(["set_property", "speed", next], root.meta.itemId || "")
+        MpvClient.command(["set_property", "speed", next], root.sessionKey)
         osd.showText("倍速 " + next + "x")
     }
     function episodeJump(delta) {
@@ -141,8 +145,8 @@ Window {
         return (h > 0 ? h + ":" : "") + p(m) + ":" + p(sec)
     }
 
-    onWidthChanged: MpvClient.setEmbeddedOutputSize(root.meta.itemId || "", video.width, video.height)
-    onHeightChanged: MpvClient.setEmbeddedOutputSize(root.meta.itemId || "", video.width, video.height)
+    onWidthChanged: MpvClient.setEmbeddedOutputSize(root.sessionKey, video.width, video.height)
+    onHeightChanged: MpvClient.setEmbeddedOutputSize(root.sessionKey, video.width, video.height)
     // 图标按钮(带自绘悬停气泡;QQC2 ToolTip 原生白底与播放器暗色不搭)。
     component IconBtn: ToolButton {
         property string tip: ""
@@ -180,8 +184,8 @@ Window {
         video.sendCommand(["set_property", "http-proxy", proxy])
         // 绑定 MpvClient 会话(startPending 已按 meta.itemId 预建);attach 即
         // flush 起播(observe/超分键位/待播 loadfile 在 flush 内发出)。
-        MpvClient.setEmbeddedOutputSize(meta.itemId || "", video.width, video.height)
-        MpvClient.attachEmbedded(video.core, meta.itemId || "")
+        MpvClient.setEmbeddedOutputSize(root.sessionKey, video.width, video.height)
+        MpvClient.attachEmbedded(video.core, root.sessionKey)
         refreshTitle()
         root.requestActivate()
     }
@@ -199,8 +203,8 @@ Window {
 
     Connections {
         target: MpvClient
-        function onPlaybackFinished(itemId, error) {
-            if (itemId === (root.meta.itemId || ""))
+        function onPlaybackFinished(sessionKey, itemId, error) {
+            if (sessionKey === root.sessionKey)
                 root.closeSelf()
         }
         // 连播换集:标题跟随实际播放集;轨道表按新集重拉。
@@ -209,21 +213,21 @@ Window {
                 return
             if (m.itemId) {
                 root.currentItemId = m.itemId
-                MpvClient.refreshTracks(m.itemId)
+                MpvClient.refreshTracks(root.sessionKey)
             }
         }
-        function onTracksChanged(itemId, list) {
-            if (itemId === root.currentItemId || itemId === (root.meta.itemId || ""))
+        function onTracksChanged(key, list) {
+            if (key === root.sessionKey)
                 root.tracks = list
         }
-        function onChaptersChanged(itemId, list) {
-            if (itemId === root.currentItemId || itemId === (root.meta.itemId || ""))
+        function onChaptersChanged(key, list) {
+            if (key === root.sessionKey)
                 root.chapters = list
         }
-        function onPlaybackStarted(itemId) {
+        function onPlaybackStarted(sessionKey, itemId) {
             // 每集就绪即拉轨道(选轨已在 file-loaded 应用,这里是面板数据)。
-            if (itemId === root.currentItemId || itemId === (root.meta.itemId || ""))
-                MpvClient.refreshTracks(itemId)
+            if (sessionKey === root.sessionKey)
+                MpvClient.refreshTracks(root.sessionKey)
         }
     }
 
@@ -401,7 +405,7 @@ Window {
                         } else {
                             // 松手落点过磁吸(与 hover 预览一致)。
                             const target = root.snapChapter(value)
-                            MpvClient.seek(target >= 0 ? target : value, root.meta.itemId || "")
+                            MpvClient.seek(target >= 0 ? target : value, root.sessionKey)
                             scrubbing = false
                         }
                     }
@@ -490,10 +494,10 @@ Window {
                             anchors.margins: 1
                             // 仅 hover 且有播放地址时建立预览实例。
                             active: (seekBar.hovered || seekBar.scrubbing)
-                                    && (MpvClient.previewInfo(root.meta.itemId || "").url || "") !== ""
+                                    && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""
                             sourceComponent: MpvVideoItem { id: previewVideo }
                             onLoaded: {
-                                const info = MpvClient.previewInfo(root.meta.itemId || "")
+                                const info = MpvClient.previewInfo(root.sessionKey)
                                 if (info.headers && info.headers.length > 0)
                                     item.sendCommand(["set_property", "http-header-fields", info.headers.join(",")])
                                 item.sendCommand(["set_property", "mute", true])
@@ -566,7 +570,7 @@ Window {
                         icon.color: "white"
                         icon.width: 20
                         icon.height: 20
-                        onClicked: MpvClient.command(["cycle", "mute"], root.meta.itemId || "")
+                        onClicked: MpvClient.command(["cycle", "mute"], root.sessionKey)
  tip: "静音"
                     }
                     Slider {
@@ -578,7 +582,7 @@ Window {
                         property bool held: false
                         Binding on value { when: !volSlider.held; value: video.volume }
                         onPressedChanged: held = pressed
-                        onMoved: MpvClient.setVolume(Math.round(value), root.meta.itemId || "")
+                        onMoved: MpvClient.setVolume(Math.round(value), root.sessionKey)
                         background: Rectangle {
                             implicitHeight: 3
                             radius: 2
@@ -628,7 +632,7 @@ Window {
                         onClicked: {
                             root.panel = root.panel === "audio" ? "" : "audio"
                             if (root.panel === "audio")
-                                MpvClient.refreshTracks(root.currentItemId)
+                                MpvClient.refreshTracks(root.sessionKey)
                             root.wake()
                         }
                     }
@@ -638,7 +642,7 @@ Window {
                         onClicked: {
                             root.panel = root.panel === "sub" ? "" : "sub"
                             if (root.panel === "sub")
-                                MpvClient.refreshTracks(root.currentItemId)
+                                MpvClient.refreshTracks(root.sessionKey)
                             root.wake()
                         }
                     }
@@ -747,7 +751,7 @@ Window {
                         hoverEnabled: true
                         onClicked: {
                             if (ep && ep.id)
-                                MpvClient.playEpisode(root.meta.itemId || "", ep.id)
+                                MpvClient.playEpisode(root.sessionKey, ep.id)
                         }
                     }
                 }
@@ -810,7 +814,7 @@ Window {
                         anchors.fill: parent
                         hoverEnabled: true
                         enabled: modelData.kind !== "head"
-                        onClicked: MpvClient.selectTrack(root.currentItemId, modelData.type, modelData.id)
+                        onClicked: MpvClient.selectTrack(root.sessionKey, modelData.type, modelData.id)
                     }
                 }
             }
@@ -874,7 +878,7 @@ Window {
     Shortcut { sequences: ["Shift+Right"]; onActivated: { root.wake(); root.seekBy(30) } }
     Shortcut { sequences: ["Up"]; onActivated: root.adjustVolume(5) }
     Shortcut { sequences: ["Down"]; onActivated: root.adjustVolume(-5) }
-    Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["cycle", "mute"], root.meta.itemId || "") }
+    Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["cycle", "mute"], root.sessionKey) }
     Shortcut { sequences: ["F"]; onActivated: root.toggleFullscreen() }
     Shortcut { sequences: ["N"]; onActivated: root.episodeJump(1) }
     Shortcut { sequences: ["P"]; onActivated: root.episodeJump(-1) }

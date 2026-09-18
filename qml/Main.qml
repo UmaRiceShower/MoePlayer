@@ -163,7 +163,7 @@ ApplicationWindow {
         }
         const e = root._epUrlCache[meta.itemId]
         console.info("Main: 灌入播放列表", list.length, "条,当前集", meta.itemId)
-        MpvClient.setEpisodeList(list, meta.itemId, idx,
+        MpvClient.setEpisodeList(list, (meta.accountId ? meta.accountId + "|" : "") + meta.itemId, idx,
                                  e ? e.url : "", e ? e.headers : [],
                                  e ? e.meta : {})
         return true
@@ -197,7 +197,7 @@ ApplicationWindow {
             console.info("Main: 内嵌播放窗口", meta.itemId)
             playerWinComp.createObject(root, { "meta": meta })
         }
-        function onPlaybackFinished(itemId, error) {
+        function onPlaybackFinished(sessionKey, itemId, error) {
             console.info("Main: 播放结束", itemId, "error:", error)
             // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
             // 历史页下次打开即是新时间,不必等整表刷新。账号/服务器取会话
@@ -728,7 +728,7 @@ ApplicationWindow {
                         }
                         if (idx >= 0) {
                             // 当前集 URL 一并传 setEpisodeList(第 0 条真 URL)。
-                            MpvClient.setEpisodeList(list, meta.itemId, idx,
+                            MpvClient.setEpisodeList(list, (meta.accountId ? meta.accountId + "|" : "") + meta.itemId, idx,
                                                      url, headers, meta)
                             root._listPrimed = true
                             MpvClient.deliver(url, headers, meta)
