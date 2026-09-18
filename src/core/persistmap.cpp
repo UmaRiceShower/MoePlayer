@@ -25,6 +25,12 @@ PersistMap::PersistMap(QSettings *settings, const QString &cacheBase)
 
 bool PersistMap::loadSettings(const QString &key, QVariant &out, const QVariant &def)
 {
+    if (m_settings->status() != QSettings::NoError) {
+        qWarning().noquote() << "PersistMap: 配置读取失败"
+                             << "status" << int(m_settings->status());
+        out = def;
+        return false;
+    }
     const QString raw = m_settings->value(key).toString();
     if (raw.isEmpty())
         return false; // 缺键:首次启动常态,静默回默认
@@ -52,9 +58,9 @@ bool PersistMap::loadCache(const QString &name, QVariant &out)
     const QString raw = QString::fromUtf8(f.readAll());
     if (loadInner(raw, QVariant(), out, name))
         return true;
-    // 损坏(坏 JSON/版本回退):可重建件,删除重来,避免每次启动重读重报。
-    qWarning().noquote() << "PersistMap: 删除损坏缓存" << path;
-    QFile::remove(path);
+    // 损坏(坏 JSON/版本高于当前):不删文件——历史类是本地独有数据,
+    // 读失败也可能只是一次抖动;文件保留,下次成功写自然覆盖自愈。
+    qWarning().noquote() << "PersistMap: 缓存读失败,回默认(文件保留)" << path;
     return false;
 }
 
