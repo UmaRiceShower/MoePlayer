@@ -1547,7 +1547,8 @@ QString AccountManager::folderIdOfAccount(const QString &accountId) const
     return QString();
 }
 
-void AccountManager::addAccountToFolder(const QString &folderId, const QString &accountId)
+void AccountManager::addAccountToFolder(const QString &folderId, const QString &accountId,
+                                        const QString &beforeAccountId)
 {
     FolderInfo *f = folderById(folderId);
     if (!f)
@@ -1561,7 +1562,10 @@ void AccountManager::addAccountToFolder(const QString &folderId, const QString &
         if (e.accountIds.removeOne(accountId))
             break;
     }
-    f->accountIds.append(accountId);
+    int ins = f->accountIds.indexOf(beforeAccountId);
+    if (ins < 0)
+        ins = f->accountIds.size();
+    f->accountIds.insert(ins, accountId);
     // 成员不占视觉位:从 layoutOrder 移除账号项,并按展平顺序重排
     // accounts(账号进文件夹块,首页聚合跟随视觉)。
     removeFromLayoutOrder(QLatin1String("account"), accountId);
@@ -1574,6 +1578,27 @@ void AccountManager::addAccountToFolder(const QString &folderId, const QString &
         emit accountsChanged();
         emit homeRowsReady();
     }
+    emit foldersChanged();
+}
+
+void AccountManager::moveAccountInFolder(const QString &folderId, const QString &accountId,
+                                         const QString &beforeAccountId)
+{
+    FolderInfo *f = folderById(folderId);
+    if (!f || !f->accountIds.contains(accountId) || accountId == beforeAccountId)
+        return;
+    // 落点语义 = 占据目标格位:前拖后插目标之后,后拖前插目标之前
+    // (否则相邻前移 = 原地不动的假死)。
+    const int fromIdx = f->accountIds.indexOf(accountId);
+    const int toOrig = f->accountIds.indexOf(beforeAccountId);
+    f->accountIds.removeAll(accountId);
+    int pos = f->accountIds.indexOf(beforeAccountId);
+    if (pos < 0)
+        pos = f->accountIds.size();
+    else if (toOrig > fromIdx)
+        pos += 1;
+    f->accountIds.insert(pos, accountId);
+    saveFolders();
     emit foldersChanged();
 }
 
