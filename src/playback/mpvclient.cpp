@@ -30,6 +30,7 @@
 #include "playback/mpvvideoitem.h"
 
 namespace {
+
 // 播放状态回传节流(与 QML Constants.progressReportMs 一致)。
 constexpr qint64 kProgressReportMs = 10000;
 // 每 10 分钟 Ping 维持服务器会话。
@@ -75,8 +76,23 @@ MpvClient::MpvClient(EmbyClient *emby, ConfigManager *config, QObject *parent)
 
 void MpvClient::shutdownAll()
 {
-    // 应用退出:终止全部 mpv 子进程(避免残留窗口/进程)。
+    // 应用退出:先补 Stopped 回传(播到一半退出,进度要落服务器),
+    // 再终止全部 mpv 子进程(避免残留窗口/进程)。
+    bool reported = false;
     const auto keys = m_sessions.keys();
+    for (const QString &k : keys) {
+        Session *s = m_sessions.value(k);
+        if (s && s->loadIssued && !s->ended) {
+            reportStopped(s);
+            reported = true;
+        }
+    }
+    if (reported) {
+        // 回传是异步 POST:退出路径事件循环将停,给网络一小窗发出去。
+        QEventLoop loop;
+        QTimer::singleShot(600, &loop, &QEventLoop::quit);
+        loop.exec();
+    }
     for (const QString &k : keys) {
         Session *s = m_sessions.value(k);
         if (s)
@@ -1159,7 +1175,7 @@ void MpvClient::flush(Session *s)
                             {QStringLiteral("command"),
                              QJsonArray{QStringLiteral("set_property"),
                                         QStringLiteral("http-header-fields"),
-                                        fields.join(QLatin1Char(','))}},
+                                        QJsonArray::fromStringList(fields)}},
                         });
         }
         // 外挂字幕:随 loadfile 第 4 参 options 挂 sub-file(文件加载时生效,
@@ -1260,7 +1276,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                         {QStringLiteral("command"),
                          QJsonArray{QStringLiteral("set_property"),
                                     QStringLiteral("http-header-fields"),
-                                    fields.join(QLatin1Char(','))}},
+                                    QJsonArray::fromStringList(fields)}},
                     });
     }
     // idle 时以 replace 灌入:mpv 直接播第 0 条(真 URL)。
@@ -1296,7 +1312,7 @@ void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &item
                         {QStringLiteral("command"),
                          QJsonArray{QStringLiteral("set_property"),
                                     QStringLiteral("http-header-fields"),
-                                    fields.join(QLatin1Char(','))}},
+                                    QJsonArray::fromStringList(fields)}},
                     });
     }
     if (url.isEmpty())

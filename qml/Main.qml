@@ -44,6 +44,13 @@ ApplicationWindow {
     property var _deliverMeta: null
     // 协商结果缓存:id -> {url, headers, meta}(预取/hook 共用)。
     property var _epUrlCache: ({})
+    // 协商结果缓存写入唯一口:上限 40 条,超出清最旧(键序即插入序)。
+    function cacheEpisodeUrl(id, url, headers, meta) {
+        const ck = Object.keys(root._epUrlCache)
+        if (ck.length >= 40)
+            delete root._epUrlCache[ck[0]]
+        root._epUrlCache[id] = { url: url, headers: headers, meta: meta }
+    }
     // 在途协商:id -> true(防重复)。
     property var _pendingUrls: ({})
     // hook 等待应答:id -> true(moe-hook on_load 已 defer)。
@@ -199,10 +206,12 @@ ApplicationWindow {
         }
         function onPlaybackFinished(sessionKey, itemId, error) {
             console.info("Main: 播放结束", itemId, "error:", error)
+            root._listPrimed = false // 会话终结:下次起播(新剧)重建列表
             // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
             // 历史页下次打开即是新时间,不必等整表刷新。账号/服务器取会话
             // 缓存里的 meta(无缓存时退回当前播放上下文)。
             const e = root._epUrlCache[itemId]
+            delete root._epUrlCache[itemId] // 取完即清:播过的协商结果不再复用
             const m = e && e.meta ? e.meta : root._curMeta
             if (m && m.serverUrl && m.accountId)
                 AccountManager.refreshHistoryItem(m.serverUrl, m.accountId, itemId)
@@ -280,7 +289,7 @@ ApplicationWindow {
             if (!m.accountId)
                 m.accountId = root._playAccountId || root.currentAccountId
             console.info("Main: 协商就绪入缓存", id)
-            root._epUrlCache[id] = { url: url, headers: headers, meta: m }
+            root.cacheEpisodeUrl(id, url, headers, m)
             root.serveEpisodeUrl(id, "")
         }
         function onPlaybackFailed(serverUrl, itemId, message) {
@@ -709,7 +718,7 @@ ApplicationWindow {
                 if (root._playAccountId !== "" && !meta.accountId)
                     meta.accountId = root._playAccountId
                 // 当前集 URL/头/元数据无条件入共享缓存(hook 应答/补建路径用)。
-                root._epUrlCache[meta.itemId] = { url: url, headers: headers, meta: meta }
+                root.cacheEpisodeUrl(meta.itemId, url, headers, meta)
                 // 剧集:全集标题入 mpv 播放列表(占位,m3u EXTINF 标题),deliver
                 // 后按当前集索引开播 → on_load hook 重定向真实地址;所有条目
                 // 标题一致。电影/无序列:直接 deliver。

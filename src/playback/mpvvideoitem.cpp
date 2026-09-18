@@ -358,8 +358,13 @@ MpvEmbeddedCore::~MpvEmbeddedCore()
     if (m_res->mpv)
         mpv_wakeup(m_res->mpv);
     if (m_thread) {
-        m_thread->wait(3000);
-        delete m_thread;
+        if (m_thread->wait(3000)) {
+            delete m_thread;
+        } else {
+            // 超时仍活:delete 活 QThread 会崩;挂 finished→deleteLater 由其退出后自收。
+            qWarning() << "MpvEmbeddedCore: 事件线程 3s 未退出,延后回收";
+            QObject::connect(m_thread, &QThread::finished, m_thread, &QObject::deleteLater);
+        }
         m_thread = nullptr;
     }
     // 事件线程已停。渲染上下文可能还在(Renderer 异步存活):先注销
