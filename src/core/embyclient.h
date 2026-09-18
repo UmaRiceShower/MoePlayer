@@ -28,6 +28,12 @@ public:
     // main.cpp 经 proxyChanged 重新调用,作用于之后的所有请求。
     void setProxy(const QNetworkProxy &proxy);
 
+    // 多线路:身份键 serverUrl → 工作地址(当前线路)的解析器,由
+    // AccountManager 在启动时注入;未注入 = 直通(serverUrl 即基址)。
+    // 收口点:makeRequest(API)与播放取流 URL 构造。
+    using BaseUrlResolver = std::function<QString(const QString &serverUrl, const QString &userId)>;
+    void setBaseUrlResolver(BaseUrlResolver fn) { m_baseUrlResolver = std::move(fn); }
+
     // 按服务器取模型(首次访问创建);账号删除时用 dropServerModels 清理。
     Q_INVOKABLE MediaItemModel *viewsModelFor(const QString &serverUrl);
     Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl);
@@ -295,6 +301,7 @@ signals:
     void errorOccurred(const QString &serverUrl, const QString &message);
 
 private:
+    BaseUrlResolver m_baseUrlResolver;
     // 按显式服务器/凭据拼接路径与认证头。
     QNetworkRequest makeRequest(const QString &serverUrl, const QString &token,
                                 const QString &userId, const QString &path, bool json) const;

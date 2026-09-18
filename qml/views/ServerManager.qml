@@ -33,6 +33,7 @@ Item {
     property bool adding: false
     property string errorMsg: ""
     property bool editOpen: false
+    property int editActiveLine: 0
     property string editAccountId: ""
     property string editError: ""
     property var expandedFolders: []
@@ -669,6 +670,14 @@ Item {
             editUserField.text = acc.userName
         }
         editIconField.text = ""
+        linesDraft.clear()
+        const ls = (acc && acc.lines) || []
+        for (let i = 0; i < ls.length; ++i)
+            linesDraft.append({ name: ls[i].name, url: ls[i].url })
+        root.editActiveLine = Math.min(Math.max(-1, (acc && acc.activeLine) ?? -1),
+                                       linesDraft.count - 1)
+        if (linesDraft.count === 0)
+            root.editActiveLine = -1
         root.editError = ""
         editHiddenSwitch.checked = root.accountInfo(id).hidden === true
         root.editOpen = true
@@ -696,6 +705,24 @@ Item {
         if (icon !== "")
             AccountManager.setAccountIcon(root.editAccountId, icon)
         AccountManager.setAccountHidden(root.editAccountId, editHiddenSwitch.checked)
+        editNameField.forceActiveFocus()
+        const activeUrl = (editActiveLine >= 0 && editActiveLine < linesDraft.count)
+                          ? linesDraft.get(editActiveLine).url : ""
+        const list = []
+        for (let i = 0; i < linesDraft.count; ++i)
+            list.push({ name: linesDraft.get(i).name, url: linesDraft.get(i).url })
+        AccountManager.setAccountLines(root.editAccountId, list)
+        if (editActiveLine < 0 || list.length === 0) {
+            AccountManager.setActiveLine(root.editAccountId, -1) // 主地址
+        } else {
+            const ls2 = root.accountInfo(root.editAccountId).lines || []
+            for (let i = 0; i < ls2.length; ++i) {
+                if (ls2[i].url === activeUrl) {
+                    AccountManager.setActiveLine(root.editAccountId, i)
+                    break
+                }
+            }
+        }
         root.closeEditDialog()
     }
     // 删除:先向服务器发登出(结果忽略),再删本地数据(见
@@ -790,6 +817,29 @@ Item {
 
     // 右键菜单:与设置页下拉同套令牌(scrim 底 + accent 描边 + 淡入),
     // 不用原生 Menu/MenuItem 默认样式。
+    // 自绘悬停气泡挂在目标项上方。
+    component HoverBubble: Rectangle {
+        property string tip: ""
+        property bool show: false
+        visible: show && tip !== ""
+        // 向下弹:单选点行贴近浮窗顶/列表裁剪线,上弹会被裁。
+        anchors.top: parent.bottom
+        anchors.topMargin: 8
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: bubbleText.implicitWidth + 14
+        height: bubbleText.implicitHeight + 8
+        radius: 6
+        color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
+        z: 100
+        AppText {
+            id: bubbleText
+            anchors.centerIn: parent
+            text: parent.tip
+            color: Theme.textPrimary
+            font.pixelSize: 12
+        }
+    }
+
     Menu {
         id: blankMenu
         padding: 6
@@ -889,6 +939,53 @@ Item {
             text: "删除"
             onTriggered: root.menuKind === "folder" ? AccountManager.removeFolder(root.menuId)
                                                     : AccountManager.removeAccount(root.menuId)
+        }
+        MenuSeparator {
+            visible: root.menuKind === "account"
+                     && ((root.accountInfo(root.menuId).lines || []).length > 0)
+            height: visible ? 9 : 0
+            padding: 4
+            contentItem: Rectangle {
+                implicitHeight: 1
+                color: Theme.borderSoft
+            }
+        }
+        Instantiator {
+            model: {
+                if (root.menuKind !== "account")
+                    return []
+                const acc = root.accountInfo(root.menuId)
+                const ls = acc.lines || []
+                if (ls.length === 0)
+                    return []
+                const out = [{ name: "主地址", url: acc.serverUrl, idx: -1 }]
+                for (let i = 0; i < ls.length; ++i)
+                    out.push({ name: ls[i].name !== "" ? ls[i].name : "线路 " + (i + 1),
+                               url: ls[i].url, idx: i })
+                return out
+            }
+            delegate: MenuItem {
+                id: lineChoice
+                required property var modelData
+                implicitHeight: 32
+                padding: 0
+                background: Rectangle {
+                    radius: 6
+                    color: lineChoice.highlighted ? Theme.tint : "transparent"
+                }
+                contentItem: AppText {
+                    text: (root.accountInfo(root.menuId).activeLine === lineChoice.modelData.idx
+                           ? "● " : "　") + lineChoice.modelData.name + " · " + lineChoice.modelData.url
+                    font.pixelSize: 12
+                    color: lineChoice.highlighted ? Theme.accent : Theme.textPrimary
+                    verticalAlignment: Text.AlignVCenter
+                    leftPadding: 8
+                    elide: Text.ElideRight
+                }
+                onTriggered: AccountManager.setActiveLine(root.menuId, lineChoice.modelData.idx)
+            }
+            onObjectAdded: (index, object) => cardMenu.addItem(object)
+            onObjectRemoved: (index, object) => cardMenu.removeItem(object)
         }
     }
 
@@ -1980,23 +2077,201 @@ Item {
                         color: Theme.textMuted
                         font.pixelSize: 13
                     }
-                    TextField {
-                        id: editUrlField
+                    Row {
                         width: parent.width
-                        height: 36
-                        leftPadding: 14
-                        rightPadding: 14
-                        placeholderText: "http://192.168.1.100:8096"
-                        placeholderTextColor: Theme.textMuted
-                        color: Theme.textPrimary
-                        font.pixelSize: 14
-                        background: Rectangle {
-                            radius: 18
-                            color: Theme.bg
+                        spacing: 8
+                        Rectangle {
+                            width: 14
+                            height: 14
+                            radius: 7
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: "transparent"
                             border.width: 1
-                            border.color: editUrlField.activeFocus ? Theme.accent : Theme.textMuted
+                            border.color: editActiveLine === -1 ? Theme.accent : Theme.textMuted
+                            Rectangle {
+                                anchors.centerIn: parent
+                                width: 6
+                                height: 6
+                                radius: 3
+                                visible: editActiveLine === -1
+                                color: Theme.accent
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.editActiveLine = -1
+                            }
+                            HoverHandler { id: hovMainRadio }
+                            HoverBubble {
+                                tip: "使用主地址"
+                                show: hovMainRadio.hovered
+                            }
                         }
-                        onAccepted: editUserField.forceActiveFocus()
+                        TextField {
+                            id: editUrlField
+                            width: parent.width - 22
+                            height: 36
+                            leftPadding: 14
+                            rightPadding: 14
+                            placeholderText: "http://192.168.1.100:8096"
+                            placeholderTextColor: Theme.textMuted
+                            color: Theme.textPrimary
+                            font.pixelSize: 14
+                            background: Rectangle {
+                                radius: 18
+                                color: Theme.bg
+                                border.width: 1
+                                border.color: editUrlField.activeFocus ? Theme.accent : Theme.textMuted
+                            }
+                            onAccepted: editUserField.forceActiveFocus()
+                        }
+                    }
+                }
+                // 线路(同一服务器的不同入口,行内可编辑;行数不定有界滚动)。
+                // 单选组 = 主地址行(-1)+ 线路行;请求与取流走当前选中项。
+                Column {
+                    width: parent.width
+                    spacing: 6
+                    ListView {
+                        visible: linesDraft.count > 0
+                        width: parent.width
+                        height: Math.min(contentHeight, 5 * 38)
+                        clip: true
+                        interactive: contentHeight > height
+                        model: ListModel { id: linesDraft }
+                        spacing: 4
+                        ScrollBar.vertical: MoeScrollBar {}
+                        delegate: Rectangle {
+                            id: lineRow
+                            required property int index
+                            required property string name
+                            required property string url
+                            width: ListView.view.width
+                            height: 34
+                            radius: 8
+                            color: editActiveLine === index ? Theme.tint : "transparent"
+                            Row {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+                                Rectangle {
+                                    width: 14
+                                    height: 14
+                                    radius: 7
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: "transparent"
+                                    border.width: 1
+                                    border.color: editActiveLine === lineRow.index ? Theme.accent : Theme.textMuted
+                                    Rectangle {
+                                        anchors.centerIn: parent
+                                        width: 6
+                                        height: 6
+                                        radius: 3
+                                        visible: editActiveLine === lineRow.index
+                                        color: Theme.accent
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.editActiveLine = lineRow.index
+                                    }
+                                    HoverHandler { id: hovLineRadio }
+                                    HoverBubble {
+                                        tip: "设为当前线路"
+                                        show: hovLineRadio.hovered
+                                    }
+                                }
+                                TextField {
+                                    width: 100
+                                    height: 30
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    leftPadding: 8
+                                    rightPadding: 8
+                                    placeholderText: "备注名"
+                                    placeholderTextColor: Theme.textMuted
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 13
+                                    text: lineRow.name
+                                    onEditingFinished: linesDraft.setProperty(lineRow.index, "name", text.trim())
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: Theme.bg
+                                        border.width: 1
+                                        border.color: parent.activeFocus ? Theme.accent : "transparent"
+                                    }
+                                }
+                                TextField {
+                                    id: lineUrlEdit
+                                    width: parent.width - 100 - 14 - 20 - 8 * 4
+                                    height: 30
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    leftPadding: 8
+                                    rightPadding: 8
+                                    placeholderText: "https://…"
+                                    placeholderTextColor: Theme.textMuted
+                                    color: Theme.textPrimary
+                                    font.pixelSize: 13
+                                    text: lineRow.url
+                                    onEditingFinished: {
+                                        let u = text.trim()
+                                        if (u !== "" && u.indexOf("://") < 0)
+                                            u = "http://" + u
+                                        linesDraft.setProperty(lineRow.index, "url", u)
+                                    }
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: Theme.bg
+                                        border.width: 1
+                                        border.color: lineUrlEdit.activeFocus ? Theme.accent : "transparent"
+                                    }
+                                }
+                                AppText {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "✕"
+                                    color: hovLineDel.hovered ? Theme.danger : Theme.textMuted
+                                    font.pixelSize: 13
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            linesDraft.remove(lineRow.index)
+                                            if (root.editActiveLine >= linesDraft.count)
+                                                root.editActiveLine = linesDraft.count - 1
+                                        }
+                                    }
+                                    HoverHandler { id: hovLineDel }
+                                }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: parent.width
+                        height: 34
+                        radius: 8
+                        color: hovAddLine.hovered ? Theme.tint : "transparent"
+                        border.width: 1
+                        border.color: Qt.rgba(Theme.textMuted.r, Theme.textMuted.g, Theme.textMuted.b, 0.35)
+                        AppText {
+                            anchors.centerIn: parent
+                            text: "＋ 添加线路"
+                            color: hovAddLine.hovered ? Theme.accent : Theme.textMuted
+                            font.pixelSize: 13
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: linesDraft.append({ name: "", url: "" })
+                        }
+                        HoverHandler { id: hovAddLine }
+                    }
+                    AppText {
+                        visible: linesDraft.count > 0
+                        width: parent.width
+                        wrapMode: Text.Wrap
+                        text: "● 为当前线路;切换后请求与播放都走该地址(保存生效)"
+                        color: Theme.textMuted
+                        font.pixelSize: 11
                     }
                 }
                 Column {

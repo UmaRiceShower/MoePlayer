@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QRandomGenerator>
 #include <QSaveFile>
+#include <QSet>
 #include <QUrl>
 #include <QUuid>
 
@@ -437,6 +438,8 @@ QVariantList AccountManager::accounts() const
         m.insert(QStringLiteral("hidden"), a.hidden);
         const FolderInfo *folder = folderById(folderIdOfAccount(a.id));
         m.insert(QStringLiteral("hiddenByFolder"), folder && folder->hidden);
+        m.insert(QStringLiteral("lines"), a.lines);
+        m.insert(QStringLiteral("activeLine"), a.activeLine);
         out.append(m);
     }
     return out;
@@ -487,6 +490,71 @@ void AccountManager::setAccountHidden(const QString &accountId, bool hidden)
         checkAccountToken(accountId);
         fetchHomeRows(m_homeLimit);
     }
+}
+
+// 归一化:去空白 + 去尾斜杠(去重与比较的前提)。
+static QString normLineUrl(QString u)
+{
+    u = u.trimmed();
+    while (u.endsWith(QLatin1Char('/')))
+        u.chop(1);
+    return u;
+}
+
+void AccountManager::setAccountLines(const QString &accountId, const QVariantList &lines)
+{
+    const int idx = accountIndexById(accountId);
+    if (idx < 0)
+        return;
+    QVariantList cleaned;
+    QSet<QString> seen;
+    for (const auto &v : lines) {
+        const QVariantMap m = v.toMap();
+        const QString url = normLineUrl(m.value(QStringLiteral("url")).toString());
+        if (url.isEmpty() || seen.contains(url))
+            continue;
+        seen.insert(url);
+        cleaned.append(QVariantMap{ { QStringLiteral("name"),
+                                      m.value(QStringLiteral("name")).toString().trimmed() },
+                                    { QStringLiteral("url"), url } });
+    }
+    AccountInfo &a = m_accounts[idx];
+    a.lines = cleaned;
+    if (a.activeLine >= a.lines.size())
+        a.activeLine = -1;
+    save();
+    emit accountsChanged();
+}
+
+void AccountManager::setActiveLine(const QString &accountId, int index)
+{
+    const int idx = accountIndexById(accountId);
+    if (idx < 0)
+        return;
+    AccountInfo &a = m_accounts[idx];
+    // -1 = 主地址(登录地址);0..N-1 = 线路下标。线路表为空时恒回主地址。
+    if (index < -1 || index >= a.lines.size() || index == a.activeLine)
+        return;
+    a.activeLine = index;
+    save();
+    emit accountsChanged();
+}
+
+QString AccountManager::activeUrlFor(const QString &serverUrl, const QString &userId) const
+{
+    for (const auto &a : m_accounts) {
+        if (a.serverUrl != serverUrl)
+            continue;
+        if (!userId.isEmpty() && a.userId != userId)
+            continue;
+        if (a.lines.isEmpty() || a.activeLine < 0)
+            return serverUrl;
+        const int i = qBound(0, a.activeLine, a.lines.size() - 1);
+        const QString url = normLineUrl(a.lines.at(i).toMap()
+                                        .value(QStringLiteral("url")).toString());
+        return url.isEmpty() ? serverUrl : url;
+    }
+    return serverUrl;
 }
 
 void AccountManager::setFolderHidden(const QString &folderId, bool hidden)
@@ -1971,6 +2039,8 @@ void AccountManager::load()
         a.icon = o.value(QLatin1String("icon")).toString();
         a.lastUsed = o.value(QLatin1String("lastUsed")).toVariant().toLongLong();
         a.hidden = o.value(QLatin1String("hidden")).toBool();
+        a.lines = o.value(QLatin1String("lines")).toArray().toVariantList();
+        a.activeLine = o.value(QLatin1String("activeLine")).toInt(-1);
         if (!a.id.isEmpty())
             m_accounts.append(a);
     }
@@ -1991,6 +2061,8 @@ void AccountManager::save()
         o.insert(QLatin1String("icon"), a.icon);
         o.insert(QLatin1String("lastUsed"), a.lastUsed);
         o.insert(QLatin1String("hidden"), a.hidden);
+        o.insert(QLatin1String("lines"), QJsonArray::fromVariantList(a.lines));
+        o.insert(QLatin1String("activeLine"), a.activeLine);
         arr.append(o);
     }
     m_settings.setValue(kAccountsKey, QString::fromUtf8(QJsonDocument(arr).toJson(QJsonDocument::Compact)));
