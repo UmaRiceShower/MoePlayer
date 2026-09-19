@@ -136,7 +136,10 @@ Item {
             y: 0
             width: parent.width
             height: parent.height
-            source: root.posterId ? "image://emby/" + root.posterId : ""
+
+            // 就绪淡入
+            opacity: status === Image.Ready ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 260 } }            source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true

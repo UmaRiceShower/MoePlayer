@@ -805,6 +805,9 @@ Item {
                                     anchors.fill: parent
                                     source: libCell.modelData.posterId
                                            ? "image://emby/" + libCell.modelData.posterId : ""
+                                    // 就绪淡入
+                                    opacity: status === Image.Ready ? 1 : 0
+                                    Behavior on opacity { NumberAnimation { duration: 260 } }
                                     fillMode: Image.PreserveAspectCrop
                                     cache: true
                                     asynchronous: true
@@ -1271,6 +1274,13 @@ Item {
 
             Image {
                 id: cardImg
+                // 就绪淡入带闩锁:首载淡入一次;之后 opacity 常 1,同实例换
+                // source 由 retainWhileLoading 平滑(纯 status 门控会把 retain
+                // 保留的旧帧一起淡出 = 无感刷新回退)。
+                property bool _everReady: false
+                onStatusChanged: if (status === Image.Ready) _everReady = true
+                opacity: _everReady ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 260 } }
                 // 溢出到 pad(ramp 外半需要真实内容,不只是透明)
                 x: -fxHost.pad
                 y: -fxHost.pad
