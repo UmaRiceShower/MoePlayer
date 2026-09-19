@@ -2,7 +2,6 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Shapes
 import MoePlayer.Core
 
 //! 媒体库主界面:专注展示某服务器的指定媒体库条目(分页网格)。
@@ -91,29 +90,12 @@ Item {
     readonly property color chipActive: Theme.accent
     readonly property color chipActiveHover: Theme.accentSoft
 
-    // --- 头部面包屑链配色:深冷灰底 + 粉色高亮,避免棕红感 ---
-    // 亮色系下整条"浅底深字":深色填充换浅系(scrimSoft/tintStrong),否则深字压深底。
-    readonly property color crumbServer: ThemeStore.isLight
-                                         ? Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 1.0)
-                                         : Theme.scrimDeep
-    readonly property color crumbView: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 1.0)
-    readonly property color crumbViewHover: Theme.tint
-    readonly property color crumbFolder: Theme.scrim
-    readonly property color crumbFolderHover: Theme.tintStrong
-    readonly property color crumbFolderCurrent: ThemeStore.isLight ? Theme.tintStrong : Theme.accentMuted
-    readonly property color crumbFolderCurrentHover: ThemeStore.isLight
-                                                     ? Qt.tint(Theme.bg, Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.34))
-                                                     : Theme.accentMutedHover
-    readonly property color crumbBorder: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.30)
-    readonly property color crumbBorderCurrent: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.65)
-
     // --- 筛选下拉底色(与面包屑链同风格) ---
     readonly property color crumb: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 1.0)
     readonly property color crumbHover: Theme.tint
-    // 头部面包屑尖角水平长度(服名框右尖/媒体库框左缺口共用)。
-    readonly property int bcTip: 20
-
     // ============================= 信号 =============================
+    // 点面包屑服务器段:回首页并把该服显示名注入首页过滤框。
+    signal browseHome(string name)
 
     // 请求播放(携带完整播放地址/头/元数据)。
     signal playRequested(string url, var headers, var meta)
@@ -506,35 +488,6 @@ Item {
         ListElement { label: "修改时间"; key: "DateModified" }
     }
 
-    // 头部面包屑标签形状(QtQuick.Shapes 矢量多边形,右向尖角 ▸):
-    // leftNotch=false(服名)= 左直右尖五边形;
-    // leftNotch=true(媒体库)= 左边缘保留竖边、中点向内凹 V 槽(顶点 x=tip)
-    // + 右尖;服名尖角(凸 tip)插入槽内,仅余 2px 间隙,紧密咬合。
-    // 用 Shape 而非 Canvas:属性绑定(fill/尺寸)由场景图自动重新三角化,
-    // 无 Canvas 手动 requestPaint 的时序问题。ShapePath 自动闭合填充;
-    // 末段落在槽顶点,leftNotch=false 时与左直边共线退化为五边形。
-    component BreadcrumbShape: Shape {
-        id: shape
-        property color fillColor: "transparent"
-        property color borderColor: "transparent"
-        property bool leftNotch: false
-        property int tip: root.bcTip
-
-        ShapePath {
-            fillColor: shape.fillColor
-            strokeColor: shape.borderColor
-            strokeWidth: 1
-            joinStyle: ShapePath.MiterJoin
-            startX: 0
-            startY: 0
-            PathLine { x: shape.width - shape.tip; y: 0 }
-            PathLine { x: shape.width; y: shape.height / 2 }
-            PathLine { x: shape.width - shape.tip; y: shape.height }
-            PathLine { x: 0; y: shape.height }
-            PathLine { x: shape.leftNotch ? shape.tip : 0; y: shape.height / 2}
-        }
-    }
-
     // ============================= 函数 =============================
 
     // --- 基础 ---
@@ -549,6 +502,46 @@ Item {
             if (a.serverUrl === root.serverUrl)
                 return a.name !== "" ? a.name : a.userName
         return root.serverUrl
+    }
+
+    // 媒体库下拉模型(JS 快照,模糊搜索过滤)。
+    function filteredViews(q) {
+        const rows = []
+        const m = root.vm
+        for (let i = 0; m && i < m.count; ++i) {
+            const n = m.nameAt(i) || ""
+            if (q !== "" && !FuzzyMatch.hit(q, n))
+                continue
+            rows.push({ id: m.idAt(i), name: n })
+        }
+        return rows
+    }
+    // 切库(下拉选中):重置下钻路径与筛选,重拉。
+    function selectView(id) {
+        if (root.currentViewId === id)
+            return
+        root.currentViewId = id
+        root.folderPath = []
+        root.resetFilters()
+        root.reloadAll()
+    }
+    // 文件夹下拉模型:库根 + 祖先链(当前层 kind=current)+ 当前层子文件夹。
+    function folderTreeRows() {
+        const rows = [{ name: "全部", level: 0,
+                        kind: root.folderPath.length === 0 ? "current" : "root" }]
+        for (let i = 0; i < root.folderPath.length; ++i) {
+            const f = root.folderPath[i]
+            rows.push({ name: f.name, level: i + 1, idx: i,
+                        kind: i === root.folderPath.length - 1 ? "current" : "ancestor" })
+        }
+        const m = root.fm
+        for (let i = 0; m && i < m.count; ++i) {
+            const n = m.nameAt(i)
+            if (n)
+                rows.push({ name: n, level: root.folderPath.length + 1,
+                            kind: "child", id: m.idAt(i) })
+        }
+        return rows
     }
 
     // --- 请求核心 ---
@@ -640,7 +633,6 @@ Item {
                 break
             }
         }
-        viewSelector.currentIndex = idx
         root.currentViewId = root.vm.idAt(idx)
         root.currentViewName = root.vm.nameAt(idx)
         root.folderPath = []
@@ -737,28 +729,6 @@ Item {
         id: fmMetrics
         font.pixelSize: 16
     }
-    // 子文件夹模型最长名文本宽(popup 宽度下限,防长名被截断)。
-    function maxFolderTextWidth() {
-        const m = root.fm
-        let w = 0
-        for (let i = 0; m && i < m.count; ++i) {
-            const n = m.nameAt(i)
-            if (n)
-                w = Math.max(w, fmMetrics.advanceWidth(n))
-        }
-        return w
-    }
-    // 媒体库模型最长名文本宽(媒体库下拉同理)。
-    function maxViewTextWidth() {
-        const m = root.vm
-        let w = 0
-        for (let i = 0; m && i < m.count; ++i) {
-            const n = m.nameAt(i)
-            if (n)
-                w = Math.max(w, fmMetrics.advanceWidth(n))
-        }
-        return w
-    }
 
     // --- 聚合筛选面板(FilterPanel)数据 ---
     // 已激活筛选维度数(按钮计数徽标:"筛选 · N")。
@@ -854,7 +824,10 @@ Item {
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
         }
-        // 面包屑链:服名▸媒体库▸文件夹…,负间距咬合不变(段间尖角重叠)。
+        // 面包屑链(扁平文本式):服务器 / 库名 ▾ / 文件夹 ▾。
+        // 服务器段点击 = 回首页并注入该服显示名到首页过滤框(与管理页卡片同机制);
+        // 库名段下拉带模糊搜索;文件夹段下拉 = 缩进祖先链 + 当前层子文件夹
+        // (纯缩进表意,无引导线;当前层高亮)。
         Row {
             id: crumbChain
             anchors.left: libBackBtn.right
@@ -862,101 +835,182 @@ Item {
             anchors.right: searchBox.left
             anchors.rightMargin: 12
             anchors.verticalCenter: parent.verticalCenter
-            spacing: -root.bcTip + 2
+            spacing: 2
             clip: true
 
-            // 服名:左直右尖五边形(静态展示,宽度随文字自适应)。
-            Item {
-                id: serverTab
-                width: serverTabLabel.implicitWidth + 18 + root.bcTip
-                height: 42
-                BreadcrumbShape {
+            // 段按钮:透明底,hover tint 圆角片;当前段 accent 加粗。
+            component CrumbSeg: Item {
+                id: seg
+                property alias text: segText.text
+                property bool arrow: false
+                property bool current: false
+                property alias hovered: segMa.containsMouse
+                signal clicked()
+                width: Math.min(segText.implicitWidth + (seg.arrow ? 18 : 0) + 16, 220)
+                height: 30
+                Rectangle {
                     anchors.fill: parent
-                    // 服名段 = 链最暗端,深冷灰底 + 粉描边,避免棕红。
-                    fillColor: root.crumbServer
-                    borderColor: root.crumbBorder
+                    radius: 6
+                    // 只动 opacity:ColorAnimation 在 transparent(0,0,0,0)↔tint 间
+                    // 插值会扫过暗色中间带(观感=颜色变两次)。
+                    color: Theme.tint
+                    opacity: seg.hovered ? 1 : 0
+                    Behavior on opacity { NumberAnimation { duration: 100 } }
                 }
                 AppText {
-                    id: serverTabLabel
+                    id: segText
                     anchors.left: parent.left
-                    anchors.leftMargin: 17
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8 + (seg.arrow ? 14 : 0)
                     anchors.verticalCenter: parent.verticalCenter
-                    text: root.serverLabel()
-                    font.pixelSize: 16
-                    elide: Text.ElideMiddle
-                }
-            }
-
-            // 媒体库:左缺口右尖,点击弹下拉切库(选中态 accent 高亮)。
-            // 宽度自适应:文字完整宽 + 左 18 + 间隔 8 + ▾ 宽 12 + ▾ 右距(尖角 16 + 4),
-            // 最小 160 防初始空名/短名过窄;文字锚定到 ▾ 左侧,极端长名 elide 兜底。
-            Item {
-                id: viewTab
-                width: Math.max(160, viewTabText.implicitWidth + 58)
-                height: 42
-
-                BreadcrumbShape {
-                    id: viewTabShape
-                    anchors.fill: parent
-                    leftNotch: true
-                    // Shape 属性绑定自动重绘,hover 提亮无需手动触发。
-                    fillColor: viewSelector.hovered ? root.crumbViewHover : root.crumbView
-                    borderColor: root.crumbBorder
-                }
-                // 媒体库名:anchors.left+right 提供显式宽度(AlignHCenter 生效,
-                // elide 生效);垂直用 anchors.verticalCenter 而非 fill——
-                // Text 默认 AlignTop,fill 到容器会以顶部为基线导致文字偏下。
-                AppText {
-                    id: viewTabText
-                    anchors.left: parent.left
-                    anchors.leftMargin: 18
-                    anchors.right: viewTabArrow.left
-                    anchors.rightMargin: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: root.currentViewName
-                    font.pixelSize: 16
-                    horizontalAlignment: Text.AlignHCenter
+                    font.pixelSize: 15
+                    font.bold: seg.current
+                    color: seg.current ? Theme.accent : Theme.textPrimary
                     elide: Text.ElideRight
                 }
                 AppText {
-                    id: viewTabArrow
+                    visible: seg.arrow
                     anchors.right: parent.right
-                    anchors.rightMargin: root.bcTip + 4
+                    anchors.rightMargin: 7
                     anchors.verticalCenter: parent.verticalCenter
-                    text: viewSelector.popup.opened ? "▴" : "▾"
-                    font.pixelSize: 12
+                    text: "▾"
+                    font.pixelSize: 11
+                    color: Theme.textMuted
                 }
-                // 透明交互层:整块可点击弹出下拉,hover 驱动形状提亮。
-                ComboBox {
-                    id: viewSelector
+                MouseArea {
+                    id: segMa
                     anchors.fill: parent
-                    padding: 0
-                    background: null
-                    contentItem: null
-                    indicator: null
-                    model: root.vm
-                    textRole: "name"
-                    // 弹出列表项:与面包屑两段同风格(白字 15px,略小于链身 16px),
-                    // 悬停半透明 accent 高亮,当前选中项右侧 accent 圆点。
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: seg.clicked()
+                }
+            }
+            component CrumbSep: AppText {
+                text: "/"
+                color: Theme.textMuted
+                font.pixelSize: 13
+                height: 30
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            CrumbSeg {
+                text: root.serverLabel()
+                onClicked: root.browseHome(root.serverLabel())
+            }
+            CrumbSep {}
+            CrumbSeg {
+                id: viewSeg
+                text: root.currentViewName
+                arrow: true
+                current: root.folderPath.length === 0
+                onClicked: viewPopup.opened ? viewPopup.close() : viewPopup.open()
+            }
+            // 文件夹段常驻:库根时显示"全部",是根层下钻的唯一入口
+            // (网格委托点文件夹卡走详情不下钻)。
+            CrumbSep { visible: folderSeg.visible }
+            CrumbSeg {
+                id: folderSeg
+                visible: root.folderPath.length > 0 || (root.fm ? root.fm.count > 0 : false)
+                text: root.folderPath.length > 0
+                      ? root.folderPath[root.folderPath.length - 1].name : "全部"
+                arrow: true
+                current: root.folderPath.length > 0
+                onClicked: folderPopup.opened ? folderPopup.close() : folderPopup.open()
+            }
+        }
+
+        // 媒体库下拉:顶部模糊搜索(FuzzyMatch 含拼音)+ 库列表,当前项高亮;
+        // 回车 = 首个匹配。Popup.Item 模式(场景内 overlay,宽度同帧生效)。
+        Popup {
+            id: viewPopup
+            parent: viewSeg
+            popupType: Popup.Item
+            y: parent.height + 6
+            width: 260
+            padding: 8
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+            enter: Transition {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+            }
+            background: Rectangle {
+                color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
+                radius: 8
+                border.width: 1
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+            }
+            onOpened: {
+                viewSearch.text = ""
+                viewList.model = root.filteredViews("")
+                viewFocusTimer.start()
+            }
+            Timer {
+                id: viewFocusTimer
+                interval: 60
+                onTriggered: viewSearch.forceActiveFocus()
+            }
+            contentItem: Column {
+                spacing: 6
+                TextField {
+                    id: viewSearch
+                    width: parent.width
+                    height: 30
+                    leftPadding: 10
+                    rightPadding: 10
+                    placeholderText: "搜索媒体库"
+                    placeholderTextColor: Theme.textMuted
+                    color: Theme.textPrimary
+                    font.pixelSize: 13
+                    selectByMouse: true
+                    background: Rectangle {
+                        radius: 6
+                        color: ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.06)
+                                                  : Qt.rgba(0, 0, 0, 0.25)
+                        border.width: 1
+                        border.color: viewSearch.activeFocus
+                                      ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
+                                      : Theme.borderSoft
+                    }
+                    onTextChanged: if (viewPopup.opened) viewList.model = root.filteredViews(text)
+                    Keys.onEscapePressed: viewPopup.close()
+                    onAccepted: {
+                        const rows = root.filteredViews(text)
+                        if (rows.length > 0)
+                            root.selectView(rows[0].id)
+                        viewPopup.close()
+                    }
+                }
+                ListView {
+                    id: viewList
+                    width: parent.width
+                    height: Math.min(contentHeight, 252)
+                    // Popup 按 contentItem 隐高定尺寸,Flickable 隐高默认 0(弹层会只剩 padding)。
+                    implicitHeight: contentHeight
+                    clip: true
+                    // 命令式赋值(非活绑定):页面销毁中途活绑定重算会读半死
+                    // 对象(setModel→DelegateModel 读 NULL 崩溃,实测)。
+                    model: []
                     delegate: ItemDelegate {
-                        // Qt6 delegate 上下文(Bound 模式):index 与 model 均须
-                        // required 声明;contentItem 委托作用域独立,经根属性转发。
-                        required property int index
-                        required property var model
-                        property string itemText: model[viewSelector.textRole]
-                        width: ListView.view.width
-                        height: 36
+                        required property var modelData
+                        width: viewList.width
+                        height: 32
                         padding: 0
                         contentItem: Item {
                             AppText {
                                 anchors.left: parent.left
                                 anchors.leftMargin: 10
+                                anchors.right: dot.left
+                                anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: parent.parent.itemText
-                                font.pixelSize: 15
+                                text: modelData.name
+                                font.pixelSize: 14
                                 elide: Text.ElideRight
                             }
                             Rectangle {
+                                id: dot
                                 anchors.right: parent.right
                                 anchors.rightMargin: 10
                                 anchors.verticalCenter: parent.verticalCenter
@@ -964,201 +1018,89 @@ Item {
                                 height: 6
                                 radius: 3
                                 color: Theme.accent
-                                visible: viewSelector.currentIndex === parent.parent.index
+                                visible: root.currentViewId === modelData.id
                             }
                         }
-                        highlighted: viewSelector.highlightedIndex === index
                         background: Rectangle {
                             radius: 4
-                            color: parent.highlighted || parent.hovered
+                            color: parent.hovered
                                 ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                                 : "transparent"
                         }
-                    }
-                    // 弹出层:暗色 surface 底 + 描边,与服名框同底色同描边语言,
-                    // 替换 QQC2 默认浅色弹出列表。
-                    // Item 模式(非独立窗口):Qt6.8+ 默认 Popup.Window(顶级窗口),
-                    // 打开时 width 绑定跳变经窗口系统异步 resize,先显旧宽再调宽;
-                    // Popup.Item 作为场景内 overlay item,宽度同帧生效无闪烁。
-                    popup: Popup {
-                        id: viewPopup
-                        y: viewSelector.height + 4
-                        // 自适应宽度:max(段宽, 最长库名文本宽 + 32),上限防超窗口。
-                        // 不能在 opened 三元绑定里算——绑定求值晚于弹窗首帧渲染,
-                        // 会先以段宽显示再变宽(先窄后宽)。onAboutToShow 在显示前
-                        // 同步发射,此处赋值使首帧即带正确宽度;每次打开重算
-                        // (JS 函数访问模型不建绑定依赖,下钻后 fm 已更新)。
-                        width: viewSelector.width
-                        onAboutToShow: {
-                            width = Math.min(root.width - 48,
-                                             Math.max(viewSelector.width, root.maxViewTextWidth() + 32))
+                        onClicked: {
+                            root.selectView(modelData.id)
+                            viewPopup.close()
                         }
-                        implicitHeight: contentItem.implicitHeight
-                        padding: 6
-                        enter: Transition {
-                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
-                        }
-                        exit: Transition {
-                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
-                        }
-                        background: Rectangle {
-                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
-                            radius: 8
-                            border.width: 1
-                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
-                        }
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: viewSelector.delegateModel
-                            currentIndex: viewSelector.highlightedIndex
-                            highlightMoveDuration: 0
-                        }
-                    }
-                    onActivated: function (index) {
-                        if (root.currentViewId === root.vm.idAt(index))
-                            return
-                        root.currentViewId = root.vm.idAt(index)
-                        root.folderPath = []
-                        root.resetFilters()
-                        root.reloadAll()
                     }
                 }
             }
+        }
 
-            // 文件夹层级段(Repeater,model = 库根段 + folderPath 各层):
-            // 库根段("全部")常驻链首——未下钻时是当前段(弹顶层子文件夹),
-            // 下钻后变为回根入口;上级段点击跳回该层(goToLevel),
-            // 当前段点击弹该层子文件夹下拉。段数随层级动态增减。
-            Repeater {
-                model: [{ id: root.currentViewId, name: "全部" }]
-                       .concat(root.folderPath)
-                delegate: Item {
-                    // Qt6 delegate 上下文(Bound 模式):required 声明注入属性。
+        // 文件夹下拉:缩进树(库根 → 祖先链 → 当前层子文件夹)。
+        // 当前层高亮;点库根/祖先 = 跳回该层,点子文件夹 = 下钻。
+        Popup {
+            id: folderPopup
+            onAboutToShow: folderList.model = root.folderTreeRows()
+            parent: folderSeg
+            popupType: Popup.Item
+            y: parent.height + 6
+            width: 260
+            padding: 8
+            closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
+            enter: Transition {
+                NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
+            }
+            exit: Transition {
+                NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
+            }
+            background: Rectangle {
+                color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
+                radius: 8
+                border.width: 1
+                border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
+            }
+            contentItem: ListView {
+                id: folderList
+                width: parent.width
+                height: Math.min(contentHeight, 300)
+                implicitHeight: contentHeight
+                clip: true
+                model: [] // 命令式赋值(同 viewList 注释)
+                Component.onCompleted: model = root.folderTreeRows()
+                delegate: ItemDelegate {
                     required property var modelData
-                    required property int index
-                    // model 下标比 folderPath 下标多 1(链首为库根段)。
-                    property bool isCurrent: index === root.folderPath.length
-                    width: isCurrent
-                           ? Math.max(140, crumbText.implicitWidth + 58)
-                           : crumbText.implicitWidth + 18 + root.bcTip + 8
-                    height: 42
-
-                    BreadcrumbShape {
-                        anchors.fill: parent
-                        leftNotch: true
-                        fillColor: crumbBtn.hovered
-                            ? (parent.isCurrent ? root.crumbFolderCurrentHover : root.crumbFolderHover)
-                            : (parent.isCurrent ? root.crumbFolderCurrent : root.crumbFolder)
-                        borderColor: parent.isCurrent ? root.crumbBorderCurrent : root.crumbBorder
-                    }
-                    AppText {
-                        id: crumbText
-                        anchors.left: parent.left
-                        anchors.leftMargin: 18
-                        anchors.right: parent.isCurrent ? crumbArrow.left : parent.right
-                        anchors.rightMargin: parent.isCurrent ? 8 : 14
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.name
-                        font.pixelSize: 16
-                        horizontalAlignment: Text.AlignHCenter
-                        elide: Text.ElideMiddle
-                    }
-                    AppText {
-                        id: crumbArrow
-                        visible: parent.isCurrent
-                        anchors.right: parent.right
-                        anchors.rightMargin: root.bcTip + 4
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: crumbPopup.opened ? "▴" : "▾"
-                        font.pixelSize: 12
-                    }
-                    // 透明交互层:上级段点击跳回(库根段=回根),当前段点击弹子文件夹下拉。
-                    MouseArea {
-                        id: crumbBtn
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        onClicked: {
-                            if (parent.isCurrent) {
-                                if (crumbPopup.opened)
-                                    crumbPopup.close()
-                                else
-                                    crumbPopup.open()
-                            } else if (index === 0) {
-                                root.goToLevel(-1)
-                            } else {
-                                root.goToLevel(index - 1)
-                            }
+                    width: folderList.width
+                    height: 30
+                    padding: 0
+                    contentItem: Item {
+                        AppText {
+                            anchors.left: parent.left
+                            anchors.leftMargin: 10 + modelData.level * 16
+                            anchors.right: parent.right
+                            anchors.rightMargin: 10
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: modelData.name
+                            font.pixelSize: 14
+                            font.bold: modelData.kind === "current"
+                            color: modelData.kind === "current" ? Theme.accent : Theme.textPrimary
+                            elide: Text.ElideRight
                         }
                     }
-                    // 当前段弹出:该层子文件夹列表(与媒体库下拉同样式)。
-                    // 同 viewPopup:Popup.Item 模式避免独立窗口异步 resize 闪烁。
-                    Popup {
-                        id: crumbPopup
-                        parent: crumbBtn
-                        popupType: Popup.Item
-                        y: parent.height + 4
-                        // closePolicy 用 PressOutsideParent:点击本段(crumbBtn,
-                        // popup 的 parent)不触发 overlay 关闭,事件到达 MouseArea
-                        // onClicked 正常 toggle;若用默认 CloseOnPressOutside,
-                        // overlay 先关 popup、事件再传播到 onClicked 又会 open()——
-                        // 每次点击 close+open 死循环(箭头翻两次、popup 关不掉)。
-                        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-                        // 自适应宽度:max(段宽, 最长子文件夹名文本宽 + 32),上限防超窗口。
-                        // 同 viewPopup:onAboutToShow 显示前赋值,避免首帧先窄后宽。
-                        width: parent.width
-                        onAboutToShow: {
-                            width = Math.min(root.width - 48,
-                                             Math.max(parent.width, root.maxFolderTextWidth() + 32))
-                        }
-                        implicitHeight: contentItem.implicitHeight
-                        padding: 6
-                        enter: Transition {
-                            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 120 }
-                        }
-                        exit: Transition {
-                            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 120 }
-                        }
-                        background: Rectangle {
-                            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.78)
-                            radius: 8
-                            border.width: 1
-                            border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
-                        }
-                        contentItem: ListView {
-                            clip: true
-                            implicitHeight: contentHeight
-                            model: root.fm
-                            delegate: ItemDelegate {
-                                required property int index
-                                required property var model
-                                property string itemText: model.name
-                                width: ListView.view.width
-                                height: 36
-                                padding: 0
-                                contentItem: Item {
-                                    AppText {
-                                        anchors.left: parent.left
-                                        anchors.leftMargin: 10
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: parent.parent.itemText
-                                        font.pixelSize: 15
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                highlighted: ListView.view.currentIndex === index
-                                background: Rectangle {
-                                    radius: 4
-                                    color: parent.highlighted || parent.hovered
-                                        ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
-                                        : "transparent"
-                                }
-                                onClicked: {
-                                    root.enterFolder(model.id, model.name)
-                                    crumbPopup.close()
-                                }
-                            }
-                        }
+                    background: Rectangle {
+                        radius: 4
+                        color: parent.hovered
+                            ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                            : "transparent"
+                    }
+                    onClicked: {
+                        folderPopup.close()
+                        if (modelData.kind === "root")
+                            root.goToLevel(-1)
+                        else if (modelData.kind === "child")
+                            root.enterFolder(modelData.id, modelData.name)
+                        else if (modelData.kind === "ancestor")
+                            root.goToLevel(modelData.idx)
+                        // kind === "current":本层,无需跳转
                     }
                 }
             }

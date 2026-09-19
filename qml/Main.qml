@@ -688,6 +688,12 @@ ApplicationWindow {
     Component {
         id: libraryPage
         Library {
+            onBrowseHome: function (name) {
+                Qt.callLater(function () {
+                    root.homeFilterText = name
+                    stackView.pop(null)
+                })
+            }
             onPlayRequested: function (url, headers, meta) {
                 MpvClient.start(url, headers, meta)
             }
