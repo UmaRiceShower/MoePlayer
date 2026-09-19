@@ -1298,7 +1298,8 @@ Item {
             }
             // 玻璃信息条(仅中心卡):半透明 scrim + 顶部 1px 均匀细 rim
             Rectangle {
-                visible: hcard.isCenter
+                opacity: hcard.isCenter ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 400 } }
                 x: -fxHost.pad
                 y: cardContent.height * 0.58
                 width: fxHost.width
@@ -1310,7 +1311,8 @@ Item {
             }
             Rectangle {
                 id: glassBar
-                visible: hcard.isCenter
+                opacity: hcard.isCenter ? 1 : 0
+                Behavior on opacity { NumberAnimation { duration: 400 } }
                 x: -fxHost.pad
                 y: cardContent.height - Math.round(cardContent.height * 0.16)
                 width: fxHost.width
@@ -1332,13 +1334,19 @@ Item {
             // 判中心卡不用 isCurrentItem(实测本 PathView 恒 false),
             // 用路径 tilt=0 + 浮点容差(吸附毫厘差不瞬间失显)。
             Item {
-                visible: hcard.isCenter
+                id: titleArea
+                // 换卡文字动线:失焦 = 下移+淡出;到位 = 自下方上移+淡入。
+                // visible 恒定,由 opacity 承担显隐(绑定 Behavior 才双向生效)。
+                property real ty: hcard.isCenter ? 0 : 14
+                opacity: hcard.isCenter ? 1 : 0
+                Behavior on ty { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
+                Behavior on opacity { NumberAnimation { duration: 400; easing.type: Easing.OutCubic } }
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
                 anchors.leftMargin: 12
                 anchors.rightMargin: 12
-                anchors.bottomMargin: 12
+                anchors.bottomMargin: 12 - titleArea.ty
                 height: titleText.height
                 AppText {
                     id: yearText
