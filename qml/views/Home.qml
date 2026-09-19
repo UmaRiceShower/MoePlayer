@@ -706,6 +706,8 @@ Item {
                         orientation: ListView.Horizontal
                         spacing: 0
                         header: Item { width: Constants.rowLeftMargin; height: 1 }
+                        // 右缘与左缘同留白(滚到尽头时末卡不贴窗缘)。
+                        footer: Item { width: Constants.rowLeftMargin; height: 1 }
                         model: AccountManager.homeRows
                             // 过滤变化时回左端:原 contentX 会指向已折叠的中段(首卡被截断)。
                         property string filterEcho: root.libFilter
@@ -957,7 +959,8 @@ Item {
         Item {
             anchors.left: parent.left
             anchors.leftMargin: Constants.rowLeftMargin
-            width: libRow.width - Constants.rowLeftMargin
+            // 双侧留白:原只减左边距,右缘贴窗口边。
+            width: libRow.width - Constants.rowLeftMargin * 2
             height: Constants.rowHeight + Constants.homeRowHoverPad
             clip: true
                 ListView {
