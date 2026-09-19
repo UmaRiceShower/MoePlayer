@@ -89,18 +89,6 @@ Item {
     // 分页加载中(防并发翻页)。
     property bool loadingMore: false
 
-    // 选中 chip 底色:accent 降饱和加深(H192° 100% → 35% 饱和)。
-    // chip 选中是实心大面积背景,直接套 accent 太艳;边框/进度条等
-    // 小面积场景用预设强调色(低饱和底)。
-    // 亮色系:深底会在浅界面里突兀,改用实心 accent(与 FilterChip 对齐)。
-    readonly property color chipActive: ThemeStore.isLight
-                                        ? Theme.accent
-                                        : Qt.hsla(Theme.accent.hslHue, 0.35, 0.30, 1.0)
-    // 选中 chip 悬停:同色相提亮一档。
-    readonly property color chipActiveHover: ThemeStore.isLight
-                                             ? Theme.accentSoft
-                                             : Qt.hsla(Theme.accent.hslHue, 0.35, 0.38, 1.0)
-
     // 点击结果进详情(携带所在服务器)。
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
 
@@ -357,17 +345,6 @@ Item {
                     color: Theme.bg
                     border.width: 1
                     border.color: searchField.activeFocus ? Theme.accent : Theme.textMuted
-                    // 聚焦时粉色柔光外圈。
-                    Rectangle {
-                        anchors.fill: parent
-                        anchors.margins: -3
-                        radius: 23
-                        color: "transparent"
-                        border.color: Theme.accent
-                        border.width: searchField.activeFocus ? 2 : 0
-                        opacity: searchField.activeFocus ? 0.35 : 0
-                        Behavior on opacity { NumberAnimation { duration: 120 } }
-                    }
                 }
             }
 
@@ -538,7 +515,7 @@ Item {
                                             radius: 6
                                             color: Theme.bg
                                             border.width: 1
-                                            border.color: Theme.textMuted
+                                            border.color: yearFromField.activeFocus ? Theme.accent : Theme.textMuted
                                         }
                                     }
                                     AppText {
@@ -565,7 +542,7 @@ Item {
                                             radius: 6
                                             color: Theme.bg
                                             border.width: 1
-                                            border.color: Theme.textMuted
+                                            border.color: yearToField.activeFocus ? Theme.accent : Theme.textMuted
                                         }
                                     }
                                 }

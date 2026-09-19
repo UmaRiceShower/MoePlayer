@@ -13,7 +13,7 @@ endif()
 set(MOEPLAYER_VERSION_FULL "${PROJECT_VERSION}${MOEPLAYER_VERSION_SUFFIX}")
 
 # 桌面集成标识(反向域名):desktop 文件名、图标名、Wayland app_id 与
-# 打包(Flatpak/AppImage)统一取值,与 QSettings 路径(MOEPLAYER_NAME)解耦。
+# 打包(Flatpak/AppImage)统一取值,与数据目录名(MOEPLAYER_NAME)解耦。
 set(MOEPLAYER_APP_ID "io.github.umariceshower.MoePlayer")
 
 set(CMAKE_CXX_STANDARD 17)
@@ -219,7 +219,7 @@ qt_add_resources(MoePlayer "app_icon"
 # 的 basename include 惯例记录)才能解析;无同名头文件冲突。
 target_include_directories(MoePlayer PRIVATE src src/core src/models src/playback third_party/tomlplusplus)
 # 应用名/版本单一来源:CMake project() → 编译期宏 → 运行时引用。
-# applicationName 决定 QSettings 存储路径,改名会失联旧配置,改前需评估。
+# applicationName 决定数据目录名(config/cache/state),改名会失联旧配置,改前需评估。
 target_compile_definitions(MoePlayer PRIVATE
     MOEPLAYER_VERSION="${MOEPLAYER_VERSION_FULL}"
     $<$<BOOL:${MPV_FOUND}>:MOEPLAYER_HAVE_LIBMPV>
