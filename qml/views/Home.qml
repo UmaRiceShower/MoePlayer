@@ -657,18 +657,21 @@ Item {
                             onExited: dot.scale = 1.0
                             onClicked: {
                                 heroPv.currentIndex = index
-                                heroTimer.restart()
+                                if (!heroHover.hovered)
+                                    heroTimer.restart()
                             }
                         }
                     }
                 }
             }
 
+            // hover 悬停暂停自动轮播(看卡时不被切走)。
+            HoverHandler { id: heroHover }
             Timer {
                 id: heroTimer
                 interval: Constants.homeHeroTimerMs
                 repeat: true
-                running: heroModel.count > 1
+                running: heroModel.count > 1 && !heroHover.hovered
                 onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
             }
             // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
@@ -1269,7 +1272,10 @@ Item {
                                     hcard.modelData.accountId)
                 } else {
                     heroPv.currentIndex = hcard.index
-                    heroTimer.restart()
+                    // 悬停中不 restart:restart 会强制 running=true 顶掉
+                    // hover 暂停的绑定(直到下次依赖变化)。
+                    if (!heroHover.hovered)
+                        heroTimer.restart()
                 }
             }
         }
