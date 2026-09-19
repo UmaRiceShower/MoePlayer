@@ -151,43 +151,45 @@ Item {
     // 服务器管理页点卡片注入:Main.homeFilterText 写入(账号显示名)后
     // 此处消费进过滤框,消费即清(同名再点能再触发)。
     property string filterInject: ApplicationWindow.window ? ApplicationWindow.window.homeFilterText : ""
+    // 非激活态(上方压着其他页)收到注入先挂起:非激活页上做 模型切换
+    // (空查询 C++ 模型 ↔ 过滤快照 JS 数组)会让 DelegateModel 读空指针
+    property string _pendingInject: ""
     onFilterInjectChanged: {
-        if (root.filterInject !== "") {
-            filterField.text = root.filterInject
-            ApplicationWindow.window.homeFilterText = ""
-        }
+        if (root.filterInject === "")
+            return
+        root._pendingInject = root.filterInject
+        // 清空挪出本 notify 级联:filterInject 绑定读 window.homeFilterText,
+        // 同步清空 = 在自身 notify 里重赋值源,Binding loop(实测告警)。
+        Qt.callLater(function () { ApplicationWindow.window.homeFilterText = "" })
+        if (root.StackView.status === StackView.Active)
+            root._applyInject()
+    }
+    // 注入结算定时器:转场时长(230ms)之上取整。
+    Timer {
+        id: injectTimer
+        interval: 400
+        repeat: false
+        onTriggered: root._applyInject()
+    }
+    function _applyInject() {
+        if (root._pendingInject === "")
+            return
+        filterField.text = root._pendingInject
+        root._pendingInject = ""
     }
 
-    // pageList 模型:空查询 = 原生 C++ 模型(默认态零回归——快照重建会把
-    // 聚合期的行原位更新变成整列重置);非空 = 过滤快照(行数少,重建可承受)。
-    // 不能给竖向 ListView 行加条件高度(离屏高度缓存失效 → 全量孵化委托)。
-    property var filteredRows: []
-    function rebuildRowsFilter() {
-        const q = root.libFilter.trim()
-        if (q === "") {
-            root.filteredRows = []
-            return
-        }
-        const hm = AccountManager.homeRows
-        const out = []
-        for (let i = 0; i < hm.count; ++i) {
-            const row = hm.rowAt(i)
-            if (root.libMatch(row))
-                out.push(row)
-        }
-        root.filteredRows = out
+    // pageList 恒定绑定代理模型(永不切换对象):过滤谓词 = libMatch(JS 回调,
+    // FuzzyMatch 单一真相源);空查询 = 谓词恒真透传。历史:旧实现按查询空否
+    // 切换 model(C++↔JS 快照),切换瞬间 DelegateModel 读已释放对象概率性
+    // 崩溃(多轮复现矩阵实证,两步清池/关 reuseItems 均不能根除)。
+    HomeRowsFilterModel {
+        id: homeRowsFilter
+        sourceModel: AccountManager.homeRows
+        filterPredicate: root.libMatch
     }
     onLibFilterChanged: {
-        root.rebuildRowsFilter()
+        homeRowsFilter.refilter()
         root.rebuildTop()
-    }
-    Connections {
-        target: AccountManager.homeRows
-        // 仅过滤态需要跟随模型更新(空查询 rebuild 早退)。
-        function onDataChanged() { root.rebuildRowsFilter() }
-        function onRowsInserted() { root.rebuildRowsFilter() }
-        function onRowsRemoved() { root.rebuildRowsFilter() }
-        function onModelReset() { root.rebuildRowsFilter() }
     }
 
     // hero 跟随过滤的条件:查询命中某服名(媒体库名的查询不动推荐)。
@@ -244,7 +246,15 @@ Item {
 
     // 页面被压栈(进详情/库/管理页)时收下拉里——Popup 挂在 Overlay 层,
     // 不收会悬在新页面上方。
-    StackView.onStatusChanged: if (StackView.status !== StackView.Active) serverPickPopup.close()
+    StackView.onStatusChanged: {
+        if (StackView.status !== StackView.Active)
+            serverPickPopup.close()
+        else {
+            // 延到转场结束后:pop 过渡期内旧页仍存活,模型切换与旧页
+            // 委托回收交错会让 DelegateModel 读空指针崩溃(竞态实测)。
+            injectTimer.start()
+        }
+    }
 
     function rebuildTop() {
         // 服务端已按 IncludeItemTypes=Movie,Series & ImageTypes=Backdrop 过滤
@@ -282,7 +292,7 @@ Item {
     }
 
     Component.onCompleted: {
-        root.rebuildRowsFilter()
+        homeRowsFilter.refilter()
         if (AccountManager.hasAccounts) {
             AccountManager.validateTokens()
             AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
@@ -355,9 +365,13 @@ Item {
             }
             onTextChanged: {
                 root.libFilter = text
+                if (serverPickPopup.visible)
+                    serverPickList.model = root.serverPickOptions()
                 // 编辑中保持下拉展开(点选关闭后再改词要能看到新匹配)。
-                if (activeFocus && !serverPickPopup.visible)
+                else if (activeFocus) {
+                    serverPickList.model = root.serverPickOptions()
                     serverPickPopup.open()
+                }
             }
             Keys.onEscapePressed: filterField.text = ""
             // 回车 = 进入首个命中库(与历史页"回车 = 激活首个匹配项"同约定)。
@@ -375,10 +389,12 @@ Item {
             // 失焦即收下拉(点框外任意处 → 全局失焦层清焦点 → 这里收口;
             // 点下拉项不收焦点——Popup 在 Overlay 层,选中走自身 onClicked)。
             onActiveFocusChanged: {
-                if (activeFocus)
+                if (activeFocus) {
+                    serverPickList.model = root.serverPickOptions()
                     serverPickPopup.open()
-                else
+                } else {
                     serverPickPopup.close()
+                }
             }
             // 服务器快选下拉:列出可见账号(显示名),输入即过滤;点选 =
             // 服名填入框中(过滤按服名命中,行/卡条同步收窄)。
@@ -396,9 +412,12 @@ Item {
                     border.color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.45)
                 }
                 contentItem: ListView {
+                    id: serverPickList
                     implicitHeight: Math.min(contentHeight, 300)
                     clip: true
-                    model: root.serverPickOptions()
+                    // 命令式赋值(非活绑定):注入/聚合通知与页面切换交错时,
+                    // 活绑定重算 setModel 会撞 DelegateModel 崩溃窗(实测)。
+                    model: []
                     delegate: ItemDelegate {
                         id: pickItem
                         required property string modelData
@@ -550,7 +569,7 @@ Item {
         smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: root.libFilter.trim() === "" ? AccountManager.homeRows : root.filteredRows
+        model: homeRowsFilter // 恒定对象,过滤走谓词(见 homeRowsFilter 注释)
         reuseItems: true
         cacheBuffer: 400
 
@@ -581,7 +600,7 @@ Item {
                 anchors.topMargin: Constants.homeHeroTopPad
                 height: root.heroH
                 model: heroModel
-                onCurrentIndexChanged: {
+                        onCurrentIndexChanged: {
                     root.heroCenter = currentIndex   // 根级函数读不到本 id,用镜像
                     root.flushHero(false)            // 轮播走开即结算挂起的替换
                 }
@@ -688,7 +707,7 @@ Item {
                         spacing: 0
                         header: Item { width: Constants.rowLeftMargin; height: 1 }
                         model: AccountManager.homeRows
-                        // 过滤变化时回左端:原 contentX 会指向已折叠的中段(首卡被截断)。
+                            // 过滤变化时回左端:原 contentX 会指向已折叠的中段(首卡被截断)。
                         property string filterEcho: root.libFilter
                         onFilterEchoChanged: positionViewAtBeginning()
                         // delegate 外包一层格子:卡间距折进格子右侧,过滤折叠(宽 0)

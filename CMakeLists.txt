@@ -77,6 +77,7 @@ qt_add_executable(MoePlayer
     src/core/pinyin_table.cpp
     src/models/colorprovider.cpp
     src/models/homerowsmodel.cpp
+    src/models/homerowsfiltermodel.cpp
     src/models/mediaitemmodel.cpp
     src/models/posterprovider.cpp
     src/playback/mpvclient.cpp
