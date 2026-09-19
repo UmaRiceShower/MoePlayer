@@ -66,11 +66,12 @@ class LoadTask : public QRunnable
 {
 public:
     LoadTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token,
-             const QNetworkProxy &proxy)
+             const QNetworkProxy &proxy, const QString &idKey)
         : m_self(self)
         , m_url(url)
         , m_token(token)
         , m_proxy(proxy)
+        , m_idKey(idKey)
     {
     }
 
@@ -78,7 +79,7 @@ public:
     {
         // 加载(磁盘缓存/回源)抽至 PosterProvider::loadImageSync,取色等复用。
         QString err;
-        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err, m_proxy);
+        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err, m_proxy, m_idKey);
         if (m_self)
             QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
                                       Q_ARG(QImage, img), Q_ARG(QString, err));
@@ -89,6 +90,7 @@ private:
     QUrl m_url;
     QString m_token;
     QNetworkProxy m_proxy;
+    QString m_idKey;
 };
 } // namespace
 
@@ -106,12 +108,14 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl, userId),
                               itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
+    // 键 = 海报 id(与 loadImageSync 同源)。
+    const QString ckey = id;
     {
         QMutexLocker locker(&g_memMutex);
-        if (g_memCache.contains(url.toString()))
-            return new PosterResponse(url, *g_memCache.object(url.toString()));
+        if (g_memCache.contains(ckey))
+            return new PosterResponse(url, *g_memCache.object(ckey));
     }
-    return new PosterResponse(url, token, proxy());
+    return new PosterResponse(url, token, proxy(), id);
 }
 
 bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token, QString *userId,
@@ -203,9 +207,10 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
 }
 
 QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error,
-                                     const QNetworkProxy &proxy)
+                                     const QNetworkProxy &proxy, const QString &idKey)
 {
-    const QString key = url.toString();
+    // 缓存键 = 海报 id(accountId~itemId~tag~kind,不可变身份)
+    const QString key = idKey.isEmpty() ? url.toString() : idKey;
     if (error)
         error->clear();
     // 1) 磁盘层命中(TTL 内):读文件解码,回填内存层。
@@ -302,10 +307,10 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
 }
 
 PosterResponse::PosterResponse(const QUrl &url, const QString &token,
-                               const QNetworkProxy &proxy)
+                               const QNetworkProxy &proxy, const QString &idKey)
 {
     // 加载(磁盘/网络)全部在线程池线程执行,不阻塞调用线程(GUI)。
-    QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token, proxy));
+    QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token, proxy, idKey));
 }
 
 PosterResponse::PosterResponse(const QUrl &url, const QImage &img, const QString &error)

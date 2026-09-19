@@ -15,6 +15,7 @@ Item {
     property double heroPendingSince: 0
     property int heroCenter: 0   // 当前中心索引镜像(根级函数读不到 header 里的 id)
     readonly property int heroKeepRadius: 1   // 前排除 = 当前中心 ±1(pathItemCount 3)
+    property bool heroHovered: false            // heroHover 的镜像(见 HoverHandler)
     property bool heroFromFallback: false   // 当前 hero 内容是否来自本地聚合兜底
     ListModel { id: heroModel }
     readonly property real navH: Constants.homeNavH
@@ -92,7 +93,9 @@ Item {
         }
         if (root.heroPendingSince === 0)
             root.heroPendingSince = Date.now()
-        else if (Date.now() - root.heroPendingSince > Constants.homeHeroPendingMaxMs)
+        else if (Date.now() - root.heroPendingSince > Constants.homeHeroPendingMaxMs
+                 && !root.heroHovered
+                 && heroModel.count <= root.heroKeepRadius * 2 + 1)
             root.flushHero(true)
     }
     // 角色归一化:ListModel 的角色集由首次 append 定型,而 set() 只覆盖传入的键 ——
@@ -133,9 +136,6 @@ Item {
     }
 
     function syncHero(items, fromFallback) {
-        // 来源切换(兜底 ↔ 服务器建议)直接强落:小列表(≤ 中心 ±1 全覆盖)时
-        // 前排除会让内容永远释放不出来,用户会一直看着兜底数据。
-        const switched = root.heroFromFallback !== fromFallback
         root.heroFromFallback = fromFallback
         root.heroWant = root.heroRows(items)
         if (heroModel.count === 0) {
@@ -143,7 +143,7 @@ Item {
                 heroModel.append(root.heroWant[i])
             return
         }
-        root.flushHero(switched)
+        root.flushHero(false)
     }
 
 
@@ -581,6 +581,7 @@ Item {
         // header 高度异步变化时 ListView 不会重排条目,只把 header 顶出内容区。
         header: Item {
             id: heroCar
+            property bool _hoverMoved: false
             height: Constants.homeHeroTopPad + root.heroH + heroCar.mediaSecH
             width: pageList.width
             clip: false
@@ -657,7 +658,7 @@ Item {
                             onExited: dot.scale = 1.0
                             onClicked: {
                                 heroPv.currentIndex = index
-                                if (!heroHover.hovered)
+                                if (!root.heroHovered)
                                     heroTimer.restart()
                             }
                         }
@@ -666,12 +667,80 @@ Item {
             }
 
             // hover 悬停暂停自动轮播(看卡时不被切走)。
-            HoverHandler { id: heroHover }
+            HoverHandler {
+                id: heroHover
+                // 幻影 hover 闩锁:窗口若恰好开在光标下,enter 无移动即触发,
+                // 悬停暂停会把轮换卡到"移出为止"(实测启动后轮转迟迟不开)。
+                // 只在移入后真发生过位移才算悬停;移出即复位。
+                onPointChanged: heroCar._hoverMoved = true
+                onHoveredChanged: {
+                    if (!hovered)
+                        heroCar._hoverMoved = false
+                    root.heroHovered = hovered && heroCar._hoverMoved
+                }
+            }
+            // 全图慢速灌缓存:启动 10s 后每 1.5s 一张灌进磁盘缓存(会话中期
+            // 空闲时,不挤启动)。随机建议的新条目图从未显示=从未入缓存,
+            // 下次启动轮到只能现场拉(实测白卡);灌过则下次全命中。
+            property int _heroWarmIdx: 0
+            Timer {
+                id: heroWarmStarter
+                interval: 10000
+                running: true
+                repeat: false
+                onTriggered: {
+                    heroCar._heroWarmIdx = 0
+                    heroWarmTimer.start()
+                }
+            }
+            Timer {
+                id: heroWarmTimer
+                interval: 1500
+                repeat: true
+                running: false
+                onTriggered: {
+                    if (heroCar._heroWarmIdx >= heroModel.count) {
+                        stop()
+                        return
+                    }
+                    const m = heroModel.get(heroCar._heroWarmIdx)
+                    const id = m ? (m.backdropId || m.parentBackdropId || m.posterId || "") : ""
+                    heroWarmImg.source = id ? "image://emby/" + id : ""
+                    heroCar._heroWarmIdx++
+                }
+            }
+            Image {
+                id: heroWarmImg
+                visible: false
+                width: 0
+                height: 0
+                asynchronous: true
+                cache: true
+                // 缓存键 = 海报 id(与尺寸无关),无需对齐卡面尺寸。
+            }
+            // 只预载"下一张"卡图
+            Image {
+                visible: false
+                width: 0
+                height: 0
+                asynchronous: true
+                cache: true
+                source: {
+                    if (heroModel.count < 2)
+                        return ""
+                    const m = heroModel.get((heroPv.currentIndex + 2) % heroModel.count)
+                    const id = m.backdropId || m.parentBackdropId || m.posterId || ""
+                    return id ? "image://emby/" + id : ""
+                }
+                // 缓存键含解码尺寸:与卡面 Image 的 sourceSize 逐位一致。
+                sourceSize.width: Math.max(1, Math.round((heroCar.cardW + 16) * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round((heroCar.cardH + 16) * Screen.devicePixelRatio))
+            }
             Timer {
                 id: heroTimer
                 interval: Constants.homeHeroTimerMs
                 repeat: true
-                running: heroModel.count > 1 && !heroHover.hovered
+                running: heroModel.count > 1 && !root.heroHovered
                 onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
             }
             // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
@@ -1304,7 +1373,7 @@ Item {
                     heroPv.currentIndex = hcard.index
                     // 悬停中不 restart:restart 会强制 running=true 顶掉
                     // hover 暂停的绑定(直到下次依赖变化)。
-                    if (!heroHover.hovered)
+                    if (!root.heroHovered)
                         heroTimer.restart()
                 }
             }
