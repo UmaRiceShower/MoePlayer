@@ -16,6 +16,8 @@ layout(std140, binding = 0) uniform buf {
     float focal;         // 焦距(像素),越大透视越弱
     float sideInset;     // 侧卡向中线收拢的水平位移(像素)
     float meshDensity;   // 网格密度,缓解透视锯齿
+    float radiusPx;      // 与 frag 块布局一致(std140 同名块两阶段需同布局)
+    float padPx;
 };
 
 void main() {

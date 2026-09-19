@@ -1153,23 +1153,60 @@ Item {
         property real tilt: PathView.onPath ? PathView.tilt : 0
         // 中心卡判定(容差):root 级绑定,供文字显隐。
         readonly property bool isCenter: Math.abs(PathView.tilt) < 0.01
-
         // 卡片整体(图片 + 底部渐变 + 文字)被 ShaderEffectSource 抓取成纹理,
         // 再由 ShaderEffect 做透视映射——文字随卡片一起倾斜。
-        Rectangle {
+        // 过扫描:宿主比卡面大 pad(8px)/边,内容溢出进 pad——SDF 卡界线
+        // 落在 mesh 三角形内部,圆角 ramp 两侧都有像素。
+        Item {
+            id: fxHost
+            readonly property int pad: 8
+            x: -pad
+            y: -pad
+            width: parent.width + pad * 2
+            height: parent.height + pad * 2
+            // layer 效果:内容一次进 layer 纹理,effect 采样透视(无双卡)。
+            // 尺寸含 pad(过扫描,见上注);pad 传给 SDF 定位卡界。
+            layer.enabled: true
+            layer.samplerName: "src"
+            layer.smooth: true
+            layer.mipmap: true
+            // 2 倍超采样,量化 128px 步进:缩放时纹理尺寸不逐帧重建(重建闪烁)。
+            layer.textureSize: Qt.size(Math.max(1, Math.round(width * Screen.devicePixelRatio * 2 / 128) * 128),
+                                       Math.max(1, Math.round(height * Screen.devicePixelRatio * 2 / 128) * 128))
+            layer.effect: ShaderEffect {
+                id: cardFx
+                property real sideTilt: hcard.tilt
+                property real radiusPx: Constants.homeHeroRadius
+                property real padPx: fxHost.pad
+                property real w: fxHost.width
+                property real h: fxHost.height
+                property real maxAngle: 38
+                property real focal: w * Constants.homeHeroFocalRatio
+                property real sideInset: 0
+                property real meshDensity: 16
+                mesh: Qt.size(16, 16)
+                vertexShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.vert.qsb"
+                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.frag.qsb"
+            }
+        Item {
             id: cardContent
-            anchors.fill: parent
-            radius: Constants.homeHeroRadius
-            color: "transparent"
-            border.width: 0
-            clip: true
+            x: fxHost.pad
+            y: fxHost.pad
+            width: hcard.width
+            height: hcard.height
+            // 圆角/裁剪全由 hero.frag 的 SDF 做;不做矩形 clip(内容要溢出
+            // 进 pad 供 ramp 外半使用)。
             // 用 layer.effect 做透视(Qt 官方图片效果方式):本卡内容一次渲染进
             // layer 纹理,effect(ShaderEffect)采样透视——无独立 ShaderEffectSource,
             // Qt 保证不重复渲染(无双卡)。
 
             Image {
                 id: cardImg
-                anchors.fill: parent
+                // 溢出到 pad(ramp 外半需要真实内容,不只是透明)
+                x: -fxHost.pad
+                y: -fxHost.pad
+                width: fxHost.width
+                height: fxHost.height
                 source: {
                     const m = hcard.modelData
                     const id = m.backdropId || m.parentBackdropId || m.posterId || ""
@@ -1185,20 +1222,38 @@ Item {
                 // 解码尺寸偏离显示,窗口缩放中出现 1.0~1.5× 升采样/拉伸,
                 // 双线性放大无 mipmap 兜底 → 边缘锯齿/模糊。缩放中重解码由
                 // retainWhileLoading 保留旧纹理,避免闪烁(不再需要量化防抖)。
-                sourceSize.width: Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio))
-                sourceSize.height: Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio))
+                sourceSize.width: Math.max(1, Math.round(fxHost.width * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round(fxHost.height * Screen.devicePixelRatio))
                 asynchronous: true
                 retainWhileLoading: true
             }
-            // 底部渐变,保证右下角文字可读
+            // 玻璃信息条(仅中心卡):半透明 scrim + 顶部 1px 均匀细 rim
             Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.bottom: parent.bottom
-                height: parent.height * 0.42
+                visible: hcard.isCenter
+                x: -fxHost.pad
+                y: cardContent.height * 0.58
+                width: fxHost.width
+                height: cardContent.height * 0.42 + fxHost.pad
                 gradient: Gradient {
                     GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.62) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.28) }
+                }
+            }
+            Rectangle {
+                id: glassBar
+                visible: hcard.isCenter
+                x: -fxHost.pad
+                y: cardContent.height - Math.round(cardContent.height * 0.16)
+                width: fxHost.width
+                height: Math.round(cardContent.height * 0.16) + fxHost.pad
+                color: Qt.rgba(0, 0, 0, 0.32)
+                // 顶部细 rim(均匀,非定向——定向高光被否过)。
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: 1
+                    color: Qt.rgba(1, 1, 1, 0.22)
                 }
             }
             // 文字区(仅中心卡显示;侧卡纯图):年份靠左、标题靠右、底部平齐。
@@ -1237,31 +1292,6 @@ Item {
                     anchors.bottom: parent.bottom
                 }
             }
-            // layer 效果:内容一次进 layer 纹理,effect 采样透视(无双卡)。
-            // layer.samplerName 与 shader 采样名(src)一致;w/h 用本卡尺寸。
-            // 侧卡经 scale + 透视倾斜是缩采样,双线性无 mipmap 文字会糊;
-            // 2 倍超采样渲染进纹理,缩小后仍保持 1:1 以上采样密度。
-            layer.enabled: true
-            layer.samplerName: "src"
-            // 侧卡(item 级 scale 变换)的降采样发生在 layer 纹理上:双线性会
-            // 锯齿,mipmap 预滤波消除;2 倍超采样纹理本身缓解,两者叠加更干净。
-            layer.smooth: true
-            layer.mipmap: true
-            // 2 倍超采样,量化 128px 步进:缩放时纹理尺寸不逐帧重建(重建闪烁)。
-            layer.textureSize: Qt.size(Math.max(1, Math.round(cardContent.width * Screen.devicePixelRatio * 2 / 128) * 128),
-                                       Math.max(1, Math.round(cardContent.height * Screen.devicePixelRatio * 2 / 128) * 128))
-            layer.effect: ShaderEffect {
-                property real sideTilt: hcard.tilt
-                property real w: cardContent.width
-                property real h: cardContent.height
-                property real maxAngle: 38
-                property real focal: w * Constants.homeHeroFocalRatio
-                property real sideInset: 0
-                property real meshDensity: 16
-                mesh: Qt.size(16, 16)
-                vertexShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.vert.qsb"
-                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.frag.qsb"
-            }
         }
         MouseArea {
             anchors.fill: parent
@@ -1281,3 +1311,5 @@ Item {
         }
     }
 }
+}  // fxHost(过扫描宿主)
+
