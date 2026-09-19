@@ -1278,6 +1278,7 @@ Item {
                             color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                             ServerIcon {
                                 anchors.fill: parent
+                                radius: 10 
                                 icon: card.modelData.icon
                                 fallbackText: (card.modelData.name !== "" ? card.modelData.name : card.modelData.userName).charAt(0)
                             }
@@ -2320,6 +2321,7 @@ Item {
                             color: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
                             ServerIcon {
                                 anchors.fill: parent
+                                radius: 10
                                 icon: editIconField.text.trim() || root.accountInfo(root.editAccountId).icon
                                 fallbackText: "图"
                             }
