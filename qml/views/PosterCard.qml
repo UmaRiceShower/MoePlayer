@@ -233,6 +233,9 @@ Item {
             visible: root.positionTicks > 0 && root.runtimeTicks > 0
             anchors.left: parent.left
             anchors.right: parent.right
+            // 横向内缩:卡底 r14 圆角镂空最深 ~5.3px,条角不浮空。
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
             anchors.bottom: parent.bottom
             height: 3
             color: Qt.rgba(1, 1, 1, 0.25)

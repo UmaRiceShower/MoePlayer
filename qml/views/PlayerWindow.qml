@@ -491,7 +491,7 @@ Window {
                         Loader {
                             id: previewLoader
                             anchors.fill: parent
-                            anchors.margins: 1
+                            anchors.margins: 3
                             // 仅 hover 且有播放地址时建立预览实例。
                             active: (seekBar.hovered || seekBar.scrubbing)
                                     && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""

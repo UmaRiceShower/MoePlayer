@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import MoePlayer.Core
 
 //! 服务器图标:统一图标(本地缓存 file:// URL,自定义或服务器默认)→
@@ -21,6 +22,16 @@ Item {
         root.currentSource = root.icon
     }
 
+    property int radius: 0
+    Component {
+        id: iconMaskEffect
+        MultiEffect {
+            maskEnabled: true
+            maskSource: iconMask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 1.0
+        }
+    }
     Image {
         id: iconImg
         anchors.fill: parent
@@ -33,6 +44,16 @@ Item {
         // 图标源通常是远大于显示尺寸的方图,只靠默认的 smooth(双线性)降采样会有
         // 明显锯齿;文档:mipmap 的降采样质量优于 smooth。
         mipmap: true
+        Rectangle {
+            id: iconMask
+            visible: false
+            anchors.fill: parent
+            radius: root.radius
+            layer.enabled: true
+        }
+        layer.enabled: root.radius > 0
+        layer.smooth: true
+        layer.effect: root.radius > 0 ? iconMaskEffect : null
         visible: status === Image.Ready
     }
 
