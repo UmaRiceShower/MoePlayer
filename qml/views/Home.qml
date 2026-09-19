@@ -16,7 +16,6 @@ Item {
     property int heroCenter: 0   // 当前中心索引镜像(根级函数读不到 header 里的 id)
     readonly property int heroKeepRadius: 1   // 前排除 = 当前中心 ±1(pathItemCount 3)
     property bool heroHovered: false            // heroHover 的镜像(见 HoverHandler)
-    property bool heroFromFallback: false   // 当前 hero 内容是否来自本地聚合兜底
     ListModel { id: heroModel }
     readonly property real navH: Constants.homeNavH
     // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
@@ -136,7 +135,6 @@ Item {
     }
 
     function syncHero(items, fromFallback) {
-        root.heroFromFallback = fromFallback
         root.heroWant = root.heroRows(items)
         if (heroModel.count === 0) {
             for (let i = 0; i < root.heroWant.length; ++i)

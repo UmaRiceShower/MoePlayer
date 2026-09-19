@@ -24,16 +24,6 @@ Button {
         border.color: root.active
                        ? Theme.accentDeep
                        : (root.hovered ? Theme.accent : Theme.textMuted)
-        // 萌系小阴影,让胶囊浮起来。
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: -2
-            radius: 18
-            color: "transparent"
-            border.color: Theme.accent
-            border.width: root.active ? 2 : 0
-            opacity: 0.25
-        }
     }
     contentItem: AppText {
         text: root.label

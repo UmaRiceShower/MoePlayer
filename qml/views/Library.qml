@@ -87,8 +87,6 @@ Item {
 
     // --- chip 样式 ---
     // 选中 chip 底色:粉色降饱和,大色块不用纯 accent。
-    readonly property color chipActive: Theme.accent
-    readonly property color chipActiveHover: Theme.accentSoft
 
     // --- 筛选下拉底色(与面包屑链同风格) ---
     readonly property color crumb: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 1.0)
@@ -1135,17 +1133,6 @@ Item {
                 color: root.crumb
                 border.color: searchBox.activeFocus ? Theme.accent : Theme.textMuted
                 border.width: 1
-                // 聚焦时粉色柔光外圈,萌系氛围。
-                Rectangle {
-                    anchors.fill: parent
-                    anchors.margins: -3
-                    radius: 23
-                    color: "transparent"
-                    border.color: Theme.accent
-                    border.width: searchBox.activeFocus ? 2 : 0
-                    opacity: searchBox.activeFocus ? 0.45 : 0
-                    Behavior on opacity { NumberAnimation { duration: 120 } }
-                }
             }
             onTextChanged: searchDebounce.restart()
             // 防抖:停止输入 300ms 后才重查(与全局搜索浮层同阈值)。
