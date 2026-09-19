@@ -1272,9 +1272,10 @@ void AccountManager::maybeAssembleHomeRows()
                     }
                 }
             }
-            // 新鲜结果为空:库无内容(空库/权限不可见/请求失败),不占首页
-            // 行;加载中的空占位保留(骨架屏,等结果决定去留)。
+            // 新鲜结果为空:库无内容(空库/权限不可见/请求失败),不占首页行。
             if (fresh && items.isEmpty())
+                continue;
+            if (!fresh && items.isEmpty())
                 continue;
             QVariantMap row;
             row.insert(QStringLiteral("viewId"), viewId);

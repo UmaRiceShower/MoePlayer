@@ -41,8 +41,11 @@ public:
     // 后台线程同步加载:磁盘缓存命中直读,未命中回源(占并发闸);
     // 失败/解码失败返回空图,error 填错误描述。线程安全,供取色等复用。
     // proxy 用于回源请求(默认直连)。
+    // idKey:缓存键覆盖(海报 id 不可变身份);空 = 退回 URL 键(ColorProvider
+    // 等无 id 场景)。
     static QImage loadImageSync(const QUrl &url, const QString &token, QString *error = nullptr,
-                                const QNetworkProxy &proxy = QNetworkProxy::NoProxy);
+                                const QNetworkProxy &proxy = QNetworkProxy::NoProxy,
+                                const QString &idKey = QString());
 
 private:
     EmbyClient *m_client;
@@ -58,7 +61,8 @@ class PosterResponse : public QQuickImageResponse
 public:
     // 常规:后台线程查缓存/回源,token 用于 X-Emby-Token 请求头,proxy 用于回源。
     explicit PosterResponse(const QUrl &url, const QString &token,
-                            const QNetworkProxy &proxy = QNetworkProxy::NoProxy);
+                            const QNetworkProxy &proxy = QNetworkProxy::NoProxy,
+                            const QString &idKey = QString());
     // 同步完成(内存命中/解析失败):携带图片或错误,异步投递 finished,
     // 遵守 QQuickImageProvider 契约(finished 不得在 requestImageResponse 内发出)。
     explicit PosterResponse(const QUrl &url, const QImage &img,
