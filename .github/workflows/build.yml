@@ -1,7 +1,7 @@
 name: build
 
 on:
-  # 发布 = 打 tag(v0.2.0 / v0.2.0-rc.1):tag 触发四平台构建 + 建 GitHub
+  # 发布 = 打 tag(v0.2.0 / v0.2.0-rc.1):tag 触发五平台构建 + 建 GitHub
   # Release(tag 含 '-' 自动标 pre-release)。workflow_dispatch 保留供
   # 手动验证(产物带 -dev 后缀)。
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # 版本解析(tag 优先,校验与 project(VERSION) 数字段一致):四个打包
+  # 版本解析(tag 优先,校验与 project(VERSION) 数字段一致):五个打包
   # 作业经 needs 取 version/vnum/suffix,suffix 以环境变量注入 CMake 与
   # AppImage 脚本。
   version:

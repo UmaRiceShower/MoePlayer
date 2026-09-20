@@ -5,7 +5,7 @@
 -- MoePlayer 实时协商真实流地址后重定向(官方 on_load + stream-open-filename
 -- 契约,见 mpv DOCS/man/input.rst "Hooks" 与 "stream-open-filename")。
 -- 真实 URL 的条目(起播/已就绪)直接放行,不经过协商。
--- 脚本名默认 = 文件名去扩展("moe-hook",与 mp.get_script_name 一致;
+-- 脚本名 = 文件名去扩展且非字母数字转下划线("moe_hook",与 mp.get_script_name 一致;
 -- mpv 0.41 Lua 无 mp.set_script_name)。
 local pending = {}   -- itemId -> hook 对象(defer 后保持)
 
