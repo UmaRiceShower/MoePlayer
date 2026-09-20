@@ -48,11 +48,6 @@ public:
     Q_INVOKABLE QVariantList items(const QString &serverUrl, const QString &accountId) const;
     // 全部账号的条目展平并按最近播放倒序(跨服聚合视图),调用方可直接截断。
     Q_INVOKABLE QVariantList allItems() const;
-    // 某条目的上次播放时间(ms epoch;0 = 未知)。按最近播放排序用。
-    Q_INVOKABLE qint64 lastPlayedAt(const QString &serverUrl, const QString &accountId,
-                                    const QString &itemId) const;
-    // 该 scope 上次拉取完成时间(ms epoch;0 = 从未拉取)。
-    Q_INVOKABLE qint64 fetchedAt(const QString &serverUrl, const QString &accountId) const;
     // 落盘:内存变更后由调用方在一个账号的批次结束时调一次,避免逐条写文件。
     Q_INVOKABLE void flush();
     // 删除某账号的历史(账号被删除时调用,立即落盘)。

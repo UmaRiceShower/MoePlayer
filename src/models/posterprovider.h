@@ -10,9 +10,11 @@ class AccountManager;
 class ConfigManager;
 
 //! 异步图片提供器,注册为 "image://emby/<id>"。
-//! 无状态浏览下海报 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>
-//! (模型填充时统一加前缀),提供器按前缀路由到对应服务器的账号 token。
-//! 请求路径 /Items/{id}/Images/Primary(maxWidth + tag + api_key)。
+//! 无状态浏览下海报 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>~<kind>
+//! (kind 为图片类型 Primary/Backdrop/Thumb,缺省 Primary 兼容旧三段 id;
+//! 模型填充时统一加前缀),提供器按前缀路由到对应服务器的账号 token。
+//! 请求路径 /Items/{id}/Images/{kind}(maxWidth 按 kind 分档 + tag;URL 不含
+//! api_key,认证经请求头,重登换 token 不失效)。
 class PosterProvider : public QQuickAsyncImageProvider
 {
 public:
@@ -41,8 +43,8 @@ public:
     // 后台线程同步加载:磁盘缓存命中直读,未命中回源(占并发闸);
     // 失败/解码失败返回空图,error 填错误描述。线程安全,供取色等复用。
     // proxy 用于回源请求(默认直连)。
-    // idKey:缓存键覆盖(海报 id 不可变身份);空 = 退回 URL 键(ColorProvider
-    // 等无 id 场景)。
+    // idKey:缓存键覆盖(海报 id 不可变身份;取色等复用方也传 id)。
+    // 空 = 退回 URL 键(仅防御)。
     static QImage loadImageSync(const QUrl &url, const QString &token, QString *error = nullptr,
                                 const QNetworkProxy &proxy = QNetworkProxy::NoProxy,
                                 const QString &idKey = QString());

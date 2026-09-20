@@ -19,8 +19,8 @@ public:
     PersistMap(const PersistMap &) = delete; // 单实例归属,防拷贝
 
     // 缓存层:CacheLocation/<name>.json;QSaveFile 原子写。文件缺失静默
-    // 返回 false(首次启动常态);损坏(坏 JSON/版本回退)删除文件重来
-    // (可重建件),qWarning 并返回 false。
+    // 返回 false(首次启动常态);损坏(坏 JSON/版本回退)不删文件——历史
+    // 类是本地独有数据,保留待下次成功写自然覆盖自愈,qWarning 并返回 false。
     bool loadCache(const QString &name, QVariant &out);
     bool saveCache(const QString &name, const QVariant &value);
 

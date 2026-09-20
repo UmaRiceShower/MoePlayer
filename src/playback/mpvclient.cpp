@@ -21,7 +21,6 @@
 #include <QStandardPaths>
 #include <QStringList>
 #include <QTimer>
-#include <QDir>
 #include <QFile>
 #include <QUuid>
 
@@ -131,7 +130,7 @@ void MpvClient::attachEmbedded(QObject *coreObj, const QString &itemId)
         return;
     }
     if (s->embedded == core && s->ready)
-        return; 
+        return;
     core->disconnect(this);
     s->embedded = core;
     const QString key = s->key;
@@ -249,11 +248,11 @@ QString MpvClient::findMpvBinary()
 QString MpvClient::findScript(const QString &fileName)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
-    // 旁置布局(开发构建 build/lua/、AppImage/Flatpak 与可执行文件同级 lua/)。
+    // 旁置布局(仅开发构建:build/lua/ 与可执行文件同级)。
     const QString bundled = QDir(appDir).filePath(QStringLiteral("lua/") + fileName);
     if (QFileInfo::exists(bundled))
         return bundled;
-    // 系统安装(DEB/RPM/AUR):share/moeplayer/lua/。
+    // 安装布局(DEB/RPM 与 AppImage/Flatpak 的 AppDir 同构:bin/ + ../share/)。
     const QString installed =
         QDir(appDir).filePath(QStringLiteral("../share/moeplayer/lua/") + fileName);
     if (QFileInfo::exists(installed))
@@ -270,11 +269,11 @@ QString MpvClient::findMoeHookScript()
 QString MpvClient::findShader(const QString &fileName)
 {
     const QString appDir = QCoreApplication::applicationDirPath();
-    // 旁置布局(开发构建 build/shaders/、AppImage/Flatpak 与可执行文件同级)。
+    // 旁置布局(仅开发构建:build/shaders/ 与可执行文件同级)。
     const QString bundled = QDir(appDir).filePath(QStringLiteral("shaders/") + fileName);
     if (QFileInfo::exists(bundled))
         return bundled;
-    // 系统安装(DEB/RPM/AUR):share/moeplayer/shaders/。
+    // 安装布局(DEB/RPM 与 AppImage/Flatpak 的 AppDir 同构:bin/ + ../share/)。
     const QString installed =
         QDir(appDir).filePath(QStringLiteral("../share/moeplayer/shaders/") + fileName);
     if (QFileInfo::exists(installed))
@@ -474,7 +473,7 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
 
 void MpvClient::fail(const QString &itemId, const QString &message)
 {
-    Q_UNUSED(message);
+    qWarning() << "MpvClient: 协商失败,关闭会话" << itemId << message;
     Session *s = sessionFor(itemId);
     if (!s) {
         // 宽松:调用方(协商失败信号)只有裸 itemId,按后缀 "|itemId" 补配。
@@ -962,7 +961,6 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
                     << s->superResState.value(QStringLiteral("expected")).toInt()
                     << "片源" << vidW << "x" << vidH << "输出" << outW << "x" << outH
                     << "尺寸门槛" << gated << s->key;
-            emit superResStateChanged(s->key, superResStatus(s->key));
         }
         return;
     }
@@ -1058,7 +1056,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         if (s->superResPreset != QLatin1String("off"))
             requestSuperResState(s);
         refreshChapters(s->key);
-            emit playbackStarted(s->key, s->meta.value(QStringLiteral("itemId")).toString());
+        emit playbackStarted(s->key, s->meta.value(QStringLiteral("itemId")).toString());
         emit playbackContextChanged(s->meta);
         return;
     }
@@ -1369,7 +1367,8 @@ void MpvClient::reportStart(Session *s)
     }
 }
 
-// 文件加载后按所选轨选 mpv 数字 id。
+// 文件加载后按所选轨选 mpv 数字 id;两模式共享(外部经 IPC 同样可行,
+// 修复外部模式正数 ordinal 选轨被静默丢弃的缺口)。
 // 不依赖容器 Index/ff-index/src-id/title,转码重排/demuxer 差异均不影响。
 void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
 {
@@ -1685,33 +1684,4 @@ void MpvClient::requestSuperResState(Session *s)
                              QJsonArray{QStringLiteral("get_property"),
                                         QStringLiteral("osd-dimensions")}},
                             {QStringLiteral("request_id"), kSuperResOutputRequestId}});
-}
-
-void MpvClient::setSuperRes(const QString &presetId, const QString &itemId)
-{
-    if (!itemId.isEmpty()) {
-        if (Session *s = sessionFor(itemId))
-            applySuperRes(s, presetId, true);
-        return;
-    }
-    // 无 itemId:应用到全部在线会话(新会话由 initSuperRes 按配置挂载)。
-    if (m_sessions.isEmpty()) {
-        qInfo() << "MpvClient: 无会话,超分档位仅记入配置" << presetId;
-        return;
-    }
-    for (Session *s : m_sessions)
-        applySuperRes(s, presetId, true);
-}
-
-QVariantMap MpvClient::superResStatus(const QString &itemId) const
-{
-    const Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (!s)
-        return {};
-    QVariantMap out = s->superResState;
-    out.insert(QStringLiteral("preset"), s->superResPreset);
-    out.insert(QStringLiteral("label"), superResLabel(s->superResPreset));
-    out.insert(QStringLiteral("running"), s->superResPreset != QLatin1String("off")
-                                              && !s->superResState.isEmpty());
-    return out;
 }

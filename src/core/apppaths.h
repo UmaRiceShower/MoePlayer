@@ -9,7 +9,6 @@ public:
     //! 并预建 data/ 目录(失败仅告警,应用继续可运行)。
     static void init();
 
-    static bool portable();
 
     //! 配置根:便携 = <exeDir>/data/config;否则 AppConfigLocation。
     static QString configDir();

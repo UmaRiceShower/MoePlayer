@@ -15,15 +15,19 @@ class EmbyClient;
 class ConfigManager;
 class MpvEmbeddedCore;
 
-//! 外部 mpv 进程客户端(路线2)。
+//! mpv 播放客户端:外部进程 / 内嵌 libmpv 双模式(embeddedPreferred
+//! 判定,缺库或配置 external 走外部)。
 //!
-//! 点播放即 spawn 系统 mpv 二进制(`--force-window` + 内建 OSC 自绘
-//! OSD/控制栏;moe-hook.lua 经 `--script` 加载承担连播换集),Qt 不再
-//! 渲染视频。经 `--input-ipc-server`(临时 unix socket)用 mpv JSON IPC 控制/订阅。
+//! 外部模式:spawn 系统 mpv 二进制(`--force-window` + 内建 OSC 自绘
+//! OSD/控制栏;moe-hook.lua 经 `--script` 加载承担连播换集),Qt 不渲染
+//! 视频,经 `--input-ipc-server`(临时 unix socket)用 mpv JSON IPC 控制/
+//! 订阅;内嵌模式:libmpv 渲染进 MpvVideoItem,经 MpvEmbeddedCore 的
+//! JSON 模拟层走同一套命令/事件逻辑,不 spawn 进程。
 //!
 //! Emby 播放状态回传(Start/Progress/Stopped/Ping)在此承接(原自绘播放窗口的逻辑):起播上报、每 progressReportMs(项目 10s)进度节流、
-//! 每 10 分钟 Ping、结束/关窗上报停止。协商链路:startPending 先弹 mpv 空窗
-//! (先开窗后协商),deliver 交付地址起播,fail 关窗;Library 直连走 start。
+//! 每 10 分钟 Ping、结束/关窗上报停止。协商链路:startPending 预建会话并
+//! 弹播放窗(外部:mpv 空窗;内嵌:embeddedPlaybackRequested → 播放页),
+//! deliver 交付地址起播,fail 关窗;Library 直连走 start。
 //!
 //! QML 侧以单例 "MpvClient" 使用(main.cpp 注册)。
 class MpvClient : public QObject
@@ -37,13 +41,15 @@ public:
     // 查找 mpv 可执行:MOEPLAYER_MPV 环境变量 → <appdir>/mpv(发版内封) →
     // PATH 上的 "mpv"。找不到则返回空。
     static QString findMpvBinary();
-    // 查找随包脚本:应用目录旁置 lua/(开发 build/ 与 AppImage/Flatpak)→ 系统安装
+    // 查找随包脚本:可执行文件旁置 lua/(开发 build/)→ 安装布局
+    // ../share/moeplayer/lua/(DEB/RPM 与 AppImage/Flatpak 的 AppDir 同构)。
     static QString findScript(const QString &fileName);
     // moe-hook.lua(on_load 占位重定向);界面用 mpv 内建 OSC。
     static QString findMoeHookScript();
 
-    // 查找随包 shader(Anime4K):应用目录旁置 shaders/(开发 build/ 与
-    // AppImage/Flatpak)→ 系统安装 share/moeplayer/shaders/。
+    // 查找随包 shader(Anime4K):可执行文件旁置 shaders/(开发 build/)→
+    // 安装布局 ../share/moeplayer/shaders/(DEB/RPM 与 AppImage/Flatpak 的
+    // AppDir 同构)。
     static QString findShader(const QString &fileName);
 
     // Anime4K 超分预设:shader 链与顺序取官方 v4.0.1 模板
@@ -63,13 +69,6 @@ public:
     // ConfigManager 的 Combo 选项钩子({label,key})与档位显示名。
     static QVariantList superResOptions();
     static QString superResLabel(const QString &id);
-
-    // 应用超分档位(off/未知 = 卸载全部)。只下发命令,是否真跑由回读
-    // 判定后经 superResStateChanged 广播(mpv 收下路径 ≠ shader 会执行)。
-    Q_INVOKABLE void setSuperRes(const QString &presetId, const QString &itemId = {});
-    // 最近一次回读:{preset,label,mounted,expected,sizeGated,willRun,
-    // videoW/videoH,outputW/outputH};无会话返回空表。
-    Q_INVOKABLE QVariantMap superResStatus(const QString &itemId = {}) const;
 
     // 先弹 mpv 空窗(协商期加载态);meta 含 itemId/serverUrl/...。成功返回 true。
     Q_INVOKABLE bool startPending(const QVariantMap &meta);
@@ -92,8 +91,8 @@ public:
     // 全集进入 mpv 播放列表:写 m3u(EXTINF 标题;官方 demux_playlist.c
     // 解析为条目 title,经 --osd-playlist-entry=title 显示),第 0 条 = 当前集
     // 真 URL(标题一致),其余按「当前→其后→环绕前部」旋转顺序为占位
-    // moe://ep/<id>(经 on_load hook 重定向,见 moe-hook.lua)。deliver 后
-    // mpv 自动播第 0 条;点列表/上/下集/eof 连播都走 hook。
+    // moe://ep/<id>(经 on_load hook 重定向,见 moe-hook.lua)。loadlist
+    // (replace)灌入即自动播第 0 条;点列表/上/下集/eof 连播都走 hook。
     Q_INVOKABLE void setEpisodeList(const QVariantList &episodes,
                                     const QString &currentItemId, int currentIndex,
                                     const QString &url, const QVariantList &headers,
@@ -101,8 +100,8 @@ public:
     // on_load hook 应答:占位条目经 moe-url 请求,QML 协商后的真实地址、
     // 流头、元数据与(可选)外挂字幕 URL;meta 供 file-loaded 归位/选轨。
     // url 为空 = 协商失败:通知 hook 继续(占位加载失败,mpv 跳过该条)。
-    // sessionKey = 会话键(当前播放集 itemId):多窗并发时把应答路由回
-    // 发起 hook 的会话(此前按 m_active,多会话会答错/挂起)。
+    // sessionKey = 会话键(起始集 accountId|itemId,换集不换键):多窗并发
+    // 时把应答路由回发起 hook 的会话(此前按 m_active,多会话会答错/挂起)。
     Q_INVOKABLE void deliverEpisodeUrl(const QString &sessionKey, const QString &itemId, const QString &url,
                                        const QVariantList &headers,
                                        const QVariantMap &meta,
@@ -150,8 +149,6 @@ signals:
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
     // 双轴:sessionKey 路由会话,itemId 为真实集 id(换集后随实际播放变)。
     void playbackFinished(const QString &sessionKey, const QString &itemId, bool error);
-    // 超分回读结果(state 同 superResStatus):挂载数与尺寸门槛判定。
-    void superResStateChanged(const QString &itemId, const QVariantMap &state);
 
 private:
     struct Session
@@ -228,8 +225,9 @@ private:
     void handleEvent(Session *s, const QJsonObject &ev);
     void observe(Session *s);
     void flush(Session *s);
-    // 文件加载后按 meta 所选轨(Emby index/title/lang/codec)在 track-list
-    // 中匹配出 mpv 数字 id,set aid/sid;字幕 -2 显式关。
+    // 文件加载后按 meta 所选轨在 track-list 中按同类型第 ordinal 条匹配出
+    // mpv 数字 id,set aid/sid;两模式共享(外部经 IPC 同样可行,修复外部
+    // 模式正数 ordinal 选轨被静默丢弃的缺口);字幕 -2 显式关。
     void applyTrackSelection(Session *s, const QJsonArray &trackList);
     void enqueueLoad(Session *s, const QString &url, const QVariantList &headers);
     // 超分:注册快捷键与默认档位(IPC 就绪后一次)、按档位挂载、回读校验。

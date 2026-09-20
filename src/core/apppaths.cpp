@@ -37,11 +37,6 @@ void AppPaths::init()
     qInfo().noquote() << "AppPaths: 便携模式,数据目录" << root;
 }
 
-bool AppPaths::portable()
-{
-    return g_portable;
-}
-
 QString AppPaths::configDir()
 {
     if (g_portable)

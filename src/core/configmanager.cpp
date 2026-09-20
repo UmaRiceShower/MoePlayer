@@ -215,7 +215,8 @@ bool validateProxy(const QVariant &v)
     return s.isEmpty() || parseProxy(s).type() != QNetworkProxy::NoProxy;
 }
 
-bool validateWheelStep(const QVariant &v)
+// 正整数(≥1):通用数值下限校验(detail 文字区宽/高等)。
+bool validatePositiveInt(const QVariant &v)
 {
     return v.toInt() >= 1;
 }
@@ -227,27 +228,10 @@ bool validateShortcut(const QVariant &v)
     return !v.toString().trimmed().isEmpty();
 }
 
-
-QVariantList optionsHistoryView()
-{
-    return { QVariantMap{ { QStringLiteral("label"), QStringLiteral("时间轴") },
-                          { QStringLiteral("key"), QStringLiteral("timeline") } },
-             QVariantMap{ { QStringLiteral("label"), QStringLiteral("网格") },
-                          { QStringLiteral("key"), QStringLiteral("grid") } } };
-}
-
 bool validateHistoryView(const QVariant &v)
 {
     const QString s = v.toString();
     return s == QLatin1String("timeline") || s == QLatin1String("grid");
-}
-
-QVariantList optionsServerManagerView()
-{
-    return { QVariantMap{ { QStringLiteral("label"), QStringLiteral("网格") },
-                          { QStringLiteral("key"), QStringLiteral("grid") } },
-             QVariantMap{ { QStringLiteral("label"), QStringLiteral("树状") },
-                          { QStringLiteral("key"), QStringLiteral("tree") } } };
 }
 
 bool validateServerManagerView(const QVariant &v)

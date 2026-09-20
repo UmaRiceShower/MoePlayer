@@ -52,10 +52,8 @@ bool validatePosterPos(const QVariant &v);
 bool validateTextPos(const QVariant &v);
 bool validateButtonsPos(const QVariant &v);
 bool validateProxy(const QVariant &v);
-bool validateWheelStep(const QVariant &v);
+bool validatePositiveInt(const QVariant &v);
 bool validateSearchLimit(const QVariant &v);
-QVariantList optionsHistoryView();
-QVariantList optionsServerManagerView();
 bool validateServerManagerView(const QVariant &v);
 bool validateHistoryView(const QVariant &v);
 QVariantList optionsSuperRes();
@@ -96,7 +94,6 @@ bool validateShortcut(const QVariant &v);
     M(themeAccent, "themeAccent", QString, "", "theme", "高级自定义:强调色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeAccentSoft, "themeAccentSoft", QString, "", "theme", "高级自定义:浅强调(悬停提亮/浅色文字)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeAccentDeep, "themeAccentDeep", QString, "", "theme", "高级自定义:深强调(按压/深描边)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
-    M(themeAccentGlow, "themeAccentGlow", QString, "", "theme", "高级自定义:光晕(带 alpha,写 #AARRGGBB)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeAccentInk, "themeAccentInk", QString, "", "theme", "高级自定义:强调底上的文字色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeAccentWarm, "themeAccentWarm", QString, "", "theme", "高级自定义:次级暖强调(徽标/收藏点缀)#RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeBaseTop, "themeBaseTop", QString, "", "theme", "高级自定义:背景渐变起色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
@@ -110,14 +107,14 @@ bool validateShortcut(const QVariant &v);
     M(detailPosterPos, "posterPos", QString, "bottom-left", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-left)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
     M(detailTextPos, "textPos", QString, "followPoster", "detail", "标题+介绍位置:followPoster(跟随海报)/9 宫格", "详情页", "标题与介绍位置", "跟随海报,或固定于 hero 区九宫格位置(优先于海报)。", Combo, optionsDetailTextPos, validateTextPos) \
     M(detailButtonsPos, "buttonsPos", QString, "poster", "detail", "播放/收藏/已看按钮组:text(标题)/poster(海报)/backdrop(背景左下)", "详情页", "按钮组位置", "播放/收藏/已看按钮组:跟随标题、跟随海报,或背景图左下角。", Combo, optionsDetailButtonsPos, validateButtonsPos) \
-    M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validateWheelStep) \
-    M(detailTextHeight, "textHeight", int, 140, "detail", "标题+介绍区固定高度(像素,不随内容自适应;默认 140)", "详情页", "文字区高度", "标题+介绍区固定高度(px),默认 140。", Field, nullptr, validateWheelStep) \
+    M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validatePositiveInt) \
+    M(detailTextHeight, "textHeight", int, 140, "detail", "标题+介绍区固定高度(像素,不随内容自适应;默认 140)", "详情页", "文字区高度", "标题+介绍区固定高度(px),默认 140。", Field, nullptr, validatePositiveInt) \
     M(proxy, "proxy", QString, "", "network", "全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,https 目标走 CONNECT 隧道;可带 user:pass@ 认证;仅支持 HTTP,播放经 mpv --http-proxy)", "代理", "代理地址", "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连。", Field, nullptr, validateProxy) \
     M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "search", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \
     M(superRes, "superRes", QString, "off", "video", "Anime4K 超分预设(shader 链档位;mpv 内 CTRL+0..8 可即时切换)", "播放", "超分(Anime4K)", "Anime4K shader 链档位:模式 A/B/C 为一次放大(分别优化 1080p/720p/降采样源),A+/B+/C+A 为二次放大(仅放大比 ≥2 倍时用),去噪/去模糊两档无尺寸门槛。CNN 放大 pass 要求输出大于片源 1.2 倍,窗口不够大时该段不生效(mpv 内按 CTRL+0 关闭)。", Combo, optionsSuperRes, validateSuperRes) \
     M(playerBackend, "playerBackend", QString, "embedded", "video", "播放后端:embedded(内嵌 libmpv,QML 界面)/external(外部 mpv 进程,内建 OSC 界面)", "播放", "播放后端", "内嵌:视频在应用窗口内渲染,界面为应用主题的控制层(官方安装包/AppImage 已自带 libmpv;其余场景缺库自动回退外部);外部:弹独立 mpv 窗口(需自备 mpv,mpv 原生 OSC)。", Combo, optionsPlayerBackend, validatePlayerBackend) \
-    M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, optionsHistoryView, validateHistoryView) \
-    M(serverManagerView, "serverManagerView", QString, "grid", "servermanager", "服务器管理视图:grid(网格)/tree(树状)", "", "", "", Hidden, optionsServerManagerView, validateServerManagerView) \
+    M(historyView, "historyView", QString, "timeline", "history", "播放历史视图:timeline(时间轴)/grid(网格)", "", "", "", Hidden, nullptr, validateHistoryView) \
+    M(serverManagerView, "serverManagerView", QString, "grid", "servermanager", "服务器管理视图:grid(网格)/tree(树状)", "", "", "", Hidden, nullptr, validateServerManagerView) \
     M(historyAggregate, "historyAggregate", bool, false, "history", "播放历史聚合同一剧的多集记录(仅分集条目)", "", "", "", Hidden, nullptr, nullptr) \
     M(shortcutBack, "shortcutBack", QString, "Alt+Left", "shortcut", "返回键(QKeySequence 文本;| 分隔多键位)", "快捷键", "返回", "返回上一页;浮层打开时优先关浮层。", Field, nullptr, validateShortcut) \
     M(shortcutHome, "shortcutHome", QString, "Alt+Home", "shortcut", "回首页清栈键(| 分隔多键位)", "快捷键", "回首页", "回到首页并清空页面栈。", Field, nullptr, validateShortcut) \

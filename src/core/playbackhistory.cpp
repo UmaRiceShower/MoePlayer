@@ -221,24 +221,6 @@ QVariantList PlaybackHistory::allItems() const
     return out;
 }
 
-qint64 PlaybackHistory::lastPlayedAt(const QString &serverUrl, const QString &accountId,
-                                     const QString &itemId) const
-{
-    const QString scope = scopeOf(serverUrl, accountId);
-    for (const QVariant &v : m_items) {
-        const QVariantMap m = v.toMap();
-        if (m.value(QStringLiteral("scope")).toString() == scope
-            && m.value(QStringLiteral("id")).toString() == itemId)
-            return m.value(QStringLiteral("lastPlayedAt")).toLongLong();
-    }
-    return 0;
-}
-
-qint64 PlaybackHistory::fetchedAt(const QString &serverUrl, const QString &accountId) const
-{
-    return m_fetchedAt.value(scopeOf(serverUrl, accountId)).toLongLong();
-}
-
 void PlaybackHistory::renameScopeServer(const QString &accountId, const QString &oldUrl,
                                         const QString &newUrl)
 {

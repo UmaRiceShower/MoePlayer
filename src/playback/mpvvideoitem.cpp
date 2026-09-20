@@ -440,7 +440,6 @@ bool MpvEmbeddedCore::start(const QString &hookScript)
         qInfo() << "MpvEmbeddedCore: libmpv 实例已就绪" << ver;
         mpv_free(ver);
     }
-    emit ready();
     return true;
 }
 
@@ -474,14 +473,12 @@ QJsonObject MpvEmbeddedCore::execute(const QJsonObject &obj)
     if (name == QLatin1String("observe_property") && cmd.size() >= 3) {
         const quint64 id = quint64(cmd.at(1).toVariant().toULongLong());
         const QString prop = cmd.at(2).toString();
-        m_observed.insert(id, prop);
         mpv_observe_property(mpv, id, prop.toUtf8().constData(), MPV_FORMAT_NODE);
         reply.insert(QStringLiteral("error"), QStringLiteral("success"));
         return reply;
     }
     if (name == QLatin1String("unobserve_property") && cmd.size() >= 2) {
         const quint64 id = quint64(cmd.at(1).toVariant().toULongLong());
-        m_observed.remove(id);
         mpv_unobserve_property(mpv, id);
         reply.insert(QStringLiteral("error"), QStringLiteral("success"));
         return reply;
@@ -788,5 +785,7 @@ MpvVideoItem::Renderer *MpvVideoItem::createRenderer() const { return new NullRe
 void MpvVideoItem::setPlaybackState(double, double, bool) {}
 void MpvVideoItem::sendCommand(const QVariantList &) {}
 void MpvVideoItem::setVolumeSpeed(double, double) {}
+void MpvVideoItem::setBuffered(double) {}
+void MpvVideoItem::setBuffering(bool) {}
 
 #endif
