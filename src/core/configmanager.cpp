@@ -145,6 +145,21 @@ QVariantList optionsLibrarySortBy()
     });
 }
 
+QVariantList optionsCustomLibrariesMode()
+{
+    return QVariantList{
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("开启") }, { QStringLiteral("value"), QStringLiteral("on") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("仅显示自定义库") }, { QStringLiteral("value"), QStringLiteral("only") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("关闭") }, { QStringLiteral("value"), QStringLiteral("off") }},
+    };
+}
+
+bool validateCustomLibrariesMode(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("on") || s == QLatin1String("only") || s == QLatin1String("off");
+}
+
 QVariantList optionsLibrarySortOrder()
 {
     return optionsFrom({

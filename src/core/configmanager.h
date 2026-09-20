@@ -45,6 +45,8 @@ struct Item {
 // 选项/校验钩子(宏行引用名字;实现于 configmanager.cpp)。
 QVariantList optionsLibrarySortBy();
 QVariantList optionsLibrarySortOrder();
+QVariantList optionsCustomLibrariesMode();
+bool validateCustomLibrariesMode(const QVariant &v);
 QVariantList optionsDetailPosterPos();
 QVariantList optionsDetailTextPos();
 QVariantList optionsDetailButtonsPos();
@@ -103,6 +105,8 @@ bool validateShortcut(const QVariant &v);
     M(themeGlowC, "themeGlowC", QString, "", "theme", "高级自定义:背景光团 C 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(librarySortBy, "sortBy", QString, "DateLastContentAdded", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
     M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
+    M(customLibrariesMode, "customLibrariesMode", QString, "on", "library", "自定义库聚合:off(关闭)/on(开启,未匹配库保留原行)/only(仅显示自定义库)", "媒体库", "自定义库聚合", "按规则把多台服务器的库合并成自定义行。", Combo, optionsCustomLibrariesMode, validateCustomLibrariesMode) \
+    M(customLibraries, "customLibraries", QString, "", "library", "自定义库规则(JSON:[{name,rules:[{field,pattern}]}];空=预置)", "", "", "", Hidden, nullptr, nullptr) \
     M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
     M(detailPosterPos, "posterPos", QString, "bottom-right", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-right)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
     M(detailTextPos, "textPos", QString, "followPoster", "detail", "标题+介绍位置:followPoster(跟随海报)/9 宫格", "详情页", "标题与介绍位置", "跟随海报,或固定于 hero 区九宫格位置(优先于海报)。", Combo, optionsDetailTextPos, validateTextPos) \

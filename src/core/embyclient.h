@@ -344,6 +344,11 @@ private:
     void get(const QString &serverUrl, const QString &token, const QString &userId,
              const QString &path, std::function<void(const QJsonDocument &)> onOk,
              std::function<void()> onFail, const QString &what, bool background = false);
+    // get 的实现体;retried 标记传输层重试已发生(仅一次)。
+    void sendGet(const QString &serverUrl, const QString &token, const QString &userId,
+                 const QString &path, std::function<void(const QJsonDocument &)> onOk,
+                 std::function<void()> onFail, const QString &what, bool background,
+                 bool retried);
     // 跨服务器 POST(无认证头,登录端点用),失败发 serverRequestFailed 并调用 onFail。
     void postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
                   std::function<void(const QJsonDocument &)> onOk,

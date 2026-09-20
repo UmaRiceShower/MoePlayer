@@ -182,7 +182,9 @@ Item {
     // 崩溃(多轮复现矩阵实证,两步清池/关 reuseItems 均不能根除)。
     HomeRowsFilterModel {
         id: homeRowsFilter
-        sourceModel: AccountManager.homeRows
+        plainSource: AccountManager.homeRows
+        customSource: AccountManager.customHomeRows
+        customActive: ConfigManager.customLibrariesMode !== "off" && root.libFilter.trim() === ""
         filterPredicate: root.libMatch
     }
     onLibFilterChanged: {
@@ -778,6 +780,8 @@ Item {
                         header: Item { width: Constants.rowLeftMargin; height: 1 }
                         // 右缘与左缘同留白(滚到尽头时末卡不贴窗缘)。
                         footer: Item { width: Constants.rowLeftMargin; height: 1 }
+                        // 卡条保持原始模型:过滤走每卡折叠(不打字期重建),
+                        // 自定义桶卡无目标库页(虚拟库页后续阶段),不进卡条。
                         model: AccountManager.homeRows
                             // 过滤变化时回左端:原 contentX 会指向已折叠的中段(首卡被截断)。
                         property string filterEcho: root.libFilter
@@ -998,8 +1002,10 @@ Item {
                 anchors.right: seeAllLink.left
                 anchors.rightMargin: Constants.homeRowTitlePad
                 anchors.verticalCenter: parent.verticalCenter
-                text: (libRow.modelData.serverName !== ""
-                       ? libRow.modelData.serverName + " · " : "") + libRow.modelData.viewName
+                text: (libRow.modelData.custom === true
+                       ? ""
+                       : (libRow.modelData.serverName !== ""
+                          ? libRow.modelData.serverName + " · " : "")) + libRow.modelData.viewName
                 color: Theme.textPrimary
                 font.pixelSize: Constants.homeRowTitlePx
                 font.bold: true
@@ -1007,6 +1013,7 @@ Item {
             }
             AppText {
                 id: seeAllLink
+                visible: libRow.modelData.custom !== true
                 anchors.right: parent.right
                 anchors.rightMargin: Constants.rowLeftMargin
                 anchors.verticalCenter: parent.verticalCenter
@@ -1075,8 +1082,9 @@ Item {
                             unplayedCount: parent.modelData.unplayedCount || 0
                             itemType: parent.modelData.type || ""
                             onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
-                                                       parent.modelData.name, libRow.modelData.serverUrl,
-                                                       libRow.modelData.accountId)
+                                                       parent.modelData.name,
+                                                       parent.modelData.serverUrl || libRow.modelData.serverUrl,
+                                                       parent.modelData.accountId || libRow.modelData.accountId)
                         }
                     }
                 }

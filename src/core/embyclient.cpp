@@ -87,6 +87,11 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &idPrefix)
     m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
     m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
     m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("IsFavorite")).toBool(false));
+    {
+        const QString d = o.value(QLatin1String("DateLastMediaAdded")).toString();
+        m.insert(QStringLiteral("dateAdded"),
+                 d.isEmpty() ? o.value(QLatin1String("DateCreated")).toString() : d);
+    }
     const QJsonObject pid = o.value(QLatin1String("ProviderIds")).toObject();
     m.insert(QStringLiteral("tmdbId"), pid.value(QLatin1String("Tmdb")).toString());
     m.insert(QStringLiteral("imdbId"), pid.value(QLatin1String("Imdb")).toString());
@@ -262,12 +267,36 @@ void EmbyClient::get(const QString &serverUrl, const QString &token, const QStri
                      const QString &path, std::function<void(const QJsonDocument &)> onOk,
                      std::function<void()> onFail, const QString &what, bool background)
 {
+    sendGet(serverUrl, token, userId, path, std::move(onOk), std::move(onFail), what,
+            background, false);
+}
+
+// get 的实现体。传输层失败(HTTP 0:连接断/对端重置等)换连接重试一次——
+// GET 全幂等,隧道路由的间歇断连不该让首页行/视图本轮被当空库丢弃
+// (与图片回源同款);HTTP 状态错误(4xx/5xx)不重试。
+void EmbyClient::sendGet(const QString &serverUrl, const QString &token, const QString &userId,
+                         const QString &path, std::function<void(const QJsonDocument &)> onOk,
+                         std::function<void()> onFail, const QString &what, bool background,
+                         bool retried)
+{
     QNetworkAccessManager &nam = background ? m_bgNam : m_nam;
     QNetworkReply *reply = nam.get(makeRequest(serverUrl, token, userId, path, false));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, serverUrl, token, userId, path, onOk, onFail, what, background, retried]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            if (status == 0 && reply->error() != QNetworkReply::OperationCanceledError && !retried) {
+                // GUI 线程不能 sleep:400ms 后换连接重发(隧道半死连接重建窗口);
+                // clearAccessCache 只丢空闲 keep-alive 连接,不打断在途请求。
+                qInfo().noquote() << "Emby:" << what << "传输层失败,换连接重试" << serverUrl;
+                (background ? m_bgNam : m_nam).clearAccessCache();
+                QTimer::singleShot(400, this, [this, serverUrl, token, userId, path,
+                                               onOk, onFail, what, background]() {
+                    sendGet(serverUrl, token, userId, path, onOk, onFail, what, background, true);
+                });
+                return;
+            }
             const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             qWarning().noquote() << "Emby:" << msg
@@ -944,6 +973,8 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
                 QVariantMap m;
                 m.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
                 m.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+                m.insert(QStringLiteral("collectionType"),
+                         o.value(QLatin1String("CollectionType")).toString());
                 m.insert(QStringLiteral("posterId"),
                          tag.isEmpty() ? QString()
                                        : o.value(QLatin1String("Id")).toString()
@@ -972,7 +1003,7 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
     // ProviderIds:跨服去重键(Tmdb/Imdb/Tvdb)
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags,ProviderIds"));
+                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags,ProviderIds,DateCreated,DateLastMediaAdded"));
     q.addQueryItem(QStringLiteral("Limit"),
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
@@ -980,7 +1011,13 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
         [this, serverUrl, userId, viewId, viewName, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                items.append(parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId)));
+                {
+                    QVariantMap it = parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId));
+                    // 合并行跨服混编后点击导航按条目路由。
+                    it.insert(QStringLiteral("accountId"), accountId);
+                    it.insert(QStringLiteral("serverUrl"), serverUrl);
+                    items.append(it);
+                }
             // 正常路径(有条目)记 debug(默认滤,避免聚合刷屏);空结果记
             // info——多账号/多库聚合时空行常指向库权限或空库,需定位到
             // 账号与库(同服多账号可见库不同)。
@@ -1126,7 +1163,13 @@ void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString 
         [this, serverUrl, userId, accountId](const QJsonDocument &doc) {
             QVariantList items;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
-                items.append(parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId)));
+                {
+                    QVariantMap it = parseHomeItem(v.toObject(), idPrefixFor(serverUrl, userId));
+                    // 合并行跨服混编后点击导航按条目路由。
+                    it.insert(QStringLiteral("accountId"), accountId);
+                    it.insert(QStringLiteral("serverUrl"), serverUrl);
+                    items.append(it);
+                }
             qInfo() << "Emby: serverSuggestions =" << items.size() << "on" << serverUrl;
             emit serverSuggestionsReceived(serverUrl, accountId, items);
         },

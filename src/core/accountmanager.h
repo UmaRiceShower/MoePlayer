@@ -9,6 +9,8 @@
 #include "core/apppaths.h"
 #include "core/constants.h"
 #include "core/persistmap.h"
+
+class ConfigManager;
 #include "homerowsmodel.h"
 
 class EmbyClient;
@@ -39,6 +41,10 @@ class AccountManager : public QObject
     // {accountId, serverUrl, serverName, viewName, posterId, items, loading}。
     // 按行增量更新(见 HomeRowsModel::setRows),只触发变化行的 delegate 重估。
     Q_PROPERTY(HomeRowsModel* homeRows READ homeRowsModel NOTIFY homeRowsReady)
+    // 自定义库聚合行模型:按 customLibraries 规则把多服库合并为自定义行
+    // (跨服去重:同账号同 id → Tmdb/Imdb/Tvdb → 标题+年份);mode=off 时为空。
+    // 行形 {custom:true, viewName:桶名, items, ...};未匹配库的行按 mode 保留/丢弃。
+    Q_PROPERTY(HomeRowsModel* customHomeRows READ customHomeRowsModel NOTIFY homeRowsReady)
     // 服务器建议(首页 hero 轮播数据源):全部账号的建议按账号顺序展平,
     // 每条含行条目字段 + {serverUrl, accountId}(posterId 已带服务器前缀);
     // 逐账号到位即发 suggestionsUpdated,新数据覆盖旧数据(不等待全部)。
@@ -53,11 +59,12 @@ class AccountManager : public QObject
 public:
     // history 为播放历史本地存储(拉取结果写入其中,不持有所有权)。
     explicit AccountManager(EmbyClient *client, PlaybackHistory *history,
-                            QObject *parent = nullptr);
+                            ConfigManager *config, QObject *parent = nullptr);
 
     QVariantList accounts() const;
     int accountCount() const { return m_accounts.size(); }
     HomeRowsModel *homeRowsModel() const { return m_homeRowsModel; }
+    HomeRowsModel *customHomeRowsModel() const { return m_customHomeRowsModel; }
     QVariantList folders() const;
     QVariantList layoutOrder() const { return m_layoutOrder; }
     QVariantList suggestions() const;
@@ -214,6 +221,11 @@ private:
     static QString deobfuscate(const QString &cipher);
     // 首页聚合:全部请求完成后按账号顺序组装 homeRows 并发 homeRowsReady。
     void maybeAssembleHomeRows();
+    // 由原始行集(visibleHomeRows 结果)构建自定义聚合行并写入
+    // m_customHomeRowsModel;配置/隐藏变化时也要重跑(不重拉网络)。
+    // final=true 时才发 info 级汇总(聚合完成/配置变更等一次性事件);
+    // 增量中途重排解 debug,不刷屏。
+    void rebuildCustomHomeRows(bool final = true);
     // 首页聚合串行化:结束本轮,飞行中排队的触发重跑一次。
     void finishHomeFetch();
     // 文件夹结构(见 folders 属性)。
@@ -274,7 +286,9 @@ const QString &accountId) const;
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
     // 首页聚合行模型(QML 渲染按行增量;m_homeRows 为快照,供缓存/语义比较)。
+    ConfigManager *m_config = nullptr;
     HomeRowsModel *m_homeRowsModel = nullptr;
+    HomeRowsModel *m_customHomeRowsModel = nullptr;
     // 首页聚合串行化:飞行中收到新触发(启动拉取/重登/账号变化)时排队,
     // 本轮完成后重跑一次。避免并发 fill 打断正在孵化的 ListView delegate
     // (Qt 报 "Object or context destroyed during incubation")。
