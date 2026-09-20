@@ -81,10 +81,10 @@ bool validateShortcut(const QVariant &v);
 // 不破坏用户磁盘 config.toml 与手改值。
 #define MOECONFIG_X(M) \
     M(monetEnabled, "monetEnabled", bool, true, "theme", "海报莫奈动态取色(false 回退静态主题色)", "界面", "海报莫奈取色", "从海报提取主题色,染色详情页强调色与界面点缀;关闭后使用默认蓝色。", Switch, nullptr, nullptr) \
-    M(themePalette, "themePalette", QString, "yozakura", "theme", "配色方案(ThemeStore.palettes 的 key)", "界面", "配色方案", "整套界面配色与背景底色;默认夜樱(深靛 × 浅粉)。", Combo, optionsThemePalette, validateThemePalette) \
-    M(backgroundEffect, "backgroundEffect", QString, "sakura", "theme", "背景效果(ThemeStore.effects 的 key;none 为纯色)", "界面", "背景效果", "背景上的动态效果层,与配色独立;选「无」为纯色背景。", Combo, optionsBackgroundEffect, validateBackgroundEffect) \
-    M(backgroundMotion, "backgroundMotion", QString, "low", "theme", "背景动效帧率(off/low/high;仅含动效的预设生效)", "界面", "背景动效", "含动效的背景按此帧率刷新:极低频几乎看不出刷新、更省,流畅更顺滑;静止预设不受影响。", Combo, optionsBackgroundMotion, nullptr) \
-    M(backgroundIntensity, "backgroundIntensity", int, 100, "theme", "背景强度(百分比 0-100)", "界面", "背景强度", "背景整体强度:0 接近纯底色,100 为预设原样。", Slider, nullptr, validatePercent) \
+    M(themePalette, "themePalette", QString, "mint", "theme", "配色方案(ThemeStore.palettes 的 key)", "界面", "配色方案", "整套界面配色与背景底色;默认薄荷(浅色)。", Combo, optionsThemePalette, validateThemePalette) \
+    M(backgroundEffect, "backgroundEffect", QString, "starry", "theme", "背景效果(ThemeStore.effects 的 key;none 为纯色)", "界面", "背景效果", "背景上的动态效果层,与配色独立;选「无」为纯色背景。", Combo, optionsBackgroundEffect, validateBackgroundEffect) \
+    M(backgroundMotion, "backgroundMotion", QString, "high", "theme", "背景动效帧率(off/low/high;仅含动效的预设生效)", "界面", "背景动效", "含动效的背景按此帧率刷新:极低频几乎看不出刷新、更省,流畅更顺滑;静止预设不受影响。", Combo, optionsBackgroundMotion, nullptr) \
+    M(backgroundIntensity, "backgroundIntensity", int, 30, "theme", "背景强度(百分比 0-100)", "界面", "背景强度", "背景整体强度:0 接近纯底色,100 为预设原样。", Slider, nullptr, validatePercent) \
     M(backgroundMeteorRate, "backgroundMeteorRate", int, 100, "theme", "星空流星频率(百分比,0=关)", "界面", "流星频率", "仅「星空流星」效果生效:100 = 约 3.5 秒一颗(现状),50 ≈ 7 秒一颗,0 = 不出现流星。", Slider, nullptr, validatePercent) \
     M(pageTransition, "pageTransition", QString, "axis_x", "theme", "页面转场(axis_x/slide_up/fade/ios_slide)", "界面", "页面转场", "页面切换动画:横向轻移(Material)、纵向上浮(Kirigami)、纯淡入淡出、横滑视差(iOS)。", Combo, optionsPageTransition, validatePageTransition) \
     M(themeBg, "themeBg", QString, "", "theme", "高级自定义:窗口底色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
@@ -101,10 +101,10 @@ bool validateShortcut(const QVariant &v);
     M(themeGlowA, "themeGlowA", QString, "", "theme", "高级自定义:背景光团 A 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeGlowB, "themeGlowB", QString, "", "theme", "高级自定义:背景光团 B 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(themeGlowC, "themeGlowC", QString, "", "theme", "高级自定义:背景光团 C 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
-    M(librarySortBy, "sortBy", QString, "DateModified", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
+    M(librarySortBy, "sortBy", QString, "DateLastContentAdded", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
     M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
-    M(detailSidebarLeft, "sidebarLeft", bool, false, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示;默认靠右。", Switch, nullptr, nullptr) \
-    M(detailPosterPos, "posterPos", QString, "bottom-left", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-left)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
+    M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
+    M(detailPosterPos, "posterPos", QString, "bottom-right", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-right)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
     M(detailTextPos, "textPos", QString, "followPoster", "detail", "标题+介绍位置:followPoster(跟随海报)/9 宫格", "详情页", "标题与介绍位置", "跟随海报,或固定于 hero 区九宫格位置(优先于海报)。", Combo, optionsDetailTextPos, validateTextPos) \
     M(detailButtonsPos, "buttonsPos", QString, "poster", "detail", "播放/收藏/已看按钮组:text(标题)/poster(海报)/backdrop(背景左下)", "详情页", "按钮组位置", "播放/收藏/已看按钮组:跟随标题、跟随海报,或背景图左下角。", Combo, optionsDetailButtonsPos, validateButtonsPos) \
     M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validatePositiveInt) \

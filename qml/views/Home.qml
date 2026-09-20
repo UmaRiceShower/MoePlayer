@@ -284,7 +284,7 @@ Item {
         const cw = all.filter(function (i) {
             return i.positionTicks > 0 && !i.played && i.runtimeTicks > 0
         })
-        // 候选按行顺序取前 10:行内条目由服务器按 DateModified 倒序返回。
+        // 候选按行顺序取前 10:行内条目由服务器按 DateLastContentAdded 倒序返回。
         const cwTop = cw.slice(0, 10)
         root.syncHero(cwTop.length > 0 ? cwTop : all.slice(0, 10))
     }
