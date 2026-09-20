@@ -960,9 +960,9 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
-    // 按更新时间(文件修改时间)倒序,新更新/入库的内容靠前;
-    // DateLastMediaAdded 在部分服务器条目级排序会异常,改用 DateModified。
-    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateModified"));
+    // 按内容入库时间倒序:新内容入库才上浮(剧集来新集会顶上来),
+    // 刮削/换图等元数据变动不动它——比 DateModified 干净。
+    q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateLastContentAdded"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
     q.addQueryItem(QStringLiteral("Fields"),
                    QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags"));
