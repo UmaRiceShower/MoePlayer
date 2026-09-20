@@ -469,9 +469,9 @@ Item {
     // ListModel(而非 JS 对象数组):ComboBox model/textRole 官方标准模型。
     ListModel {
         id: sortOptions
-        ListElement { label: "最近添加"; key: "DateLastContentAdded" }
+        ListElement { label: "更新日期"; key: "DateLastContentAdded" }
         ListElement { label: "加入时间"; key: "DateCreated" }
-        ListElement { label: "上映日期"; key: "PremiereDate" }
+        ListElement { label: "首映日期"; key: "PremiereDate" }
         ListElement { label: "名称"; key: "SortName" }
         ListElement { label: "出品年份"; key: "ProductionYear" }
         ListElement { label: "社区评分"; key: "CommunityRating" }
