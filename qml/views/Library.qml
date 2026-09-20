@@ -67,8 +67,7 @@ Item {
     // 库内搜索关键词(SearchTerm,空 = 不传)。与 ParentId/筛选/排序/分页
     // 正交;带词时服务端固定相关度排序(SortBy 忽略),UI 置灰排序控件。
     property string currentSearchTerm: ""
-    // 子文件夹下钻路径(元素为文件夹 id;空数组 = 库根)。进文件夹 push,
-    // 下钻路径(元素 {id, name},按层序;空=库根)。头部面包屑逐段显示,
+    // 子文件夹下钻路径(元素 {id, name},按层序;空 = 库根)。进文件夹 push,
     // 上级 pop、根清空;查询 ParentId = 末元素 id 或库视图 id。
     property var folderPath: []
 
@@ -82,11 +81,6 @@ Item {
     property bool busy: false
     // 可浏览 = 有服务器且凭据有效。
     readonly property bool browseReady: root.serverUrl !== "" && root.creds().token !== ""
-
-    // --- 萌系粉白甜系配色(集中定义在 Constants,此处仅别名方便引用) ---
-
-    // --- chip 样式 ---
-    // 选中 chip 底色:粉色降饱和,大色块不用纯 accent。
 
     // --- 筛选下拉底色(与面包屑链同风格) ---
     readonly property color crumb: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 1.0)
@@ -1228,7 +1222,6 @@ Item {
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24
-        // anchors.bottomMargin: 24
         cellWidth: root.cellW
         cellHeight: root.cellH
         clip: true
@@ -1445,11 +1438,6 @@ Item {
                     root.refetch()
                 }
             }
-        }
-        function onFoldersReceived(serverUrl, accountId) {
-            if (serverUrl !== root.serverUrl || accountId !== root.accountId)
-                return
-            // 当前段下拉的子文件夹列表随 fm 模型自动刷新,无额外动作。
         }
         function onErrorOccurred(serverUrl, message) {
             if (serverUrl !== root.serverUrl)

@@ -13,7 +13,8 @@ Item {
     // ============================= 属性 =============================
 
     // 行模型:分组头与条目行交替(见 rebuildRows)。行字段:
-    // header → {kind:"header", label, count};;item → {kind:"item", ...}
+    // header → {kind:"header", label, count};时间轴 item → {kind:"item", ...};
+    // 网格视图按列打包 cards → {kind:"cards", key, items}
     property var rows: []
     // 条目行数(不含分组头),顶部条展示用。
     property int itemCount: 0

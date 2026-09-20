@@ -7,8 +7,8 @@ import MoePlayer.Core
 //! 全局搜索浮层(Ctrl+K 开关):按最近浏览的服务器搜索(主窗口注入 serverUrl),
 //! 服务端搜索跨库递归(影片/剧集/单集),输入 300ms 防抖后请求。
 //! 过滤区(类型/年份/已看状态)全部走服务端查询参数,客户端零过滤。
-//! 分页:请求 Limit+1 探针,多出的 1 条由 C++ 截断并置 model.hasMore,
-//! 滚动到底自动加载下一页。结果网格点击进详情;Esc / 点击背景关闭。
+//! 每账号单次请求(上限 ConfigManager.searchLimitPerAccount,不翻页)。
+//! 结果网格点击进详情;Esc / 点击背景关闭。
 Item {
     id: root
 
@@ -82,12 +82,8 @@ Item {
     property int yearTo: 0
     // 状态过滤(Filters,多选):已看/未看/收藏 的 "IsPlayed" 等值数组。
     property var activeFilters: []
-    // 分页游标:下一页 StartIndex;0 表示替换结果。
-    property int startIndex: 0
     // 首屏/过滤重搜进行中(状态行显示"搜索中")。
     property bool searching: false
-    // 分页加载中(防并发翻页)。
-    property bool loadingMore: false
 
     // 点击结果进详情(携带所在服务器)。
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
@@ -149,11 +145,6 @@ Item {
             EmbyClient.search(t.serverUrl, t.accountId, t.token, t.userId, searchField.text,
                               root.typesParam(), root.yearsParam(), root.filtersParam(),
                               0, ConfigManager.searchLimitPerAccount)
-        }
-        if (root.aggTargets.length === 0) {
-            root.searching = false
-            root.pendingAccounts = 0
-            root._chipPending = false
         }
     }
 
@@ -250,7 +241,6 @@ Item {
     GlassPanel {
         anchors.fill: parent
         blurSource: root.backgroundSource
-        fullSource: true
         blurRadius: 64
         glassColor: Qt.rgba(Theme.scrimDeep.r, Theme.scrimDeep.g, Theme.scrimDeep.b, 0.55)
         border.width: 0
@@ -274,7 +264,6 @@ Item {
         GlassPanel {
             anchors.fill: parent
             blurSource: root.backgroundSource
-            fullSource: true
             blurRadius: 48
             glassColor: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.72)
             borderColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)
