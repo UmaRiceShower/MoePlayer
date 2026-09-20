@@ -143,8 +143,6 @@ Item {
     property string selMediaSourceId: ""
     property int selAudioIndex: -1
     property int selSubtitleIndex: -1
-    // 摘要行当前展开段:""/"version"/"audio"/"subtitle"(三段互斥,开新收旧)。
-    property string expandedSection: ""
     property bool _ready: false
     signal playWindowRequested(var meta)
     signal playbackDelivered(string url, var headers, var meta)
@@ -326,10 +324,10 @@ Item {
             return true
         }
         return false
-    }    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步)。
-    // 落地详情数据(fadeInOut 动画中调用,正文已淡出;fromReplace 仅标记
-    // 替换场景,文字揭示动画由 fadeInOut 自身编排)。
-    function applyDetail(d, fromReplace) {
+    }
+    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步);
+    // fadeInOut 动画中调用(正文已淡出),文字揭示动画由其自身编排。
+    function applyDetail(d) {
         root.detail = d
         root.resetPlaybackSelection()
         root.isFavorite = d.isFavorite
@@ -879,7 +877,7 @@ Item {
             script: {
                 const d = root.pendingDetail
                 root.pendingDetail = null
-                root.applyDetail(d, true)
+                root.applyDetail(d)
             }
         }
         ParallelAnimation {
@@ -932,8 +930,8 @@ Item {
             height: parent.width * 9 / 16
             visible: root.loaded
             z: 0
-            // 底部渐隐:整块背景(图+氛围层)离屏合成后,底 10%
-            // (y 0.90→1.0)alpha 1→0 淡出。取代原"透明→bgTint 盖色"
+            // 底部渐隐:整块背景(图+氛围层)离屏合成后,底 20%
+            // (y 0.80→1.0,带宽 Constants.detailHeroFadeBand)alpha 1→0 淡出。取代原"透明→bgTint 盖色"
             // 遮罩——图片细节保留到最后一刻再溶解入页面底色,无平板色带;
             // 压暗职责由氛围层与页面底色(暗色)承担。
             layer.enabled: true
@@ -1493,7 +1491,6 @@ Item {
                     // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
                     component OptRow: FrostedGlass {
                         id: optRow
-                        property string sectionKey: ""
                         property string icon: ""
                         property string mainText: ""
                         property string subText: ""
@@ -1650,7 +1647,6 @@ Item {
 
                     // ---- 版本行(多版本才显示) ----
                     OptRow {
-                        sectionKey: "version"
                         icon: "🎞"
                         rowWidth: playOptsCol.width
                         visible: (root.detail.mediaSources || []).length > 0
@@ -1670,7 +1666,6 @@ Item {
                     }
                     // ---- 音频行(当前源有音频才显示) ----
                     OptRow {
-                        sectionKey: "audio"
                         icon: "♪"
                         rowWidth: playOptsCol.width
                         visible: true
@@ -1689,7 +1684,6 @@ Item {
                     }
                     // ---- 字幕行(常显;含 关闭字幕/默认/各轨) ----
                     OptRow {
-                        sectionKey: "subtitle"
                         icon: "󰨗"
                         rowWidth: playOptsCol.width
                         visible: true
@@ -2588,7 +2582,7 @@ Item {
                 root.pendingDetail = d
                 fadeInOut.start()
             } else {
-                root.applyDetail(d, false)
+                root.applyDetail(d)
             }
             root.refreshSeriesPlayText()
         }
@@ -2728,9 +2722,6 @@ Item {
             }
         }
     }
-
-    // 返回快捷键:Alt+←(原"← 返回"按钮移除后替代);仅本页可见时生效,
-    // 被上层页覆盖/pop 后不误触发。
 
 }
 

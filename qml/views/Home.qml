@@ -134,7 +134,7 @@ Item {
         onTriggered: root.flushHero(false)
     }
 
-    function syncHero(items, fromFallback) {
+    function syncHero(items) {
         root.heroWant = root.heroRows(items)
         if (heroModel.count === 0) {
             for (let i = 0; i < root.heroWant.length; ++i)
@@ -149,8 +149,8 @@ Item {
     // 服务器管理页点卡片注入:Main.homeFilterText 写入(账号显示名)后
     // 此处消费进过滤框,消费即清(同名再点能再触发)。
     property string filterInject: ApplicationWindow.window ? ApplicationWindow.window.homeFilterText : ""
-    // 非激活态(上方压着其他页)收到注入先挂起:非激活页上做 模型切换
-    // (空查询 C++ 模型 ↔ 过滤快照 JS 数组)会让 DelegateModel 读空指针
+    // 非激活态(上方压着其他页)收到注入先挂起,待页面重新激活(转场结束)
+    // 再写入过滤框:写入会连动整页 refilter/rebuildTop,不落在被压住的页面上。
     property string _pendingInject: ""
     onFilterInjectChanged: {
         if (root.filterInject === "")
@@ -248,8 +248,8 @@ Item {
         if (StackView.status !== StackView.Active)
             serverPickPopup.close()
         else {
-            // 延到转场结束后:pop 过渡期内旧页仍存活,模型切换与旧页
-            // 委托回收交错会让 DelegateModel 读空指针崩溃(竞态实测)。
+            // 延到转场结束后:pop 过渡期内旧页仍存活,过滤写入连动的
+            // refilter/重建与旧页委托回收交错,等页面稳定后再落。
             injectTimer.start()
         }
     }
@@ -263,7 +263,7 @@ Item {
                       ? suggAll.filter(function (it) { return root.heroServerHit(it.serverUrl, it.accountId) })
                       : suggAll
         if (sugOk.length > 0) {
-            root.syncHero(sugOk.slice(0, 10), false)
+            root.syncHero(sugOk.slice(0, 10))
             return
         }
         const all = []
@@ -286,7 +286,7 @@ Item {
         })
         // 候选按行顺序取前 10:行内条目由服务器按 DateModified 倒序返回。
         const cwTop = cw.slice(0, 10)
-        root.syncHero(cwTop.length > 0 ? cwTop : all.slice(0, 10), true)
+        root.syncHero(cwTop.length > 0 ? cwTop : all.slice(0, 10))
     }
 
     Component.onCompleted: {
@@ -1253,7 +1253,6 @@ Item {
                 property real maxAngle: 38
                 property real focal: w * Constants.homeHeroFocalRatio
                 property real sideInset: 0
-                property real meshDensity: 16
                 mesh: Qt.size(16, 16)
                 vertexShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.vert.qsb"
                 fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero.frag.qsb"

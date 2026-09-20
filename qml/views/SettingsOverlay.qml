@@ -308,8 +308,6 @@ Item {
         }
     }
 
-    // 文本/整数输入:绑 ConfigManager 键,intOnly 启用整数校验;
-    // 非法值被后端拒绝(代理格式/非正整数)时编辑结束回填实际生效值。
     // 百分比滑块:绑 ConfigManager 整数键(0-100),拖动即写;与其它控件一样
     // 经 resync() 回填(热重载/重置后同步),右侧显示当前百分比。
     component SettingSlider: Item {
@@ -365,6 +363,8 @@ Item {
         }
     }
 
+    // 文本/整数输入:绑 ConfigManager 键,intOnly 启用整数校验;
+    // 非法值被后端拒绝(代理格式/非正整数)时编辑结束回填实际生效值。
     component SettingField: TextField {
         id: sfield
         required property string configKey
@@ -423,7 +423,7 @@ Item {
     // 设置页:纵向滚动容器,default 属性直写 Column。
     component SettingsPage: ScrollView {
         id: spage
-        // 悬浮细条:不占布局,滚动/hover 显现(替代滚轮步长定制的长页导航补偿)。
+        // 悬浮细条:不占布局,滚动/hover 显现。
         ScrollBar.vertical: MoeScrollBar {}
         default property alias content: spageCol.data
         clip: true
@@ -462,7 +462,6 @@ Item {
     GlassPanel {
         anchors.fill: parent
         blurSource: root.backgroundSource
-        fullSource: true
         blurRadius: 64
         glassColor: Qt.rgba(Theme.scrimDeep.r, Theme.scrimDeep.g, Theme.scrimDeep.b, 0.55)
         border.width: 0
@@ -486,7 +485,6 @@ Item {
         GlassPanel {
             anchors.fill: parent
             blurSource: root.backgroundSource
-            fullSource: true
             blurRadius: 48
             glassColor: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.72)
             borderColor: Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.35)

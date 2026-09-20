@@ -60,7 +60,7 @@ Window {
     onCurrentItemIdChanged: refreshTitle()
     // 正在播放的集(连播高亮;playbackContextChanged 更新)。
     property string currentItemId: meta.itemId || ""
-    // 右侧面板:"" | "episodes" | "tracks"(互斥,开新收旧)。
+    // 右侧面板:"" | "episodes" | "audio" | "sub"(互斥,开新收旧)。
     property string panel: ""
     // 轨道列表(MpvClient.tracksChanged 喂;file-loaded 后 refreshTracks)。
     property var tracks: []
@@ -543,12 +543,13 @@ Window {
                     width: barCol.width
                     spacing: 2
 
-                    IconBtn {                        icon.source: "qrc:/icons/prev.svg"
+                    IconBtn {
+                        icon.source: "qrc:/icons/prev.svg"
                         icon.color: "white"
                         icon.width: 20
                         icon.height: 20
                         onClicked: root.episodeJump(-1)
- tip: "上一集"
+                        tip: "上一集"
                     }
                     IconBtn {
                         icon.source: video.paused ? "qrc:/icons/play.svg" : "qrc:/icons/pause.svg"
@@ -557,21 +558,23 @@ Window {
                         tip: video.paused ? "播放" : "暂停"
                         onClicked: root.togglePause()
                     }
-                    IconBtn {                        icon.source: "qrc:/icons/next.svg"
+                    IconBtn {
+                        icon.source: "qrc:/icons/next.svg"
                         icon.color: "white"
                         icon.width: 20
                         icon.height: 20
                         onClicked: root.episodeJump(1)
- tip: "下一集"
+                        tip: "下一集"
                     }
                     // 音量:图标(静音切换)+ 滑条。
-                    IconBtn {                        id: volBtn
+                    IconBtn {
+                        id: volBtn
                         icon.source: video.volume <= 0 ? "qrc:/icons/mute.svg" : "qrc:/icons/volume.svg"
                         icon.color: "white"
                         icon.width: 20
                         icon.height: 20
                         onClicked: MpvClient.command(["cycle", "mute"], root.sessionKey)
- tip: "静音"
+                        tip: "静音"
                     }
                     Slider {
                         id: volSlider
@@ -666,9 +669,6 @@ Window {
             }
         }
     }
-
-    // 弹性占位:把右侧按钮推到底栏右缘(Row 布局占位)。
-    // (Row 内用 Item{Layout} 需 Layouts;此处用空白 Item 加宽即推挤。)
 
     // ---- 右侧面板(选集 / 轨道;玻璃,压在控制层上)----
     FrostedGlass {

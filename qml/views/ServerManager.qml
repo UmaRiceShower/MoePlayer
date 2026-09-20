@@ -359,23 +359,12 @@ Item {
         if (t.kind === "plus")
             return { beforeType: "", beforeId: "" } // 最前
         // 展开文件夹的「末尾」= layoutOrder 中该夹的后继元素之前。
-        function afterFolder(fid) {
-            const order = AccountManager.layoutOrder
-            for (let i = 0; i < order.length; ++i) {
-                if (order[i].type === "folder" && order[i].id === fid) {
-                    if (i + 1 < order.length)
-                        return { beforeType: order[i + 1].type, beforeId: order[i + 1].id }
-                    break
-                }
-            }
-            return { beforeType: "@end", beforeId: "" }
-        }
         if (t.kind === "folder")
-            return root.isFolderExpanded(t.id) ? afterFolder(t.id)
+            return root.isFolderExpanded(t.id) ? root.folderInsertTargetAfterFolder(t.id)
                                                : { beforeType: "folder", beforeId: t.id }
         const f = AccountManager.folderIdOfAccount(t.id)
         if (f !== "" && root.isFolderExpanded(f))
-            return afterFolder(f)
+            return root.folderInsertTargetAfterFolder(f)
         return { beforeType: "account", beforeId: t.id }
     }
     // 树状模式的新建落点:行上 = 该元素之前(展开文件夹行/成员行 = 夹

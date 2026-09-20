@@ -33,7 +33,7 @@ Item {
     property string itemType: ""
     // 悬停快捷操作开关(搜索结果等轻量场景可关)。
     property bool showActions: true
-    // 键盘当前项(由 GridView 注入,delegate 当前项时为 true)。
+    // 键盘当前项(使用方 delegate 显式绑定,如 current: GridView.isCurrentItem)。
     property bool current: false
 
     // 海报莫奈取色:底部渐变氛围尾色与进度条强调色跟随海报。
@@ -139,7 +139,8 @@ Item {
 
             // 就绪淡入
             opacity: status === Image.Ready ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 260 } }            source: root.posterId ? "image://emby/" + root.posterId : ""
+            Behavior on opacity { NumberAnimation { duration: 260 } }
+            source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true

@@ -3,12 +3,11 @@ import QtQuick
 import QtQuick.Controls
 import MoePlayer.Core
 
-// 萌系筛选胶囊:选中时带小爱心前缀,hover 粉色高亮。
+// 萌系筛选胶囊:hover 粉色高亮。
 Button {
     id: root
     property string label: ""
     property bool active: false
-    property bool showHeart: true
 
     height: 30
     topPadding: 6
