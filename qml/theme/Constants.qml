@@ -63,7 +63,7 @@ QtObject {
     readonly property real homeHeroCardH: 0.86            // 卡高占 hero 区比例
     readonly property real homeHeroCardAspect: 16.0 / 9.0 // 卡宽高比
     readonly property real homeHeroCardWCap: 0.50         // 卡宽上限 = 窗口宽 × 比例
-    // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.37×窗口宽);
+    // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.33×窗口宽);
     // 窄窗时 hero 高收缩、卡片保持满带宽,宽窗由高度预算/上限决定。
     readonly property real homeHeroWidthRatio: homeHeroCardWCap / homeHeroCardAspect / homeHeroCardH
     readonly property int homeHeroTopPad: 40            // hero 区顶部留白(卡顶越过 48px 顶栏)

@@ -13,7 +13,7 @@ layout(binding = 1) uniform sampler2D source;
 
 void main() {
     vec4 c = texture(source, qt_TexCoord0);
-    // 底 u_fadeBand 内线性淡出(alpha 1→0):y=1-0.1 起开始渐隐,
+    // 底 u_fadeBand 内线性淡出(alpha 1→0):自 y=1-u_fadeBand 起渐隐,
     // 图片细节保留到最后一刻再溶解入页面底色,无平板色带。
     float fade = clamp((1.0 - qt_TexCoord0.y) / u_fadeBand, 0.0, 1.0);
     fragColor = c * fade * qt_Opacity;

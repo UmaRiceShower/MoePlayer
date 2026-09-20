@@ -54,9 +54,7 @@ QtObject {
         return total
     }
 
-    function match(query, text) {
-        return score(query, text) >= 0
-    }
+    
 
     // 命中判定:原文按子序列模糊匹配(见 score);原文不中再试拼音 —— 全拼与首字母
     // 都按**连续**子串判定。拼音若也走模糊子序列,长串会把 "sn" 这类短查询匹配到
@@ -76,7 +74,7 @@ QtObject {
         const compact = q.replace(/ /g, "").toLowerCase()
         if (compact === "")
             return true
-        // 分段:全拼、简拼(,可能再来一组次选读音的同样两段)。全部按连续子串判定。
+        // 分段:全拼、简拼(可能再来一组次选读音的同样两段)。全部按连续子串判定。
         const parts = key.split("|")
         for (let i = 0; i < parts.length; ++i) {
             if (parts[i].replace(/ /g, "").indexOf(compact) >= 0)

@@ -58,7 +58,6 @@ Item {
         property real u_time: root.u_time
         property real u_intensity: ThemeStore.intensity
         property real u_vignette: root.bg.vignette
-        property real u_motion: ThemeStore.animated ? Number(root.bg.motion) : 0.0
         property real u_style: Number(root.bg.style)
         property real u_light: Number(root.bg.light)
         property real u_meteorT: ThemeStore.meteorPeriod
@@ -66,15 +65,9 @@ Item {
 
         property color u_baseTop: root.bg.baseTop
         property color u_baseBottom: root.bg.baseBottom
-        property color u_g0Color: root.bg.glow0[0]
-        property color u_g1Color: root.bg.glow1[0]
-        property color u_g2Color: root.bg.glow2[0]
-        property vector4d u_g0: Qt.vector4d(root.bg.glow0[1], root.bg.glow0[2],
-                                            root.bg.glow0[3], root.bg.glow0[4])
-        property vector4d u_g1: Qt.vector4d(root.bg.glow1[1], root.bg.glow1[2],
-                                            root.bg.glow1[3], root.bg.glow1[4])
-        property vector4d u_g2: Qt.vector4d(root.bg.glow2[1], root.bg.glow2[2],
-                                            root.bg.glow2[3], root.bg.glow2[4])
+        property color u_g0Color: root.bg.glow0
+        property color u_g1Color: root.bg.glow1
+        property color u_g2Color: root.bg.glow2
         fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/background.frag.qsb"
     }
 }

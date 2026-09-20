@@ -13,9 +13,7 @@ QtObject {
 
     // 强调色系(随预设;accent 用于小面积描边/悬停/选中)
     readonly property color accent: ThemeStore.accent
-    readonly property color accentSoft: ThemeStore.accentSoft   // 浅强调:悬停提亮/浅色文字
     readonly property color accentDeep: ThemeStore.accentDeep   // 深强调:按压/深色描边
-    readonly property color accentGlow: ThemeStore.accentGlow   // 带 alpha 的光晕/投影
     readonly property color accentInk: ThemeStore.accentInk     // 强调底上的文字
     // 实心强调控件 hover 填充:朝 ink 的反方向走——暗色系(深 ink)变浅
     // (accentSoft),亮色系(白 ink)变深(accentDeep)。反着走会让 hover 态
@@ -53,7 +51,6 @@ QtObject {
     readonly property color tint: Qt.tint(bg, Qt.rgba(accent.r, accent.g, accent.b, 0.16))
     readonly property color tintStrong: Qt.tint(bg, Qt.rgba(accent.r, accent.g, accent.b, 0.26))
     readonly property color accentMuted: Qt.tint(accent, Qt.rgba(0, 0, 0, 0.30))
-    readonly property color accentMutedHover: Qt.tint(accent, Qt.rgba(0, 0, 0, 0.22))
     // 暖色角标底(评分等,随预设暖强调色)。
     readonly property color badgeScrim: Qt.tint("#000000", Qt.rgba(accentWarm.r, accentWarm.g, accentWarm.b, 0.12))
     readonly property color dangerPressed: Qt.tint(danger, Qt.rgba(0, 0, 0, 0.18))
