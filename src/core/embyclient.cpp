@@ -17,7 +17,7 @@
 
 namespace {
 
-// 构造 X-Emby-Authorization 请求头,格式为官方认证规范:Emby UserId=..., Client=... 等。
+// 设备 id:进程内持久的随机 UUID(X-Emby-Authorization 的 DeviceId,见 authHeaderFor)。
 QString deviceId()
 {
     static const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
@@ -159,7 +159,6 @@ QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) c
 }
 
 namespace {
-// 播放地址补全 server 前缀(相对路径 → 绝对;已是 http 原样)。
 // 播放历史列表查询(首页批次与"加载更多"分页共用):startIndex<=0 不传该参数
 // (与首页批次请求逐字一致)。服务器按 LastPlayedDate 倒序;列表端点不返回该字段,
 // 但顺序有效(时间与次数由 fetchItemUserData 逐条补全)。
@@ -186,7 +185,7 @@ QUrlQuery historyListQuery(int startIndex, int limit, bool playedOnly)
                    QString::number(qBound(1, limit, MoePlayer::kMaxPageSize)));
     return q;
 }
-
+// 播放地址补全 server 前缀(相对路径 → 绝对;已是 http 原样)。
 QString absolutePlaybackUrl(const QString &serverKey, QString p)
 {
     if (p.startsWith(QLatin1String("http")))

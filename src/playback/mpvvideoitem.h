@@ -72,8 +72,6 @@ signals:
     void jsonReceived(const QJsonObject &obj);
     // mpv 有新帧待渲(渲染上下文的 update 回调转发;回调本身严禁调 mpv)。
     void redrawRequested();
-    // mpv 实例初始化完成(可下发命令)。
-    void ready();
     // mpv 进程内退出(SHUTDOWN/实例销毁)。
     void terminated();
 
@@ -90,8 +88,6 @@ private:
     QQueue<QJsonObject> m_commands;
     class EventThread;
     EventThread *m_thread = nullptr;
-    // observe_property 的 reply_id → 属性名(事件线程独占)。
-    QHash<quint64, QString> m_observed;
 };
 
 //! QML 视频表面:内嵌 mpv 帧渲染载体(QQuickFramebufferObject)。

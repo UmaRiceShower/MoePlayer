@@ -13,8 +13,8 @@
 //! Emby REST 客户端(QML 单例 "MoePlayer.Core EmbyClient")。
 //! 无状态浏览:每个请求显式携带目标服务器凭据(serverUrl/token/userId),
 //! 不维护"当前会话";多服务器浏览完全并行(HTTP 无状态),结果按服务器
-//! 路由到独立模型。模型按服务器字典化(modelFor(serverUrl) 查询),
-//! 页面绑定模型时一次性取引用(serverKey = trimmed serverUrl)。
+//! 路由到独立模型。模型按 服务器|账号(|范围) 复合键字典化(各 *ModelFor
+//! 查询,见 modelKey),页面绑定模型时一次性取引用。
 //! WS 实时通道与播放回传同样按服务器路由(回传凭据随播放 meta 携带;
 //! WS 多路为后续工作,当前不自动建立连接)。
 class EmbyClient : public QObject
@@ -348,7 +348,6 @@ private:
     void postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
                   std::function<void(const QJsonDocument &)> onOk,
                   std::function<void()> onFail, const QString &what);
-    // POST JSON 请求,失败同上。
     // POST JSON(带认证):失败发 serverRequestFailed + errorOccurred 并调用
     // onFail(可为空;播放协商失败精确复位用)。
     void postJson(const QString &serverUrl, const QString &token, const QString &userId,
@@ -382,8 +381,8 @@ private:
     // 可用 QHttp1Configuration 调整)按实例计,独立实例使后台播放历史请求不与
     // 浏览/首页请求互相排队。
     QNetworkAccessManager m_bgNam;
-    // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
-    // 模型按服务器字典化(key = trimmed serverUrl):多服浏览并行互不覆盖。
+    // 模型按 服务器|账号(|范围) 复合键字典化(见 modelKey):多服/多账号
+    // 并行浏览互不覆盖。
     QHash<QString, MediaItemModel *> m_viewsModels;
     QHash<QString, MediaItemModel *> m_itemsModels;
     QHash<QString, MediaItemModel *> m_seasonsModels;

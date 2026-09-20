@@ -314,14 +314,14 @@ const QString &accountId) const;
     // 播放历史本地存储(构造注入,不持有所有权)。
     PlaybackHistory *m_playbackHistory;
     // 播放历史拉取状态(见 fetchPlaybackHistory):调度标记、本轮参与的
-    // scope(serverUrl|账号 id)、各 scope 未完成任务数(列表/回补页 1 项 + 入队的
-    // 明细数)、逐页回补的累积行与下一页下标、明细待发队列与飞行中计数。
+    // scope(serverUrl|账号 id)、各 scope 未完成列表任务数(每 scope 恒 1 票,
+    // 覆盖窗口页 + 过滤段逐页回补;明细不记票)、逐页回补的累积行、
+    // 明细待发队列与飞行中计数。
     bool m_historyScheduled = false;
     bool m_historyActive = false;
     QSet<QString> m_historyScopes;
     QHash<QString, int> m_historyOutstanding;
     QHash<QString, QVariantList> m_historyAccum;  // scope → 本轮已回补的行(按页序)
-    QHash<QString, int> m_historyNextStart;       // scope → 过滤段下一页 startIndex
     QHash<QString, int> m_historyPages;           // scope → 过滤段已回补页数
     QHash<QString, int> m_historyPhase;           // scope → 0=窗口页(未过滤) 1=过滤段
     QQueue<QPair<QString, QString>> m_historyDetailQueue; // scope + itemId

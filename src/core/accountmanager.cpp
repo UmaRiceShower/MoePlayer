@@ -954,7 +954,6 @@ void AccountManager::startPlaybackHistoryFetch()
     m_historyScopes.clear();
     m_historyOutstanding.clear();
     m_historyAccum.clear();
-    m_historyNextStart.clear();
     m_historyPages.clear();
     m_historyPhase.clear();
     m_historyDetailQueue.clear();
@@ -1002,11 +1001,10 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     if (!m_historyScopes.contains(scope) || !accountById(accountId))
         return; // 非本轮参与或账号已删除
     // 失败与"成功但确有零条播放记录"都会带空列表:失败时必须保留既有条目与
-    // fetchedAt(后者是后续按陈旧度触发拉取的判断依据),只结算列表这一票。
+    // fetchedAt(后者目前只写不读,为将来按陈旧度触发拉取保留),只结算列表这一票。
     if (!ok) {
         qInfo() << "AccountManager: 播放历史拉取失败,保留既有数据" << scope;
         m_historyAccum.remove(scope);
-        m_historyNextStart.remove(scope);
         m_historyPages.remove(scope);
         m_historyPhase.remove(scope);
         onHistoryTaskDone(scope);
@@ -1047,7 +1045,6 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     if (phase == 0 && items.size() >= MoePlayer::kHistoryFetchLimit && canContinue) {
         // 窗口页到手(且整页)→ 开过滤段(StartIndex 0)。
         m_historyAccum.insert(scope, accum);
-        m_historyNextStart.insert(scope, 0);
         m_historyPages.insert(scope, 0);
         m_historyPhase.insert(scope, 1);
         m_client->fetchPlaybackHistory(acc->serverUrl, acc->id, acc->token, acc->userId,
@@ -1059,7 +1056,6 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     if (phase >= 1 && !items.isEmpty() && next < total
         && pages < MoePlayer::kHistoryMaxHistoryPages && canContinue) {
         m_historyAccum.insert(scope, accum);
-        m_historyNextStart.insert(scope, next);
         m_historyPages.insert(scope, pages);
         m_client->fetchPlaybackHistory(acc->serverUrl, acc->id, acc->token, acc->userId,
                                        next, MoePlayer::kHistoryFetchLimit, true);
@@ -1067,7 +1063,6 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
     }
     const int pageCount = pages + 1; // 窗口页 + 过滤段页数
     m_historyAccum.remove(scope);
-    m_historyNextStart.remove(scope);
     m_historyPages.remove(scope);
     m_historyPhase.remove(scope);
     // 海报键与首页条目同构,仅差服务器前缀(补上后图片提供器跨服通用)。
@@ -1242,7 +1237,7 @@ void AccountManager::maybeAssembleHomeRows()
             continue;
         }
         if (views.isEmpty())
-            continue; // 该服视图失败/无毒:跳过,不显示(仅保留成功服)
+            continue; // 该服视图失败/无果:跳过,不显示(仅保留成功服)
         // 库壳已到:逐库建行。items 优先级 = 新鲜 > 上次缓存 > 空占位(加载中)。
         for (const auto &v : views) {
             const QVariantMap vm = v.toMap();
@@ -1952,7 +1947,7 @@ void AccountManager::removeAccount(const QString &id)
     m_accounts.erase(it, m_accounts.end());
     // 视觉顺序同步:未分组账号项移除(成员账号不在序列中)。
     removeFromLayoutOrder(QLatin1String("account"), id);
-        save();
+    save();
     // 成员表同步:残留已删 id 会被视觉序展平计入,重排时取不到账号。
     bool foldersTouched = false;
     for (auto &f : m_folders) {
