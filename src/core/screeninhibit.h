@@ -21,7 +21,7 @@ public:
     explicit ScreenInhibit(QObject *parent = nullptr);
     ~ScreenInhibit() override;
 
-    // 持有一个"播放中"计数(acquire);暂停/结束调用 release 释放一个。
+    // 播放中计数:会话开始 acquire、结束 release(暂停不释放——仍在播放)。
     Q_INVOKABLE void acquire();
     Q_INVOKABLE void release();
 
