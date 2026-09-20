@@ -11,7 +11,7 @@ ApplicationWindow {
     title: Qt.application.name
 
     property var libraryState: null
-    // 最近浏览的服务器(全局搜索按它路由;打开任意库/详情页时更新)。
+    // 最近浏览的服务器(打开任意库/详情页时更新;作 pushDetail/pushLibrary 的回退)。
     property string currentServerUrl: ""
     // 最近浏览的账号 id(凭据精确定位;随导航更新)。
     property string currentAccountId: ""
@@ -53,8 +53,8 @@ ApplicationWindow {
     }
     // 在途协商:id -> true(防重复)。
     property var _pendingUrls: ({})
-    // hook 等待应答:id -> true(moe-hook on_load 已 defer)。
-    property var _wantedUrls: ({}) // itemId → { session: 会话键 }
+    // hook 等待应答:itemId -> { session: 会话键 }(moe-hook on_load 已 defer)。
+    property var _wantedUrls: ({})
 
     // 播放上下文进链:找下一集(跨季全集序列),存在则协商其播放地址。
     // 守卫用 seriesId(协商 meta 无 type 字段;Episode 才有 seriesId,电影为空)。
@@ -82,7 +82,7 @@ ApplicationWindow {
         for (let i = 0; i < model.count; ++i) {
             const it = model.itemAt(i)
             if (it.id === meta.itemId && i + 1 < model.count) {
-                nextId = it.id
+                nextId = model.itemAt(i + 1).id
                 break
             }
         }
@@ -204,7 +204,11 @@ ApplicationWindow {
             console.info("Main: 内嵌播放窗口", meta.itemId)
             playerWinComp.createObject(root, { "meta": meta })
         }
+        function onPlaybackStarted(sessionKey, itemId) {
+            ScreenInhibit.acquire()
+        }
         function onPlaybackFinished(sessionKey, itemId, error) {
+            ScreenInhibit.release()
             console.info("Main: 播放结束", itemId, "error:", error)
             root._listPrimed = false // 会话终结:下次起播(新剧)重建列表
             // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
@@ -324,7 +328,6 @@ ApplicationWindow {
     function pushHistory() {
         stackView.push(historyPage)
     }
-    // 打开媒体库页:记录浏览服务器与账号。
     function toggleSearch() {
         if (searchOverlay.visible) {
             searchOverlay.close()
@@ -333,6 +336,7 @@ ApplicationWindow {
         // 搜索目标由浮窗内「目标」下拉决定(默认全部),与页面上下文无关。
         searchOverlay.open()
     }
+    // 打开媒体库页:记录浏览服务器与账号。
     function pushLibrary(viewId, serverUrl, viewName, accountId) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
@@ -394,7 +398,7 @@ ApplicationWindow {
             }
         }
 
-        // B. 纵向上浮:旧页前 45% 淡出,新页随后自下方 40px 上滑淡入
+        // B. 纵向上浮:旧页前 40% 淡出,新页随后自下方 40px 上滑淡入
         property Transition upIn: Transition {
             SequentialAnimation {
                 PropertyAction { property: "opacity"; value: 0 }
@@ -503,7 +507,8 @@ ApplicationWindow {
         initialItem: homePage
     }
 
-    // 全局搜索浮层(Ctrl+K):按最近浏览的服务器搜索,结果点击进详情。
+    // 全局搜索浮层(Ctrl+K):跨全部账号聚合搜索,浮窗内「目标」下拉可选
+    // 服务器;结果点击进详情。
     SearchOverlay {
         id: searchOverlay
         anchors.fill: parent
@@ -526,7 +531,7 @@ ApplicationWindow {
 
     // 鼠标返回层:后退侧键与中键左滑手势 = 返回(分发规则同 Alt+Left,
     // 见 goBack())。置顶只接中键/后退键,左键与滚轮原样穿透;文本框聚焦
-    // 时中键放行(保留中键粘贴)。中键手势开关 = ConfigManager.mouseGesture,
+    // 时中键放行(按按压点是否落在文本框判定,保留中键粘贴)。中键手势开关 = ConfigManager.mouseGesture,
     // 后退侧键不受开关影响。
     MouseArea {
         id: mouseNav
