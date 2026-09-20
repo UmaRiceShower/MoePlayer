@@ -87,6 +87,10 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &idPrefix)
     m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
     m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
     m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("IsFavorite")).toBool(false));
+    const QJsonObject pid = o.value(QLatin1String("ProviderIds")).toObject();
+    m.insert(QStringLiteral("tmdbId"), pid.value(QLatin1String("Tmdb")).toString());
+    m.insert(QStringLiteral("imdbId"), pid.value(QLatin1String("Imdb")).toString());
+    m.insert(QStringLiteral("tvdbId"), pid.value(QLatin1String("Tvdb")).toString());
     return m;
 }
 
@@ -960,12 +964,15 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Movie,Series,BoxSet"));
     // 按内容入库时间倒序:新内容入库才上浮(剧集来新集会顶上来),
     // 刮削/换图等元数据变动不动它——比 DateModified 干净。
     q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("DateLastContentAdded"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Descending"));
+    // ProviderIds:跨服去重键(Tmdb/Imdb/Tvdb)
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags"));
+                   QStringLiteral("PrimaryImageAspectRatio,UserData,Overview,ProductionYear,RunTimeTicks,BackdropImageTags,ParentBackdropImageTags,ProviderIds"));
     q.addQueryItem(QStringLiteral("Limit"),
                    QString::number(qBound(1, limit, MoePlayer::kHomePerLibraryLimit)));
     get(serverUrl, token, userId,
