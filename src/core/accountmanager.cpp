@@ -1,5 +1,7 @@
 #include "accountmanager.h"
 
+#include "core/configmanager.h"
+
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -9,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRandomGenerator>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>
 #include <QUrl>
@@ -72,13 +75,21 @@ constexpr int kHistoryItemRefreshDelayMs = 5000;
 constexpr int kHistoryTopAlwaysDetail = 15;
 } // namespace
 
-AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QObject *parent)
+AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
+                               ConfigManager *config, QObject *parent)
     : QObject(parent)
     , m_client(client)
     , m_playbackHistory(history)
+    , m_config(config)
     , m_persist(AppPaths::cacheDir())
 {
     m_homeRowsModel = new HomeRowsModel(this);
+    m_customHomeRowsModel = new HomeRowsModel(this);
+    // 自定义库规则/模式热改:由现有行集重聚合,不重拉网络。
+    connect(m_config, &ConfigManager::customLibrariesChanged,
+            this, [this] { rebuildCustomHomeRows(); });
+    connect(m_config, &ConfigManager::customLibrariesModeChanged,
+            this, [this] { rebuildCustomHomeRows(); });
     load(); // accounts.json 一次性读出(账号/文件夹/布局)
 
     // 网络问题账号定期重试:先 token 再账密,恢复后清除标记。
@@ -325,6 +336,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history, QOb
                             }
                             if (rowsTouched)
                                 m_homeRowsModel->setRows(visibleHomeRows());
+                                rebuildCustomHomeRows(false); // 账号名回填:逐账号一次,非终态
                             break;
                         }
                     }
@@ -623,11 +635,197 @@ QVariantList AccountManager::visibleHomeRows() const
     return out;
 }
 
+// ---------- 自定义库聚合(多服库合并为自定义行) ----------
+namespace {
+struct CustomLibBucket {
+    QString name;
+    QList<QPair<QString, QRegularExpression>> rules; // field ∈ {name, collectionType}
+};
+} // namespace
+
+// 规则来源:config customLibraries(JSON);空串 = 预置表。每条规则 =
+// {field:name|collectionType, pattern:正则(大小写不敏感,部分匹配)}。
+static QList<CustomLibBucket> customLibBuckets(ConfigManager *config)
+{
+    static const char *kPresets = R"([
+{"name":"动画","rules":[{"field":"name","pattern":"动漫|动画|番剧|新番|国漫|剧场版|Anime"}]},
+{"name":"剧集","rules":[{"field":"name","pattern":"电视剧|电视|剧集|美剧|韩剧|日剧|英剧|华语剧|追新|TV"}]},
+{"name":"电影","rules":[{"field":"name","pattern":"电影|影片|院线|Movie"}]},
+{"name":"演出","rules":[{"field":"name","pattern":"演唱会|音乐|Music|MV"}]},
+{"name":"综艺","rules":[{"field":"name","pattern":"综艺"}]},
+{"name":"儿童","rules":[{"field":"name","pattern":"儿童|少儿|Kids"}]},
+{"name":"纪录片","rules":[{"field":"name","pattern":"纪录片|记录片|Documentary"}]}
+])";
+    QString raw = config->customLibraries();
+    if (raw.trimmed().isEmpty())
+        raw = QString::fromUtf8(kPresets);
+    QList<CustomLibBucket> out;
+    const QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
+    for (const auto &bv : arr) {
+        const QJsonObject bo = bv.toObject();
+        CustomLibBucket b;
+        b.name = bo.value(QLatin1String("name")).toString();
+        if (b.name.isEmpty())
+            continue;
+        for (const auto &rv : bo.value(QLatin1String("rules")).toArray()) {
+            const QJsonObject ro = rv.toObject();
+            const QString field = ro.value(QLatin1String("field")).toString();
+            const QString pattern = ro.value(QLatin1String("pattern")).toString();
+            if (pattern.isEmpty())
+                continue;
+            const QRegularExpression re(pattern, QRegularExpression::CaseInsensitiveOption);
+            if (!re.isValid()) {
+                qWarning() << "AccountManager: 自定义库规则正则无效" << b.name << pattern;
+                continue;
+            }
+            b.rules.append({ field, re });
+        }
+        if (!b.rules.isEmpty())
+            out.append(b);
+    }
+    return out;
+}
+
+void AccountManager::rebuildCustomHomeRows(bool final)
+{
+    const QString mode = m_config->customLibrariesMode();
+    if (mode == QLatin1String("off")) {
+        m_customHomeRowsModel->setRows(QVariantList());
+        return;
+    }
+    const QList<CustomLibBucket> buckets = customLibBuckets(m_config);
+    const QVariantList orig = visibleHomeRows();
+
+    // 桶工作区:按规则定义序建行;行内条目按 dateAdded 倒序收尾。
+    struct BucketAcc {
+        QVariantMap row;
+        QList<QVariantMap> items;
+        QSet<QString> idKeys;              // 同账号同条目(账号内/跨库重叠)
+        QHash<QString, int> dedupToIndex;  // tmdb:/imdb:/tvdb:/ny: → items 下标
+    };
+    QList<BucketAcc> accs(buckets.size());
+    QVariantList plainRows; // 未匹配库的原行(mode=on 时保留)
+    for (int i = 0; i < buckets.size(); ++i) {
+        QVariantMap row;
+        row.insert(QStringLiteral("custom"), true);
+        row.insert(QStringLiteral("viewId"), QStringLiteral("custom|") + buckets[i].name);
+        row.insert(QStringLiteral("viewName"), buckets[i].name);
+        row.insert(QStringLiteral("accountId"), QString());
+        row.insert(QStringLiteral("serverUrl"), QString());
+        row.insert(QStringLiteral("serverName"), QString());
+        row.insert(QStringLiteral("loading"), false);
+        accs[i].row = row;
+    }
+
+    for (const QVariant &rv : orig) {
+        const QVariantMap row = rv.toMap();
+        const QString viewName = row.value(QStringLiteral("viewName")).toString();
+        const QString collType = row.value(QStringLiteral("collectionType")).toString();
+        int bucketIdx = -1;
+        for (int i = 0; i < buckets.size() && bucketIdx < 0; ++i)
+            for (const auto &rule : buckets[i].rules) {
+                const QString &subject = rule.first == QLatin1String("collectionType")
+                                             ? collType : viewName;
+                if (rule.second.match(subject).hasMatch()) {
+                    bucketIdx = i;
+                    break;
+                }
+            }
+        if (bucketIdx < 0) {
+            if (mode == QLatin1String("on"))
+                plainRows.append(row); // 开启:未匹配库保留原行(排在自定义行之后)
+            continue;
+        }
+        BucketAcc &acc = accs[bucketIdx];
+        const QString rowAccount = row.value(QStringLiteral("accountId")).toString();
+        for (const QVariant &iv : row.value(QStringLiteral("items")).toList()) {
+            QVariantMap it = iv.toMap();
+            const QString idKey = rowAccount + QLatin1Char('|')
+                                  + it.value(QStringLiteral("id")).toString();
+            if (acc.idKeys.contains(idKey))
+                continue; // 同服重叠库(如"动漫"与"追新-动漫"同 id):无条件去重
+            acc.idKeys.insert(idKey);
+            // 跨服去重键:Tmdb → Imdb → Tvdb → 标题+年份;空键不参与。
+            QStringList keys;
+            const QString tmdb = it.value(QStringLiteral("tmdbId")).toString();
+            const QString imdb = it.value(QStringLiteral("imdbId")).toString();
+            const QString tvdb = it.value(QStringLiteral("tvdbId")).toString();
+            if (!tmdb.isEmpty()) keys.append(QStringLiteral("tmdb:") + tmdb);
+            if (!imdb.isEmpty()) keys.append(QStringLiteral("imdb:") + imdb);
+            if (!tvdb.isEmpty()) keys.append(QStringLiteral("tvdb:") + tvdb);
+            if (keys.isEmpty()) {
+                const QString ny = QStringLiteral("ny:")
+                                   + it.value(QStringLiteral("name")).toString().trimmed()
+                                   + QLatin1Char('|')
+                                   + QString::number(it.value(QStringLiteral("year")).toInt());
+                keys.append(ny);
+            }
+            int dupAt = -1;
+            for (const QString &k : keys)
+                if (acc.dedupToIndex.contains(k)) {
+                    dupAt = acc.dedupToIndex.value(k);
+                    break;
+                }
+            if (dupAt >= 0) {
+                // 合并:保留先到者(账号序),记多源计数(徽标/详情选源用)。
+                QVariantMap cur = acc.items[dupAt];
+                cur.insert(QStringLiteral("sourceCount"),
+                           cur.value(QStringLiteral("sourceCount"), 1).toInt() + 1);
+                acc.items[dupAt] = cur;
+                continue;
+            }
+            it.insert(QStringLiteral("sourceCount"), 1);
+            const int idx = acc.items.size();
+            acc.items.append(it);
+            for (const QString &k : keys)
+                acc.dedupToIndex.insert(k, idx);
+        }
+    }
+
+    // 桶收尾:条目按入库日期倒序混排;非空桶按定义序出列,空桶不占行。
+    QVariantList customRows;
+    for (BucketAcc &acc : accs) {
+        if (acc.items.isEmpty())
+            continue;
+        std::sort(acc.items.begin(), acc.items.end(), [](const QVariantMap &a, const QVariantMap &b) {
+            const QDateTime da = QDateTime::fromString(
+                a.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
+            const QDateTime db = QDateTime::fromString(
+                b.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
+            return da > db;
+        });
+        QVariantList items;
+        items.reserve(acc.items.size());
+        for (const QVariantMap &it : acc.items)
+            items.append(it);
+        acc.row.insert(QStringLiteral("items"), items);
+        // 桶行海报:取首条目海报(媒体库卡条/空格回退用)。
+        acc.row.insert(QStringLiteral("posterId"),
+                       acc.items.first().value(QStringLiteral("posterId")).toString());
+        customRows.append(acc.row);
+        const int total = acc.row.value(QStringLiteral("items")).toList().size();
+        int merged = 0;
+        for (const QVariant &iv : acc.row.value(QStringLiteral("items")).toList())
+            merged += iv.toMap().value(QStringLiteral("sourceCount"), 1).toInt();
+        qDebug() << "AccountManager: 自定义桶" << acc.row.value(QStringLiteral("viewName")).toString()
+                 << total << "条(合并前" << merged << ")";
+    }
+    // 汇总只在 final(整轮聚合完成/配置变更)发 info;中途增量重排走 debug。
+    if (final)
+        qInfo().noquote() << "AccountManager: 自定义库聚合" << customRows.size() << "桶 +"
+                          << plainRows.size() << "未匹配原行";
+    else
+        qDebug().noquote() << "AccountManager: 自定义库聚合(增量)" << customRows.size()
+                           << "桶 +" << plainRows.size() << "未匹配原行";
+    m_customHomeRowsModel->setRows(customRows + plainRows);
+}
+
 // 隐藏状态变化后的统一收尾:行模型与推荐按可见性重过滤并通知。
 // 不重拉网络(调用方按需触发),隐藏账号的数据原样留在内存与缓存里。
 void AccountManager::applyHiddenChange()
 {
     m_homeRowsModel->setRows(visibleHomeRows());
+    rebuildCustomHomeRows();
     emit suggestionsUpdated();
     // 三个信号都要发:accountsChanged 让"遍历 accounts 求可见性"的绑定重算
     // (含 showHidden 切换),hiddenChanged 给显式监听者(QML 里的命令式重建)。
@@ -839,6 +1037,7 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     const QVariantList cached = loadHomeCache();
     m_homeRows = cached;
     m_homeRowsModel->setRows(visibleHomeRows()); // 缓存里可能有已隐藏账号的行
+    rebuildCustomHomeRows(false); // 缓存先显,终态行在聚合完成时记
     // 推荐(服务器建议)缓存必须在 homeRowsReady **之前**载入:否则 hero 会先被
     // 本地聚合兜底数据填一次、随即又被推荐替换(启动时可见的一次"换一批")。
     loadHomeSuggestionCache();
@@ -906,6 +1105,7 @@ void AccountManager::reorderHomeRows()
     // 顺序路径 out 含全部行(重排);删除路径 out 已剔除被删服的行。
     m_homeRows = out;
     m_homeRowsModel->setRows(visibleHomeRows());
+    rebuildCustomHomeRows();
 }
 
 // 播放历史拉取(见 fetchPlaybackHistory):延迟到首页聚合之后开拉,已调度
@@ -1275,6 +1475,8 @@ void AccountManager::maybeAssembleHomeRows()
             QVariantMap row;
             row.insert(QStringLiteral("viewId"), viewId);
             row.insert(QStringLiteral("viewName"), viewName);
+            row.insert(QStringLiteral("collectionType"),
+                       vm.value(QStringLiteral("collectionType")).toString());
             row.insert(QStringLiteral("accountId"), accountId);
             row.insert(QStringLiteral("serverUrl"), serverUrl);
             row.insert(QStringLiteral("serverName"), serverName);
@@ -1317,6 +1519,7 @@ void AccountManager::maybeAssembleHomeRows()
     // 渲染只重估变化行;homeRows 快照同步供缓存与语义比较。
     m_homeRows = ordered;
     m_homeRowsModel->setRows(visibleHomeRows());
+    rebuildCustomHomeRows(allDone);
     if (allDone)
         saveHomeCache(); // 全部完成才缓存,保证缓存是完整可依赖集合
     emit homeRowsReady();

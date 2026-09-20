@@ -10,6 +10,34 @@ HomeRowsFilterModel::HomeRowsFilterModel(QObject *parent)
 {
 }
 
+void HomeRowsFilterModel::setPlainSource(QAbstractItemModel *m)
+{
+    m_plain = m;
+    applySource();
+}
+
+void HomeRowsFilterModel::setCustomSource(QAbstractItemModel *m)
+{
+    m_custom = m;
+    applySource();
+}
+
+void HomeRowsFilterModel::setCustomActive(bool b)
+{
+    if (m_customActive == b)
+        return;
+    m_customActive = b;
+    applySource();
+    emit customActiveChanged();
+}
+
+void HomeRowsFilterModel::applySource()
+{
+    QAbstractItemModel *t = (m_customActive && m_custom) ? m_custom : m_plain;
+    if (t && t != sourceModel())
+        setSourceModel(t);
+}
+
 void HomeRowsFilterModel::setFilterPredicate(const QJSValue &fn)
 {
     m_pred = fn;

@@ -154,7 +154,7 @@ int main(int argc, char *argv[])
     RecentSearches recentSearches;
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor,
                                  "RecentSearches", &recentSearches);
-    AccountManager accountManager(&embyClient, &playbackHistory);
+    AccountManager accountManager(&embyClient, &playbackHistory, &configManager);
     // 多线路收口:请求/取流基址 = 账号当前线路(身份键 serverUrl 不变)。
     embyClient.setBaseUrlResolver([&accountManager](const QString &serverUrl, const QString &userId) {
         return accountManager.activeUrlFor(serverUrl, userId);
