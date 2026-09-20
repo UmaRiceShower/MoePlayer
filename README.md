@@ -87,8 +87,8 @@ lua/shaders + 开始菜单快捷方式与卸载器)。HTTPS 走 Qt 自带的 Sch
 ## 技术架构
 
 - **QML 模块化**:所有 QML + C++ 类型归入 URI `MoePlayer.Core`,`qt_add_qml_module` 生成 qmldir/qmltypes,资源嵌入 `qrc:/qt/qml/MoePlayer/Core/`
-- **C++ 核心**:`EmbyClient`(API 请求与模型填充)、`AccountManager`(账号凭据)、`ConfigManager`/`SettingsStore`(配置持久化)、媒体 / 海报 / 取色模型
-- **播放**:外部 mpv 进程 + JSON IPC(`src/playback/MpvClient`),播放窗口由 mpv 自带
+- **C++ 核心**:`EmbyClient`(API 请求与模型填充)、`AccountManager`(账号凭据,accounts.json)、`ConfigManager`(配置持久化,config.toml)、媒体 / 海报 / 取色模型
+- **播放**:内嵌 libmpv(QML 界面,默认)或外部 mpv 进程 + JSON IPC(`src/playback/MpvClient`,双模式共用同一套会话/回传逻辑)
 - **主题**:`ThemeStore`(配色 × 效果预设)→ `Theme`/`Constants` 令牌三层;参数化动态背景 `ThemedBackground`(background.frag,落樱/萤火/星空流星/夜雨/无);毛玻璃 `GlassPanel`/`FrostedGlass`(ShaderEffectSource + 折射 shader,共享抓取 `GlassBlurSource`)
 
 ## 目录结构
