@@ -133,9 +133,9 @@ namespace MoeConfig {
 QVariantList optionsLibrarySortBy()
 {
     return optionsFrom({
-        { QStringLiteral("最近添加"), QStringLiteral("DateLastContentAdded") },
+        { QStringLiteral("更新日期"), QStringLiteral("DateLastContentAdded") },
         { QStringLiteral("加入时间"), QStringLiteral("DateCreated") },
-        { QStringLiteral("上映日期"), QStringLiteral("PremiereDate") },
+        { QStringLiteral("首映日期"), QStringLiteral("PremiereDate") },
         { QStringLiteral("名称"), QStringLiteral("SortName") },
         { QStringLiteral("出品年份"), QStringLiteral("ProductionYear") },
         { QStringLiteral("社区评分"), QStringLiteral("CommunityRating") },
