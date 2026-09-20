@@ -1,5 +1,5 @@
 //! 双层图片圆形扩散溶解替换(awww 壁纸切换式):source 变化时,新图从圆心
-//! 一点按圆形裁剪扩散,圆内新图渐入、圆外保持旧图(inward=true 反向)。
+//! 圆心一点按圆形裁剪扩散,圆内新图渐入、圆外保持旧图。
 //!
 //! 实现:bottom/top Image 元素 visible:false(防遮挡)+ ShaderEffectSource
 //! 直接采样(官方文档:sourceItem 本身可 invisible,仍渲染进纹理;无需
@@ -30,10 +30,6 @@ Item {
     property alias status: bottom.status
     // 扩散时长。
     property int duration: 800
-    // true=新图从四周向圆心收缩(Outer);false=从圆心一点扩散(Grow)。
-    property bool inward: false
-    // 扩散圆心(归一化 0-1,相对本组件)。
-    property vector2d center: Qt.vector2d(0.5, 0.5)
     // 圆角半径(0=直角);>= 短边一半时呈圆形。
     property real cornerRadius: 0
     // 替换流程内部状态。
@@ -75,11 +71,11 @@ Item {
         const w = root.width, h = root.height
         if (w === 0 || h === 0)
             return
-        const cx = root.center.x * w, cy = root.center.y * h
+        const cx = w / 2, cy = h / 2
         const maxR = Math.sqrt(Math.max(cx, w - cx) * Math.max(cx, w - cx)
                              + Math.max(cy, h - cy) * Math.max(cy, h - cy))
-        revealAnim.radiusTo = root.inward ? 0 : maxR
-        revealAnim.radiusFrom = root.inward ? maxR : 0
+        revealAnim.radiusTo = maxR
+        revealAnim.radiusFrom = 0
         fx.u_dissolve = 0
         revealAnim.start()
     }
@@ -134,11 +130,9 @@ Item {
         }
         property real u_radius: root.cornerRadius
         property vector2d u_size: Qt.vector2d(root.width, root.height)
-        property vector2d u_center: Qt.vector2d(root.width * root.center.x,
-                                                root.height * root.center.y)
+        property vector2d u_center: Qt.vector2d(root.width / 2, root.height / 2)
         property real u_reveal: 0
         property real u_dissolve: 0
-        property real u_inward: root.inward ? 1.0 : 0.0
         fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/crossfade.frag.qsb"
     }
 

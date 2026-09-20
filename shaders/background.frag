@@ -22,7 +22,6 @@ layout(std140, binding = 0) uniform buf {
     vec2 u_size;
     float u_intensity;
     float u_vignette;
-    float u_motion;
     float u_style;
     float u_light;
     float u_meteorT;
@@ -31,9 +30,6 @@ layout(std140, binding = 0) uniform buf {
     vec4 u_g0Color;
     vec4 u_g1Color;
     vec4 u_g2Color;
-    vec4 u_g0;
-    vec4 u_g1;
-    vec4 u_g2;
 };
 
 float hash21(vec2 p) {

@@ -10,7 +10,6 @@ layout(std140, binding = 0) uniform buf {
     float maxAngle;
     float focal;
     float sideInset;
-    float meshDensity;
     float radiusPx;      // 圆角半径(像素,卡面空间)
     float padPx;         // 过扫描边距(宿主比卡面大的像素数/边)
 };
