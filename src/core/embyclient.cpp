@@ -297,7 +297,11 @@ void EmbyClient::sendGet(const QString &serverUrl, const QString &token, const Q
                 });
                 return;
             }
-            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+            // OperationCanceled 在 setTransferTimeout 路径 = 传输超时中止
+            const QString reason = reply->error() == QNetworkReply::OperationCanceledError
+                                       ? QStringLiteral("传输超时(20s 无应答)")
+                                       : reply->errorString();
+            const QString msg = what + QStringLiteral(" 失败: ") + reason
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             qWarning().noquote() << "Emby:" << msg
                                  << QStringLiteral("body=")
@@ -334,7 +338,11 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+            // OperationCanceled 在 setTransferTimeout 路径 = 传输超时中止
+            const QString reason = reply->error() == QNetworkReply::OperationCanceledError
+                                       ? QStringLiteral("传输超时(20s 无应答)")
+                                       : reply->errorString();
+            const QString msg = what + QStringLiteral(" 失败: ") + reason
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             qWarning().noquote() << "Emby:" << msg
                                  << QStringLiteral("body=")
@@ -362,7 +370,11 @@ void EmbyClient::postJson(const QString &serverUrl, const QString &token, const 
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+            // OperationCanceled 在 setTransferTimeout 路径 = 传输超时中止
+            const QString reason = reply->error() == QNetworkReply::OperationCanceledError
+                                       ? QStringLiteral("传输超时(20s 无应答)")
+                                       : reply->errorString();
+            const QString msg = what + QStringLiteral(" 失败: ") + reason
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             qWarning().noquote() << "Emby:" << msg
                                  << QStringLiteral("body=")
@@ -388,7 +400,11 @@ void EmbyClient::del(const QString &serverUrl, const QString &token, const QStri
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString msg = what + QStringLiteral(" 失败: ") + reply->errorString()
+            // OperationCanceled 在 setTransferTimeout 路径 = 传输超时中止
+            const QString reason = reply->error() == QNetworkReply::OperationCanceledError
+                                       ? QStringLiteral("传输超时(20s 无应答)")
+                                       : reply->errorString();
+            const QString msg = what + QStringLiteral(" 失败: ") + reason
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
             qWarning().noquote() << "Emby:" << msg
                                  << QStringLiteral("body=")

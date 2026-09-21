@@ -462,6 +462,14 @@ QVariant ConfigManager::value(const QString &key) const
     return m_values.value(key, it->def);
 }
 
+QVariant ConfigManager::defaultValue(const QString &key) const
+{
+    for (const auto &it : MoeConfig::items())
+        if (key == QString::fromUtf8(it.name))
+            return it.def;
+    return QVariant();
+}
+
 QVariantList ConfigManager::items() const
 {
     QVariantList out;

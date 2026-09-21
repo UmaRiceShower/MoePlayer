@@ -106,7 +106,7 @@ bool validateShortcut(const QVariant &v);
     M(librarySortBy, "sortBy", QString, "DateLastContentAdded", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
     M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
     M(customLibrariesMode, "customLibrariesMode", QString, "on", "library", "自定义库聚合:off(关闭)/on(开启,未匹配库保留原行)/only(仅显示自定义库)", "媒体库", "自定义库聚合", "按规则把多台服务器的库合并成自定义行。", Combo, optionsCustomLibrariesMode, validateCustomLibrariesMode) \
-    M(customLibraries, "customLibraries", QString, "", "library", "自定义库规则(JSON:[{name,rules:[{field,pattern}]}];空=预置)", "", "", "", Hidden, nullptr, nullptr) \
+    M(customLibraries, "customLibraries", QString, "[{\"name\":\"动画\",\"rules\":[{\"field\":\"name\",\"pattern\":\"动漫|动画|番剧|新番|国漫|剧场版|Anime\"}]},{\"name\":\"剧集\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电视剧|电视|剧集|美剧|韩剧|日剧|英剧|华语剧|追新|TV\"}]},{\"name\":\"电影\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电影|影片|院线|Movie\"}]}]", "library", "自定义库规则(JSON:[{name,rules:[{field,pattern}]}])", "", "", "", Hidden, nullptr, nullptr) \
     M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
     M(detailPosterPos, "posterPos", QString, "bottom-right", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-right)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
     M(detailTextPos, "textPos", QString, "followPoster", "detail", "标题+介绍位置:followPoster(跟随海报)/9 宫格", "详情页", "标题与介绍位置", "跟随海报,或固定于 hero 区九宫格位置(优先于海报)。", Combo, optionsDetailTextPos, validateTextPos) \
@@ -197,6 +197,8 @@ public:
     // 中不追踪,value 仅限非绑定调用)。
     Q_INVOKABLE bool setValue(const QString &key, const QVariant &v);
     Q_INVOKABLE QVariant value(const QString &key) const;
+    // 键的默认值(M 表 def;未知键返回无效)。
+    Q_INVOKABLE QVariant defaultValue(const QString &key) const;
     // 从磁盘重读配置(丢弃内存未落盘改动;热重载内部也走这里)。
     Q_INVOKABLE void reload();
     // 恢复默认值并立即写回。

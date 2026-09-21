@@ -71,6 +71,9 @@ public:
 
     // 是否已保存任何账号。
     Q_INVOKABLE bool hasAccounts() const;
+    // 自定义库各桶当前命中统计(编辑器反馈):[{name, libraries:[服名·库名…], itemCount}];
+    // 按实际归属(被高优先级桶收编的不计)。空数组 = 模式 off 或无规则。
+    Q_INVOKABLE QVariantList customBucketStats() const;
 
     // 新增账号:使用给定凭据登录(异步),成功后保存账号。
     // 返回 true 表示已发起登录,结果经 accountLoginFinished(ok, message) 通知;
