@@ -77,7 +77,7 @@ Item {
     // 默认电影+剧集;空数组 = 不传(服务器返回全部类型)。
     property var activeTypes: ["Movie", "Series"]
     // 年份范围(Years):0=不限;仅一端 = 精确单年;两端(起<=止)=
-    // 区间展开为逗号年份列表(服务器不支持范围语法,实测 500)。
+    // 区间展开为逗号年份列表(服务器不支持范围语法,返回 500)。
     property int yearFrom: 0
     property int yearTo: 0
     // 状态过滤(Filters,多选):已看/未看/收藏 的 "IsPlayed" 等值数组。

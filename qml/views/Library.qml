@@ -55,7 +55,7 @@ Item {
     property string currentSortOrder: ConfigManager.librarySortOrder
 
     // --- 库内筛选状态(直接映射 API 查询参数,空 = 不传) ---
-    // 类型单选(Genres 多值实测为 AND 语义,单选安全):Genre 名称。
+    // 类型单选(Genres 多值为 AND 语义,单选安全):Genre 名称。
     property string currentGenres: ""
     // 年份区间(Years 多值 OR 语义 = 区间):"1999,2000,2001,2002" 逗号
     // 列表;由输入框 "起始-终止" 解析生成;空 = 全部年份。
@@ -247,7 +247,7 @@ Item {
     // 聚合筛选入口:类型/评分/状态/年份做进一个控件,面板内分面小节
     // 分组,激活计数显示在按钮上。面板固定四节直接渲染——全部引用
     // root 的 QML 对象(ListModel/属性/函数),不用 JS 数组作 model:
-    // 数组元素经模型系统包装后函数属性丢失(实测 inputText 非函数)。
+    // 数组元素经模型系统包装后函数属性丢失(inputText 非函数)。
     // 选项节单选,点击即应用并保持面板打开(便于连续调整多节);年份
     // = 输入区间节(枚举年份传服务端)。激活时 accent 描边 + "筛选 · N",
     // 底部"清除筛选"一键归零;Esc/点外部关闭。
@@ -983,7 +983,7 @@ Item {
                     implicitHeight: contentHeight
                     clip: true
                     // 命令式赋值(非活绑定):页面销毁中途活绑定重算会读半死
-                    // 对象(setModel→DelegateModel 读 NULL 崩溃,实测)。
+                    // 对象(setModel→DelegateModel 读 NULL 崩溃)。
                     model: []
                     delegate: ItemDelegate {
                         required property var modelData
@@ -1423,7 +1423,7 @@ Item {
         function onYearsReceived(serverUrl, accountId, names) {
             if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
-            // 过滤脏年份(实测 nayo 返回 "1"),只用于区间有效性校验。
+            // 过滤脏年份(nayo 返回 "1"),只用于区间有效性校验。
             const set = new Set()
             for (const n of names) {
                 const y = parseInt(n, 10)

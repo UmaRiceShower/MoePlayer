@@ -114,7 +114,7 @@ int main(int argc, char *argv[])
     // qmltyperegistrar 经 QML_ELEMENT/QML_SINGLETON/QML_NAMED_ELEMENT 自动注册
     // 到 MoePlayer.Core。生成的注册函数 qml_register_types_MoePlayer_Core() 由
     // qmltyperegistrations.cpp 中的 QQmlModuleRegistration 静态注册,理论上引擎
-    // import 模块时自动触发;但实测(Qt 6.11,qrc qmldir 与静态注册并存)静态注册
+    // import 模块时自动触发;但 Qt 6.11 下(qrc qmldir 与静态注册并存)静态注册
     // 未在组件类型解析前触发,故在此显式调用该注册函数,保证类型在
     // loadFromModule 前就绪。宏与手动 qmlRegister 不并存,无双注册。
     qml_register_types_MoePlayer_Core();

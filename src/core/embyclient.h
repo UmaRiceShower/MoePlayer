@@ -96,7 +96,7 @@ public:
     // genres/years/minRating/filters 为可选过滤(空串不传):Genres 单值、
     // Years 单值、MinCommunityRating 评分下限、Filters 状态;searchTerm
     // 为库内搜索关键词(SearchTerm,空串不传);配合 ParentId(视图或子
-    // 文件夹 id)即库内多维筛选。注意:实测 4.9.5.0 带 SearchTerm 时
+    // 文件夹 id)即库内多维筛选。注意:4.9.5.0 带 SearchTerm 时
     // 忽略 SortBy/SortOrder(固定相关度排序)。
     Q_INVOKABLE void fetchItems(const QString &serverUrl, const QString &accountId,
                               const QString &token,
@@ -130,7 +130,7 @@ public:
     // 服务端搜索(/Users/{id}/Items?SearchTerm=),填充该服务器的 searchModel。
     // 空串清空结果;防抖在调用方(QML)做,响应按服务器+序号丢弃过期结果。
     // itemTypes/years/filters 空串不传。搜索结果由服务器固定按相关度排序
-    // (实测 4.9.5.0 忽略 SortBy/SortOrder),故无排序参数。
+    // (4.9.5.0 忽略 SortBy/SortOrder),故无排序参数。
     // startIndex=0 替换结果,>0 追加(分页);Limit 内部 +1 探针,多出的
     // 1 条截断并置 model.hasMore 供"加载更多"。
     Q_INVOKABLE void search(const QString &serverUrl, const QString &accountId,

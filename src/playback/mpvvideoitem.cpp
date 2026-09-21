@@ -485,7 +485,7 @@ QJsonObject MpvEmbeddedCore::execute(const QJsonObject &obj)
     }
     // get_property/set_property 是 JSON IPC 层的特判命令(ipc.c 拦获),不在
     // mpv_command 的命令表里 —— 内嵌侧必须同样特判(裸调 command_node 报
-    // invalid parameter,实测)。
+    // invalid parameter)。
     if (name == QLatin1String("get_property") && cmd.size() >= 2) {
         const QByteArray prop = cmd.at(1).toString().toUtf8();
         mpv_node val{};
@@ -507,7 +507,7 @@ QJsonObject MpvEmbeddedCore::execute(const QJsonObject &obj)
     }
 
     // 命令表(loadfile 等):mpv_command_node 同步等完成,vo=libmpv 等待渲染
-    // 上下文时会把事件线程堵死(实测)——一律 async:立即入队返回,应答经
+    // 上下文时会把事件线程堵死——一律 async:立即入队返回,应答经
     // MPV_EVENT_COMMAND_REPLY 回来,request_id 原样装在 reply_userdata。
     NodePool pool;
     std::vector<mpv_node> vals;

@@ -22,7 +22,7 @@ inline constexpr int kImageTimeoutMs = 30000;
 // 分页上限(Emby 单页上限 200)。
 inline constexpr int kMaxPageSize = 200;
 // 首页聚合每库条目上限。
-inline constexpr int kHomePerLibraryLimit = 20;
+inline constexpr int kHomePerLibraryLimit = 60;
 // 首页 hero 服务器建议条数(每账号;全部账号展平后由 QML 再截断)。
 inline constexpr int kHomeSuggestLimit = 10;
 // 播放历史单页条数(每账号):Emby 单页上限 200(kMaxPageSize),取满即一次请求

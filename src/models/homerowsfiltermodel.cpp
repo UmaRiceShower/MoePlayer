@@ -38,6 +38,22 @@ void HomeRowsFilterModel::applySource()
         setSourceModel(t);
 }
 
+void HomeRowsFilterModel::setMaxRows(int n)
+{
+    if (m_maxRows == n)
+        return;
+    m_maxRows = n;
+    invalidateFilter();
+}
+
+void HomeRowsFilterModel::setFiltering(bool b)
+{
+    if (m_filtering == b)
+        return;
+    m_filtering = b;
+    invalidateFilter();
+}
+
 void HomeRowsFilterModel::setFilterPredicate(const QJSValue &fn)
 {
     m_pred = fn;
@@ -52,6 +68,8 @@ void HomeRowsFilterModel::refilter()
 
 bool HomeRowsFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
+    if (!m_filtering && m_maxRows > 0 && sourceRow >= m_maxRows)
+        return false;
     if (!m_pred.isCallable())
         return true;
     auto *src = qobject_cast<HomeRowsModel *>(sourceModel());

@@ -22,6 +22,9 @@ class HomeRowsFilterModel : public QSortFilterProxyModel
     Q_PROPERTY(QAbstractItemModel* plainSource WRITE setPlainSource)
     Q_PROPERTY(QAbstractItemModel* customSource WRITE setCustomSource)
     Q_PROPERTY(bool customActive WRITE setCustomActive NOTIFY customActiveChanged)
+    //! 预览行数上限(0=全部);过滤态(filtering)不截断。
+    Q_PROPERTY(int maxRows WRITE setMaxRows)
+    Q_PROPERTY(bool filtering WRITE setFiltering)
 
 public:
     explicit HomeRowsFilterModel(QObject *parent = nullptr);
@@ -30,6 +33,8 @@ public:
     void setPlainSource(QAbstractItemModel *m);
     void setCustomSource(QAbstractItemModel *m);
     void setCustomActive(bool b);
+    void setMaxRows(int n);
+    void setFiltering(bool b);
 
     //! 查询词变化后调用(谓词闭包捕获查询词,此处仅触发重过滤)。
     Q_INVOKABLE void refilter();
@@ -47,4 +52,6 @@ private:
     QAbstractItemModel *m_plain = nullptr;
     QAbstractItemModel *m_custom = nullptr;
     bool m_customActive = false;
+    int m_maxRows = 0;
+    bool m_filtering = false;
 };

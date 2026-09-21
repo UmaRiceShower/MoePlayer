@@ -545,7 +545,7 @@ void MpvClient::scheduleRetry(Session *s)
             if (!cur || cur->retryIndex < 0)
                 return;
             // 播放列表模式:占位条目的 on_load hook 挂起时,mpv 会吞掉所有
-            // 播放列表操作(实测:playlist-pos 变了但不加载)——先清空列表
+            // 播放列表操作(playlist-pos 变了但不加载)——先清空列表
             // (除当前)、放行挂起的占位,待 mpv 回到 idle 再重新灌入 m3u
             // (第 0 条 = 当前集真实 URL),实现"重连当前集"。
             if (cur->listSet && !cur->m3uPath.isEmpty()) {
@@ -688,7 +688,7 @@ void MpvClient::spawnMpv(Session *s)
         qInfo() << "MpvClient: mpv 进程退出,退出码" << code;
         stopAndConsiderEnd(key, code != 0);
     });
-    // mpv 日志转发:逐行接进 MoePlayer 输出。实测 mpv 日志走 stdout 而非
+    // mpv 日志转发:逐行接进 MoePlayer 输出。mpv 日志走 stdout 而非
     // stderr(--terminal=yes 时控制台输出在 stdout),两个通道都接防漏。
     const auto forwardLog = [key = s->key, this](QByteArray data) {
         Session *cur = sessionFor(key);
@@ -1605,7 +1605,7 @@ void MpvClient::initSuperRes(Session *s)
     s->superResReady = true;
     // mpv 窗口内快捷键:把「键 档位 …」清单交 moe-hook.lua 用
     // mp.add_key_binding 注册。**必须是 lua 的弱绑定**:IPC 的 keybind 命令
-    // 会顶掉用户自己 input.conf 的同名键(实测),lua.rst 的 add_key_binding
+    // 会顶掉用户自己 input.conf 的同名键,lua.rst 的 add_key_binding
     // 只覆盖默认绑定。按键 → script-message moe-shader <id>(mpv 广播给所有
     // 客户端,含 IPC)→ 本类 client-message 分支写配置,再统一应用到所有会话。
     sendSuperResKeys(s);

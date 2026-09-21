@@ -36,7 +36,7 @@ Item {
     // 连续子串,见 FuzzyMatch),本地即时过滤不防抖;未命中的库卡折叠为 0 宽
     // (不重建委托、不重载图片)。匹配对象 = 库名 + 服务器名。
     // 注意:库行不做折叠 —— 条件行高叠加 reuseItems 与模型增量更新会让
-    // ListView 重建离屏高度缓存(全量孵化行委托,实测阻塞 GUI ~600ms)。
+    // ListView 重建离屏高度缓存(全量孵化行委托,阻塞 GUI ~600ms)。
     property string libFilter: ""
     function libMatch(row) {
         const q = root.libFilter.trim()
@@ -157,7 +157,7 @@ Item {
             return
         root._pendingInject = root.filterInject
         // 清空挪出本 notify 级联:filterInject 绑定读 window.homeFilterText,
-        // 同步清空 = 在自身 notify 里重赋值源,Binding loop(实测告警)。
+        // 同步清空 = 在自身 notify 里重赋值源,Binding loop 告警。
         Qt.callLater(function () { ApplicationWindow.window.homeFilterText = "" })
         if (root.StackView.status === StackView.Active)
             root._applyInject()
@@ -186,6 +186,8 @@ Item {
         customSource: AccountManager.customHomeRows
         customActive: ConfigManager.customLibrariesMode !== "off" && root.libFilter.trim() === ""
         filterPredicate: root.libMatch
+        maxRows: ConfigManager.homeLibraryRows
+        filtering: root.libFilter.trim() !== ""
     }
     onLibFilterChanged: {
         homeRowsFilter.refilter()
@@ -295,7 +297,7 @@ Item {
         homeRowsFilter.refilter()
         if (AccountManager.hasAccounts) {
             AccountManager.validateTokens()
-            AccountManager.fetchHomeRows(Constants.homePerLibraryLimit)
+            AccountManager.fetchHomeRows(ConfigManager.homeLibraryLimit)
             AccountManager.fetchPlaybackHistory()
         }
     }
@@ -416,7 +418,7 @@ Item {
                     implicitHeight: Math.min(contentHeight, 300)
                     clip: true
                     // 命令式赋值(非活绑定):注入/聚合通知与页面切换交错时,
-                    // 活绑定重算 setModel 会撞 DelegateModel 崩溃窗(实测)。
+                    // 活绑定重算 setModel 会撞 DelegateModel 崩溃窗。
                     model: []
                     delegate: ItemDelegate {
                         id: pickItem
@@ -573,7 +575,7 @@ Item {
         reuseItems: true
         cacheBuffer: 400
 
-        // 行间间距:标题与上一行海报间距(14)>= 标题与自身海报间距(12)。
+        // 行间间距:标题与上一行海报间距(6)>= 标题与自身海报间距(4)。
         spacing: Constants.homeRowGap
 
         // header = hero 轮播 + 媒体库节(顶部一屏,随内容滚动,常驻加载 3 张图)。
@@ -670,7 +672,7 @@ Item {
             HoverHandler {
                 id: heroHover
                 // 幻影 hover 闩锁:窗口若恰好开在光标下,enter 无移动即触发,
-                // 悬停暂停会把轮换卡到"移出为止"(实测启动后轮转迟迟不开)。
+                // 悬停暂停会把轮换卡到"移出为止"(启动后轮转迟迟不开)。
                 // 只在移入后真发生过位移才算悬停;移出即复位。
                 onPointChanged: heroCar._hoverMoved = true
                 onHoveredChanged: {
@@ -681,7 +683,7 @@ Item {
             }
             // 全图慢速灌缓存:启动 10s 后每 1.5s 一张灌进磁盘缓存(会话中期
             // 空闲时,不挤启动)。随机建议的新条目图从未显示=从未入缓存,
-            // 下次启动轮到只能现场拉(实测白卡);灌过则下次全命中。
+            // 下次启动轮到只能现场拉(会白卡);灌过则下次全命中。
             property int _heroWarmIdx: 0
             Timer {
                 id: heroWarmStarter
@@ -984,9 +986,6 @@ Item {
         id: libRow
         required property var modelData
         width: parent ? parent.width : 0
-        // 行高 = 行头文字 + 标题行间距 + 条目卡行(hover 溢出缓冲)。
-        height: Constants.rowTitleH + Constants.homeRowTitleGap
-                + Constants.rowHeight + Constants.homeRowHoverPad
         // 标题贴近自身海报(下间距 < 与上一节的上间距)。
         spacing: Constants.homeRowTitleGap
 
@@ -998,6 +997,7 @@ Item {
             AppText {
                 id: rowTitle
                 anchors.left: parent.left
+                // 与「媒体库」节标题同左缘(标题文字对齐;卡片图像区各自内偏)。
                 anchors.leftMargin: Constants.rowLeftMargin
                 anchors.right: seeAllLink.left
                 anchors.rightMargin: Constants.homeRowTitlePad
@@ -1015,7 +1015,7 @@ Item {
                 id: seeAllLink
                 visible: libRow.modelData.custom !== true
                 anchors.right: parent.right
-                anchors.rightMargin: Constants.rowLeftMargin
+                anchors.rightMargin: Constants.rowLeftMargin + Constants.homeRowHoverPad / 2 + Constants.cellGap / 2
                 anchors.verticalCenter: parent.verticalCenter
                 text: "查看全部 ›"
                 color: seeAllMouse.hovered ? Theme.accent : Theme.textMuted
@@ -1032,155 +1032,88 @@ Item {
                 }
             }
         }
-        // 条目卡片横向行(鼠标拖拽横向滚动)。
-        // clip:true 的边界即裁切线:首卡左缘原贴 ListView 左缘,hover 放大
-        // (1.06,横向溢出 4.6px)立即被裁;header 垫 8px 让首卡左缘内移,
-        // 高度 +16 容纳垂直溢出(230×1.06=243.8)。
+        // 条目卡片区:网格自动铺满宽度,不横向滚动(横滚与页面纵向滚动手感
+        // 互搏,且离屏卡纯耗内存);行数 = 配置「每库行数」,条数 = min(请求
+        // 上限, 行数×列数)。首末卡 hover 放大溢出经水平内缩垫吸收。
         Item {
             anchors.left: parent.left
             anchors.leftMargin: Constants.rowLeftMargin
-            // 双侧留白:原只减左边距,右缘贴窗口边。
             width: libRow.width - Constants.rowLeftMargin * 2
-            height: Constants.rowHeight + Constants.homeRowHoverPad
+            readonly property int lines: Math.max(1, Math.min(5, ConfigManager.homeRowLines))
+            // 卡宽精确铺满:列数按卡宽下限取(保 minW),卡宽 = 净宽均分;
+            // 超上限时 +1 列回收。左右缘 = rowLeftMargin + hoverPad/2,对称。
+            readonly property int gap: Constants.cellGap
+            readonly property real availW: width - Constants.homeRowHoverPad
+            readonly property int cols: {
+                let n = Math.max(1, Math.floor((availW + gap) / (Constants.rowCardMinW + gap)))
+                let w = (availW - (n - 1) * gap) / n
+                while (w > Constants.rowCardMaxW && n < 24) { n += 1; w = (availW - (n - 1) * gap) / n }
+                return n
+            }
+            // GridView 按 floor(width/cellWidth) 布列(每格都含 gap)——
+            // cellWidth 必须精确等分(width/cols),gap 折进格内,否则公式列数
+            // 与 GridView 实际列数错位,末列空位成右缝。
+            readonly property real cardW: availW / cols - gap
+            readonly property real cardH: Constants.gridCardH(cardW)
+            // 行高 = 行数×卡高 + (行数-1)×卡间距(尾行不带 gap)+ hover 缓冲;
+            // 多算一个尾部 gap 会让行与下个库名之间空出 46px。
+            height: lines * cardH + (lines - 1) * gap + Constants.homeRowHoverPad
             clip: true
-                ListView {
-                    id: rowItems
-                    anchors.fill: parent
-                    orientation: ListView.Horizontal
-                    spacing: Constants.rowSpacing
-                    // 首卡左缘内移(hover 放大横向溢出的一半),避免被 clip 裁切。
-                    header: Item { width: Constants.homeRowHoverPad / 2; height: 1 }
-                    // 末卡右缘同理(滚到行尾 hover 末卡时)。
-                    footer: Item { width: Constants.homeRowHoverPad / 2; height: 1 }
-                    // 复用 delegate 避免滚动时销毁/重建;cacheBuffer 预备离屏项减少抖动。
-                    reuseItems: true
-                    cacheBuffer: 600
-                    model: libRow.modelData.items
-                    delegate: Item {
-                        required property var modelData
-                        required property int index
-                        width: Constants.rowCardW
-                        height: Constants.rowHeight + Constants.homeRowHoverPad
-                        z: pc.hovered ? 2 : 0
-                        PosterCard {
-                            id: pc
-                            anchors.centerIn: parent
-                            width: Constants.rowCardW
-                            height: Constants.rowHeight
-                            model: parent.modelData
-                            index: parent.index
-                            showActions: false
-                            itemId: parent.modelData.id || ""
-                            posterId: parent.modelData.posterId || ""
-                            title: parent.modelData.name || ""
-                            year: parent.modelData.year || 0
-                            rating: parent.modelData.rating || 0
-                            played: !!parent.modelData.played
-                            favorite: !!parent.modelData.favorite
-                            positionTicks: parent.modelData.positionTicks || 0
-                            runtimeTicks: parent.modelData.runtimeTicks || 0
-                            unplayedCount: parent.modelData.unplayedCount || 0
-                            itemType: parent.modelData.type || ""
-                            onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
-                                                       parent.modelData.name,
-                                                       parent.modelData.serverUrl || libRow.modelData.serverUrl,
-                                                       parent.modelData.accountId || libRow.modelData.accountId)
-                        }
+            GridView {
+                id: rowItems
+                anchors.fill: parent
+                anchors.leftMargin: Constants.homeRowHoverPad / 2
+                anchors.rightMargin: Constants.homeRowHoverPad / 2
+                anchors.topMargin: Constants.homeRowHoverPad / 2
+                interactive: false
+                // -0.5:width/cols 的双精度积可微超 width(1201/7×7=1201.0000000000002)
+                // ⇒ GridView 判定末格放不下而换行,末列失踪成右缝。
+                cellWidth: width / parent.cols - 0.5
+                cellHeight: parent.cardH + parent.gap
+                reuseItems: true
+                model: libRow.modelData.items.slice(0, parent.lines * parent.cols)
+                delegate: Item {
+                    required property var modelData
+                    required property int index
+                    width: rowItems.cellWidth
+                    height: rowItems.cellHeight
+                    z: pc.hovered ? 2 : 0
+                    PosterCard {
+                        id: pc
+                        // 格内居中:卡间距拆半到卡两侧,首/末卡距缘各 gap/2,左右对称。
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        width: rowItems.cellWidth - Constants.cellGap
+                        height: rowItems.cellHeight - Constants.cellGap
+                        model: parent.modelData
+                        index: parent.index
+                        showActions: false
+                        itemId: parent.modelData.id || ""
+                        posterId: parent.modelData.posterId || ""
+                        title: parent.modelData.name || ""
+                        year: parent.modelData.year || 0
+                        rating: parent.modelData.rating || 0
+                        played: !!parent.modelData.played
+                        favorite: !!parent.modelData.favorite
+                        positionTicks: parent.modelData.positionTicks || 0
+                        runtimeTicks: parent.modelData.runtimeTicks || 0
+                        unplayedCount: parent.modelData.unplayedCount || 0
+                        itemType: parent.modelData.type || ""
+                        onClicked: root.showDetail(parent.modelData.id, parent.modelData.posterId || "",
+                                                   parent.modelData.name,
+                                                   parent.modelData.serverUrl || libRow.modelData.serverUrl,
+                                                   parent.modelData.accountId || libRow.modelData.accountId)
                     }
-                }
-                // 库壳已到、条目未到时显示加载占位(items 空且 loading)。
-                Text {
-                    anchors.centerIn: parent
-                    visible: rowItems.count === 0 && libRow.modelData.loading
-                    color: Theme.textMuted
-                    font.pixelSize: 13
-                    text: "加载中…"
-                }
-                // 行悬停 ◀ ▶ 滚动钮:纯鼠标的横行浏览(拖拽仍可用)。
-                // 玻璃化但零抓取成本:blurSource = 本行海报条 rowItems(按钮是其
-                // 兄弟,不自采样;pageList 含按钮自身,不可作源),映射恒定(按钮
-                // 与行内容无相对位移)⇒ liveCapture:false + 横滚事件驱动刷新。
-                HoverHandler { id: rowStripHover }
-                FrostedGlass {
-                    id: rowPrevBtn
-                    width: 36
-                    height: 36
-                    radius: 18
-                    anchors.left: parent.left
-                    anchors.leftMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
-                    blurSource: rowItems
-                    liveCapture: false
-                    blurRadius: 4
-                    thickness: 12
-                    visible: opacity > 0
-                    opacity: (rowStripHover.hovered && rowItems.contentX > 0) ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
-                    hoverGlow: rowPrevArea.hovered ? 0.35 : 0.0
-                    NavGlyph {
-                        anchors.centerIn: parent
-                        dir: 0
-                    }
-                    MouseArea {
-                        id: rowPrevArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            rowScrollAnim.stop()
-                            rowScrollAnim.to = Math.max(0, rowItems.contentX - rowItems.width * 0.85)
-                            rowScrollAnim.start()
-                        }
-                    }
-                    onVisibleChanged: if (visible) refresh()
-                }
-                FrostedGlass {
-                    id: rowNextBtn
-                    width: 36
-                    height: 36
-                    radius: 18
-                    anchors.right: parent.right
-                    anchors.rightMargin: 6
-                    anchors.verticalCenter: parent.verticalCenter
-                    blurSource: rowItems
-                    liveCapture: false
-                    blurRadius: 4
-                    thickness: 12
-                    visible: opacity > 0
-                    opacity: (rowStripHover.hovered
-                              && rowItems.contentX < rowItems.contentWidth - rowItems.width - 1) ? 1 : 0
-                    Behavior on opacity { NumberAnimation { duration: 150 } }
-                    hoverGlow: rowNextArea.hovered ? 0.35 : 0.0
-                    NavGlyph {
-                        anchors.centerIn: parent
-                        dir: 1
-                    }
-                    MouseArea {
-                        id: rowNextArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            rowScrollAnim.stop()
-                            rowScrollAnim.to = Math.min(rowItems.contentWidth - rowItems.width,
-                                                        rowItems.contentX + rowItems.width * 0.85)
-                            rowScrollAnim.start()
-                        }
-                    }
-                    onVisibleChanged: if (visible) refresh()
-                }
-                Connections {
-                    target: rowItems
-                    function onContentXChanged() { rowPrevBtn.refresh(); rowNextBtn.refresh() }
-                }
-                NumberAnimation {
-                    id: rowScrollAnim
-                    target: rowItems
-                    property: "contentX"
-                    duration: 260
-                    easing.type: Easing.OutCubic
                 }
             }
+            // 库壳已到、条目未到时显示加载占位(items 空且 loading)。
+            Text {
+                anchors.centerIn: parent
+                visible: rowItems.count === 0 && libRow.modelData.loading
+                color: Theme.textMuted
+                font.pixelSize: 13
+                text: "加载中…"
+            }
+        }
     }
 
     // 圆形毛玻璃按钮(放大镜等):圆形玻璃底 + 居中图标。
@@ -1346,7 +1279,7 @@ Item {
             // 锚定只连兄弟/直接父(官方限制),故年份与标题共用一个容器 Item,
             // 各自 anchors.left/right 到容器两侧;容器单边锚+显式 height 合法,
             // 标题单边右锚+width 合法(elide 需要确定宽)。
-            // 判中心卡不用 isCurrentItem(实测本 PathView 恒 false),
+            // 判中心卡不用 isCurrentItem(本 PathView 恒 false),
             // 用路径 tilt=0 + 浮点容差(吸附毫厘差不瞬间失显)。
             Item {
                 id: titleArea

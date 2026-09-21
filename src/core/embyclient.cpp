@@ -100,8 +100,8 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &idPrefix)
 }
 
 // Emby 时间戳(ISO 8601)换算毫秒 epoch;空值/解析失败返回 0(未知)。
-// 服务端实测小数秒为 7 位,Qt 6.11 的 ISODateWithMs 可直接解析并截断到毫秒
-// (实测 7 位/3 位/无小数均有效),无需预处理。
+// 服务端小数秒为 7 位,Qt 6.11 的 ISODateWithMs 可直接解析并截断到毫秒
+// (7 位/3 位/无小数均有效),无需预处理。
 qint64 parseEmbyDateMs(const QString &iso)
 {
     if (iso.isEmpty())
@@ -183,9 +183,9 @@ QUrlQuery historyListQuery(int startIndex, int limit, bool playedOnly)
     q.addQueryItem(QStringLiteral("Fields"),
                    QStringLiteral("PrimaryImageAspectRatio,ProductionYear,RunTimeTicks,"
                                   "SeriesId,SeriesName,IndexNumber,ParentIndexNumber"));
-    // 分页("加载更多")加服务器端过滤:实测服务器把"播过的"排在前面、从未播放的排在
+    // 分页("加载更多")加服务器端过滤:服务器把"播过的"排在前面、从未播放的排在
     // 其后,不过滤时第 60 条之后整页都是未播条目,翻页毫无意义。刻意只用 IsPlayed
-    // (不用 IsResumable 组合:实测逗号组合是"同时满足"语义,会把结果缩到几条)。
+    // (不用 IsResumable 组合:逗号组合是"同时满足"语义,会把结果缩到几条)。
     if (playedOnly)
         q.addQueryItem(QStringLiteral("Filters"), QStringLiteral("IsPlayed"));
     if (startIndex > 0)
@@ -760,7 +760,7 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &accountId,
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     // 媒体库默认请求:递归平铺 + 仅电影/剧集。Recursive=true 把库/子文件夹
-    // 子树内全部 Movie/Series 纳入(与 Emby web 默认一致,实测动漫库 653→1034
+    // 子树内全部 Movie/Series 纳入(与 Emby web 默认一致,动漫库 653→1034
     // 条);IncludeItemTypes 排除 Folder 等非播放条目。下钻文件夹时同规则平铺
     // 该子树,层级浏览仍由 fetchFolders 负责。
     q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
@@ -779,7 +779,7 @@ void EmbyClient::fetchItems(const QString &serverUrl, const QString &accountId,
         q.addQueryItem(QStringLiteral("MinCommunityRating"), minRating);
     if (!filters.isEmpty())
         q.addQueryItem(QStringLiteral("Filters"), filters);
-    // 库内搜索:SearchTerm 与 ParentId/筛选正交(实测 4.9.5.0 带词时
+    // 库内搜索:SearchTerm 与 ParentId/筛选正交(4.9.5.0 带词时
     // 忽略 SortBy/SortOrder,固定相关度排序)。
     if (!searchTerm.isEmpty())
         q.addQueryItem(QStringLiteral("SearchTerm"), searchTerm);
@@ -808,7 +808,7 @@ void EmbyClient::fetchGenres(const QString &serverUrl, const QString &accountId,
 {
     const QString key = serverUrl.trimmed();
     // /Genres 为全局分类端点,ParentId 限定库/文件夹;Genre 是 BaseItemDto
-    // (带 Id/ImageTags,实测 ImageTags.Primary 有值),直接复用条目模型。
+    // (带 Id/ImageTags,ImageTags.Primary 有值),直接复用条目模型。
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
@@ -824,7 +824,7 @@ void EmbyClient::fetchYears(const QString &serverUrl, const QString &accountId,
                             const QString &token, const QString &userId, const QString &viewId)
 {
     const QString key = serverUrl.trimmed();
-    // /Years 返回轻量 TagItem(实测兼容实现仅 Name,无 Id),经信号返回
+    // /Years 返回轻量 TagItem(兼容实现仅 Name,无 Id),经信号返回
     // 名称列表,QML 端过滤脏值(如 "1")并倒序展示。
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
@@ -898,8 +898,8 @@ void EmbyClient::search(const QString &serverUrl, const QString &accountId,
         q.addQueryItem(QStringLiteral("Years"), years);
     if (!filters.isEmpty())
         q.addQueryItem(QStringLiteral("Filters"), filters);
-    // 搜索排序:服务器固定按相关度返回,SortBy/SortOrder 无效(实测
-    // 4.9.5.0 各组合结果顺序相同),不传。
+    // 搜索排序:服务器固定按相关度返回,SortBy/SortOrder 无效
+    // (4.9.5.0 各组合结果顺序相同),不传。
     if (startIndex > 0)
         q.addQueryItem(QStringLiteral("StartIndex"), QString::number(startIndex));
     // Limit+1 探针:多出的 1 条说明还有更多,截断并标记 hasMore。
@@ -963,7 +963,7 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &accountI
 {
     const QString key = serverUrl.trimmed();
     get(key, token, userId,
-        // UserId 必带:分集端点的 UserData 只在该参数存在时返回(实测缺参数时
+        // UserId 必带:分集端点的 UserData 只在该参数存在时返回(缺参数时
         // 响应条目里整个 UserData 键都不存在),已看徽标/进度条/续播位置依赖它。
         QStringLiteral("/Shows/%1/Episodes?SeasonId=%2&UserId=%3&Fields=UserData,PrimaryImageAspectRatio")
             .arg(seriesId, seasonId, userId),
@@ -1054,7 +1054,7 @@ void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &a
                                       const QString &token, const QString &userId,
                                       int startIndex, int limit, bool filtered)
 {
-    // 过滤段带 Filters=IsPlayed:实测服务器在已播条目之后混着从未播放的行,越深越多,
+    // 过滤段带 Filters=IsPlayed:服务器在已播条目之后混着从未播放的行,越深越多,
     // 不过滤翻页只会白拿未播条目。过滤会换一套下标空间,故由调用方显式给出 filtered,
     // 不能按 StartIndex 推断(过滤段本身也从 0 起)。
     const int from = qMax(0, startIndex);
@@ -1531,7 +1531,7 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                  QVariantList subtitleStreams;
                  // 所选轨以「同类序号 ordinal」传给 mpv:track-list 内封轨顺序 ==
                  // 容器顺序 == Emby MediaStreams 同类顺序,ordinal 跨两端稳定对应。
-                 // ★ 不依赖响应流级 IsDefault 翻转——实测(4.9.5)服务器只更新源级
+                 // ★ 不依赖响应流级 IsDefault 翻转——4.9.5 服务器只更新源级
                  //   DefaultXxxStreamIndex,流级 IsDefault 保持容器原始标记。故记
                  //   index→ordinal 映射,请求 index>=0 时按它取 ordinal,否则回退
                  //   IsDefault 捕获(未显式选时即服务器默认轨)。
