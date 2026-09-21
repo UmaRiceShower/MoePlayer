@@ -144,6 +144,7 @@ qt_add_shaders(MoePlayer moeplayer_shaders
           shaders/episode-fade.frag
           shaders/glass-refract.frag
           shaders/hero-fade.frag
+          shaders/poster-round.frag
           shaders/hero.vert
           shaders/hero.frag
 )
