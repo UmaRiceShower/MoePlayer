@@ -54,6 +54,7 @@ QtObject {
     // 暖色角标底(评分等,随预设暖强调色)。
     readonly property color badgeScrim: Qt.tint("#000000", Qt.rgba(accentWarm.r, accentWarm.g, accentWarm.b, 0.12))
     readonly property color dangerPressed: Qt.tint(danger, Qt.rgba(0, 0, 0, 0.18))
+    readonly property color dangerTint: Qt.rgba(danger.r, danger.g, danger.b, 0.12)
 
     // 半透明底(卡片角标/快捷按钮)
     readonly property color overlayBg: "#000000aa"

@@ -647,18 +647,7 @@ struct CustomLibBucket {
 // {field:name|collectionType, pattern:正则(大小写不敏感,部分匹配)}。
 static QList<CustomLibBucket> customLibBuckets(ConfigManager *config)
 {
-    static const char *kPresets = R"([
-{"name":"动画","rules":[{"field":"name","pattern":"动漫|动画|番剧|新番|国漫|剧场版|Anime"}]},
-{"name":"剧集","rules":[{"field":"name","pattern":"电视剧|电视|剧集|美剧|韩剧|日剧|英剧|华语剧|追新|TV"}]},
-{"name":"电影","rules":[{"field":"name","pattern":"电影|影片|院线|Movie"}]},
-{"name":"演出","rules":[{"field":"name","pattern":"演唱会|音乐|Music|MV"}]},
-{"name":"综艺","rules":[{"field":"name","pattern":"综艺"}]},
-{"name":"儿童","rules":[{"field":"name","pattern":"儿童|少儿|Kids"}]},
-{"name":"纪录片","rules":[{"field":"name","pattern":"纪录片|记录片|Documentary"}]}
-])";
-    QString raw = config->customLibraries();
-    if (raw.trimmed().isEmpty())
-        raw = QString::fromUtf8(kPresets);
+    const QString raw = config->customLibraries();
     QList<CustomLibBucket> out;
     const QJsonArray arr = QJsonDocument::fromJson(raw.toUtf8()).array();
     for (const auto &bv : arr) {
@@ -682,6 +671,59 @@ static QList<CustomLibBucket> customLibBuckets(ConfigManager *config)
         }
         if (!b.rules.isEmpty())
             out.append(b);
+    }
+    return out;
+}
+
+// 行 → 桶下标(第一命中赢;无命中 -1)。
+static int matchBucket(const QList<CustomLibBucket> &buckets, const QString &viewName,
+                       const QString &collType)
+{
+    for (int i = 0; i < buckets.size(); ++i)
+        for (const auto &rule : buckets[i].rules) {
+            const QString &subject = rule.first == QLatin1String("collectionType")
+                                         ? collType : viewName;
+            if (rule.second.match(subject).hasMatch())
+                return i;
+        }
+    return -1;
+}
+
+QVariantList AccountManager::customBucketStats() const
+{
+    QVariantList out;
+    if (m_config->customLibrariesMode() == QLatin1String("off"))
+        return out;
+    const QList<CustomLibBucket> buckets = customLibBuckets(m_config);
+    QStringList names;
+    for (const auto &b : buckets)
+        names.append(b.name);
+    QVariantList libLists, counts;
+    for (int i = 0; i < buckets.size(); ++i) {
+        libLists.append(QStringList());
+        counts.append(0);
+    }
+    for (const QVariant &rv : visibleHomeRows()) {
+        const QVariantMap row = rv.toMap();
+        const int b = matchBucket(buckets, row.value(QStringLiteral("viewName")).toString(),
+                                  row.value(QStringLiteral("collectionType")).toString());
+        if (b < 0)
+            continue;
+        QString label = row.value(QStringLiteral("viewName")).toString();
+        const QString sn = row.value(QStringLiteral("serverName")).toString();
+        if (!sn.isEmpty())
+            label = sn + QStringLiteral(" · ") + label;
+        QStringList lst = libLists[b].toStringList();
+        lst.append(label);
+        libLists[b] = lst;
+        counts[b] = counts[b].toInt() + row.value(QStringLiteral("items")).toList().size();
+    }
+    for (int i = 0; i < buckets.size(); ++i) {
+        QVariantMap m;
+        m.insert(QStringLiteral("name"), names[i]);
+        m.insert(QStringLiteral("libraries"), libLists[i].toStringList());
+        m.insert(QStringLiteral("itemCount"), counts[i].toInt());
+        out.append(m);
     }
     return out;
 }
@@ -721,16 +763,7 @@ void AccountManager::rebuildCustomHomeRows(bool final)
         const QVariantMap row = rv.toMap();
         const QString viewName = row.value(QStringLiteral("viewName")).toString();
         const QString collType = row.value(QStringLiteral("collectionType")).toString();
-        int bucketIdx = -1;
-        for (int i = 0; i < buckets.size() && bucketIdx < 0; ++i)
-            for (const auto &rule : buckets[i].rules) {
-                const QString &subject = rule.first == QLatin1String("collectionType")
-                                             ? collType : viewName;
-                if (rule.second.match(subject).hasMatch()) {
-                    bucketIdx = i;
-                    break;
-                }
-            }
+        const int bucketIdx = matchBucket(buckets, viewName, collType);
         if (bucketIdx < 0) {
             if (mode == QLatin1String("on"))
                 plainRows.append(row); // 开启:未匹配库保留原行(排在自定义行之后)

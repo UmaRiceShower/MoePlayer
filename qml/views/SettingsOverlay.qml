@@ -70,14 +70,14 @@ Item {
                      ? catModel.get(catList.currentIndex).section : ""
         const q = root.filterText
         const cats = q === ""
-            ? ["界面", "播放", "媒体库", "详情页", "快捷键", "代理", "关于"]
+            ? ["界面", "首页", "播放", "媒体库", "详情页", "快捷键", "代理", "关于"]
             : []
         catModel.clear()
         if (q === "") {
             for (let i = 0; i < cats.length; ++i)
                 catModel.append({ label: cats[i], section: cats[i] })
         } else {
-            const named = ["界面", "播放", "媒体库", "详情页", "快捷键", "代理"]
+            const named = ["界面", "首页", "播放", "媒体库", "详情页", "快捷键", "代理"]
             for (let i = 0; i < named.length; ++i) {
                 const n = itemsMatching(q, named[i]).length
                 if (n > 0)
@@ -640,6 +640,376 @@ Item {
                         }
                     }
 
+                    // ---- 首页(聚合模式 + 自定义库编辑器) ----
+                    SettingsPage {
+                        PageHeader { text: "首页" }
+                        Repeater {
+                            model: root.itemsFor("首页")
+                            delegate: SettingItem {}
+                        }
+                        // ---- 自定义库(内联编辑器,非表驱动项;过滤态隐藏)----
+                        // 预置即默认值,直接可编辑/删除;编辑只动工作副本,保存才落盘。
+                        Column {
+                            id: customLibsEditor
+                            width: parent.width
+                            spacing: 10
+                            visible: root.filterText === ""
+                            // [{name, rules:[{field,pattern}]}];文本静默回写,结构变更重排
+                            property var libs: []
+                            property string errorText: ""
+                            // 各桶当前命中统计(与配置同序;保存后刷新):[{name,libraries,itemCount}]
+                            property var stats: []
+                            // 显式保存语义(参考 antd/GitHub dirty-save 条):编辑只动工作副本,
+                            // dirty 时底部浮现 取消/保存;不实时落盘。
+                            property bool dirty: false
+
+                            function load() {
+                                try {
+                                    const v = JSON.parse(ConfigManager.customLibraries)
+                                    libs = Array.isArray(v) ? v : []
+                                } catch (e) { libs = [] }
+                                errorText = ""
+                                dirty = false
+                                refreshStats()
+                            }
+                            function refreshStats() {
+                                stats = AccountManager.customBucketStats()
+                            }
+                            function markDirty() { dirty = true }
+                            function mut() { libs = libs.slice(); dirty = true }
+                            function save() {
+                                const out = []
+                                for (const lib of libs) {
+                                    const name = (lib.name || "").trim()
+                                    if (name === "") { errorText = "存在未命名的自定义库,未保存"; return }
+                                    const rules = []
+                                    for (const r of lib.rules) {
+                                        const pat = (r.pattern || "").trim()
+                                        if (pat === "") continue
+                                        try { new RegExp(pat, "i") } catch (e) {
+                                            errorText = "「" + name + "」含无效正则,未保存:" + pat
+                                            return
+                                        }
+                                        rules.push({ field: r.field, pattern: pat })
+                                    }
+                                    if (rules.length === 0) { errorText = "「" + name + "」至少需要一条规则,未保存"; return }
+                                    out.push({ name: name, rules: rules })
+                                }
+                                ConfigManager.customLibraries = JSON.stringify(out)
+                                errorText = ""
+                                dirty = false
+                                refreshStats()
+                            }
+                            Component.onCompleted: load()
+                            // 每次打开设置浮层重载(外部 config.toml 热改也收敛)
+                            Connections {
+                                target: root
+                                function onVisibleChanged() {
+                                    if (root.visible && !customLibsEditor.dirty)
+                                        customLibsEditor.load()
+                                }
+                            }
+
+                            RowLayout {
+                                width: parent.width
+                                AppText {
+                                    text: "自定义库"
+                                    font.pixelSize: 14
+                                    Layout.fillWidth: true
+                                }
+                                AppText {
+                                    text: "恢复预置"
+                                    color: resetLibsHover.hovered ? Theme.accent : Theme.textMuted
+                                    font.pixelSize: 12
+                                    HoverHandler { id: resetLibsHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler {
+                                        onTapped: {
+                                            try {
+                                                customLibsEditor.libs = JSON.parse(ConfigManager.defaultValue("customLibraries"))
+                                            } catch (e) { customLibsEditor.libs = [] }
+                                            customLibsEditor.markDirty()
+                                        }
+                                    }
+                                }
+                            }
+                            AppText {
+                                width: parent.width
+                                wrapMode: Text.WordWrap
+                                text: "把多台服务器的媒体库按规则合并成统一行。按顺序归桶,第一个命中的桶赢;同一库的多条规则为「或」。"
+                                color: Theme.textMuted
+                                font.pixelSize: 12
+                            }
+                            AppText {
+                                visible: customLibsEditor.errorText !== ""
+                                text: customLibsEditor.errorText
+                                color: Theme.danger
+                                font.pixelSize: 12
+                            }
+                            Column {
+                                width: parent.width
+                                spacing: 8
+                                Repeater {
+                                    model: customLibsEditor.libs
+                                    delegate: Rectangle {
+                                        id: libCard
+                                        required property var modelData
+                                        required property int index
+                                        property var lib: modelData
+                                        property bool hovered: cardHover.hovered
+                                        HoverHandler { id: cardHover }
+                                        width: parent.width
+                                        height: libCol.implicitHeight + 20
+                                        radius: 10
+                                        color: Theme.bg
+                                        border.width: 1
+                                        border.color: Theme.borderSoft
+                                        Column {
+                                            id: libCol
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            anchors.margins: 10
+                                            spacing: 6
+                                            // 库名行:无边框内联输入 + 悬停露删除
+                                            RowLayout {
+                                                width: parent.width
+                                                TextField {
+                                                    id: libNameField
+                                                    Layout.fillWidth: true
+                                                    text: libCard.lib.name
+                                                    placeholderText: "库名(如:动画)"
+                                                    placeholderTextColor: Theme.textMuted
+                                                    color: Theme.textPrimary
+                                                    font.pixelSize: 13
+                                                    font.bold: true
+                                                    onEditingFinished: {
+                                                        customLibsEditor.libs[libCard.index].name = text.trim()
+                                                        customLibsEditor.markDirty()
+                                                    }
+                                                    background: Rectangle {
+                                                        radius: 6
+                                                        color: libNameField.activeFocus ? Theme.surface : "transparent"
+                                                        border.width: 1
+                                                        border.color: libNameField.activeFocus ? Theme.accent : "transparent"
+                                                    }
+                                                }
+                                                Rectangle {
+                                                    width: 26
+                                                    height: 26
+                                                    radius: 6
+                                                    color: delLibHover.hovered ? Theme.dangerTint : "transparent"
+                                                    opacity: libCard.hovered ? 1 : 0
+                                                    Behavior on opacity { NumberAnimation { duration: 120 } }
+                                                    HoverHandler { id: delLibHover; cursorShape: Qt.PointingHandCursor }
+                                                    TapHandler {
+                                                        onTapped: {
+                                                            customLibsEditor.libs.splice(libCard.index, 1)
+                                                            customLibsEditor.mut()
+                                                        }
+                                                    }
+                                                    Image {
+                                                        anchors.centerIn: parent
+                                                        width: 13
+                                                        height: 13
+                                                        source: "qrc:/icons/" + (ThemeStore.isLight ? "dark/" : "") + "trash.svg"
+                                                        sourceSize.width: 26
+                                                        sourceSize.height: 26
+                                                    }
+                                                }
+                                            }
+                                            // 规则行:字段切换(库名/类型)+ 正则 + 悬停删除
+                                            Repeater {
+                                                model: libCard.lib.rules
+                                                delegate: RowLayout {
+                                                    id: ruleRow
+                                                    required property var modelData
+                                                    required property int index
+                                                    width: libCol.width
+                                                    spacing: 8
+                                                    Rectangle {
+                                                        width: 52
+                                                        height: 24
+                                                        radius: 12
+                                                        color: Theme.tint
+                                                        AppText {
+                                                            anchors.centerIn: parent
+                                                            text: ruleRow.modelData.field === "collectionType" ? "类型" : "库名"
+                                                            color: Theme.accent
+                                                            font.pixelSize: 11
+                                                        }
+                                                        TapHandler {
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onTapped: {
+                                                                const cur = customLibsEditor.libs[libCard.index].rules[ruleRow.index]
+                                                                cur.field = cur.field === "collectionType" ? "name" : "collectionType"
+                                                                customLibsEditor.mut()
+                                                            }
+                                                        }
+                                                    }
+                                                    TextField {
+                                                        id: patternField
+                                                        Layout.fillWidth: true
+                                                        text: ruleRow.modelData.pattern
+                                                        placeholderText: "正则(如:动漫|番剧)"
+                                                        placeholderTextColor: Theme.textMuted
+                                                        color: Theme.textPrimary
+                                                        font.pixelSize: 12
+                                                        onEditingFinished: {
+                                                            customLibsEditor.libs[libCard.index].rules[ruleRow.index].pattern = text.trim()
+                                                            customLibsEditor.markDirty()
+                                                        }
+                                                        background: Rectangle {
+                                                            radius: 6
+                                                            color: patternField.activeFocus ? Theme.surface : "transparent"
+                                                            border.width: 1
+                                                            border.color: patternField.activeFocus ? Theme.accent : "transparent"
+                                                        }
+                                                    }
+                                                    Rectangle {
+                                                        width: 22
+                                                        height: 22
+                                                        radius: 5
+                                                        color: delRuleHover.hovered ? Theme.dangerTint : "transparent"
+                                                        opacity: libCard.hovered ? 1 : 0
+                                                        Behavior on opacity { NumberAnimation { duration: 120 } }
+                                                        HoverHandler { id: delRuleHover; cursorShape: Qt.PointingHandCursor }
+                                                        TapHandler {
+                                                            onTapped: {
+                                                                customLibsEditor.libs[libCard.index].rules.splice(ruleRow.index, 1)
+                                                                customLibsEditor.mut()
+                                                            }
+                                                        }
+                                                        Image {
+                                                            anchors.centerIn: parent
+                                                            width: 11
+                                                            height: 11
+                                                            source: "qrc:/icons/" + (ThemeStore.isLight ? "dark/" : "") + "trash.svg"
+                                                            sourceSize.width: 22
+                                                            sourceSize.height: 22
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            AppText {
+                                                // 按名匹配(dirty 态增删卡后下标会错位);重名退下标
+                                                property var st: {
+                                                    const nm = (libCard.lib.name || "").trim()
+                                                    const arr = customLibsEditor.stats
+                                                    for (const x of arr)
+                                                        if (x.name === nm)
+                                                            return x
+                                                    return arr.length > libCard.index ? arr[libCard.index] : null
+                                                }
+                                                visible: st !== null
+                                                width: libCol.width
+                                                wrapMode: Text.WordWrap
+                                                font.pixelSize: 11
+                                                color: Theme.textMuted
+                                                text: st === null ? ""
+                                                      : ((st.libraries.length === 0
+                                                          ? "当前未命中任何库(空桶不占首页行)"
+                                                          : "命中 " + st.libraries.length + " 库 "
+                                                            + st.itemCount + " 条 ⓘ")
+                                                         + (customLibsEditor.dirty ? "(保存后刷新)" : ""))
+                                                // 名单明细收悬停提示:行内只留紧凑计数
+                                                HoverHandler { id: statHover; enabled: parent.st !== null && parent.st.libraries.length > 0; cursorShape: Qt.PointingHandCursor }
+                                                ToolTip {
+                                                    id: statTip
+                                                    visible: statHover.hovered
+                                                    delay: 200
+                                                    x: 0
+                                                    y: parent.height + 6
+                                                    padding: 10
+                                                    contentItem: AppText {
+                                                        text: statTip.parent.st ? statTip.parent.st.libraries.join("\n") : ""
+                                                        font.pixelSize: 12
+                                                        color: Theme.textPrimary
+                                                        lineHeight: 1.4
+                                                    }
+                                                    background: Rectangle {
+                                                        radius: 8
+                                                        color: Theme.surface
+                                                        border.width: 1
+                                                        border.color: Theme.glassRim
+                                                    }
+                                                }
+                                            }
+                                            AppText {
+                                                text: "+ 规则(或)"
+                                                color: addRuleHover.hovered ? Theme.accent : Theme.textMuted
+                                                font.pixelSize: 12
+                                                HoverHandler { id: addRuleHover; cursorShape: Qt.PointingHandCursor }
+                                                TapHandler {
+                                                    onTapped: {
+                                                        // 深拷贝陷阱(实测):委托 modelData 是数组元素的
+                                                        // 副本,改副本无效;一切写操作按下标直改真身。
+                                                        customLibsEditor.libs[libCard.index].rules.push({ field: "name", pattern: "" })
+                                                        customLibsEditor.mut()
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                // 幽灵「添加库」卡
+                                Rectangle {
+                                    width: parent.width
+                                    height: 36
+                                    radius: 10
+                                    color: addLibHover.hovered ? Theme.tint : "transparent"
+                                    border.width: 1
+                                    border.color: Theme.borderSoft
+                                    HoverHandler { id: addLibHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler {
+                                        onTapped: {
+                                            customLibsEditor.libs.push({ name: "", rules: [{ field: "name", pattern: "" }] })
+                                            customLibsEditor.mut()
+                                        }
+                                    }
+                                    AppText {
+                                        anchors.centerIn: parent
+                                        text: "+ 添加自定义库"
+                                        color: Theme.textMuted
+                                        font.pixelSize: 12
+                                    }
+                                }
+                            }
+                            RowLayout {
+                                width: parent.width
+                                height: customLibsEditor.dirty ? 36 : 0
+                                visible: customLibsEditor.dirty
+                                AppText {
+                                    text: "有未保存的更改"
+                                    color: Theme.textMuted
+                                    font.pixelSize: 12
+                                }
+                                Item { Layout.fillWidth: true }
+                                AppText {
+                                    text: "取消"
+                                    color: cancelLibsHover.hovered ? Theme.textPrimary : Theme.textMuted
+                                    font.pixelSize: 13
+                                    HoverHandler { id: cancelLibsHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler { onTapped: customLibsEditor.load() }
+                                }
+                                Rectangle {
+                                    width: saveLibsTxt.implicitWidth + 26
+                                    height: 30
+                                    radius: 15
+                                    color: saveLibsHover.hovered ? Theme.accentHover : Theme.accent
+                                    HoverHandler { id: saveLibsHover; cursorShape: Qt.PointingHandCursor }
+                                    TapHandler { onTapped: customLibsEditor.save() }
+                                    AppText {
+                                        id: saveLibsTxt
+                                        anchors.centerIn: parent
+                                        text: "保存"
+                                        color: Theme.accentInk
+                                        font.pixelSize: 13
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     // ---- 播放(配置项经 items 表枚举) ----
                     SettingsPage {
                         PageHeader { text: "播放" }
@@ -799,4 +1169,7 @@ Item {
             }
         }
     }
+
+
 }
+
