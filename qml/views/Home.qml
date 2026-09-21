@@ -4,8 +4,8 @@ import QtQuick.Controls
 import QtQuick.Effects
 import MoePlayer.Core
 
-//! 首页(主流平铺版):整页 Flickable 上下滚动;顶部导航固定。
-//! 内容 = hero 轮播 + 每库一行(大库海报 + 条目卡片横向行)。
+//! 首页:pageList ListView 滚动(hero 轮播 + 媒体库卡条在 header);行内自适应网格。
+//! 内容 = hero 轮播 + 每库网格行(条目卡铺满宽度,不横滚)。
 Item {
     id: root
 
@@ -1036,6 +1036,7 @@ Item {
         // 互搏,且离屏卡纯耗内存);行数 = 配置「每库行数」,条数 = min(请求
         // 上限, 行数×列数)。首末卡 hover 放大溢出经水平内缩垫吸收。
         Item {
+            id: rowGridWrap
             anchors.left: parent.left
             anchors.leftMargin: Constants.rowLeftMargin
             width: libRow.width - Constants.rowLeftMargin * 2
@@ -1057,14 +1058,16 @@ Item {
             readonly property real cardH: Constants.gridCardH(cardW)
             // 行高 = 行数×卡高 + (行数-1)×卡间距(尾行不带 gap)+ hover 缓冲;
             // 多算一个尾部 gap 会让行与下个库名之间空出 46px。
-            height: lines * cardH + (lines - 1) * gap + Constants.homeRowHoverPad
+            // hover 放大溢出(卡高×3%)+ 光晕外探(1.25×1.06)+ 1px 余量,随卡高推导。
+            readonly property int vPad: Math.ceil(cardH * 0.03 + 2.5 * 1.06 + 1)
+            height: lines * cardH + (lines - 1) * gap + vPad * 2
             clip: true
             GridView {
                 id: rowItems
                 anchors.fill: parent
                 anchors.leftMargin: Constants.homeRowHoverPad / 2
                 anchors.rightMargin: Constants.homeRowHoverPad / 2
-                anchors.topMargin: Constants.homeRowHoverPad / 2
+                anchors.topMargin: rowGridWrap.vPad
                 interactive: false
                 // -0.5:width/cols 的双精度积可微超 width(1201/7×7=1201.0000000000002)
                 // ⇒ GridView 判定末格放不下而换行,末列失踪成右缝。

@@ -4,7 +4,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import MoePlayer.Core
 
-//! 设置浮层(Ctrl+S / 首页设置按钮开关):两级布局,左侧设置分类,
+//! 设置浮层(Ctrl+, / 首页设置按钮开关):两级布局,左侧设置分类,
 //! 右侧对应该分类的具体设置项;Esc / 点击背景关闭。
 //! 值全部直读写 ConfigManager(config.toml,外部修改热重载):控件初始
 //! 绑定会被用户交互打断,故每个可同步控件注册进 syncables,open() 与

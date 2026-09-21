@@ -127,9 +127,9 @@ Item {
         radius: 14
         clip: true
 
-        // 海报图:Image 自身 layer + layer.effect(MultiEffect)圆角。相比
-        // CrossfadeImage,列表/网格卡片静止时无需溶解动画,省去「双图 + 溶解」
-        // 的每帧片元与两个离屏 FBO;圆角由 Image 的 layer.effect 单 pass 裁切。
+        // 海报图:Image 自身 layer + layer.effect(SDF 圆角)单 pass 裁切。
+        // 相比 CrossfadeImage,列表/网格卡片静止时无需溶解动画,省去「双图 +
+        // 溶解」的每帧片元与两个离屏 FBO。
         Image {
             id: posterImg
             x: 0
@@ -154,19 +154,12 @@ Item {
             sourceSize.height: Math.max(1, Math.round(root.height * Screen.devicePixelRatio))
             layer.enabled: true
             layer.smooth: true
-            // 圆角蒙版(Image 子项,经自身 layer 供 layer.effect 采样 alpha 裁切)。
-            Rectangle {
-                id: roundMask
-                visible: false
-                anchors.fill: parent
-                radius: 14
-                layer.enabled: true
-            }
-            layer.effect: MultiEffect {
-                maskEnabled: true
-                maskSource: roundMask
-                maskThresholdMin: 0.5
-                maskSpreadAtMin: 1.0
+            // 圆角 = 片元 SDF 解析抗锯齿(hero 同款);蒙版方案死路:蒙版纹理
+            // 无 MSAA 硬二值,阈值重映射救不回。
+            layer.effect: ShaderEffect {
+                property real u_radius: 14
+                property size u_size: Qt.size(posterImg.width, posterImg.height)
+                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/poster-round.frag.qsb"
             }
         }
 
@@ -243,7 +236,7 @@ Item {
             visible: root.rating >= 0.5
             anchors.left: parent.left
             anchors.top: parent.top
-            anchors.margins: 6
+            anchors.margins: 10
             height: 18
             width: ratingRow.implicitWidth + 10
             radius: height / 2
@@ -276,7 +269,7 @@ Item {
             id: stateBadge
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.margins: 6
+            anchors.margins: 10
             height: 18
             width: stateRow.implicitWidth + 10
             radius: height / 2
@@ -327,12 +320,14 @@ Item {
     }
 
     Rectangle {
-        x: 0
-        y: 0
-        width: parent.width
-        height: posterArea.height
+        // 光晕外包裹:Qt 矩形描边画在界内(不骑跨),整带外探 = 矩形外移
+        // 整个描边宽;带占 [-2.5,0] 全在图外,内弧 16.5-2.5=14 恰贴图角弧。
+        x: -2.5
+        y: -2.5
+        width: parent.width + 5
+        height: posterArea.height + 5
         color: "transparent"
-        radius: 14
+        radius: 16.5
         border.width: (cardHover.hovered || root.current) ? 2.5 : 0
         border.color: Theme.accent
         opacity: (cardHover.hovered || root.current) ? 0.95 : 0
