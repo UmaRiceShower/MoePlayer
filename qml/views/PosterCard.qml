@@ -44,8 +44,6 @@ Item {
     property color accentColor: Theme.accent
     // 卡片底色藏色:带海报色相倾向,取代中性灰。
     property color surfaceTint: Theme.surface
-    // 底部渐变尾色:暗色系用莫奈深色(承白字),亮色系用浅色卡底(承深字)
-    property color _bottomFade: ThemeStore.isLight ? root.surfaceTint : root.heroFrom
 
     function applyMonet() {
         // 无条件赋值:取色未完成/失败或配置关闭时显示回退色,Grid 回收
@@ -118,11 +116,13 @@ Item {
         }
     }
 
+    // 海报区(上) + 文字块(下,图外)
     Rectangle {
+        id: posterArea
         x: 0
         y: 0
         width: parent.width
-        height: parent.height
+        height: parent.height - Constants.posterCardTextH
         color: root.surfaceTint
         radius: 14
         clip: true
@@ -190,45 +190,6 @@ Item {
                 font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
                 anchors.horizontalCenter: parent.horizontalCenter
-            }
-        }
-
-        // 底部渐变遮罩,提升标题可读性;尾色跟随海报莫奈色(氛围统一)。
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: 46
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 1.0; color: Qt.rgba(root._bottomFade.r, root._bottomFade.g, root._bottomFade.b, 0.72) }
-            }
-            radius: 14
-        }
-
-        // 标题 + 年份(第二行小字,避免长标题截断年份)。
-        // 右侧锚到收藏按钮左侧,右下角按钮(常显/悬停浮现)不遮标题。
-        Column {
-            anchors.bottom: parent.bottom
-            anchors.left: parent.left
-            anchors.right: favBtn.left
-            anchors.bottomMargin: 6
-            anchors.leftMargin: 8
-            anchors.rightMargin: 4
-            spacing: 1
-            AppText {
-                width: parent.width
-                text: root.title
-                color: Theme.textPrimary
-                font.pixelSize: 13
-                elide: Text.ElideRight
-            }
-            AppText {
-                visible: root.year > 0
-                width: parent.width
-                text: root.year
-                color: Theme.textMuted
-                font.pixelSize: 11
             }
         }
 
@@ -365,12 +326,11 @@ Item {
         }
     }
 
-    // 萌系光晕边框:hover / 键盘焦点时泛出粉色轮廓。
     Rectangle {
         x: 0
         y: 0
         width: parent.width
-        height: parent.height
+        height: posterArea.height
         color: "transparent"
         radius: 14
         border.width: (cardHover.hovered || root.current) ? 2.5 : 0
@@ -387,5 +347,28 @@ Item {
     // 官方推荐替代 MouseArea 做点击检测)。
     TapHandler {
         onTapped: root.clicked()
+    }
+
+    // 文字块
+    Column {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: posterArea.bottom
+        anchors.topMargin: 6
+        height: Constants.posterCardTextH - 6
+        spacing: 1
+        AppText {
+            width: parent.width
+            text: root.title
+            color: Theme.textPrimary
+            font.pixelSize: 13
+            elide: Text.ElideRight
+        }
+        AppText {
+            width: parent.width
+            text: root.year > 0 ? String(root.year) : ""
+            color: Theme.textMuted
+            font.pixelSize: 11
+        }
     }
 }

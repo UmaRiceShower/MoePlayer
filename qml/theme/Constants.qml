@@ -35,8 +35,9 @@ QtObject {
         }
         return w
     }
+    readonly property int posterCardTextH: 40
     function gridCardH(w) {
-        return Math.round(w / cellAspect)
+        return Math.round(w / cellAspect) + posterCardTextH
     }
     // cell = 卡 + gap。GridView 内部列数 = int((width - cellWidth)/cellWidth
     // + 1)(C++ 截断):cellWidth = avail/n 数学整除,但 double 除法舍入可落
@@ -107,8 +108,8 @@ QtObject {
     readonly property int homeRowHoverPad: 16             // 条目行 hover 垂直溢出缓冲
 
     // ---- 库行卡片尺寸 ----
-    readonly property int rowHeight: 230                  // 海报卡高
-    readonly property int rowCardW: Math.round(rowHeight * 2 / 3) // 条目海报卡宽(2:3)
+    readonly property int rowHeight: 230 + posterCardTextH // 海报卡高(含图外文字区)
+    readonly property int rowCardW: Math.round((rowHeight - posterCardTextH) * 2 / 3)
     readonly property int rowTitleH: 24                   // 行标题行高
     readonly property int rowSpacing: 12                  // 条目卡间距
     readonly property int rowLeftMargin: 24               // 行内容左边距
