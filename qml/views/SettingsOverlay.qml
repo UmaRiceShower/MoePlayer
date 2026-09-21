@@ -377,13 +377,18 @@ Item {
         rightPadding: 12
         placeholderTextColor: Theme.textMuted
         validator: sfield.intOnly ? sfieldIntValidator : null
-        IntValidator { id: sfieldIntValidator; bottom: 1; top: 9999 }
+        IntValidator { id: sfieldIntValidator; bottom: 0; top: 9999 }
         text: ConfigManager[sfield.configKey]
         function resync() { text = String(ConfigManager[sfield.configKey]) }
         Component.onCompleted: root.registerSyncable(sfield)
         onEditingFinished: {
-            if (sfield.intOnly)
-                ConfigManager[sfield.configKey] = parseInt(text)
+            if (sfield.intOnly) {
+                let v = parseInt(text)
+                const range = root.fieldClamp[sfield.configKey]
+                if (range !== undefined)
+                    v = Math.max(range[0], Math.min(range[1], v))
+                ConfigManager[sfield.configKey] = v
+            }
             else
                 ConfigManager[sfield.configKey] = text.trim()
             sfield.resync()
@@ -398,6 +403,9 @@ Item {
             border.color: sfield.activeFocus ? Theme.accent : Theme.textMuted
         }
     }
+
+    // 数值输入框区间钳制表:键 → [下限, 上限](越界自动收为界值)。
+    readonly property var fieldClamp: ({ "homeLibraryLimit": [1, 60], "homeRowLines": [1, 5] })
 
     // 表驱动设置行:label/description/控件按 items 元数据渲染;
     // 条件显示行:某些配置项只在相关功能启用时有意义(key → 条件函数,绑定内
@@ -941,7 +949,7 @@ Item {
                                                 HoverHandler { id: addRuleHover; cursorShape: Qt.PointingHandCursor }
                                                 TapHandler {
                                                     onTapped: {
-                                                        // 深拷贝陷阱(实测):委托 modelData 是数组元素的
+                                                        // 深拷贝陷阱:委托 modelData 是数组元素的
                                                         // 副本,改副本无效;一切写操作按下标直改真身。
                                                         customLibsEditor.libs[libCard.index].rules.push({ field: "name", pattern: "" })
                                                         customLibsEditor.mut()

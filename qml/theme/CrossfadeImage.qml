@@ -11,7 +11,7 @@
 //! - 纹理:ShaderEffectSource textureSize 按物理分辨率(x devicePixelRatio),
 //!   DPR>1 屏幕 1:1 采样锐利。
 //! - 全部走普通 ShaderEffect(非 layer.effect):QML 属性绑定 uniform 的
-//!   路径经溶解动画实测可靠(layer.effect 的纹理坐标/自定义 uniform 行为
+//!   路径在溶解动画下可靠(layer.effect 的纹理坐标/自定义 uniform 行为
 //!   不可靠,弃用)。
 //!
 //! 为什么不用 Canvas:Qt6 Canvas 的 backing store 固定为元素逻辑尺寸

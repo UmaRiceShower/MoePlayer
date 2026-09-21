@@ -169,7 +169,7 @@ Item {
     }
     // 网格卡的图键:**裸键**(PosterCard 内部自行拼 image://emby/,与 Home/Library
     // 一致;传整 URL 会拼成 image://emby/image://emby/… 报"图片地址无效")。
-    // 剧集海报(2:3,分集实测响应均带)→ 自身海报(影片即 2:3)→ 16:9 背景(裁切)。
+    // 剧集海报(2:3,分集响应均带)→ 自身海报(影片即 2:3)→ 16:9 背景(裁切)。
     function cardKey(it) {
         return (it.seriesPosterId || "") !== "" ? it.seriesPosterId
              : ((it.posterId || "") !== "" ? it.posterId : (it.backdropId || ""))

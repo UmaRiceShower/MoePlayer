@@ -100,7 +100,7 @@ Item {
         // 配色切换:莫奈取色是命令式赋值(无绑定),需重跑取亮色镜像。
         // 挂 paletteChanged(不止明暗:同明暗换配色也要换 surface 回退值)。
         // 必须 Qt.callLater:回调触发时 Theme.* 依赖链尚未重算完,
-        // 立即读 Theme.surface 会拿到旧值并被固化(实踩:切回暗色后卡面仍白)。
+        // 立即读 Theme.surface 会拿到旧值并被固化(切回暗色后卡面仍白)。
         target: ThemeStore
         function onPaletteChanged() {
             Qt.callLater(root.applyMonet)

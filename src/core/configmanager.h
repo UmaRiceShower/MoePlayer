@@ -46,6 +46,7 @@ struct Item {
 QVariantList optionsLibrarySortBy();
 QVariantList optionsLibrarySortOrder();
 QVariantList optionsCustomLibrariesMode();
+QVariantList optionsHomeLibraryRows();
 bool validateCustomLibrariesMode(const QVariant &v);
 QVariantList optionsDetailPosterPos();
 QVariantList optionsDetailTextPos();
@@ -105,7 +106,10 @@ bool validateShortcut(const QVariant &v);
     M(themeGlowC, "themeGlowC", QString, "", "theme", "高级自定义:背景光团 C 颜色 #RRGGBB(空 = 用预设)", "", "", "", Hidden, nullptr, nullptr) \
     M(librarySortBy, "sortBy", QString, "DateLastContentAdded", "library", "默认排序字段(Emby SortBy 值)", "媒体库", "默认排序", "媒体库默认排序字段,仅在没有浏览状态可恢复时生效。", Combo, optionsLibrarySortBy, nullptr) \
     M(librarySortOrder, "sortOrder", QString, "Descending", "library", "默认排序方向(Emby SortOrder 值)", "媒体库", "排序方向", "媒体库默认排序方向。", Combo, optionsLibrarySortOrder, nullptr) \
-    M(customLibrariesMode, "customLibrariesMode", QString, "on", "library", "自定义库聚合:off(关闭)/on(开启,未匹配库保留原行)/only(仅显示自定义库)", "媒体库", "自定义库聚合", "按规则把多台服务器的库合并成自定义行。", Combo, optionsCustomLibrariesMode, validateCustomLibrariesMode) \
+    M(homeLibraryRows, "homeLibraryRows", int, 0, "home", "首页预览库数(0=全部)", "首页", "预览库数", "首页显示多少个媒体库的预览行;0=全部。", Combo, optionsHomeLibraryRows, nullptr) \
+    M(homeRowLines, "homeRowLines", int, 1, "home", "每库行数(1-5)", "首页", "每库行数", "每个媒体库在首页纵向占几行海报(自动铺满宽度,不横向滚动)。", Field, nullptr, validatePositiveInt) \
+    M(homeLibraryLimit, "homeLibraryLimit", int, 20, "home", "每库请求条数(上限 60,超出自动按上限)", "首页", "每库条数", "每库拉取的条目上限;更深的行=更慢的聚合(慢服在途时间同步拉长)。", Field, nullptr, validatePositiveInt) \
+    M(customLibrariesMode, "customLibrariesMode", QString, "on", "library", "自定义库聚合:off(关闭)/on(开启,未匹配库保留原行)/only(仅显示自定义库)", "首页", "自定义库聚合", "按规则把多台服务器的库合并成自定义行。", Combo, optionsCustomLibrariesMode, validateCustomLibrariesMode) \
     M(customLibraries, "customLibraries", QString, "[{\"name\":\"动画\",\"rules\":[{\"field\":\"name\",\"pattern\":\"动漫|动画|番剧|新番|国漫|剧场版|Anime\"}]},{\"name\":\"剧集\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电视剧|电视|剧集|美剧|韩剧|日剧|英剧|华语剧|追新|TV\"}]},{\"name\":\"电影\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电影|影片|院线|Movie\"}]}]", "library", "自定义库规则(JSON:[{name,rules:[{field,pattern}]}])", "", "", "", Hidden, nullptr, nullptr) \
     M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
     M(detailPosterPos, "posterPos", QString, "bottom-right", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-right)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \

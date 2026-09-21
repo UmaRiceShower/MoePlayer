@@ -23,9 +23,9 @@ struct mpv_render_context;
 //!   脚本(moe-hook.lua)与协议(script-message)零改动。
 //! - **命令通道**:observe/get_property/set_property 走专用同步 API
 //!   (get/set_property 是 JSON IPC 层特判,不在命令表;裸调 command_node
-//!   报 invalid parameter,实测);命令表(loadfile 等)走
+//!   报 invalid parameter);命令表(loadfile 等)走
 //!   mpv_command_node_async —— 同步 command_node 会阻塞等完成,vo=libmpv
-//!   等待渲染上下文时把事件线程堵死(实测),async 应答经
+//!   等待渲染上下文时把事件线程堵死,async 应答经
 //!   MPV_EVENT_COMMAND_REPLY 回同一事件泵,request_id 装 reply_userdata。
 //! - **线程模型**:GUI 线程调 sendJson() 入队 + mpv_wakeup;事件线程
 //!   mpv_wait_event 循环,醒后先排空命令队列,事件转换后经信号投递回

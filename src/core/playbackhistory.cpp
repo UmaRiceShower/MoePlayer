@@ -34,8 +34,8 @@ bool historyBefore(const QVariant &a, const QVariant &b)
 }
 } // namespace
 
-// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(实测
-// 0 播放账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。
+// 是否有播放痕迹:列表端点(SortBy=DatePlayed)会带回从未播放过的条目(0 播放
+// 账号也能拉到整页无日期的行),Resume 里的"下一未看集"占位同样如此。
 // 只接受有痕迹的行,避免"上次播放"落到没看过的分集、或把"下一集"记成已播。
 bool hasPlayTrace(const QVariantMap &m)
 {

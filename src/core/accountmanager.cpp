@@ -1244,7 +1244,7 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
         return;
     }
     // 两段式取全:先取"窗口页"(不带服务器过滤,与既有语义一致:含"在看"),再进入
-    // **过滤段**取更早的已看条目。过滤会换一套下标空间(实测:窗口页拿到 200 条后
+    // **过滤段**取更早的已看条目。过滤会换一套下标空间(窗口页拿到 200 条后
     // 带 Filters=IsPlayed 且 StartIndex=200 的请求返回 0 条),故过滤段的 StartIndex
     // 必须从 0 重新数起,按过滤后的 total 推进。
     // 窗口页与过滤段头部重叠(过滤段 StartIndex 从 0 重数),同一 id 会来两次;
@@ -1327,7 +1327,7 @@ void AccountManager::onHistoryListReceived(const QString &serverUrl, const QStri
         const QString id = m.value(QStringLiteral("id")).toString();
         const QVariantMap old = before.value(id);
         // 变化判据:新增/进度或已看状态变化/尚无时间戳,以及**列表最前的若干条**。
-        // 列表端点不给上次播放时间(实测:PlayCount 恒为 0、追加 Fields 也拿不到
+        // 列表端点不给上次播放时间(PlayCount 恒为 0、追加 Fields 也拿不到
         // 日期),唯一可靠的是它按 DatePlayed 倒序 ⇒ 被重播的条目必然被提升到
         // 最前;而重看同一集时进度与"已看"可能一字不变(续播点没动),只比这两项
         // 会让时间戳永远停在第一次补全的结果上(旧实现即如此)。故最前
@@ -2101,7 +2101,7 @@ void AccountManager::saveHomeSuggestionCache()
         out.append(row);
     }
     if (out.isEmpty() || (havePrev && prevVal.toList() == out))
-        return; // 无可写内容或内容未变:不落盘(QVariant 跨数值类型按 C++ 提升规则比较,实测相等)
+        return; // 无可写内容或内容未变:不落盘(QVariant 跨数值类型按 C++ 提升规则比较,相等)
     if (m_persist.saveCache(kHomeSuggCacheName, out))
         qInfo() << "AccountManager: 推荐缓存已写" << out.size() << "个账号";
 }

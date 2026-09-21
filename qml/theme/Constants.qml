@@ -108,13 +108,12 @@ QtObject {
     readonly property int homeRowHoverPad: 16             // 条目行 hover 垂直溢出缓冲
 
     // ---- 库行卡片尺寸 ----
-    readonly property int rowHeight: 230 + posterCardTextH // 海报卡高(含图外文字区)
-    readonly property int rowCardW: Math.round((rowHeight - posterCardTextH) * 2 / 3)
+    readonly property int rowCardMinW: 140                 // 首页行卡宽下限
+    readonly property int rowCardMaxW: 165                 // 首页行卡宽上限
     readonly property int rowTitleH: 24                   // 行标题行高
     readonly property int rowSpacing: 12                  // 条目卡间距
-    readonly property int rowLeftMargin: 24               // 行内容左边距
+    readonly property int rowLeftMargin: 16               // 行内容左边距
 
-    readonly property int homePerLibraryLimit: 20         // 每库首页拉取条数
 
     // ===================== Detail.qml =====================
 

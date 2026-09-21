@@ -145,12 +145,21 @@ QVariantList optionsLibrarySortBy()
     });
 }
 
+QVariantList optionsHomeLibraryRows()
+{
+    QVariantList out;
+    out.append(QVariantMap{{ QStringLiteral("label"), QStringLiteral("全部") }, { QStringLiteral("key"), 0 }});
+    for (int n : { 3, 5, 8, 12 })
+        out.append(QVariantMap{{ QStringLiteral("label"), QString::number(n) }, { QStringLiteral("key"), n }});
+    return out;
+}
+
 QVariantList optionsCustomLibrariesMode()
 {
     return QVariantList{
-        QVariantMap{{ QStringLiteral("label"), QStringLiteral("开启") }, { QStringLiteral("value"), QStringLiteral("on") }},
-        QVariantMap{{ QStringLiteral("label"), QStringLiteral("仅显示自定义库") }, { QStringLiteral("value"), QStringLiteral("only") }},
-        QVariantMap{{ QStringLiteral("label"), QStringLiteral("关闭") }, { QStringLiteral("value"), QStringLiteral("off") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("开启") }, { QStringLiteral("key"), QStringLiteral("on") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("仅显示自定义库") }, { QStringLiteral("key"), QStringLiteral("only") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("关闭") }, { QStringLiteral("key"), QStringLiteral("off") }},
     };
 }
 
@@ -653,7 +662,7 @@ void ConfigManager::scheduleReload()
         return;
     // 编辑器保存/原子替换常更换文件 inode,QFileSystemWatcher 在首次
     // fileChanged 后即失效(仍监视旧 inode),须重新挂载,否则后续修改
-    // 不再触发(实测:sed -i 一次后热重载即断)。
+    // 不再触发(sed -i 一次后热重载即断)。
     m_watcher->removePath(m_path);
     m_watcher->addPath(m_path);
     m_reloadTimer->start();

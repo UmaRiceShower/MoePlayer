@@ -17,7 +17,7 @@ QtObject {
     readonly property color accentInk: ThemeStore.accentInk     // 强调底上的文字
     // 实心强调控件 hover 填充:朝 ink 的反方向走——暗色系(深 ink)变浅
     // (accentSoft),亮色系(白 ink)变深(accentDeep)。反着走会让 hover 态
-    // 文字不可读(实踩:ink 压 accentDeep ≈2.4:1)。
+    // 文字不可读(ink 压 accentDeep ≈2.4:1)。
     readonly property color accentHover: ThemeStore.isLight ? ThemeStore.accentDeep
                                                             : ThemeStore.accentSoft
     readonly property color accentWarm: ThemeStore.accentWarm   // 次级暖强调(徽标/收藏点缀)
