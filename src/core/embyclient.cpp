@@ -1005,6 +1005,32 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
         QStringLiteral("获取媒体库视图"));
 }
 
+void EmbyClient::fetchLatestMedia(const QString &serverUrl, const QString &accountId,
+                                  const QString &token, const QString &userId, int limit)
+{
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Episode"));
+    q.addQueryItem(QStringLiteral("GroupItems"), QStringLiteral("false"));
+    q.addQueryItem(QStringLiteral("Limit"), QString::number(limit));
+    q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("DateCreated"));
+    get(serverUrl, token, userId,
+        QStringLiteral("/Users/%1/Items/Latest?%2").arg(userId, q.toString()),
+        [this, serverUrl, accountId](const QJsonDocument &doc) {
+            QVariantList items; // Latest 返回裸数组(非 {Items} 包装)
+            for (const auto &v : doc.array()) {
+                const QJsonObject o = v.toObject();
+                const QString sid = o.value(QLatin1String("SeriesId")).toString();
+                if (sid.isEmpty())
+                    continue;
+                QVariantMap m;
+                m.insert(QStringLiteral("seriesId"), sid);
+                m.insert(QStringLiteral("dateAdded"), o.value(QLatin1String("DateCreated")).toString());
+                items.append(m);
+            }
+            emit latestMediaReceived(serverUrl, accountId, items);
+        }, nullptr, QStringLiteral("拉取最新入库"));
+}
+
 void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accountId,
                                   const QString &token, const QString &userId,
                                   const QString &viewId, const QString &viewName, int limit)

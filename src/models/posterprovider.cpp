@@ -46,7 +46,7 @@ namespace {
 // - 回源闸:最多 6 张图同时回源。封面与 API 请求共用服务器连接,
 //   无闸时一屏几十张图同时拉取会挤占 JSON 请求带宽;缓存命中不占名额。
 QMutex g_memMutex;
-constexpr int kCacheMaxBytes = 64 * 1024 * 1024; // 内存缓存上限(cost = 图片字节数)
+constexpr int kCacheMaxBytes = 192 * 1024 * 1024; // 内存缓存上限
 constexpr int kFetchConcurrency = 6;             // 同时回源上限
 QCache<QString, QImage> g_memCache(kCacheMaxBytes);
 QSemaphore g_fetchGate(kFetchConcurrency);
@@ -93,6 +93,17 @@ private:
     QString m_idKey;
 };
 } // namespace
+
+bool PosterProvider::isCached(const QString &id) const
+{
+    {
+        QMutexLocker locker(&g_memMutex);
+        if (g_memCache.contains(id))
+            return true;
+    }
+    const QString path = cacheFilePath(id);
+    return QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs;
+}
 
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)

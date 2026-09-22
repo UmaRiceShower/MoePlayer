@@ -22,6 +22,8 @@ Item {
     // 条目数据(由使用方从模型角色绑定)。
     property string itemId: ""
     property string posterId: ""
+    // 创建时查询一次即可:门控销毁/重建的卡在重建时刻判定,期间缓存状态不变
+    readonly property bool _posterCached: posterId !== "" && PosterProvider.isCached(posterId)
     property string title: ""
     property int year: 0
     property real rating: 0
@@ -137,9 +139,9 @@ Item {
             width: parent.width
             height: parent.height
 
-            // 就绪淡入
-            opacity: status === Image.Ready ? 1 : 0
-            Behavior on opacity { NumberAnimation { duration: 260 } }
+            // 就绪淡入;已缓存的图跳过
+            opacity: status === Image.Ready || root._posterCached ? 1 : 0
+            Behavior on opacity { NumberAnimation { duration: 260 } enabled: !root._posterCached }
             source: root.posterId ? "image://emby/" + root.posterId : ""
             fillMode: Image.PreserveAspectCrop
             cache: true
