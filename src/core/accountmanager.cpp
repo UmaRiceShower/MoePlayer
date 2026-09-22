@@ -88,6 +88,23 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     // 自定义库规则/模式热改:由现有行集重聚合,不重拉网络。
     connect(m_config, &ConfigManager::customLibrariesChanged,
             this, [this] { rebuildCustomHomeRows(); });
+    connect(m_client, &EmbyClient::latestMediaReceived, this,
+            [this](const QString &serverUrl, const QString &accountId, const QVariantList &items) {
+                Q_UNUSED(serverUrl);
+                auto &map = m_seriesRecency[accountId];
+                for (const auto &v : items) {
+                    const QVariantMap m = v.toMap();
+                    const QDateTime dt = QDateTime::fromString(
+                        m.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
+                    if (!dt.isValid())
+                        continue;
+                    const QString sid = m.value(QStringLiteral("seriesId")).toString();
+                    if (!map.contains(sid) || map.value(sid) < dt)
+                        map.insert(sid, dt);
+                }
+                qInfo() << "AccountManager: 系列最新入库映射" << serverUrl << accountId.left(8) << map.size() << "部";
+                rebuildCustomHomeRows(false); // 排序键到位重排(非终态,不写缓存)
+            });
     connect(m_config, &ConfigManager::homeHideNoImageChanged,
             this, [this] {
                 m_homeRowsModel->setRows(visibleHomeRows());
@@ -834,17 +851,25 @@ void AccountManager::rebuildCustomHomeRows(bool final)
         }
     }
 
-    // 桶收尾:条目按入库日期倒序混排;非空桶按定义序出列,空桶不占行。
+    // 桶收尾:按「内容入库时间」倒序混排
+    const auto keyOf = [this](const QVariantMap &it) -> QDateTime {
+        if (it.value(QStringLiteral("type")).toString() == QLatin1String("Series")) {
+            const QDateTime dt = m_seriesRecency
+                .value(it.value(QStringLiteral("accountId")).toString())
+                .value(it.value(QStringLiteral("id")).toString());
+            if (dt.isValid())
+                return dt;
+        }
+        const QDateTime d = QDateTime::fromString(
+            it.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
+        return d.isValid() ? d : QDateTime(QDate(1970, 1, 1), QTime(0, 0), Qt::UTC);
+    };
     QVariantList customRows;
     for (BucketAcc &acc : accs) {
         if (acc.items.isEmpty())
             continue;
-        std::sort(acc.items.begin(), acc.items.end(), [](const QVariantMap &a, const QVariantMap &b) {
-            const QDateTime da = QDateTime::fromString(
-                a.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
-            const QDateTime db = QDateTime::fromString(
-                b.value(QStringLiteral("dateAdded")).toString(), Qt::ISODateWithMs);
-            return da > db;
+        std::sort(acc.items.begin(), acc.items.end(), [&keyOf](const QVariantMap &a, const QVariantMap &b) {
+            return keyOf(a) > keyOf(b);
         });
         QVariantList items;
         items.reserve(acc.items.size());
@@ -1124,6 +1149,8 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         }
         ++m_homePending; // 该服视图请求
         m_client->fetchServerViews(a.serverUrl, a.id, a.token, a.userId);
+        // 桶内混排排序键:系列最近内容入库时间(Latest 派生,DTO 无直读字段)
+        m_client->fetchLatestMedia(a.serverUrl, a.id, a.token, a.userId, 150);
     }
     if (m_homePending == 0)
         finishHomeFetch();

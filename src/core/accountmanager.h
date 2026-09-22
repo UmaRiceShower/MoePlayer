@@ -301,6 +301,9 @@ const QString &accountId) const;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
     QHash<QString, int> m_homeReqGen; // 账号 id -> 发起聚合的代次
+    // 系列最近内容入库时间(Latest 派生):账号 id → seriesId → 最新集 DateCreated。
+    // 桶内混排排序键用;缺失回落条目 dateAdded(=DateCreated)。
+    QHash<QString, QHash<QString, QDateTime>> m_seriesRecency;
     // 服务器建议:账号 id -> 建议列表(带代次过滤,见 m_homeSuggReqGen)。
     QHash<QString, QVariantList> m_homeSuggByAccount;
     QHash<QString, int> m_homeSuggReqGen; // 账号 id -> 发起建议请求的代次

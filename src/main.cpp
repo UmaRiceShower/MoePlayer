@@ -169,6 +169,7 @@ int main(int argc, char *argv[])
     // 海报取色:复用 PosterProvider 加载(实例须在 addImageProvider 前创建,
     // 且与 PosterProvider 同生命周期,ColorProvider 后台任务经 QPointer 自管)。
     PosterProvider *posterProvider = new PosterProvider(&embyClient, &accountManager, &configManager);
+    qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "PosterProvider", posterProvider);
     ColorProvider colorProvider(posterProvider);
     qmlRegisterSingletonInstance("MoePlayer.Core", kQmlModuleMajor, kQmlModuleMinor, "ColorProvider", &colorProvider);
 

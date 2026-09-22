@@ -156,6 +156,10 @@ public:
                                       const QString &token, const QString &userId);
     // 拉取指定库按更新时间倒序的前 limit 条(首页聚合,结果经 serverItemsReceived)。
     // accountId 为触发账号,回调按 id 准确归位;viewName 仅用于日志标识。
+    // /Items/Latest:最近入库的集(Episode)
+    // DateCreated)。回执 latestMediaReceived,items = [{seriesId, dateAdded}]。
+    void fetchLatestMedia(const QString &serverUrl, const QString &accountId,
+                          const QString &token, const QString &userId, int limit);
     Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId,
                                       const QString &viewId, const QString &viewName,
@@ -242,6 +246,8 @@ signals:
     // 浏览结果按服务器路由(页面据此判断是否自己的请求)。
     void viewsReceived(const QString &serverUrl, const QString &accountId);
     void itemsReceived(const QString &serverUrl, const QString &accountId);
+    void latestMediaReceived(const QString &serverUrl, const QString &accountId,
+                             const QVariantList &items);
     void searchResultsReady(const QString &serverUrl, const QString &accountId);
     void seasonsReceived(const QString &serverUrl, const QString &accountId, const QString &seriesId);
     void episodesReceived(const QString &serverUrl, const QString &accountId, const QString &seasonId);

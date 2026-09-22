@@ -1013,8 +1013,8 @@ Item {
         width: parent ? parent.width : 0
         // 视口门控:壳高由几何公式定死(与卡是否实例化无关),离屏行的
         // 卡片/海报不创建,内存与 ListView 按需持平;回滚经磁盘缓存快速重现。
-        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - 800
-                                          && libRow.y < pageList.contentY + pageList.height + 800
+        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - pageList.height
+                                          && libRow.y < pageList.contentY + pageList.height * 2
         // 标题贴近自身海报(下间距 < 与上一节的上间距)。
         spacing: Constants.homeRowTitleGap
 

@@ -17,12 +17,16 @@ class ConfigManager;
 //! api_key,认证经请求头,重登换 token 不失效)。
 class PosterProvider : public QQuickAsyncImageProvider
 {
+    Q_OBJECT // QML 单例可见性:缺它元对象停在基类,Q_INVOKABLE 不可达
 public:
     explicit PosterProvider(EmbyClient *client, AccountManager *accounts,
                             ConfigManager *config = nullptr);
 
     // 当前配置代理(每次调用现解析,热重载后新请求自动用新代理)。
     QNetworkProxy proxy() const;
+
+    //! 海报是否已在缓存(内存层,或磁盘层 TTL 内):UI 据此跳过就绪淡入。
+    Q_INVOKABLE bool isCached(const QString &id) const;
 
     // 按 id 构造海报请求,返回异步响应对象。
     QQuickImageResponse *requestImageResponse(const QString &id,
