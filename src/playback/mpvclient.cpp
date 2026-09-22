@@ -396,7 +396,8 @@ QVariantList MpvClient::superResOptions()
     QVariantList out;
     for (const SuperResPreset &p : superResTable()) {
         out.append(QVariantMap{ { QStringLiteral("label"), QString::fromUtf8(p.label) },
-                                { QStringLiteral("key"), QString::fromLatin1(p.id) } });
+                                { QStringLiteral("key"), QString::fromLatin1(p.id) },
+                                { QStringLiteral("hotkey"), QString::fromUtf8(p.key) } });
     }
     return out;
 }

@@ -206,6 +206,7 @@ qt_add_resources(MoePlayer "nav_icons"
         qml/assets/icons/episodes.svg
         qml/assets/icons/audio.svg
         qml/assets/icons/subtitle.svg
+        qml/assets/icons/wand.svg
         qml/assets/icons/dark/episodes.svg
         qml/assets/icons/dark/audio.svg
         qml/assets/icons/dark/subtitle.svg

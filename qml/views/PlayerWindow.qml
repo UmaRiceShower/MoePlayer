@@ -664,6 +664,14 @@ Window {
                         }
                     }
                     IconBtn {
+                        icon.source: "qrc:/icons/wand.svg"
+                        tip: "超分(Anime4K)"
+                        onClicked: {
+                            root.panel = root.panel === "superres" ? "" : "superres"
+                            root.wake()
+                        }
+                    }
+                    IconBtn {
                         icon.source: "qrc:/icons/fullscreen.svg"
                         tip: "全屏"
                         onClicked: root.toggleFullscreen()
@@ -696,7 +704,8 @@ Window {
 
             AppText {
                 text: root.panel === "episodes" ? "选集"
-                      : (root.panel === "audio" ? "音轨" : "字幕")
+                      : (root.panel === "audio" ? "音轨"
+                         : (root.panel === "sub" ? "字幕" : "超分(Anime4K)"))
                 color: "white"
                 font.pixelSize: 14
                 font.weight: Font.Medium
@@ -820,6 +829,60 @@ Window {
                         onClicked: MpvClient.selectTrack(root.sessionKey, modelData.type, modelData.id)
                     }
                 }
+            }
+
+            // 超分面板:Anime4K 档位(与设置页同一配置键,选中即全会话实时
+            // 应用并持久化;mpv 内 CTRL+0..8 同键位见右列提示)。
+            ListView {
+                id: srList
+                visible: root.panel === "superres"
+                width: parent.width
+                height: (parent.height - 30) - (srHint.visible ? 44 : 0)
+                clip: true
+                model: MpvClient.superResOptions()
+                delegate: Rectangle {
+                    required property var modelData
+                    width: srList.width
+                    height: 36
+                    radius: 8
+                    color: srMa.containsMouse ? Qt.rgba(1, 1, 1, 0.12) : "transparent"
+                    property bool current: ConfigManager.superRes === modelData.key
+                    AppText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.left: parent.left
+                        anchors.leftMargin: 10
+                        text: modelData.label
+                        color: current ? "white" : Qt.rgba(1, 1, 1, 0.85)
+                        font.pixelSize: 13
+                        font.weight: current ? Font.Medium : Font.Normal
+                    }
+                    AppText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.right: parent.right
+                        anchors.rightMargin: 10
+                        text: current ? "✓" : modelData.hotkey
+                        color: current ? "white" : Qt.rgba(1, 1, 1, 0.4)
+                        font.pixelSize: 12
+                    }
+                    MouseArea {
+                        id: srMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            ConfigManager.superRes = modelData.key
+                            root.wake()
+                        }
+                    }
+                }
+            }
+            AppText {
+                id: srHint
+                visible: root.panel === "superres"
+                width: parent.width
+                text: "放大档需窗口大于片源 1.2 倍才生效"
+                color: Qt.rgba(1, 1, 1, 0.5)
+                font.pixelSize: 11
+                wrapMode: Text.WordWrap
             }
         }
     }
