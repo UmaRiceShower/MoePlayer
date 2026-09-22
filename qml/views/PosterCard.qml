@@ -150,10 +150,10 @@ Item {
             // 230×323,纯双线性无 mipmap 会毛边);smooth 双线性保留。
             smooth: true
             mipmap: true
-            // 解码尺寸与显示一致(×DPR):卡尺寸固定,不再有 1.0~1.5× 的
-            // 升/降采样错配(此前按原图全尺寸解码,缩放全由渲染器做)。
-            sourceSize.width: Math.max(1, Math.round(root.width * Screen.devicePixelRatio))
-            sourceSize.height: Math.max(1, Math.round(root.height * Screen.devicePixelRatio))
+            // provider 恒回 512px 服务端缩放档(requestedSize 不参与),sourceSize
+            // 不解码只污染缓存键(resize 每像素一轮重载 ⇒ 白卡闪)——不设。
+            // retainWhileLoading(Qt 6.8):source 重绑时旧图保留到新图就绪。
+            retainWhileLoading: true
             layer.enabled: true
             layer.smooth: true
             // 圆角 = 片元 SDF 解析抗锯齿(hero 同款);蒙版方案死路:蒙版纹理

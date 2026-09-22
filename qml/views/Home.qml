@@ -760,9 +760,9 @@ Item {
                     const id = m.backdropId || m.parentBackdropId || m.posterId || ""
                     return id ? "image://emby/" + id : ""
                 }
-                // 缓存键含解码尺寸:与卡面 Image 的 sourceSize 逐位一致。
-                sourceSize.width: Math.max(1, Math.round((heroCar.cardW + 16) * Screen.devicePixelRatio))
-                sourceSize.height: Math.max(1, Math.round((heroCar.cardH + 16) * Screen.devicePixelRatio))
+                // provider 图不设 sourceSize(恒回固定档,只污染缓存键);
+                // retainWhileLoading 防 source 重绑闪空。
+                retainWhileLoading: true
             }
             Timer {
                 id: heroTimer
@@ -839,12 +839,11 @@ Item {
                                     fillMode: Image.PreserveAspectCrop
                                     cache: true
                                     asynchronous: true
-                                    // 与 PosterCard 同源修复:原图全尺寸解码缩到卡面
-                                    // 会毛边,解码尺寸对齐显示 + mipmap 降采样。
+                                    // provider 恒回固定缩放档:sourceSize 不解码只污染
+                                    // 缓存键,不设;降采样质量由 mipmap 承担。
                                     smooth: true
                                     mipmap: true
-                                    sourceSize.width: Math.max(1, Math.round(parent.width * Screen.devicePixelRatio))
-                                    sourceSize.height: Math.max(1, Math.round(parent.height * Screen.devicePixelRatio))
+                                    retainWhileLoading: true
                                     layer.enabled: true
                                     layer.smooth: true
                                     layer.effect: ShaderEffect {
@@ -1259,12 +1258,8 @@ Item {
                 // quality 优于 smooth,代价是初始化与渲染开销)。
                 smooth: true
                 mipmap: true
-                // 解码尺寸与显示尺寸精确一致(×DPR):量化(256px 步进)会让
-                // 解码尺寸偏离显示,窗口缩放中出现 1.0~1.5× 升采样/拉伸,
-                // 双线性放大无 mipmap 兜底 → 边缘锯齿/模糊。缩放中重解码由
-                // retainWhileLoading 保留旧纹理,避免闪烁(不再需要量化防抖)。
-                sourceSize.width: Math.max(1, Math.round(fxHost.width * Screen.devicePixelRatio))
-                sourceSize.height: Math.max(1, Math.round(fxHost.height * Screen.devicePixelRatio))
+                // provider 恒回固定缩放档:sourceSize 只污染缓存键(resize 逐像素
+                // 重载),不设;mipmap 承担降采样质量。retainWhileLoading 防重绑闪空。
                 asynchronous: true
                 retainWhileLoading: true
             }
