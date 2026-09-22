@@ -869,6 +869,7 @@ Item {
                                     cellWidth: root.cellW
                                     cellHeight: root.cellH
                                     clip: true
+                                    header: Item { width: 1; height: 4 }
                                     reuseItems: true
                                     cacheBuffer: 600
                                     model: aggGroup.gmodel

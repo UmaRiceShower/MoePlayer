@@ -1,5 +1,5 @@
 #version 440
-// 海报卡圆角:SDF 解析抗锯齿(蒙版纹理无 MSAA,阈值重映射救不回硬边)。
+// 圆角矩形 SDF 解析抗锯齿(通用;蒙版纹理无 MSAA,阈值重映射救不回硬边)。
 // u_size = 卡面物理像素,u_radius = 圆角半径。
 layout(location = 0) in vec2 qt_TexCoord0;
 layout(location = 0) out vec4 fragColor;

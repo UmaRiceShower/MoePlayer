@@ -159,7 +159,7 @@ Item {
             layer.effect: ShaderEffect {
                 property real u_radius: 14
                 property size u_size: Qt.size(posterImg.width, posterImg.height)
-                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/poster-round.frag.qsb"
+                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/round-rect.frag.qsb"
             }
         }
 

@@ -803,8 +803,6 @@ Item {
                                 height: Constants.homeMediaCardH
                                 radius: Constants.homeMediaCardRadius
                                 color: Theme.surface
-                                border.width: 1
-                                border.color: libCard.hovered ? Theme.accent : Theme.borderSoft
                                 Image {
                                     anchors.fill: parent
                                     source: libCell.modelData.posterId
@@ -823,18 +821,10 @@ Item {
                                     sourceSize.height: Math.max(1, Math.round(parent.height * Screen.devicePixelRatio))
                                     layer.enabled: true
                                     layer.smooth: true
-                                    Rectangle {
-                                        id: libMask
-                                        visible: false
-                                        anchors.fill: parent
-                                        radius: Constants.homeMediaCardRadius
-                                        layer.enabled: true
-                                    }
-                                    layer.effect: MultiEffect {
-                                        maskEnabled: true
-                                        maskSource: libMask
-                                        maskThresholdMin: 0.5
-                                        maskSpreadAtMin: 1.0
+                                    layer.effect: ShaderEffect {
+                                        property real u_radius: Constants.homeMediaCardRadius
+                                        property size u_size: Qt.size(libCell.width, Constants.homeMediaCardH)
+                                        fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/round-rect.frag.qsb"
                                     }
                                 }
                                 // 底部渐变压暗 + 库名常显(与库海报 hover 显字的机制不同)。
@@ -862,6 +852,13 @@ Item {
                                     color: Theme.textOnBadge
                                     font.pixelSize: Constants.homeMediaTextPx
                                     elide: Text.ElideRight
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    color: "transparent"
+                                    radius: Constants.homeMediaCardRadius
+                                    border.width: 1
+                                    border.color: libCard.hovered ? Theme.accent : Theme.borderSoft
                                 }
                                 HoverHandler {
                                     onHoveredChanged: libCard.hovered = hovered
