@@ -109,6 +109,7 @@ bool validateShortcut(const QVariant &v);
     M(homeLibraryRows, "homeLibraryRows", int, 0, "home", "首页预览库数(0=全部)", "首页", "预览库数", "首页显示多少个媒体库的预览行;0=全部。", Combo, optionsHomeLibraryRows, nullptr) \
     M(homeRowLines, "homeRowLines", int, 1, "home", "每库行数(1-5)", "首页", "每库行数", "每个媒体库在首页纵向占几行海报(自动铺满宽度,不横向滚动)。", Field, nullptr, validatePositiveInt) \
     M(homeLibraryLimit, "homeLibraryLimit", int, 20, "home", "每库请求条数(上限 60,超出自动按上限)", "首页", "每库条数", "每库拉取的条目上限;更深的行=更慢的聚合(慢服在途时间同步拉长)。", Field, nullptr, validatePositiveInt) \
+    M(homeHideNoImage, "homeHideNoImage", bool, false, "home", "首页预览跳过无海报条目(false=显示占位)", "首页", "跳过无图条目", "预览行与推荐不展示没有海报的条目(占位卡会打乱观感);库页不受影响。", Switch, nullptr, nullptr) \
     M(customLibrariesMode, "customLibrariesMode", QString, "on", "library", "自定义库聚合:off(关闭)/on(开启,未匹配库保留原行)/only(仅显示自定义库)", "首页", "自定义库聚合", "按规则把多台服务器的库合并成自定义行。", Combo, optionsCustomLibrariesMode, validateCustomLibrariesMode) \
     M(customLibraries, "customLibraries", QString, "[{\"name\":\"动画\",\"rules\":[{\"field\":\"name\",\"pattern\":\"动漫|动画|番剧|新番|国漫|剧场版|Anime\"}]},{\"name\":\"剧集\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电视剧|电视|剧集|美剧|韩剧|日剧|英剧|华语剧|追新|TV\"}]},{\"name\":\"电影\",\"rules\":[{\"field\":\"name\",\"pattern\":\"电影|影片|院线|Movie\"}]}]", "library", "自定义库规则(JSON:[{name,rules:[{field,pattern}]}])", "", "", "", Hidden, nullptr, nullptr) \
     M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
