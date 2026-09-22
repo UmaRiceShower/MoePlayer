@@ -474,7 +474,6 @@ Item {
                 }
             }
         }
-        // 四个按钮共用一份模糊抓取(见 GlassBlurSource):整片列表只抓一次。
         // 刷新策略 = 滚动驱动 + 定时兜底:滚轮直接写 contentY(不产生 moving/flick),
         // 挂 contentYChanged 滚动时逐帧刷新;33ms(30fps)定时器兜住非滚动的内容变化
         // (图片异步装载等)。
@@ -906,6 +905,27 @@ Item {
                 delegate: LibraryRow {}
             }
         }
+    }
+
+    // 全宽磨砂顶栏
+    FrostedGlass {
+        id: topBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: Constants.homeNavH
+        radius: 0
+        blurSource: pageList
+        blurGroup: navGlassBlur
+        blurRadius: 6
+        frostAmount: 0.5
+        saturation: 0.4
+        edgeLight: 0.0
+        elevation: 0
+        rimMask: Qt.vector4d(0, 0, 1, 0) // 只留底缘发丝线作分隔(上,右,下,左)
+        glassColor: Qt.rgba(ThemeStore.background.baseTop.r,
+                            ThemeStore.background.baseTop.g,
+                            ThemeStore.background.baseTop.b, 0.55)
     }
 
 
