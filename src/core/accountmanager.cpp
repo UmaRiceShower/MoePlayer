@@ -88,6 +88,12 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     // 自定义库规则/模式热改:由现有行集重聚合,不重拉网络。
     connect(m_config, &ConfigManager::customLibrariesChanged,
             this, [this] { rebuildCustomHomeRows(); });
+    connect(m_config, &ConfigManager::homeHideNoImageChanged,
+            this, [this] {
+                m_homeRowsModel->setRows(visibleHomeRows());
+                rebuildCustomHomeRows(false); // 过滤口径变化非终态,不写缓存
+                emit suggestionsUpdated();
+            });
     connect(m_config, &ConfigManager::customLibrariesModeChanged,
             this, [this] { rebuildCustomHomeRows(); });
     load(); // accounts.json 一次性读出(账号/文件夹/布局)
@@ -621,16 +627,29 @@ void AccountManager::setShowHidden(bool show)
 // (含刚被隐藏的账号,直到下一次聚合)——露出时先顶上旧行,随后由补拉替换。
 QVariantList AccountManager::visibleHomeRows() const
 {
-    if (m_showHidden)
-        return m_homeRows;
+    const bool hideNoImage = m_config->homeHideNoImage();
     QVariantList out;
     out.reserve(m_homeRows.size());
     for (const QVariant &v : m_homeRows) {
-        const AccountInfo *a = accountById(v.toMap().value(QStringLiteral("accountId")).toString());
+        QVariantMap row = v.toMap();
+        const AccountInfo *a = accountById(row.value(QStringLiteral("accountId")).toString());
         if (!a)
             continue;
-        if (!accountHiddenStored(*a))
-            out.append(v);
+        if (!m_showHidden && accountHiddenStored(*a))
+            continue;
+        // 无海报条目在展示层过滤(开关):m_homeRows 与行缓存保持原样,
+        // 切换即时生效且可逆;整行滤空则丢行。
+        if (hideNoImage) {
+            QVariantList items;
+            for (const QVariant &iv : row.value(QStringLiteral("items")).toList()) {
+                if (!iv.toMap().value(QStringLiteral("posterId")).toString().isEmpty())
+                    items.append(iv);
+            }
+            if (items.isEmpty())
+                continue;
+            row.insert(QStringLiteral("items"), items);
+        }
+        out.append(row);
     }
     return out;
 }
@@ -1500,10 +1519,8 @@ void AccountManager::maybeAssembleHomeRows()
                     }
                 }
             }
-            // 新鲜结果为空:库无内容(空库/权限不可见/请求失败),不占首页行。
-            if (fresh && items.isEmpty())
-                continue;
-            if (!fresh && items.isEmpty())
+            // 行内无条目:库无内容(空库/权限不可见/请求失败),不占首页行。
+            if (items.isEmpty())
                 continue;
             QVariantMap row;
             row.insert(QStringLiteral("viewId"), viewId);
