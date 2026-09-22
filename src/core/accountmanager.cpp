@@ -63,6 +63,8 @@ const QStringList kPresetFolderColors = {
 const QString kHomeCacheName = QStringLiteral("home-rows");
 // 服务器建议(首页 hero 推荐)缓存名:启动先展示上次推荐,后台按住账号覆盖替换。
 const QString kHomeSuggCacheName = QStringLiteral("home-suggestions");
+// 系列最新入库映射缓存名:重启首帧用上次的排序键,不等 Latest 回执重排。
+const QString kSeriesRecencyCacheName = QStringLiteral("series-recency");
 
 // 网络问题账号的定期重试间隔。
 constexpr qint64 kNetRetryIntervalMs = 5LL * 60 * 1000;
@@ -104,6 +106,15 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 }
                 qInfo() << "AccountManager: 系列最新入库映射" << serverUrl << accountId.left(8) << map.size() << "部";
                 rebuildCustomHomeRows(false); // 排序键到位重排(非终态,不写缓存)
+                // 落盘(全量重写):重启首帧用上次的排序键,Latest 回执到达不再重排。
+                QVariantMap root;
+                for (auto it = m_seriesRecency.constBegin(); it != m_seriesRecency.constEnd(); ++it) {
+                    QVariantMap perSeries;
+                    for (auto jt = it.value().constBegin(); jt != it.value().constEnd(); ++jt)
+                        perSeries.insert(jt.key(), jt.value().toString(Qt::ISODateWithMs));
+                    root.insert(it.key(), perSeries);
+                }
+                m_persist.saveCache(kSeriesRecencyCacheName, root);
             });
     connect(m_config, &ConfigManager::homeHideNoImageChanged,
             this, [this] {
@@ -1111,6 +1122,24 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     // 缓存与当前展示相同则不 emit(避免无意义重建:重登/重复拉取常返回
     // 相同数据,Home 行整体重建会触发 Qt 引擎在 delegate 销毁期的内部
     // 警告 "QQmlVMEMetaObject: Internal error ... invalid context")。
+    // 系列最新入库映射:首帧即用上次的排序键(Latest 回执仅在有变化时才引起重排)。
+    static bool recencyLoaded = false;
+    if (!recencyLoaded) {
+        recencyLoaded = true;
+        QVariant val;
+        if (m_persist.loadCache(kSeriesRecencyCacheName, val)) {
+            const QVariantMap root = val.toMap();
+            for (auto it = root.constBegin(); it != root.constEnd(); ++it) {
+                const QVariantMap perSeries = it.value().toMap();
+                auto &map = m_seriesRecency[it.key()];
+                for (auto jt = perSeries.constBegin(); jt != perSeries.constEnd(); ++jt) {
+                    const QDateTime dt = QDateTime::fromString(jt.value().toString(), Qt::ISODateWithMs);
+                    if (dt.isValid())
+                        map.insert(jt.key(), dt);
+                }
+            }
+        }
+    }
     const QVariantList cached = loadHomeCache();
     m_homeRows = cached;
     m_homeRowsModel->setRows(visibleHomeRows()); // 缓存里可能有已隐藏账号的行
