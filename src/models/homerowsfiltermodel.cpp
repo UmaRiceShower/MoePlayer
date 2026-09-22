@@ -43,7 +43,8 @@ void HomeRowsFilterModel::setMaxRows(int n)
     if (m_maxRows == n)
         return;
     m_maxRows = n;
-    invalidateFilter();
+    beginFilterChange();
+    endFilterChange();
 }
 
 void HomeRowsFilterModel::setFiltering(bool b)
@@ -51,7 +52,8 @@ void HomeRowsFilterModel::setFiltering(bool b)
     if (m_filtering == b)
         return;
     m_filtering = b;
-    invalidateFilter();
+    beginFilterChange();
+    endFilterChange();
 }
 
 void HomeRowsFilterModel::setFilterPredicate(const QJSValue &fn)

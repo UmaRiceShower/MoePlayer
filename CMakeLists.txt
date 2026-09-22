@@ -29,10 +29,10 @@ set(QT_QML_GENERATE_QMLLS_INI ON)
 
 # DBus 仅用于 Linux 的待机抑制(ScreenInhibit);Windows 走 SetThreadExecutionState。
 if(UNIX)
-    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
+    find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools DBus)
     set(MOEPLAYER_PLATFORM_LIBS Qt6::DBus)
 else()
-    find_package(Qt6 6.8 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
+    find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Network WebSockets ShaderTools)
     set(MOEPLAYER_PLATFORM_LIBS "")
 endif()
 # 内嵌播放:libmpv + GL render API,全平台启用(运行时按平台装载
@@ -43,9 +43,9 @@ set(MPV_FOUND TRUE)
 set(MOEPLAYER_PLATFORM_INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mpv/include)
 
 # 官方推荐项目默认(Qt 6.3+):开 AUTOMOC/AUTOUIC、GNUInstallDirs、RPATH,
-# 并按 REQUIRES 6.8 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
+# 并按 REQUIRES 6.10 批量启用 QTP0001-QTP0005(替代原手动 qt_policy)。
 # 不设 AUTORCC(无 .qrc)与 C++ 标准(上方手动设置,该命令不涉及)。
-qt_standard_project_setup(REQUIRES 6.8)
+qt_standard_project_setup(REQUIRES 6.10)
 # 模块产物(qmldir/qmltypes)输出到 build/qml/,避免与可执行文件同名冲突
 # (默认输出 build/MoePlayer/Core 会占用 build/MoePlayer 目录名)。
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/qml")
@@ -286,10 +286,8 @@ set(CPACK_GENERATOR "TGZ;DEB;RPM")
 
 set(CPACK_DEBIAN_PACKAGE_SECTION "video")
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "UmaRiceShower")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "mpv (>= 0.38.0), \
-    qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-effects, \
-    qml6-module-qtquick-layouts, qml6-module-qtquick-shapes, qml6-module-qtquick-window")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS OFF)
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "mpv (>= 0.38.0)")
 # deb 架构名与 GNU 机器名不同(x86_64→amd64),显式映射保持文件名同风格。
 if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
     set(CPACK_DEBIAN_PACKAGE_ARCHITECTURE "amd64")
@@ -300,7 +298,7 @@ set(CPACK_DEBIAN_FILE_NAME "MoePlayer-${CPACK_PACKAGE_VERSION}-linux-${CPACK_DEB
 
 set(CPACK_RPM_PACKAGE_LICENSE "GPL-3.0-only")
 set(CPACK_RPM_PACKAGE_GROUP "Applications/Multimedia")
-set(CPACK_RPM_PACKAGE_REQUIRES "mpv >= 0.38.0, qt6-qtdeclarative")
+set(CPACK_RPM_PACKAGE_REQUIRES "mpv >= 0.38.0")
 # 内嵌播放(libmpv)为运行时装载的可选增强:缺库回外部模式,故 Suggests。
 set(CPACK_RPM_PACKAGE_SUGGESTS "mpv-libs")
 set(CPACK_DEBIAN_PACKAGE_SUGGESTS "libmpv2")
