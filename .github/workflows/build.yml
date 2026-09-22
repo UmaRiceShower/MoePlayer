@@ -45,10 +45,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: 安装 Qt 6.8
+      - name: 安装 Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.*'
+          version: '6.11.*'
           modules: 'qtshadertools qtwebsockets'
           cache: true
 
@@ -93,10 +93,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: 安装 Qt 6.8
+      - name: 安装 Qt 6.11
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.*'
+          version: '6.11.*'
           modules: 'qtshadertools qtwebsockets'
           cache: true
 
@@ -205,19 +205,23 @@ jobs:
   deb:
     needs: version
     runs-on: ubuntu-22.04
-    container: debian:trixie
     env:
       MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
-      - name: 安装依赖
-        run: |
-          apt-get update
-          # ca-certificates:debian 基础镜像不带它,而 --no-install-recommends 下
-          # git 只会 Recommends 它 ⇒ 容器内 checkout 会报 SSL CA cert 错误。
-          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build g++ \
-            dpkg-dev file qt6-base-dev qt6-declarative-dev qt6-websockets-dev qt6-shadertools-dev
-
       - uses: actions/checkout@v5
+
+      - name: 安装 Qt 6.11
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.*'
+          modules: 'qtshadertools qtwebsockets'
+          cache: true
+
+      - name: 安装依赖(打包工具 + Qt 外的系统链接库)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git cmake ninja-build g++ \
+            dpkg-dev file rpm libgl-dev libegl-dev libxkbcommon-dev libdbus-1-dev libfontconfig-dev
 
       - name: 构建 DEB
         run: |
@@ -234,16 +238,23 @@ jobs:
   rpm:
     needs: version
     runs-on: ubuntu-22.04
-    container: fedora:42
     env:
       MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
     steps:
-      - name: 安装依赖
-        run: |
-          dnf install -y git cmake ninja-build gcc-c++ rpm-build \
-            qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtwebsockets-devel qt6-qtshadertools-devel
-
       - uses: actions/checkout@v5
+
+      - name: 安装 Qt 6.11
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.*'
+          modules: 'qtshadertools qtwebsockets'
+          cache: true
+
+      - name: 安装依赖(打包工具 rpm + Qt 外的系统链接库)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends git cmake ninja-build g++ \
+            rpm libgl-dev libegl-dev libxkbcommon-dev libdbus-1-dev libfontconfig-dev
 
       - name: 构建 RPM
         run: |
@@ -261,7 +272,7 @@ jobs:
     needs: version
     runs-on: ubuntu-22.04
     container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.10
+      image: ghcr.io/flathub-infra/flatpak-github-actions:kde-6.11
       options: --privileged
     env:
       MOEPLAYER_VERSION_SUFFIX: ${{ needs.version.outputs.suffix }}
