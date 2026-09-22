@@ -1218,7 +1218,7 @@ Item {
         anchors.right: parent.right
         // 与分类栏保持间距(视觉分组)。
         anchors.top: headerRow.bottom
-        anchors.topMargin: 24
+        anchors.topMargin: 26
         anchors.bottom: parent.bottom
         anchors.leftMargin: 24
         anchors.rightMargin: 24

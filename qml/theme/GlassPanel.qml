@@ -40,20 +40,12 @@ Rectangle {
         blurEnabled: true
         blur: 1.0
         blurMax: root.blurRadius
-        // 只裁圆角:maskSource 直传白底圆角矩形,其 alpha 通道把模糊裁到
-        // root.radius(visible:false + layer.enabled 是官方遮罩项模式,
-        // 无需再经 ShaderEffectSource 中转采样)。
-        maskEnabled: true
-        maskSource: maskRect
-    }
-
-    Rectangle {
-        id: maskRect
-        anchors.fill: parent
-        radius: root.radius
-        color: "white"
-        visible: false
         layer.enabled: true
+        layer.effect: ShaderEffect {
+            property real u_radius: root.radius
+            property size u_size: Qt.size(width, height)
+            fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/round-rect.frag.qsb"
+        }
     }
 
     Rectangle {

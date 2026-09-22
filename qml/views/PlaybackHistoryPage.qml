@@ -32,7 +32,7 @@ Item {
     // 网格:卡宽/卡高/行高与列数(列数变化才重建行,见 onColumnsChanged)。
     // hoverPad:卡 hover 放大(1.06)溢出预留;卡宽按 list.width 减两侧预留算,
     // 保证末列右缘也有等量空隙,溢出不被 ListView clip 裁(同首页卡条做法)。
-    readonly property int hoverPad: 8
+    readonly property int hoverPad: 10
     readonly property real cardW: Constants.gridCardW(Math.max(1, list.width - 2 * root.hoverPad),
                                                       Constants.cellMinW, Constants.cellMaxW)
     readonly property int cardH: Constants.gridCardH(root.cardW)
