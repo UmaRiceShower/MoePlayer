@@ -4,7 +4,8 @@ import QtQuick.Controls
 import QtQuick.Effects
 import MoePlayer.Core
 
-//! 首页:pageList ListView 滚动(hero 轮播 + 媒体库卡条在 header);行内自适应网格。
+//! 首页:pageList Flickable+Column 精确高度滚动(hero + 媒体库卡条为首节);
+//! 行壳高度由公式定死,卡片近视口才实例化;行内自适应网格。
 //! 内容 = hero 轮播 + 每库网格行(条目卡铺满宽度,不横滚)。
 Item {
     id: root
@@ -20,10 +21,32 @@ Item {
     readonly property real navH: Constants.homeNavH
     // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
     // 窄窗随宽度收缩,卡片保持满带宽。
-    // 用窗口宽度而非父宽:页面首帧布局时父宽度尚未赋值,会致 ListView 以 0
-    // hero 高做首次布局(条目从不重排,hero 被留在内容上方不可见)。
+    // 用窗口宽度而非父宽:页面首帧布局时父宽度尚未赋值,避免首帧 0 高布局。
     readonly property real heroH: (root.Window && root.Window.width > 0
                                    ? root.Window.width : 1280) * Constants.homeHeroWidthRatio
+
+    // ---- 行几何单一来源:委托高度与滚动条精确跨度同用这一套公式 ----
+    readonly property int homeLines: Math.max(1, Math.min(5, ConfigManager.homeRowLines))
+    function gridCols(rowW) {
+        const gap = Constants.cellGap
+        const availW = rowW - Constants.homeRowHoverPad
+        // 列数按卡宽下限取(保 minW),超上限时 +1 列回收
+        let n = Math.max(1, Math.floor((availW + gap) / (Constants.rowCardMinW + gap)))
+        let w = (availW - (n - 1) * gap) / n
+        while (w > Constants.rowCardMaxW && n < 24) { n += 1; w = (availW - (n - 1) * gap) / n }
+        return n
+    }
+    function gridCardW(rowW) {
+        return (rowW - Constants.homeRowHoverPad) / gridCols(rowW) - Constants.cellGap
+    }
+    function gridVPad(cardH) {
+        // hover 放大溢出(卡高×3%)+ 光晕外探(2.5×1.06)+ 1px 余量
+        return Math.ceil(cardH * 0.03 + 2.5 * 1.06 + 1)
+    }
+    function gridShownLines(itemCount, rowW) {
+        const cols = gridCols(rowW)
+        return Math.max(1, Math.ceil(Math.min(itemCount, homeLines * cols) / cols))
+    }
 
     signal showDetail(string itemId, string posterId, string title, string serverUrl, string accountId)
     signal openLibrary(string viewId, string serverUrl, string viewName, string accountId)
@@ -560,9 +583,8 @@ Item {
     }
 
     // 整页可滚动(主流:hero + 所有库行随页面上下滚动)。
-    ListView {
+    Flickable {
         id: pageList
-        ScrollBar.vertical: MoeScrollBar {}
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -571,17 +593,21 @@ Item {
         smooth: false
         clip: true
         boundsBehavior: Flickable.StopAtBounds
-        model: homeRowsFilter // 恒定对象,过滤走谓词(见 homeRowsFilter 注释)
-        reuseItems: true
-        cacheBuffer: 400
+        // Column 布局 ⇒ contentHeight 恒为精确值,滚动条无估计可跳
+        // (ListView 按「可见委托平均高」外推 contentHeight,变高行必跳)。
+        contentWidth: width
+        contentHeight: pageCol.height
+        ScrollBar.vertical: MoeScrollBar {}
 
-        // 行间间距:标题与上一行海报间距(6)>= 标题与自身海报间距(4)。
-        spacing: Constants.homeRowGap
+        Column {
+            id: pageCol
+            width: pageList.width
+            // 行间间距:标题与上一行海报间距(6)>= 标题与自身海报间距(4)。
+            spacing: Constants.homeRowGap
 
-        // header = hero 轮播 + 媒体库节(顶部一屏,随内容滚动,常驻加载 3 张图)。
-        // 高度只依赖窗口宽度与常量:首次布局即最终尺寸,后续不翻转——
-        // header 高度异步变化时 ListView 不会重排条目,只把 header 顶出内容区。
-        header: Item {
+            // hero 轮播 + 媒体库节(顶部一屏,随内容滚动,常驻加载 3 张图)。
+            // 高度只依赖窗口宽度与常量:首次布局即最终尺寸,后续不翻转。
+            Item {
             id: heroCar
             property bool _hoverMoved: false
             height: Constants.homeHeroTopPad + root.heroH + heroCar.mediaSecH
@@ -876,8 +902,10 @@ Item {
             }
         }
 
-        delegate: LibraryRow {
-            width: ListView.view.width
+            Repeater {
+                model: homeRowsFilter // 恒定对象,过滤走谓词(见 homeRowsFilter 注释)
+                delegate: LibraryRow {}
+            }
         }
     }
 
@@ -983,6 +1011,10 @@ Item {
         id: libRow
         required property var modelData
         width: parent ? parent.width : 0
+        // 视口门控:壳高由几何公式定死(与卡是否实例化无关),离屏行的
+        // 卡片/海报不创建,内存与 ListView 按需持平;回滚经磁盘缓存快速重现。
+        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - 800
+                                          && libRow.y < pageList.contentY + pageList.height + 800
         // 标题贴近自身海报(下间距 < 与上一节的上间距)。
         spacing: Constants.homeRowTitleGap
 
@@ -1037,27 +1069,19 @@ Item {
             anchors.left: parent.left
             anchors.leftMargin: Constants.rowLeftMargin
             width: libRow.width - Constants.rowLeftMargin * 2
-            readonly property int lines: Math.max(1, Math.min(5, ConfigManager.homeRowLines))
-            // 卡宽精确铺满:列数按卡宽下限取(保 minW),卡宽 = 净宽均分;
-            // 超上限时 +1 列回收。左右缘 = rowLeftMargin + hoverPad/2,对称。
+            // 几何公式全部来自根级单一来源(不各自推导,防漂移)。
+            readonly property int lines: root.homeLines
             readonly property int gap: Constants.cellGap
-            readonly property real availW: width - Constants.homeRowHoverPad
-            readonly property int cols: {
-                let n = Math.max(1, Math.floor((availW + gap) / (Constants.rowCardMinW + gap)))
-                let w = (availW - (n - 1) * gap) / n
-                while (w > Constants.rowCardMaxW && n < 24) { n += 1; w = (availW - (n - 1) * gap) / n }
-                return n
-            }
+            readonly property int cols: root.gridCols(width)
             // GridView 按 floor(width/cellWidth) 布列(每格都含 gap)——
             // cellWidth 必须精确等分(width/cols),gap 折进格内,否则公式列数
             // 与 GridView 实际列数错位,末列空位成右缝。
-            readonly property real cardW: availW / cols - gap
+            readonly property real cardW: root.gridCardW(width)
             readonly property real cardH: Constants.gridCardH(cardW)
-            // 行高 = 行数×卡高 + (行数-1)×卡间距(尾行不带 gap)+ hover 缓冲;
-            // 多算一个尾部 gap 会让行与下个库名之间空出 46px。
-            // hover 放大溢出(卡高×3%)+ 光晕外探(1.25×1.06)+ 1px 余量,随卡高推导。
-            readonly property int vPad: Math.ceil(cardH * 0.03 + 2.5 * 1.06 + 1)
-            height: lines * cardH + (lines - 1) * gap + vPad * 2
+            readonly property int vPad: root.gridVPad(cardH)
+            // 实际显示行数:条目填不满设定行数时按实际行数收,不留空行
+            readonly property int shownLines: root.gridShownLines(libRow.modelData.items.length, width)
+            height: shownLines * cardH + (shownLines - 1) * gap + vPad * 2
             clip: true
             GridView {
                 id: rowItems
@@ -1071,7 +1095,7 @@ Item {
                 cellWidth: width / parent.cols - 0.5
                 cellHeight: parent.cardH + parent.gap
                 reuseItems: true
-                model: libRow.modelData.items.slice(0, parent.lines * parent.cols)
+                model: libRow.rowActive ? libRow.modelData.items.slice(0, parent.lines * parent.cols) : []
                 delegate: Item {
                     required property var modelData
                     required property int index
