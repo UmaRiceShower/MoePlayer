@@ -67,7 +67,7 @@ public:
     static const QVector<SuperResPreset> &superResPresets();
     static const SuperResPreset *superResPreset(const QString &id);
     // ConfigManager 的 Combo 选项钩子({label,key})与档位显示名。
-    static QVariantList superResOptions();
+    Q_INVOKABLE static QVariantList superResOptions();
     static QString superResLabel(const QString &id);
 
     // 先弹 mpv 空窗(协商期加载态);meta 含 itemId/serverUrl/...。成功返回 true。
