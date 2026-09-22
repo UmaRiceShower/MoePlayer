@@ -191,8 +191,8 @@ Item {
     component SettingCombo: ComboBox {
         id: scombo
         required property string configKey
-        width: 220
-        height: 34
+        Layout.preferredWidth: 220
+        Layout.preferredHeight: 34
         padding: 0
         textRole: "label"
 
@@ -369,10 +369,13 @@ Item {
         id: sfield
         required property string configKey
         property bool intOnly: false
-        width: 220
-        height: 34
+        Layout.fillWidth: false
+        Layout.preferredWidth: 220
+        Layout.preferredHeight: 34
         color: Theme.textPrimary
         font.pixelSize: 13
+        // 框贴行右缘,文字右对齐视觉整齐
+        horizontalAlignment: TextInput.AlignRight
         leftPadding: 12
         rightPadding: 12
         placeholderTextColor: Theme.textMuted
