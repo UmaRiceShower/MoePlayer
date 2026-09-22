@@ -15,6 +15,9 @@ Window {
 
     visible: true
     width: 1280
+    // 最小尺寸:控制层(进度条+按钮行)的可用下限
+    minimumWidth: 480
+    minimumHeight: 360
     height: 720
     color: "black"
     // 父链归属主窗(防 QML GC 回收),但不是瞬态对话框:独立顶层窗,

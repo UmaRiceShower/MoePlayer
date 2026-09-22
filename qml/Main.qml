@@ -7,6 +7,10 @@ ApplicationWindow {
     id: root
     width: 1280
     height: 720
+    // 最小窗口:顶栏(标题+过滤+4 钮)需 ~500px,
+    // 设置双栏 ~620px;再窄布局只能坍缩重叠,无意义
+    minimumWidth: 680
+    minimumHeight: 480
     visible: true
     title: Qt.application.name
 
