@@ -21,6 +21,8 @@ Item {
     // 详情间导航历史(相似推荐原地替换):栈内保存被替换前的条目,
     // back 时逐级恢复,替代"压新页再 pop"的整页重建。
     property var detailHistory: []
+    // 本页初始打开的条目类型
+    property string _originType: ""
     // 相似推荐数据已过期(条目切换后、新推荐到达前):隐藏旧推荐防误导。
     property bool similarStale: true
     // 相似推荐双击防抖(沿用原 Main 侧逻辑)。
@@ -311,16 +313,20 @@ Item {
         root.replaceItem(itemId, posterId, title)
     }
     // 页内返回契约:Alt+Left 由 Main 统一分发到此处(Esc 只关浮层,不进页面栈)。
-    // 集详情先原地回父剧详情,否则沿详情历史逐级恢复;都不适用时不消费(返回
-    // false,交给 Main 退页面栈)。
+    // 先沿详情历史逐级恢复;「剧页内钻进集」回父剧;外部直达集详情不消费
+    // (返回 false 退栈回来源页)。
     function goBack() {
-        if (root.detail.type === "Episode" && root.detail.seriesId) {
-            root.replaceItem(root.detail.seriesId, "", root.detail.seriesName)
-            return true
-        }
+        // 浏览链优先(相似推荐等原地替换链逐级恢复)。
         if (root.detailHistory.length > 0) {
             const prev = root.detailHistory.pop()
             root.replaceItem(prev.itemId, prev.posterId, prev.title)
+            return true
+        }
+        // 仅「本页由剧集页原地钻进集」才回父剧(选集条不换页,这是其
+        // 唯一回程);外部直达的集详情(历史/搜索)退栈回来源页。
+        if (root.detail.type === "Episode" && root.detail.seriesId
+                && root._originType === "Series") {
+            root.replaceItem(root.detail.seriesId, "", root.detail.seriesName)
             return true
         }
         return false
@@ -328,6 +334,8 @@ Item {
     // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步);
     // fadeInOut 动画中调用(正文已淡出),文字揭示动画由其自身编排。
     function applyDetail(d) {
+        if (root._originType === "")
+            root._originType = d.type || ""
         root.detail = d
         root.resetPlaybackSelection()
         root.isFavorite = d.isFavorite
