@@ -81,15 +81,22 @@ Item {
     property bool hovered: cardHover.hovered
     scale: cardHover.hovered ? 1.06 : 1.0
     Behavior on scale { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-    onPosterIdChanged: {
-        root.applyMonet()
-        if (ConfigManager.monetEnabled)
+    // 取色搭显示管线便车:图就绪时必然已落缓存,loadImageSync 纯命中;
+    // 创建即请求会与显示加载并发回源同一图(双倍请求/双倍服务器转码)。
+    function requestMonet() {
+        if (ConfigManager.monetEnabled && root.posterId !== "")
             ColorProvider.requestColor(root.posterId)
+    }
+    onPosterIdChanged: {
+        posterImg._retry = 0
+        root.applyMonet()
+        if (posterImg.status === Image.Ready)
+            root.requestMonet()
     }
     Component.onCompleted: {
         root.applyMonet()
-        if (ConfigManager.monetEnabled)
-            ColorProvider.requestColor(root.posterId)
+        if (posterImg.status === Image.Ready)
+            root.requestMonet()
     }
     Connections {
         target: ColorProvider
@@ -142,7 +149,23 @@ Item {
             // 就绪淡入;已缓存的图跳过
             opacity: status === Image.Ready || root._posterCached ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 260 } enabled: !root._posterCached }
-            source: root.posterId ? "image://emby/" + root.posterId : ""
+            // 失败重试:QQuickPixmap 对失败 URL 在进程内缓存错误态,重设
+            // 同源秒回错误不发新请求——换 ~r<N> 外衣重请求(provider 剥
+            // 标记,缓存键不变),1.5s × 最多 5 次。委托复用时复位。
+            property int _retry: 0
+            source: root.posterId ? "image://emby/" + root.posterId
+                        + (posterImg._retry > 0 ? "~r" + posterImg._retry : "") : ""
+            onStatusChanged: {
+                if (status === Image.Error && posterImg._retry < 5)
+                    posterRetry.restart()
+                if (status === Image.Ready)
+                    root.requestMonet()
+            }
+            Timer {
+                id: posterRetry
+                interval: 1500
+                onTriggered: posterImg._retry += 1
+            }
             fillMode: Image.PreserveAspectCrop
             cache: true
             asynchronous: true

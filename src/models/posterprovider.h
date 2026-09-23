@@ -52,6 +52,11 @@ public:
     static QImage loadImageSync(const QUrl &url, const QString &token, QString *error = nullptr,
                                 const QNetworkProxy &proxy = QNetworkProxy::NoProxy,
                                 const QString &idKey = QString());
+    // 拆分的两半(异步响应按「磁盘池 → 网络池」两段调度):
+    // 磁盘层命中直读并回填内存;网络层占闸回源并写缓存。
+    static QImage loadDisk(const QString &idKey);
+    static QImage fetchNetwork(const QUrl &url, const QString &token, QString *error,
+                               const QNetworkProxy &proxy, const QString &idKey);
 
 private:
     EmbyClient *m_client;
