@@ -327,17 +327,22 @@ Window {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 250 } }
 
-        // 顶部:返回 + 标题。
-        FrostedGlass {
+        // 顶部:返回 + 标题。渐变压暗罩(上深下透),无硬边分割
+        Item {
             id: topBar
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
-            // 与底栏同款贴边全宽(胶囊全宽读作横幅,直角更收敛)。
-            radius: 0
             height: 52
-            blurSource: video
-            rimMask: Qt.vector4d(0, 0, 1, 0) // 只留下沿(上/左/右顶窗框不发光)
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.45) }
+                    GradientStop { position: 0.7; color: Qt.rgba(0, 0, 0, 0.18) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+            }
 
             // 吞点击与滚轮防穿透(同底栏)。
             MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
@@ -380,19 +385,25 @@ Window {
             }
         }
 
-        // 底部控制条:PC 惯例 = 贴边全宽,不浮空。左右下零边距,
-        // 直角(非胶囊),顶部 1px 发丝线收形。
-        FrostedGlass {
+        // 底部控制条:渐变压暗罩(下深上透),控件直接坐在罩上,
+        // 无硬边分割;罩略高于内容留出渐变过渡带。
+        Item {
             id: bottomBar
             anchors.bottom: parent.bottom
             anchors.left: parent.left
             anchors.right: parent.right
-            radius: 0
-            height: barCol.implicitHeight + 20
-            blurSource: video
-            rimMask: Qt.vector4d(1, 0, 0, 0) // 只留上沿
-            // FrostedGlass 是 Item 系(无 hovered);悬停钉住控制层用
-            // HoverHandler 采集。
+            height: barCol.implicitHeight + 34
+
+            Rectangle {
+                anchors.fill: parent
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.35; color: Qt.rgba(0, 0, 0, 0.28) }
+                    GradientStop { position: 1.0; color: Qt.rgba(0, 0, 0, 0.60) }
+                }
+            }
+
+            // 悬停钉住控制层用 HoverHandler 采集。
             HoverHandler { id: barHover }
             // 吞掉落在条上的点击与滚轮(防穿透到下层 inputArea 触发
             // 暂停/全屏/音量;面板内列表的滚动由 ListView 自身优先处理)。
@@ -400,11 +411,11 @@ Window {
 
             Column {
                 id: barCol
-                anchors.fill: parent
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
                 anchors.leftMargin: 14
                 anchors.rightMargin: 14
-                // 进度条上方留白(全屏贴边时不再顶着视频)+ 行距拉开。
-                anchors.topMargin: 14
                 anchors.bottomMargin: 10
                 spacing: 8
 
