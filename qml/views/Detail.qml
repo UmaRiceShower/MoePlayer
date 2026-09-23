@@ -79,10 +79,6 @@ Item {
                               : Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
                                         1 + (root.accentColor.g - 1) * 0.2,
                                         1 + (root.accentColor.b - 1) * 0.2)
-    // 直坐页面实底的弱化小字(如演职 role):亮色系下 textMuted 对
-    // bgTint 实底对比不足,加深一档;暗色系底深,textMuted 足够。
-    property color pageMuted: ThemeStore.isLight ? Qt.darker(Theme.textMuted, 1.3)
-                                                 : Theme.textMuted
     property color complementDark: root._monet ? (ThemeStore.isLight ? root._monet.complementDarkL
                                                                      : root._monet.complementDark)
                                                : Theme.bg
@@ -834,6 +830,42 @@ Item {
             return "外挂"
         return s.isExternal ? "外挂" : "内嵌"
     }
+    readonly property bool hasBackdrop: !!(root.detail.backdropId || root.detail.parentBackdropId)
+
+    component ShadowText: Item {
+        property string text: ""
+        property color color: "white"
+        property int pixelSize: 14
+        property bool bold: false
+        property bool shadowOn: root.hasBackdrop
+        property int hAlign: Text.AlignLeft
+        implicitWidth: stMain.implicitWidth
+        implicitHeight: stMain.implicitHeight + 1
+        AppText {
+            anchors.fill: parent
+            anchors.topMargin: 1
+            visible: parent.shadowOn
+            text: parent.text
+            color: Qt.rgba(0, 0, 0, 0.55)
+            font.pixelSize: parent.pixelSize
+            font.bold: parent.bold
+            elide: Text.ElideRight
+            horizontalAlignment: parent.hAlign
+            verticalAlignment: Text.AlignVCenter
+        }
+        AppText {
+            id: stMain
+            anchors.fill: parent
+            text: parent.text
+            color: parent.color
+            font.pixelSize: parent.pixelSize
+            font.bold: parent.bold
+            elide: Text.ElideRight
+            horizontalAlignment: parent.hAlign
+            verticalAlignment: Text.AlignVCenter
+        }
+    }
+
     // 页面底色 + Hero 背景:正文玻璃控件的采样源(在 overview 之下,不含
     // 正文控件 → 无自采样)。
     Rectangle {
@@ -844,7 +876,7 @@ Item {
             id: heroBackdrop
             y: 0
             width: parent.width
-            height: parent.width * 9 / 16
+            height: parent.height
             visible: root.loaded
             z: 0
             // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
@@ -858,9 +890,6 @@ Item {
                 cache: true
             }
         }
-        // 侧栏莫奈氛围由侧栏自身渐变承载(见侧栏容器),不再叠 scrim
-        // (叠加使颜色浑浊)。
-
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,
         // 保证首次渲染即完整结构,介绍/演员不逐块出现推动按钮位置。
         Item {
@@ -1019,32 +1048,30 @@ Item {
                                 Row {
                                     width: parent.width
                                     spacing: 12
-                                    AppText {
+                                    ShadowText {
                                         id: heroNewTitle
                                         text: root.heroTitle()
-                                        color: "white"
-                                        font.pixelSize: 30
-                                        font.bold: true
-                                        elide: Text.ElideRight
+                                        color: root.hasBackdrop ? "white" : Theme.textPrimary
+                                        pixelSize: 30
+                                        bold: true
                                         width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
+                                        hAlign: root.heroTextAlign
                                     }
                                 }
-                                AppText {
+                                ShadowText {
                                     text: root.heroEpisodeLine()
-                                    color: "white"
-                                    font.pixelSize: 18
-                                    elide: Text.ElideRight
+                                    color: root.hasBackdrop ? "white" : Theme.textPrimary
+                                    pixelSize: 18
                                     width: parent.width
-                                    horizontalAlignment: root.heroTextAlign
+                                    hAlign: root.heroTextAlign
                                     visible: text !== ""
                                 }
-                                AppText {
+                                ShadowText {
                                     text: root.metaLine()
                                     color: Theme.rating
-                                    font.pixelSize: 14
+                                    pixelSize: 14
                                     width: parent.width
-                                    horizontalAlignment: root.heroTextAlign
+                                    hAlign: root.heroTextAlign
                                     opacity: text !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 100 } }
                                 }
@@ -1133,11 +1160,9 @@ Item {
                                     radius: height / 2
                                     blurSource: detailBg
                                     scrollParent: overview
-                                    // 主按钮:accent 色调玻璃(透出背景磨砂 + 主题色)。纯磨砂下
-                                    // 0.45 太实会盖住模糊透出,降 0.30 留色调又透亮。
                                     glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
                                                        root.accentColor.b,
-                                                       ThemeStore.isLight ? 0.42 : 0.30)
+                                                       ThemeStore.isLight ? 0.72 : 0.62)
                                     borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
@@ -1169,7 +1194,7 @@ Item {
                                     // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
                                                        root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                                       ThemeStore.isLight ? 0.68 : 0.58)
                                     borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
@@ -1219,7 +1244,7 @@ Item {
                                     // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
                                                        root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                                       ThemeStore.isLight ? 0.68 : 0.58)
                                     borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
@@ -1273,7 +1298,7 @@ Item {
                                     // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
                                     glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
                                                        root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.40 : 0.22)
+                                                       ThemeStore.isLight ? 0.68 : 0.58)
                                     borderColor: Theme.glassRim
                                     thickness: 0
                                     frostAmount: 0.15
@@ -1532,11 +1557,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    AppText {
+                    ShadowText {
                         text: "简介"
-                        color: Theme.textPrimary
-                        font.pixelSize: 18
-                        font.bold: true
+                        color: root.hasBackdrop ? "white" : Theme.textPrimary
+                        pixelSize: 18
+                        bold: true
                     }
                     // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
                     FrostedGlass {
@@ -1579,11 +1604,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    AppText {
+                    ShadowText {
                         text: "演职人员"
-                        color: Theme.textPrimary
-                        font.pixelSize: 18
-                        font.bold: true
+                        color: root.hasBackdrop ? "white" : Theme.textPrimary
+                        pixelSize: 18
+                        bold: true
                     }
                     Flickable {
                         width: parent.width
@@ -1651,21 +1676,19 @@ Item {
                                                 Behavior on opacity { NumberAnimation { duration: 160 } }
                                             }
                                         }
-                                        AppText {
+                                        ShadowText {
                                             text: peopleCard.modelData.name || ""
-                                            color: Theme.textPrimary
-                                            font.pixelSize: 12
-                                            elide: Text.ElideRight
+                                            color: root.hasBackdrop ? "white" : Theme.textPrimary
+                                            pixelSize: 12
                                             width: 72
-                                            horizontalAlignment: Text.AlignHCenter
+                                            hAlign: Text.AlignHCenter
                                         }
-                                        AppText {
+                                        ShadowText {
                                             text: peopleCard.modelData.role || peopleCard.modelData.type || ""
-                                            color: root.pageMuted
-                                            font.pixelSize: 11
-                                            elide: Text.ElideRight
+                                            color: root.hasBackdrop ? Qt.rgba(1, 1, 1, 0.75) : Theme.textMuted
+                                            pixelSize: 11
                                             width: 72
-                                            horizontalAlignment: Text.AlignHCenter
+                                            hAlign: Text.AlignHCenter
                                         }
                                     }
                                 }
@@ -1684,11 +1707,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    AppText {
+                    ShadowText {
                         text: "媒体信息"
-                        color: Theme.textPrimary
-                        font.pixelSize: 18
-                        font.bold: true
+                        color: root.hasBackdrop ? "white" : Theme.textPrimary
+                        pixelSize: 18
+                        bold: true
                     }
                     Repeater {
                         model: root.detail.mediaSources
@@ -2003,11 +2026,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    AppText {
+                    ShadowText {
                         text: "相似推荐"
-                        color: Theme.textPrimary
-                        font.pixelSize: 18
-                        font.bold: true
+                        color: root.hasBackdrop ? "white" : Theme.textPrimary
+                        pixelSize: 18
+                        bold: true
                     }
                     ListView {
                         width: parent.width
@@ -2092,15 +2115,15 @@ Item {
             id: sidebarGlass
             width: Constants.detailSidebarW
             height: parent.height
-            radius: 16
+            radius: 0
             blurSource: detailBg
-            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                          : Qt.rgba(0.07, 0.09, 0.17, 0.55)
+            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.25)
+                                          : Qt.rgba(1, 1, 1, 0.05)
             borderColor: Theme.borderSoft
             thickness: 0
-            frostAmount: 0.15
-            edgeLight: 0.35
-            saturation: 0.3
+            frostAmount: 0.12
+            edgeLight: 0.45
+            saturation: 0.35
             visible: root.detail.type === "Series" || root.detail.type === "Episode"
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 220 } }
@@ -2112,8 +2135,8 @@ Item {
                 spacing: 10
 
             // 选季条:显示当前季,悬停时仅数字区变化(候选数字原位放大 +
-            // 上下邻季淡入),条本身高度/背景/描边保持固定。
-            // 背景用莫奈取色的 surfaceTint 半透明,与选集栏 scrim 同源。
+            // 上下邻季淡入),条本身高度/背景/描边保持固定(透明,
+            // 背景由容器玻璃承载)。
             Rectangle {
                 id: seasonStrip
                 property bool stripHovered: seasonMa.containsMouse
@@ -2126,10 +2149,11 @@ Item {
 
                 // "第"/"季":锚定数字牌两侧(右/左缘贴牌边 8px 间隙),
                 // 往数字牌靠近且随其位置跟随,不再贴条边缘。
-                AppText {
+                ShadowText {
                     text: "第"
-                    color: seasonStrip.stripHovered ? Theme.accent : Theme.textPrimary
-                    font.pixelSize: 14
+                    color: seasonStrip.stripHovered ? Theme.accent
+                           : (root.hasBackdrop ? "white" : Theme.textPrimary)
+                    pixelSize: 14
                     anchors.right: digitCol.left
                     anchors.rightMargin: 8
                     anchors.top: parent.top
@@ -2148,16 +2172,15 @@ Item {
                     height: 94
                     spacing: 0
                     // 上一季(列表内实际存在的季;无则隐藏)。
-                    AppText {
+                    ShadowText {
                         id: upText
                         width: 66
                         height: 16
-                        verticalAlignment: Text.AlignVCenter
                         text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
                               ? root.pad2(root.seasonPrevNo()) : ""
-                        color: Theme.textMuted
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
+                        color: root.hasBackdrop ? "white" : Theme.textMuted
+                        pixelSize: 12
+                        hAlign: Text.AlignHCenter
                         opacity: seasonStrip.stripHovered
                                  && root.seasonPrevNo() > 0 ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 160 } }
@@ -2188,26 +2211,26 @@ Item {
                         }
                     }
                     // 下一季(列表内实际存在的季;无则隐藏)。
-                    AppText {
+                    ShadowText {
                         id: downText
                         width: 66
                         height: 16
-                        verticalAlignment: Text.AlignVCenter
                         text: seasonStrip.stripHovered && root.seasonNextNo() > 0
                               ? root.pad2(root.seasonNextNo()) : ""
-                        color: Theme.textMuted
-                        font.pixelSize: 12
-                        horizontalAlignment: Text.AlignHCenter
+                        color: root.hasBackdrop ? "white" : Theme.textMuted
+                        pixelSize: 12
+                        hAlign: Text.AlignHCenter
                         opacity: seasonStrip.stripHovered
                                  && root.seasonNextNo() > 0 ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 160 } }
                     }
                 }
                 // "季" 同样锚定数字牌(左缘贴牌边 8px)。
-                AppText {
+                ShadowText {
                     text: "季"
-                    color: seasonStrip.stripHovered ? Theme.accent : Theme.textPrimary
-                    font.pixelSize: 14
+                    color: seasonStrip.stripHovered ? Theme.accent
+                           : (root.hasBackdrop ? "white" : Theme.textPrimary)
+                    pixelSize: 14
                     anchors.left: digitCol.right
                     anchors.leftMargin: 8
                     anchors.top: parent.top
@@ -2296,8 +2319,7 @@ Item {
                     scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
                     Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
 
-                    // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方)。
-                    // 缩略图高 = 行高 - 上下外边距 - 列间距 - 集名行高,总高恒填满行。
+                    // 纵向卡片:缩略图(顶部,内嵌进度条)+ 集名(下方,压图白字)。
                     Column {
                         id: cardCol
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -2417,15 +2439,15 @@ Item {
                                 }
                             }
                         }
-                        // 集名:缩略图下方,单行省略,居中。
-                        AppText {
+                        // 集名:缩略图下方居中;压图白字(+影),无图回主题色。
+                        ShadowText {
                             id: episodeTitle
                             width: thumbBox.width
                             text: episodeItem.model.name
-                            color: episodeItem.selected ? Theme.accent : Theme.textPrimary
-                            font.pixelSize: 14
-                            horizontalAlignment: Text.AlignHCenter
-                            elide: Text.ElideRight
+                            color: episodeItem.selected ? Theme.accent
+                                   : (root.hasBackdrop ? "white" : Theme.textPrimary)
+                            pixelSize: 14
+                            hAlign: Text.AlignHCenter
                         }
                     }
                     // 悬停高亮/点击选集:Pointer Handler 组合(替代
