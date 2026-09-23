@@ -726,20 +726,75 @@ Window {
                         }
                     }
                     Item { Layout.fillWidth: true } // 弹性占位:右侧按钮推右
-                    // 倍速(循环档位)。
+                    // 倍速:单击循环档位;双击手动输入(0.01~32,越界/非法取消)。
                     IconBtn {
                         id: speedBtn
+                        property bool editing: false
                         text: (Math.round(video.speed * 100) / 100) + "x"
-                        contentItem: AppText {
-                            text: speedBtn.text
-                            color: "white"
-                            font.pixelSize: 16
-                            font.weight: Font.Medium
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
+                        contentItem: Item {
+                            AppText {
+                                id: speedLabel
+                                anchors.centerIn: parent
+                                visible: !speedBtn.editing
+                                text: speedBtn.text
+                                color: "white"
+                                font.pixelSize: 16
+                                font.weight: Font.Medium
+                                TapHandler {
+                                    onDoubleTapped: {
+                                        speedClickTimer.stop()
+                                        speedEdit.text = String(Math.round(video.speed * 100) / 100)
+                                        speedBtn.editing = true
+                                        speedEdit.forceActiveFocus()
+                                        speedEdit.selectAll()
+                                        root.wake()
+                                    }
+                                }
+                            }
+                            TextField {
+                                id: speedEdit
+                                anchors.centerIn: parent
+                                visible: speedBtn.editing
+                                width: 56
+                                height: speedLabel.implicitHeight + 6
+                                padding: 0
+                                horizontalAlignment: Text.AlignHCenter
+                                color: "white"
+                                font.pixelSize: 14
+                                selectionColor: Qt.rgba(1, 1, 1, 0.3)
+                                validator: RegularExpressionValidator { regularExpression: /[0-9.]*/ }
+                                onTextChanged: root.wake()
+                                background: Rectangle {
+                                    color: Qt.rgba(1, 1, 1, 0.12)
+                                    radius: 4
+                                }
+                                onAccepted: {
+                                    const v = parseFloat(text)
+                                    speedBtn.editing = false
+                                    if (!isNaN(v) && v >= 0.01 && v <= 32) {
+                                        MpvClient.command(["set_property", "speed", v], root.sessionKey)
+                                        osd.showText("倍速 " + v + "x")
+                                    }
+                                    root.wake()
+                                }
+                                Keys.onShortcutOverride: (e) => e.accepted = true
+                                Keys.onEscapePressed: (e) => {
+                                    e.accepted = true
+                                    speedBtn.editing = false
+                                }
+                                onActiveFocusChanged: if (!activeFocus)
+                                    speedBtn.editing = false
+                            }
                         }
-                        onClicked: root.cycleSpeed()
-                        tip: "倍速(点击循环)"
+                        // 单击延迟 300ms
+                        onClicked: if (!editing)
+                            speedClickTimer.restart()
+                        Timer {
+                            id: speedClickTimer
+                            interval: 200
+                            onTriggered: root.cycleSpeed()
+                        }
+                        tip: "倍速(单击循环,双击输入)"
                     }
                     IconBtn {
                         id: audioBtn
@@ -1018,9 +1073,9 @@ Window {
     Timer {
         id: hideTimer
         interval: 3000
-        // 控制条 hover / 拖动进度 / 面板打开 / 暂停 / 时间编辑中钉住不隐。
+        // 控制条 hover / 拖动进度 / 面板打开 / 暂停 / 时间与倍速编辑中
         onTriggered: {
-            if (barHover.hovered || seekBar.scrubbing || root.panel !== "" || video.paused || posEdit.visible)
+            if (barHover.hovered || seekBar.scrubbing || root.panel !== "" || video.paused || posEdit.visible || speedBtn.editing)
                 restart()
             else
                 root.chromeVisible = false
