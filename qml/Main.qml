@@ -333,6 +333,11 @@ ApplicationWindow {
             root.currentServerUrl = serverUrl
         if (accountId)
             root.currentAccountId = accountId
+        // 深度闸:相似推荐链 wander 不设限时栈无限长,每个详情页含
+        // 1600px hero 纹理与玻璃模糊源,常驻内存可观——超过 8 层详情
+        // 时移除最旧一页(紧挨首页之上;首页 index 0 不动)。
+        while (stackView.depth > 8)
+            stackView.remove(1)
         stackView.push(detailPage, {
             itemId: itemId,
             posterId: posterId,
