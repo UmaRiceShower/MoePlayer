@@ -391,155 +391,168 @@ Window {
                 anchors.bottomMargin: 10
                 spacing: 8
 
-                // 进度条:拖动预览、松手 seek;hover 显示目标时间气泡。
-                Slider {
-                    id: seekBar
+                // 进度条行:左侧「当前 / 总时长」,右侧进度条(拖动预览、
+                // 松手 seek;hover 显示目标时间气泡)。
+                RowLayout {
                     width: barCol.width
-                    from: 0
-                    to: Math.max(1, video.duration)
-                    // 拖动中显示拖动值;否则跟随播放位置(Binding 门控,
-                    // 避免 value 自引用绑定环)。
-                    property bool scrubbing: false
-                    Binding on value { when: !seekBar.scrubbing; value: video.position }
-                    live: false
-                    onPressedChanged: {
-                        if (pressed) {
-                            scrubbing = true
-                        } else {
-                            // 松手落点过磁吸(与 hover 预览一致)。
-                            const target = root.snapChapter(value)
-                            MpvClient.seek(target >= 0 ? target : value, root.sessionKey)
-                            scrubbing = false
-                        }
+                    spacing: 10
+
+                    AppText {
+                        Layout.alignment: Qt.AlignVCenter
+                        text: root.fmtTime(video.position) + " / " + root.fmtTime(video.duration)
+                        color: Qt.rgba(1, 1, 1, 0.85)
+                        font.pixelSize: 12
                     }
-                    onValueChanged: if (scrubbing) root.wake()
-                    // hover 位置(0..1)与对应时间:预览气泡与提示共用。
-                    property real hoverFrac: -1
-                    HoverHandler {
-                        id: seekHover
-                        onPointChanged: seekBar.hoverFrac = Math.max(0, Math.min(1, point.position.x / seekBar.width))
-                        onHoveredChanged: if (!hovered) seekBar.hoverFrac = -1
-                    }
-                    // hover/拖动目标时间(气泡与预览共用;章节磁吸)。
-                    property real rawTime: scrubbing ? value
-                                           : (hoverFrac >= 0 ? hoverFrac * to : value)
-                    property real snappedTime: root.snapChapter(rawTime)
-                    property real hoverTime: snappedTime >= 0 ? snappedTime : rawTime
-                    background: Rectangle {
-                        implicitHeight: 4
-                        radius: 2
-                        color: Qt.rgba(1, 1, 1, 0.22)
-                        // 缓存带(demuxer-cache-state;进度条下层)。
-                        Rectangle {
-                            width: seekBar.to > 0
-                                   ? Math.min(1, video.buffered / seekBar.to) * parent.width : 0
-                            height: parent.height
-                            radius: 2
-                            color: Qt.rgba(1, 1, 1, 0.38)
+
+                    Slider {
+                        id: seekBar
+                        Layout.fillWidth: true
+                        from: 0
+                        to: Math.max(1, video.duration)
+                        // 拖动中显示拖动值;否则跟随播放位置(Binding 门控,
+                        // 避免 value 自引用绑定环)。
+                        property bool scrubbing: false
+                        Binding on value { when: !seekBar.scrubbing; value: video.position }
+                        live: false
+                        onPressedChanged: {
+                            if (pressed) {
+                                scrubbing = true
+                            } else {
+                                // 松手落点过磁吸(与 hover 预览一致)。
+                                const target = root.snapChapter(value)
+                                MpvClient.seek(target >= 0 ? target : value, root.sessionKey)
+                                scrubbing = false
+                            }
                         }
-                        Rectangle {
-                            width: seekBar.visualPosition * parent.width
-                            height: parent.height
-                            radius: 2
-                            color: "white"
+                        onValueChanged: if (scrubbing) root.wake()
+                        // hover 位置(0..1)与对应时间:预览气泡与提示共用。
+                        property real hoverFrac: -1
+                        HoverHandler {
+                            id: seekHover
+                            onPointChanged: seekBar.hoverFrac = Math.max(0, Math.min(1, point.position.x / seekBar.width))
+                            onHoveredChanged: if (!hovered) seekBar.hoverFrac = -1
                         }
-                        // 章节刻度(mpv chapter-list;白点压槽)。
-                        Repeater {
-                            model: root.chapters
+                        // hover/拖动目标时间(气泡与预览共用;章节磁吸)。
+                        property real rawTime: scrubbing ? value
+                                            : (hoverFrac >= 0 ? hoverFrac * to : value)
+                        property real snappedTime: root.snapChapter(rawTime)
+                        property real hoverTime: snappedTime >= 0 ? snappedTime : rawTime
+                        background: Rectangle {
+                            implicitHeight: 4
+                            radius: 2
+                            color: Qt.rgba(1, 1, 1, 0.22)
+                            // 缓存带(demuxer-cache-state;进度条下层)。
                             Rectangle {
-                                required property var modelData
-                                // 吸附该章节时点亮(放大提亮)。
-                                property bool snapped: seekBar.snappedTime === modelData.time
-                                width: snapped ? 5 : 3
-                                height: snapped ? 5 : 3
-                                radius: 3
-                                color: snapped ? "white" : Qt.rgba(1, 1, 1, 0.65)
-                                // 销毁期 parent 可能先走(Repeater 拆委托),
-                                // 用 y 绑定容忍 null,不用 anchors(垂直居中)。
-                                y: parent ? Math.round((parent.height - height) / 2) : 0
-                                x: seekBar.to > 0 ? (modelData.time / seekBar.to) * seekBar.width - width / 2 : 0
-                                visible: seekBar.to > 0
+                                width: seekBar.to > 0
+                                    ? Math.min(1, video.buffered / seekBar.to) * parent.width : 0
+                                height: parent.height
+                                radius: 2
+                                color: Qt.rgba(1, 1, 1, 0.38)
+                            }
+                            Rectangle {
+                                width: seekBar.visualPosition * parent.width
+                                height: parent.height
+                                radius: 2
+                                color: "white"
+                            }
+                            // 章节刻度(mpv chapter-list;白点压槽)。
+                            Repeater {
+                                model: root.chapters
+                                Rectangle {
+                                    required property var modelData
+                                    // 吸附该章节时点亮(放大提亮)。
+                                    property bool snapped: seekBar.snappedTime === modelData.time
+                                    width: snapped ? 5 : 3
+                                    height: snapped ? 5 : 3
+                                    radius: 3
+                                    color: snapped ? "white" : Qt.rgba(1, 1, 1, 0.65)
+                                    // 销毁期 parent 可能先走(Repeater 拆委托),
+                                    // 用 y 绑定容忍 null,不用 anchors(垂直居中)。
+                                    y: parent ? Math.round((parent.height - height) / 2) : 0
+                                    x: seekBar.to > 0 ? (modelData.time / seekBar.to) * seekBar.width - width / 2 : 0
+                                    visible: seekBar.to > 0
+                                }
                             }
                         }
-                    }
-                    handle: Rectangle {
-                        x: seekBar.visualPosition * (seekBar.availableWidth - width)
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: seekBar.hovered || seekBar.scrubbing ? 14 : 10
-                        height: width
-                        radius: width / 2
-                        color: "white"
-                        Behavior on width { NumberAnimation { duration: 120 } }
-                    }
-
-                    // hover 气泡:预览实例可用 = 大泡(画面+时间),否则 =
-                    // 小时间泡;x 跟随鼠标位置并钳制在条内。
-                    Rectangle {
-                        id: previewBubble
-                        width: previewLoader.active ? 176 : timeText.implicitWidth + 20
-                        height: previewLoader.active ? 112 : timeText.implicitHeight + 12
-                        radius: 8
-                        color: previewLoader.active ? "black" : Qt.rgba(0, 0, 0, 0.75)
-                        border.width: 1
-                        border.color: Qt.rgba(1, 1, 1, 0.25)
-                        visible: seekBar.hovered || seekBar.scrubbing
-                        anchors.bottom: parent.top
-                        anchors.bottomMargin: 8
-                        x: Math.max(0, Math.min(seekBar.width - width,
-                                (seekBar.hoverTime / seekBar.to) * seekBar.width - width / 2))
-                        clip: true
-                        Behavior on width { NumberAnimation { duration: 120 } }
-                        Behavior on height { NumberAnimation { duration: 120 } }
-
-                        Loader {
-                            id: previewLoader
-                            anchors.fill: parent
-                            anchors.margins: 3
-                            // 仅 hover 且有播放地址时建立预览实例。
-                            active: (seekBar.hovered || seekBar.scrubbing)
-                                    && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""
-                            sourceComponent: MpvVideoItem { id: previewVideo }
-                            onLoaded: {
-                                const info = MpvClient.previewInfo(root.sessionKey)
-                                if (info.headers && info.headers.length > 0)
-                                    item.sendCommand(["set_property", "http-header-fields", info.headers.join(",")])
-                                item.sendCommand(["set_property", "mute", true])
-                                item.sendCommand(["set_property", "pause", true])
-                                item.sendCommand(["loadfile", info.url, "replace"])
-                            }
-                        }
-                        AppText {
-                            id: timeText
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            // 大泡压底、小泡垂直居中(纯 y,不与 anchors 混用)。
-                            y: previewLoader.active
-                               ? parent.height - height - 4
-                               : Math.round((parent.height - height) / 2)
-                            text: root.fmtTime(seekBar.hoverTime)
+                        handle: Rectangle {
+                            x: seekBar.visualPosition * (seekBar.availableWidth - width)
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: seekBar.hovered || seekBar.scrubbing ? 14 : 10
+                            height: width
+                            radius: width / 2
                             color: "white"
-                            font.pixelSize: 12
-                            style: previewLoader.active ? Text.Outline : Text.Normal
-                            styleColor: "black"
+                            Behavior on width { NumberAnimation { duration: 120 } }
                         }
-                    }
-                    // hover/拖动位置变化 → 预览实例跟随 seek(节流 120ms)。
-                    property real lastPreviewSeek: -1
-                    Timer {
-                        id: previewSeekTimer
-                        interval: 120
-                        onTriggered: {
-                            if (!previewLoader.item)
-                                return
-                            const t = seekBar.scrubbing ? seekBar.value
-                                      : (seekBar.hoverFrac >= 0 ? seekBar.hoverFrac * seekBar.to : -1)
-                            if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5) {
-                                seekBar.lastPreviewSeek = t
-                                previewLoader.item.sendCommand(["seek", t, "absolute"])
+
+                        // hover 气泡:预览实例可用 = 大泡(画面+时间),否则 =
+                        // 小时间泡;x 跟随鼠标位置并钳制在条内。
+                        Rectangle {
+                            id: previewBubble
+                            width: previewLoader.active ? 176 : timeText.implicitWidth + 20
+                            height: previewLoader.active ? 112 : timeText.implicitHeight + 12
+                            radius: 8
+                            color: previewLoader.active ? "black" : Qt.rgba(0, 0, 0, 0.75)
+                            border.width: 1
+                            border.color: Qt.rgba(1, 1, 1, 0.25)
+                            visible: seekBar.hovered || seekBar.scrubbing
+                            anchors.bottom: parent.top
+                            anchors.bottomMargin: 8
+                            x: Math.max(0, Math.min(seekBar.width - width,
+                                    (seekBar.hoverTime / seekBar.to) * seekBar.width - width / 2))
+                            clip: true
+                            Behavior on width { NumberAnimation { duration: 120 } }
+                            Behavior on height { NumberAnimation { duration: 120 } }
+
+                            Loader {
+                                id: previewLoader
+                                anchors.fill: parent
+                                anchors.margins: 3
+                                // 仅 hover 且有播放地址时建立预览实例。
+                                active: (seekBar.hovered || seekBar.scrubbing)
+                                        && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""
+                                sourceComponent: MpvVideoItem { id: previewVideo }
+                                onLoaded: {
+                                    const info = MpvClient.previewInfo(root.sessionKey)
+                                    if (info.headers && info.headers.length > 0)
+                                        item.sendCommand(["set_property", "http-header-fields", info.headers.join(",")])
+                                    item.sendCommand(["set_property", "mute", true])
+                                    item.sendCommand(["set_property", "pause", true])
+                                    item.sendCommand(["loadfile", info.url, "replace"])
+                                }
+                            }
+                            AppText {
+                                id: timeText
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                // 大泡压底、小泡垂直居中(纯 y,不与 anchors 混用)。
+                                y: previewLoader.active
+                                ? parent.height - height - 4
+                                : Math.round((parent.height - height) / 2)
+                                text: root.fmtTime(seekBar.hoverTime)
+                                color: "white"
+                                font.pixelSize: 12
+                                style: previewLoader.active ? Text.Outline : Text.Normal
+                                styleColor: "black"
                             }
                         }
+                        // hover/拖动位置变化 → 预览实例跟随 seek(节流 120ms)。
+                        property real lastPreviewSeek: -1
+                        Timer {
+                            id: previewSeekTimer
+                            interval: 120
+                            onTriggered: {
+                                if (!previewLoader.item)
+                                    return
+                                const t = seekBar.scrubbing ? seekBar.value
+                                        : (seekBar.hoverFrac >= 0 ? seekBar.hoverFrac * seekBar.to : -1)
+                                if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5) {
+                                    seekBar.lastPreviewSeek = t
+                                    previewLoader.item.sendCommand(["seek", t, "absolute"])
+                                }
+                            }
+                        }
+                        onHoverFracChanged: if (hoverFrac >= 0) previewSeekTimer.restart()
+                        onScrubbingChanged: if (scrubbing) previewSeekTimer.restart()
                     }
-                    onHoverFracChanged: if (hoverFrac >= 0) previewSeekTimer.restart()
-                    onScrubbingChanged: if (scrubbing) previewSeekTimer.restart()
                 }
 
                 RowLayout {
@@ -609,13 +622,6 @@ Window {
                             color: "white"
                         }
                     }
-                    AppText {
-                        Layout.alignment: Qt.AlignVCenter
-                        text: root.fmtTime(video.position) + " / " + root.fmtTime(video.duration)
-                        color: Qt.rgba(1, 1, 1, 0.85)
-                        font.pixelSize: 12
-                        leftPadding: 8
-                    }
                     Item { Layout.fillWidth: true } // 弹性占位:右侧按钮推右
                     // 倍速(循环档位)。
                     IconBtn {
@@ -652,22 +658,21 @@ Window {
                             root.wake()
                         }
                     }
-                    // 选集(仅剧集有播放列表)/ 音轨 / 字幕:三个图标钮,
-                    // 面板互斥。
+                    IconBtn {
+                        icon.source: "qrc:/icons/wand.svg"
+                        tip: "超分(Anime4K)"
+                        onClicked: {
+                            root.panel = root.panel === "superres" ? "" : "superres"
+                            root.wake()
+                        }
+                    }
+                    // 选集仅剧集(有播放列表)可见;右簇功能钮面板互斥。
                     IconBtn {
                         visible: (root.meta.seriesId || "") !== ""
                         icon.source: "qrc:/icons/episodes.svg"
                         tip: "选集"
                         onClicked: {
                             root.panel = root.panel === "episodes" ? "" : "episodes"
-                            root.wake()
-                        }
-                    }
-                    IconBtn {
-                        icon.source: "qrc:/icons/wand.svg"
-                        tip: "超分(Anime4K)"
-                        onClicked: {
-                            root.panel = root.panel === "superres" ? "" : "superres"
                             root.wake()
                         }
                     }
