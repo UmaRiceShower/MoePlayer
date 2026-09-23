@@ -453,10 +453,11 @@ void MpvClient::deliver(const QString &url, const QVariantList &headers,
     const QString key = sessionKeyFor(meta);
     Session *s = sessionFor(key);
     if (!s) {
-        // 理论上 startPending 已建会话;防御:直接建并起播。
-        s = createSession(key.isEmpty() ? QStringLiteral("session-%1").arg(++m_nextKeyId) : key);
-        if (!embeddedPreferred())
-            spawnMpv(s);
+        // 会话不存在 = 用户在协商期已关窗取消(startPending 建、stop 销毁)。
+        // 建幽灵会话只会:永不播放(内嵌无窗无核心)、Ping 每 10 分钟永续、
+        // 且同 key 重播被 contains 拦截永久阻断——必须丢弃。
+        qWarning().noquote() << "MpvClient: deliver 到达时会话已不存在(用户已取消),丢弃" << key;
+        return;
     }
     s->meta = meta;
     s->delivered = true;
@@ -487,8 +488,14 @@ void MpvClient::fail(const QString &itemId, const QString &message)
     }
     if (!s)
         return;
-    // 协商失败:尚未起播,静默关窗(不回传、不刷新)。
+    // 协商失败:尚未起播,不回传服务器、不刷新历史;但要发本地
+    // playbackFinished 让内嵌 PlayerWindow 收窗(否则黑窗+转圈永驻;
+    // Main 的 onErrorOccurred 失败结算路径同样依赖此信号关窗)。
+    const QString key = m_sessions.key(s);
+    const QString metaItemId = s->meta.value(QStringLiteral("itemId")).toString();
     destroySession(s);
+    if (!key.isEmpty())
+        emit playbackFinished(key, metaItemId, false);
 }
 
 void MpvClient::start(const QString &url, const QVariantList &headers,
@@ -621,7 +628,9 @@ void MpvClient::spawnMpv(Session *s)
          // hook 重定向到真实地址,不再依赖 MoePlayer 自造菜单)。
          << QStringLiteral("--script-opts=osc-custom_button_1_content=\\\u2388|选集|")
          << QStringLiteral("--script-opts=osc-custom_button_1_mbtn_left_command=script-binding select/select-playlist; script-message-to osc osc-hide")
-         << QStringLiteral("--keep-open=yes")
+         // 不设 keep-open:mpv 在最后一条目 EOF 时会把 AT_END_OF_FILE 改写
+         // 为 KEEP_PLAYING(暂停不发 end-file)——关窗/Stopped 回传
+         // 全靠 end-file(eof) 判定;idle=yes+force-window 已保进程与窗口。
          // 日志:terminal=yes 保留 stdout/stderr(转发到 MoePlayer 输出);
          // input-terminal=no 不从 stdin 读按键(控制走 IPC,防假 tty 阻塞)。
          << QStringLiteral("--terminal=yes")
@@ -1165,6 +1174,20 @@ void MpvClient::flush(Session *s)
         // 超分:注册快捷键 + 按配置挂载默认档位(仅一次,之后再变走配置信号)。
         initSuperRes(s);
     }
+    // 未就绪期暂存的播放列表调用,就绪后原样补灌(已置 ready,本次直通)。
+    if (!s->pendingEpisodes.isEmpty()) {
+        const QVariantList eps = s->pendingEpisodes;
+        const int idx = s->pendingIndex;
+        const QString u = s->pendingUrl;
+        const QVariantList h = s->pendingHeaders;
+        const QVariantMap m = s->pendingMeta;
+        s->pendingEpisodes.clear();
+        s->pendingIndex = -1;
+        s->pendingUrl.clear();
+        s->pendingHeaders.clear();
+        s->pendingMeta.clear();
+        setEpisodeList(eps, s->key, idx, u, h, m);
+    }
     if (!s->url.isEmpty() && !s->loadIssued && !s->listSet) {
         if (!s->headers.isEmpty()) {
             QStringList fields;
@@ -1222,9 +1245,24 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                                const QString &url, const QVariantList &headers,
                                const QVariantMap &meta)
 {
-    Session *s = m_active;
-    if (!s || !s->ready || episodes.isEmpty()) {
-        qDebug() << "MpvClient: setEpisodeList 跳过(无会话/未就绪/空列表)";
+    // 按传入会话键定位(m_active 只是最新会话:多窗并发下重播旧窗剧集
+    // 会把播放列表灌进别的窗口)。
+    Session *s = sessionFor(currentItemId);
+    if (!s)
+        s = m_active;
+    if (!s || episodes.isEmpty()) {
+        qDebug() << "MpvClient: setEpisodeList 跳过(无会话/空列表)";
+        return;
+    }
+    if (!s->ready) {
+        // 外部模式 IPC 未就绪:暂存,就绪 flush 里补灌(原路跳过会让
+        // Main 置 _listPrimed 而列表永远丢失)。
+        s->pendingEpisodes = episodes;
+        s->pendingIndex = currentIndex;
+        s->pendingUrl = url;
+        s->pendingHeaders = headers;
+        s->pendingMeta = meta;
+        qDebug() << "MpvClient: 会话未就绪,播放列表暂存待补灌" << s->key;
         return;
     }
     if (!meta.isEmpty())
@@ -1302,6 +1340,12 @@ void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &item
     }
     if (!meta.isEmpty())
         s->episodeMeta.insert(itemId, meta);
+    // 换集真实地址同步进会话(进度条预览实例吃 s->url/s->headers,
+    // 不同步会一直拉首集或已过期地址)。
+    if (!url.isEmpty()) {
+        s->url = url;
+        s->headers = headers;
+    }
     // 流头(可能跨服务器变化):切换全局头,后续加载生效。
     if (!headers.isEmpty()) {
         QStringList fields;

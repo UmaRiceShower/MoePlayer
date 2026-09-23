@@ -198,6 +198,13 @@ private:
         // 播放列表旋转序的条目 id(第 0 条 = 点播集):选集面板直跳映射
         // episodeId → playlist-play-index 用。
         QStringList playlistIds;
+        // IPC 未就绪时暂存的播放列表调用(setEpisodeList 早到;就绪 flush
+        // 原样补灌)。
+        QVariantList pendingEpisodes;
+        int pendingIndex = -1;
+        QString pendingUrl;
+        QVariantList pendingHeaders;
+        QVariantMap pendingMeta;
         // 内嵌渲染输出尺寸(QML 上报;0 = 未知,回退 osd-dimensions)。
         int outW = 0, outH = 0;
         // 超分(Anime4K):当前档位、spawn 默认档位/快捷键是否已下发、

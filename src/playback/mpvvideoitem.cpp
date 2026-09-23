@@ -401,7 +401,7 @@ bool MpvEmbeddedCore::start(const QString &hookScript)
     // 选项与外部进程 spawn 参数对齐(差异:vo=libmpv 替代 force-window;
     // 无 terminal/输入绑定——输入由 QML 转发,界面由 QML 承担)。
     mpv_set_option_string(mpv, "vo", "libmpv");
-    mpv_set_option_string(mpv, "keep-open", "yes");
+    // 不设 keep-open(同外部模式):最后条目 EOF 需发 end-file 供关窗判定。
     mpv_set_option_string(mpv, "idle", "yes");
     mpv_set_option_string(mpv, "osc", "no");
     mpv_set_option_string(mpv, "osd-bar", "no");
