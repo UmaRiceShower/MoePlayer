@@ -40,8 +40,6 @@ Item {
     readonly property var _monet: ConfigManager.monetEnabled
                                      ? (ColorProvider.colors[root.detail.posterId || root.posterId] || null)
                                      : null
-    // 海报莫奈取色背景顶色(heroBackdrop 渐变起点);取色未完成/失败回退 surface。
-    property color heroFrom: root._monet ? root._monet.heroFrom : Theme.surface
     // hero 文字水平对齐:LayoutMirroring 不镜像 Text 内容,文字区靠右时
     // 须显式右对齐(靠文字区起始侧),与靠左时对称。
     readonly property int heroTextAlign: root.textSide() === "right" ? Text.AlignRight
@@ -75,14 +73,16 @@ Item {
     property color complementColor: root._monet ? root._monet.complement : Theme.textMuted
     // 藏白:白色融入一点莫奈取色(强调色色相 20% 混白),供未激活图标
     // (未收藏爱心/未看勾圈),取代纯白与背景更协调。
-    // 按钮行图标色:暗色系近白(微带海报色相),亮色系取深墨——
-    // 按钮位(hero 底部,页高 ~0.7 处)在亮色下落在 bgTint 浅带 + 渐隐的背景图上,
-    // 白图标不可读(实核:detailHeroFadeBand 0.2,按钮处背景图仅剩 ~5 成 alpha)
+    // 按钮行图标色:暗色系近白(微带海报色相),亮色系取深墨
     property color iconWhite: ThemeStore.isLight
                               ? Theme.textPrimary
                               : Qt.rgba(1 + (root.accentColor.r - 1) * 0.2,
                                         1 + (root.accentColor.g - 1) * 0.2,
                                         1 + (root.accentColor.b - 1) * 0.2)
+    // 直坐页面实底的弱化小字(如演职 role):亮色系下 textMuted 对
+    // bgTint 实底对比不足,加深一档;暗色系底深,textMuted 足够。
+    property color pageMuted: ThemeStore.isLight ? Qt.darker(Theme.textMuted, 1.3)
+                                                 : Theme.textMuted
     property color complementDark: root._monet ? (ThemeStore.isLight ? root._monet.complementDarkL
                                                                      : root._monet.complementDark)
                                                : Theme.bg
@@ -839,12 +839,7 @@ Item {
     Rectangle {
         id: detailBg
         anchors.fill: parent
-        color: Theme.bg
-
-        // 全宽 Hero 背景(延伸到选集栏下方):无 backdrop 时纯色纵向渐变。
-        // 高度 = 宽度按 16:9 推导(Emby backdrop 全为 16:9),任意窗口宽度
-        // 下 PreserveAspectCrop 零裁切;"漏出"正文量随窗口宽度变化
-        // (窄窗短、宽窗深),底部经 ShaderEffect 渐隐融入正文底色。
+        color: root.bgTint
         Rectangle {
             id: heroBackdrop
             y: 0
@@ -852,15 +847,6 @@ Item {
             height: parent.width * 9 / 16
             visible: root.loaded
             z: 0
-            // 底部渐隐:整块背景(图+氛围层)离屏合成后,底 20%
-            // (y 0.80→1.0,带宽 Constants.detailHeroFadeBand)alpha 1→0 淡出。取代原"透明→bgTint 盖色"
-            // 遮罩——图片细节保留到最后一刻再溶解入页面底色,无平板色带;
-            // 压暗职责由氛围层与页面底色(暗色)承担。
-            layer.enabled: true
-            layer.effect: ShaderEffect {
-                property real u_fadeBand: Constants.detailHeroFadeBand
-                fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/hero-fade.frag.qsb"
-            }
             // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
             // 与海报同速,切换时氛围同步换新)。
             CrossfadeImage {
@@ -870,16 +856,6 @@ Item {
                 asynchronous: true
                 duration: 800
                 cache: true
-            }
-            // 氛围色叠加层(Multiply 近似):顶部海报色相低透明染色,向下渐淡,
-            // 背景图主导视觉;不遮挡图片细节。
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.30) }
-                    GradientStop { position: 0.35; color: Qt.rgba(root.heroFrom.r, root.heroFrom.g, root.heroFrom.b, 0.08) }
-                    GradientStop { position: 0.65; color: "transparent" }
-                }
             }
         }
         // 侧栏莫奈氛围由侧栏自身渐变承载(见侧栏容器),不再叠 scrim
@@ -906,15 +882,6 @@ Item {
             }
         }
 
-        // 莫奈色纵向延伸:顶部氛围色保持到 35%,中部平滑渐入带海报色相的
-        // 极暗底色(bgTint),底部与正文底色衔接;不引入互补藏色(异色相在
-        // 暗底上显脏)。
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: root.heroFrom }
-            GradientStop { position: 0.35; color: root.heroFrom }
-            GradientStop { position: 0.70; color: root.bgTint }
-            GradientStop { position: 1.0; color: root.bgTint }
-        }
     }
     Row {
         anchors.fill: parent
@@ -1055,7 +1022,7 @@ Item {
                                     AppText {
                                         id: heroNewTitle
                                         text: root.heroTitle()
-                                        color: Theme.textPrimary
+                                        color: "white"
                                         font.pixelSize: 30
                                         font.bold: true
                                         elide: Text.ElideRight
@@ -1065,7 +1032,7 @@ Item {
                                 }
                                 AppText {
                                     text: root.heroEpisodeLine()
-                                    color: Theme.textPrimary
+                                    color: "white"
                                     font.pixelSize: 18
                                     elide: Text.ElideRight
                                     width: parent.width
@@ -1074,7 +1041,7 @@ Item {
                                 }
                                 AppText {
                                     text: root.metaLine()
-                                    color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
+                                    color: Theme.rating
                                     font.pixelSize: 14
                                     width: parent.width
                                     horizontalAlignment: root.heroTextAlign
@@ -1358,7 +1325,7 @@ Item {
                         blurSource: detailBg
                             scrollParent: overview
                         glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                      : Qt.rgba(1, 1, 1, 0.06)
+                                                      : Qt.rgba(0.07, 0.09, 0.17, 0.55)
                         borderColor: drop.opened ? root.accentColor : Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
@@ -1582,7 +1549,7 @@ Item {
                         // 玻璃底色淡一点(白底微透,非黑底)——黑色太深会盖住
                         // 磨砂模糊的透亮感,淡色透出下方模糊内容才显玻璃质感。
                         glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                      : Qt.rgba(1, 1, 1, 0.06)
+                                                      : Qt.rgba(0.07, 0.09, 0.17, 0.55)
                         borderColor: Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
@@ -1694,7 +1661,7 @@ Item {
                                         }
                                         AppText {
                                             text: peopleCard.modelData.role || peopleCard.modelData.type || ""
-                                            color: Theme.textMuted
+                                            color: root.pageMuted
                                             font.pixelSize: 11
                                             elide: Text.ElideRight
                                             width: 72
@@ -1738,7 +1705,7 @@ Item {
                             blurSource: detailBg
                             scrollParent: overview
                             glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                          : Qt.rgba(1, 1, 1, 0.05)
+                                                          : Qt.rgba(0.07, 0.09, 0.17, 0.55)
                             borderColor: Theme.borderSoft
                             thickness: 0
                             frostAmount: 0.15
@@ -2127,6 +2094,13 @@ Item {
             height: parent.height
             radius: 16
             blurSource: detailBg
+            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
+                                          : Qt.rgba(0.07, 0.09, 0.17, 0.55)
+            borderColor: Theme.borderSoft
+            thickness: 0
+            frostAmount: 0.15
+            edgeLight: 0.35
+            saturation: 0.3
             visible: root.detail.type === "Series" || root.detail.type === "Episode"
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 220 } }
