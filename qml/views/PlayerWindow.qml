@@ -6,7 +6,7 @@ import MoePlayer.Core
 //! 内嵌播放窗:libmpv 视频表面 + QML 控制层(主题玻璃控制条)。
 //! Main 在 embeddedPlaybackRequested 时 createObject 新建一个顶层窗口;
 //! 每次播放 = 一个独立窗口,允许多窗并发(同集去重在 MpvClient 会话键)。
-//! 关窗/Esc = 停播(回传 Stopped);播完自动关窗。
+//! 关窗 = 停播(回传 Stopped);播完自动关窗。Esc 仅时间编辑态取消输入。
 Window {
     id: root
 
@@ -148,6 +148,21 @@ Window {
         const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60
         const p = (n) => (n < 10 ? "0" + n : "" + n)
         return (h > 0 ? h + ":" : "") + p(m) + ":" + p(sec)
+    }
+
+    // 解析 "ss" / "m:ss" / "h:mm:ss"(允许小数秒);非法返回 -1。
+    function parseTime(str) {
+        const parts = (str || "").trim().split(":")
+        if (parts.length < 1 || parts.length > 3)
+            return -1
+        let t = 0
+        for (const p of parts) {
+            const n = parseFloat(p)
+            if (isNaN(n) || n < 0 || (t > 0 && n >= 60) || (t === 0 && parts.length > 1 && n >= 60 && parts.length < 3))
+                return -1
+            t = t * 60 + n
+        }
+        return t
     }
 
     onWidthChanged: MpvClient.setEmbeddedOutputSize(root.sessionKey, video.width, video.height)
@@ -402,9 +417,67 @@ Window {
                     Row {
                         Layout.alignment: Qt.AlignVCenter
                         spacing: 4
+                        Item {
+                            anchors.verticalCenter: parent.verticalCenter
+                            width: posEdit.visible ? posEdit.width : posLabel.implicitWidth
+                            // 高度锁标签行高:编辑态输入框不顶高进度条行。
+                            height: posLabel.implicitHeight
+                            AppText {
+                                id: posLabel
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !posEdit.visible
+                                text: root.fmtTime(video.position)
+                                color: posHover.hovered ? "white" : Qt.rgba(1, 1, 1, 0.85)
+                                font.pixelSize: 12
+                                // 双击进入编辑:预填当前位置,Enter 确认跳转,
+                                // Esc/失焦取消;超出总时长按取消处理。
+                                TapHandler {
+                                    onDoubleTapped: {
+                                        posEdit.text = root.fmtTime(video.position)
+                                        posEdit.visible = true
+                                        posEdit.forceActiveFocus()
+                                        posEdit.selectAll()
+                                        root.wake()
+                                    }
+                                }
+                                HoverHandler { id: posHover; cursorShape: Qt.PointingHandCursor }
+                            }
+                            TextField {
+                                id: posEdit
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: false
+                                width: 88
+                                height: posLabel.implicitHeight + 6
+                                padding: 0
+                                horizontalAlignment: Text.AlignHCenter
+                                color: "white"
+                                font.pixelSize: 12
+                                selectionColor: Qt.rgba(1, 1, 1, 0.3)
+                                validator: RegularExpressionValidator { regularExpression: /[0-9:.]*/ }
+                                onTextChanged: root.wake()
+                                background: Rectangle {
+                                    color: Qt.rgba(1, 1, 1, 0.12)
+                                    radius: 4
+                                }
+                                onAccepted: {
+                                    const t = root.parseTime(text)
+                                    visible = false
+                                    if (t >= 0 && t <= video.duration)
+                                        MpvClient.seek(t, root.sessionKey)
+                                    root.wake()
+                                }
+                                Keys.onShortcutOverride: (e) => e.accepted = true
+                                Keys.onEscapePressed: (e) => {
+                                    e.accepted = true
+                                    visible = false
+                                }
+                                onActiveFocusChanged: if (!activeFocus)
+                                    visible = false
+                            }
+                        }
                         AppText {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: root.fmtTime(video.position) + " /"
+                            text: "/"
                             color: Qt.rgba(1, 1, 1, 0.85)
                             font.pixelSize: 12
                         }
@@ -912,9 +985,9 @@ Window {
     Timer {
         id: hideTimer
         interval: 3000
-        // 控制条 hover / 拖动进度 / 面板打开 / 暂停时钉住不隐。
+        // 控制条 hover / 拖动进度 / 面板打开 / 暂停 / 时间编辑中钉住不隐。
         onTriggered: {
-            if (barHover.hovered || seekBar.scrubbing || root.panel !== "" || video.paused)
+            if (barHover.hovered || seekBar.scrubbing || root.panel !== "" || video.paused || posEdit.visible)
                 restart()
             else
                 root.chromeVisible = false
@@ -959,7 +1032,6 @@ Window {
 
     // ---- 键盘(mpv/通用播放器约定)----
     Shortcut { sequences: ["Space", "K"]; onActivated: root.togglePause() }
-    Shortcut { sequences: ["Esc"]; onActivated: root.goBack() }
     Shortcut { sequences: ["Left"]; onActivated: { root.wake(); root.seekBy(-5) } }
     Shortcut { sequences: ["Right"]; onActivated: { root.wake(); root.seekBy(5) } }
     Shortcut { sequences: ["Shift+Left"]; onActivated: { root.wake(); root.seekBy(-30) } }
