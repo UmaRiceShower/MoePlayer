@@ -2,6 +2,7 @@
 
 #include "core/configmanager.h"
 
+#include <numeric>
 #include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
@@ -834,11 +835,14 @@ void AccountManager::rebuildCustomHomeRows(bool final)
             if (!imdb.isEmpty()) keys.append(QStringLiteral("imdb:") + imdb);
             if (!tvdb.isEmpty()) keys.append(QStringLiteral("tvdb:") + tvdb);
             if (keys.isEmpty()) {
-                const QString ny = QStringLiteral("ny:")
-                                   + it.value(QStringLiteral("name")).toString().trimmed()
-                                   + QLatin1Char('|')
-                                   + QString::number(it.value(QStringLiteral("year")).toInt());
-                keys.append(ny);
+                // 无年份不生成回退键:同名且都无元数据的不同条目(生肉/
+                // 特典常见)会被误并为一个。
+                const int year = it.value(QStringLiteral("year")).toInt();
+                if (year > 0)
+                    keys.append(QStringLiteral("ny:")
+                                + it.value(QStringLiteral("name")).toString().trimmed()
+                                + QLatin1Char('|')
+                                + QString::number(year));
             }
             int dupAt = -1;
             for (const QString &k : keys)
@@ -862,7 +866,8 @@ void AccountManager::rebuildCustomHomeRows(bool final)
         }
     }
 
-    // 桶收尾:按「内容入库时间」倒序混排
+    // 桶收尾:按「内容入库时间」倒序混排(键先预计算,比较器不再
+    // 反复解析日期字符串)。
     const auto keyOf = [this](const QVariantMap &it) -> QDateTime {
         if (it.value(QStringLiteral("type")).toString() == QLatin1String("Series")) {
             const QDateTime dt = m_seriesRecency
@@ -879,9 +884,21 @@ void AccountManager::rebuildCustomHomeRows(bool final)
     for (BucketAcc &acc : accs) {
         if (acc.items.isEmpty())
             continue;
-        std::sort(acc.items.begin(), acc.items.end(), [&keyOf](const QVariantMap &a, const QVariantMap &b) {
-            return keyOf(a) > keyOf(b);
+        // 键预计算一次(比较器内反复 fromString = n·log n 次日期解析)。
+        QList<QDateTime> keys2;
+        keys2.reserve(acc.items.size());
+        for (const QVariantMap &it : acc.items)
+            keys2.append(keyOf(it));
+        QList<int> order(acc.items.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&keys2](int a, int b) {
+            return keys2[a] > keys2[b];
         });
+        QList<QVariantMap> sorted;
+        sorted.reserve(acc.items.size());
+        for (int i : order)
+            sorted.append(acc.items[i]);
+        acc.items = sorted;
         QVariantList items;
         items.reserve(acc.items.size());
         for (const QVariantMap &it : acc.items)
@@ -2293,6 +2310,9 @@ void AccountManager::updateAccount(const QString &id, const QString &name,
         // 历史 scope 迁移 + 旧模型整清 + 首页重聚合。
         if (oldUrl != a.serverUrl) {
             m_playbackHistory->renameScopeServer(id, oldUrl, a.serverUrl);
+            // 在途历史批次按旧 scope 注册:不废弃会把整份列表再写回旧
+            // scope,与刚迁走的新 scope 双份并存(与 removeAccount 对齐)。
+            abandonHistoryScope(oldUrl.trimmed() + QLatin1Char('|') + id);
             m_client->dropServerModels(oldUrl);
             fetchHomeRows(m_homeLimit);
         }
@@ -2311,8 +2331,13 @@ void AccountManager::load()
     const QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
     const QJsonObject data = doc.object().value(QStringLiteral("data")).toObject();
     if (data.isEmpty()) {
-        if (!doc.isNull())
-            qWarning().noquote() << "AccountManager: accounts.json 结构异常,回空" << path;
+        // 读失败(坏 JSON/结构异常):置失败标记。save() 见此标记先把原
+        // 文件改名 .bak 再写——accounts.json 是唯一不可再生的凭据存储,
+        // 空表覆盖 = 全部账号 token 不可恢复。
+        m_loadFailed = true;
+        qWarning().noquote() << "AccountManager: accounts.json 无法解析("
+                             << (doc.isNull() ? QStringLiteral("坏 JSON") : QStringLiteral("结构异常"))
+                             << "),已置保护:首次写前原文件将备份" << path;
         return;
     }
     const QJsonArray arr = data.value(QStringLiteral("accounts")).toArray();
@@ -2367,6 +2392,16 @@ void AccountManager::load()
 
 void AccountManager::save()
 {
+    // 读失败保护:原文件备份后再写(只备一次,.bak 已存在不覆盖)。
+    if (m_loadFailed) {
+        m_loadFailed = false;
+        const QString path = AppPaths::configDir() + QStringLiteral("/accounts.json");
+        const QString bak = path + QStringLiteral(".bak");
+        if (QFile::exists(path) && !QFile::exists(bak)) {
+            QFile::copy(path, bak);
+            qWarning().noquote() << "AccountManager: 原 accounts.json 已备份至" << bak;
+        }
+    }
     QJsonArray arr;
     for (const auto &a : m_accounts) {
         QJsonObject o;

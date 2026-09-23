@@ -284,6 +284,8 @@ const QString &accountId) const;
     QList<FolderInfo> m_folders;
     QVariantList m_layoutOrder; // 规范化后的视觉顺序 [{type, id}](见属性注释)
     bool m_showHidden = false; // 临时露出隐藏项(Alt+S;不持久化)
+    // accounts.json 读失败标记:save() 见标记先备份原文件再写(凭据不可再生)。
+    bool m_loadFailed = false;
     // 待保存的登录(正在走 EmbyClient.login 的账号)。
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。

@@ -222,7 +222,7 @@ private:
     void loadFromFile();
     // 以当前内存值重写文件(表生成注释模板;原子写)。
     void commit();
-    // 外部修改入队:防抖后重载(自写回经 m_suppressReload 跳过)。
+    // 外部修改入队:防抖后重载(自写回经内容哈希短路)。
     void scheduleReload();
     // 按 key 发对应属性信号(宏展开 if-链)。
     void emitChangedFor(const QString &key);
@@ -234,5 +234,6 @@ private:
     QFileSystemWatcher *m_watcher = nullptr;
     QTimer *m_reloadTimer = nullptr;
     // 自己 commit 触发 fileChanged 时置位,避免自触发重载。
-    bool m_suppressReload = false;
+    // 自写回识别:上次 commit 写出的内容哈希(reload 比对跳过自触发)。
+    size_t m_lastWrittenHash = 0;
 };
