@@ -329,7 +329,7 @@ Window {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 250 } }
 
-        // 顶部:返回 + 标题。渐变压暗罩(上深下透),无硬边分割
+        // 顶部 渐变压暗罩(上深下透),无硬边分割
         Item {
             id: topBar
             anchors.top: parent.top
@@ -362,27 +362,6 @@ Window {
                     icon.height: 22
                     tip: "返回"
                     onClicked: root.goBack()
-                }
-                Column {
-                    Layout.alignment: Qt.AlignVCenter
-                    Layout.fillWidth: true   // 吃满剩余宽,左贴返回钮(不定宽居中假象)
-                    spacing: 1
-                    AppText {
-                        text: root.titleMain
-                        color: "white"
-                        font.pixelSize: 15
-                        font.weight: Font.Medium
-                        elide: Text.ElideRight
-                        width: parent.width
-                    }
-                    AppText {
-                        text: root.titleSub
-                        color: Qt.rgba(1, 1, 1, 0.65)
-                        font.pixelSize: 12
-                        elide: Text.ElideRight
-                        width: parent.width
-                        visible: text !== ""
-                    }
                 }
             }
         }
@@ -420,6 +399,17 @@ Window {
                 anchors.rightMargin: 14
                 anchors.bottomMargin: 10
                 spacing: 8
+
+                // 标题行:主标 · 副标
+                AppText {
+                    width: barCol.width
+                    text: root.titleSub !== "" ? root.titleMain + "  ·  " + root.titleSub
+                                               : root.titleMain
+                    color: "white"
+                    font.pixelSize: 15
+                    font.weight: Font.Medium
+                    elide: Text.ElideRight
+                }
 
                 // 进度条行:左侧「当前 / 总时长」,右侧进度条(拖动预览、
                 // 松手 seek;hover 显示目标时间气泡)。
@@ -856,7 +846,7 @@ Window {
     FrostedGlass {
         id: sidePanel
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: barCol.height + 18
+        anchors.bottomMargin: barCol.height - 15
         width: 320
         property int _rows: root.panel === "episodes" ? (epList.model ? epList.model.count : 0)
                 : (root.panel === "superres" ? MpvClient.superResOptions().length
