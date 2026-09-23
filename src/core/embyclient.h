@@ -406,4 +406,9 @@ private:
     // 请求序号按服务器隔离,丢弃过期响应(视图快速切换/输入防抖窗口内旧请求)。
     QHash<QString, int> m_itemsSeq;
     QHash<QString, int> m_searchSeq;
+    // 分类三通道同样按键隔离过期(genres/years/folders 与 items 同发,
+    // 无守卫时切库/下钻后旧 ParentId 响应会覆盖当前级的分类)。
+    QHash<QString, int> m_genresSeq;
+    QHash<QString, int> m_yearsSeq;
+    QHash<QString, int> m_foldersSeq;
 };

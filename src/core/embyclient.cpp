@@ -546,6 +546,21 @@ void EmbyClient::dropServerModels(const QString &serverUrl)
     dropBy(m_allEpisodesModels);
     dropBy(m_genresModels);
     dropBy(m_foldersModels);
+    // 序号表同清:在途响应的 seq 与重置后的计数不等即被守卫丢弃,
+    // 不会在回调里经 *ModelFor 惰性重建已删账号的模型。
+    const auto dropSeq = [&](QHash<QString, int> &dict) {
+        for (auto it = dict.begin(); it != dict.end();) {
+            if (it.key().startsWith(prefix))
+                it = dict.erase(it);
+            else
+                ++it;
+        }
+    };
+    dropSeq(m_itemsSeq);
+    dropSeq(m_searchSeq);
+    dropSeq(m_genresSeq);
+    dropSeq(m_yearsSeq);
+    dropSeq(m_foldersSeq);
 }
 
 // ---------- 登录与公开信息 ----------
@@ -812,8 +827,13 @@ void EmbyClient::fetchGenres(const QString &serverUrl, const QString &accountId,
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    const QString mkey = modelKey(key, accountId);
+    const int seq = ++m_genresSeq[mkey];
     get(key, token, userId, QStringLiteral("/Genres?%1").arg(q.toString()),
-        [this, key, userId, accountId](const QJsonDocument &doc) {
+        [this, key, mkey, userId, accountId, seq](const QJsonDocument &doc) {
+            // 过期(切库/下钻后新请求已发)或模型已随账号删除丢弃。
+            if (seq != m_genresSeq.value(mkey) || !m_genresModels.contains(mkey))
+                return;
             fillItems(genresModelFor(key, accountId), doc, false, true, key, userId);
             qInfo() << "Emby: genres =" << genresModelFor(key, accountId)->count() << "on" << key;
             emit genresReceived(key, accountId);
@@ -829,8 +849,12 @@ void EmbyClient::fetchYears(const QString &serverUrl, const QString &accountId,
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("ParentId"), viewId);
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    const QString mkey = modelKey(key, accountId);
+    const int seq = ++m_yearsSeq[mkey];
     get(key, token, userId, QStringLiteral("/Years?%1").arg(q.toString()),
-        [this, key, accountId](const QJsonDocument &doc) {
+        [this, key, mkey, accountId, seq](const QJsonDocument &doc) {
+            if (seq != m_yearsSeq.value(mkey))
+                return;
             QStringList names;
             for (const auto &v : doc.object().value(QLatin1String("Items")).toArray())
                 names.append(v.toObject().value(QLatin1String("Name")).toString());
@@ -851,8 +875,12 @@ void EmbyClient::fetchFolders(const QString &serverUrl, const QString &accountId
     q.addQueryItem(QStringLiteral("SortBy"), QStringLiteral("SortName"));
     q.addQueryItem(QStringLiteral("SortOrder"), QStringLiteral("Ascending"));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(MoePlayer::kMaxPageSize));
+    const QString mkey = modelKey(key, accountId);
+    const int seq = ++m_foldersSeq[mkey];
     get(key, token, userId, userPath(userId, QStringLiteral("/Items?%1").arg(q.toString())),
-        [this, key, userId, accountId](const QJsonDocument &doc) {
+        [this, key, mkey, userId, accountId, seq](const QJsonDocument &doc) {
+            if (seq != m_foldersSeq.value(mkey) || !m_foldersModels.contains(mkey))
+                return;
             fillItems(foldersModelFor(key, accountId), doc, false, false, key, userId);
             qInfo() << "Emby: folders =" << foldersModelFor(key, accountId)->count() << "on" << key;
             emit foldersReceived(key, accountId);
@@ -1529,7 +1557,9 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                      m.insert(QStringLiteral("name"), s.value(QLatin1String("Name")).toString());
                      mediaSources.append(m);
                  }
-                 // 选择目标媒体源:显式指定 > 第一个。
+                 // 选择目标媒体源:显式指定 > 第一个。显式指定却未命中
+                 // (版本在打开详情后被删/改权限)= 明确失败,不能静默改播
+                 // 第一个版本——用户选的是 B,播 A 是错误内容。
                  QJsonObject src;
                  if (!mediaSourceId.isEmpty()) {
                      for (const QJsonValue &v : sources) {
@@ -1538,6 +1568,13 @@ void EmbyClient::fetchPlaybackInfo(const QString &serverUrl, const QString &toke
                              src = s;
                              break;
                          }
+                     }
+                     if (src.isEmpty()) {
+                         const QString msg = QStringLiteral("所选版本已不可用");
+                         qWarning() << "Emby: 指定媒体源不存在" << mediaSourceId << itemId << "on" << key;
+                         emit errorOccurred(key, msg);
+                         emit playbackFailed(key, itemId, msg);
+                         return;
                      }
                  }
                  if (src.isEmpty())
