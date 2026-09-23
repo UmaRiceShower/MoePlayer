@@ -28,21 +28,22 @@ namespace {
 class ColorTask : public QRunnable
 {
 public:
-    ColorTask(QPointer<ColorProvider> self, PosterProvider *posters, QString posterId)
+    ColorTask(QPointer<ColorProvider> self, QString posterId, QUrl url,
+              QString token, QNetworkProxy proxy)
         : m_self(self)
-        , m_posters(posters)
         , m_posterId(std::move(posterId))
+        , m_url(std::move(url))
+        , m_token(std::move(token))
+        , m_proxy(proxy)
     {
     }
 
     void run() override
     {
-        QString token;
         QVariantMap roles;
-        const QUrl url = m_posters->resolvedImageUrl(m_posterId, &token);
-        if (!url.isEmpty()) {
+        if (!m_url.isEmpty()) {
             QString err;
-            const QImage img = PosterProvider::loadImageSync(url, token, &err, m_posters->proxy(),
+            const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err, m_proxy,
                                                              m_posterId);
             if (!img.isNull())
                 roles = ColorProvider::extractRoles(img);
@@ -54,8 +55,10 @@ public:
 
 private:
     QPointer<ColorProvider> m_self;
-    PosterProvider *m_posters;
     QString m_posterId;
+    QUrl m_url;
+    QString m_token;
+    QNetworkProxy m_proxy;
 };
 } // namespace
 
@@ -64,9 +67,14 @@ void ColorProvider::requestColor(const QString &posterId)
     // 幂等:取色中/已取到不再重复。
     if (posterId.isEmpty() || m_colors.contains(posterId) || m_pending.contains(posterId))
         return;
+    // 解析必须在 GUI 线程完成(AccountManager 账号表/ConfigManager 配置表
+    // 无线程保护;池线程并发读会被登录/改线路/热重载的写撕裂)——与
+    // PosterProvider::requestImageResponse 同约定:构造期解析,任务只吃结果。
     m_pending.insert(posterId);
+    QString token;
+    const QUrl url = m_posters->resolvedImageUrl(posterId, &token);
     QThreadPool::globalInstance()->start(
-        new ColorTask(QPointer<ColorProvider>(this), m_posters, posterId));
+        new ColorTask(QPointer<ColorProvider>(this), posterId, url, token, m_posters->proxy()));
 }
 
 void ColorProvider::onColorReady(const QString &posterId, const QVariantMap &roles)

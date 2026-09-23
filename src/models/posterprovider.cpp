@@ -14,6 +14,7 @@
 #include <QNetworkRequest>
 #include <QPointer>
 #include <QQuickTextureFactory>
+#include <QRegularExpression>
 #include <QSemaphore>
 #include <QThread>
 #include <QThreadPool>
@@ -47,7 +48,7 @@ namespace {
 //   无闸时一屏几十张图同时拉取会挤占 JSON 请求带宽;缓存命中不占名额。
 QMutex g_memMutex;
 constexpr int kCacheMaxBytes = 192 * 1024 * 1024; // 内存缓存上限
-constexpr int kFetchConcurrency = 6;             // 同时回源上限
+constexpr int kFetchConcurrency = 16; // 回源并发
 QCache<QString, QImage> g_memCache(kCacheMaxBytes);
 QSemaphore g_fetchGate(kFetchConcurrency);
 constexpr qint64 kCacheTtlMs = 30LL * 24 * 3600 * 1000;
@@ -59,30 +60,68 @@ QString cacheFilePath(const QString &key)
            + QStringLiteral("/emby-images/") + QString::fromLatin1(h) + QStringLiteral(".img");
 }
 
-// 后台加载任务:磁盘读取/回源(含并发闸与网络)在线程池线程执行,
-// 绝不阻塞 GUI 线程。结果经 setResult 排队回填到响应对象;
-// 响应对象已销毁时 QPointer 置空,回填被跳过,无悬垂访问。
-class LoadTask : public QRunnable
+// 磁盘读与网络回源走两个专用池
+QThreadPool &diskPool()
+{
+    static QThreadPool p;
+    p.setMaxThreadCount(4);
+    return p;
+}
+QThreadPool &netPool()
+{
+    static QThreadPool p;
+    p.setMaxThreadCount(16);
+    return p;
+}
+
+void deliver(const QPointer<PosterResponse> &self, const QImage &img, const QString &err)
+{
+    // 响应对象已销毁时 QPointer 置空,回填被跳过,无悬垂访问。
+    if (self)
+        QMetaObject::invokeMethod(self, "setResult", Qt::QueuedConnection,
+                                  Q_ARG(QImage, img), Q_ARG(QString, err));
+}
+
+
+class NetTask : public QRunnable
 {
 public:
-    LoadTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token,
-             const QNetworkProxy &proxy, const QString &idKey)
-        : m_self(self)
-        , m_url(url)
-        , m_token(token)
-        , m_proxy(proxy)
-        , m_idKey(idKey)
+    NetTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token,
+            const QNetworkProxy &proxy, const QString &idKey)
+        : m_self(self), m_url(url), m_token(token), m_proxy(proxy), m_idKey(idKey)
     {
     }
-
     void run() override
     {
-        // 加载(磁盘缓存/回源)抽至 PosterProvider::loadImageSync,取色等复用。
         QString err;
-        const QImage img = PosterProvider::loadImageSync(m_url, m_token, &err, m_proxy, m_idKey);
-        if (m_self)
-            QMetaObject::invokeMethod(m_self, "setResult", Qt::QueuedConnection,
-                                      Q_ARG(QImage, img), Q_ARG(QString, err));
+        const QImage img = PosterProvider::fetchNetwork(m_url, m_token, &err, m_proxy, m_idKey);
+        deliver(m_self, img, err);
+    }
+
+private:
+    QPointer<PosterResponse> m_self;
+    QUrl m_url;
+    QString m_token;
+    QNetworkProxy m_proxy;
+    QString m_idKey;
+};
+
+class DiskTask : public QRunnable
+{
+public:
+    DiskTask(QPointer<PosterResponse> self, const QUrl &url, const QString &token,
+             const QNetworkProxy &proxy, const QString &idKey)
+        : m_self(self), m_url(url), m_token(token), m_proxy(proxy), m_idKey(idKey)
+    {
+    }
+    void run() override
+    {
+        const QImage img = PosterProvider::loadDisk(m_idKey);
+        if (img.isNull()) {
+            netPool().start(new NetTask(m_self, m_url, m_token, m_proxy, m_idKey));
+            return;
+        }
+        deliver(m_self, img, QString());
     }
 
 private:
@@ -101,16 +140,19 @@ bool PosterProvider::isCached(const QString &id) const
         if (g_memCache.contains(id))
             return true;
     }
-    const QString path = cacheFilePath(id);
-    return QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs;
+    const QFileInfo fi(cacheFilePath(id));
+    // 不存在文件的 lastModified 无效:msecsTo 对无效日期返 0,0 < TTL 恒真
+    // —— 必须先 exists 判定。
+    return fi.exists() && fi.lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs;
 }
 
 QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
     Q_UNUSED(requestedSize)
+    const QString base = QString(id).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
     QString serverUrl, token, userId, itemId, tag, kind;
-    if (!resolveImageId(id, &serverUrl, &token, &userId, &itemId, &tag, &kind)) {
+    if (!resolveImageId(base, &serverUrl, &token, &userId, &itemId, &tag, &kind)) {
         qWarning().noquote() << "Poster: 图片地址无效" << id;
         return new PosterResponse(QUrl(), QImage(), QStringLiteral("图片地址无效"));
     }
@@ -120,13 +162,14 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                               itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     // 键 = 海报 id(与 loadImageSync 同源)。
-    const QString ckey = id;
+    const QString ckey = base;
     {
         QMutexLocker locker(&g_memMutex);
-        if (g_memCache.contains(ckey))
+        if (g_memCache.contains(ckey)) {
             return new PosterResponse(url, *g_memCache.object(ckey));
+        }
     }
-    return new PosterResponse(url, token, proxy(), id);
+    return new PosterResponse(url, token, proxy(), base);
 }
 
 bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token, QString *userId,
@@ -217,32 +260,38 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                                    .arg(itemId, kind, q.toString()));
 }
 
-QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error,
-                                     const QNetworkProxy &proxy, const QString &idKey)
+// 磁盘层(TTL 内):读文件解码,回填内存层;未命中/失败返回空图。
+QImage PosterProvider::loadDisk(const QString &idKey)
+{
+    const QString path = cacheFilePath(idKey);
+    const QFileInfo fi(path);
+    if (!fi.exists() || fi.lastModified().msecsTo(QDateTime::currentDateTime()) >= kCacheTtlMs)
+        return QImage();
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) {
+        qDebug().noquote() << "Poster: 磁盘缓存读取失败,回源" << path << f.errorString();
+        return QImage();
+    }
+    QImage img;
+    if (!img.loadFromData(f.readAll())) {
+        qDebug().noquote() << "Poster: 磁盘缓存解码失败,回源" << path;
+        return QImage();
+    }
+    QMutexLocker locker(&g_memMutex);
+    g_memCache.insert(idKey, new QImage(img), img.sizeInBytes());
+    return img;
+}
+
+// 网络回源(并发闸 + 超时 + 一次传输重试),成功写磁盘与内存缓存。
+QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QString *error,
+                                    const QNetworkProxy &proxy, const QString &idKey)
 {
     // 缓存键 = 海报 id(accountId~itemId~tag~kind,不可变身份)
     const QString key = idKey.isEmpty() ? url.toString() : idKey;
     if (error)
         error->clear();
-    // 1) 磁盘层命中(TTL 内):读文件解码,回填内存层。
     const QString path = cacheFilePath(key);
-    if (QFileInfo(path).lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs) {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly)) {
-            qDebug().noquote() << "Poster: 磁盘缓存读取失败,回源" << path << f.errorString();
-        } else {
-            QImage img;
-            if (img.loadFromData(f.readAll())) {
-                {
-                    QMutexLocker locker(&g_memMutex);
-                    g_memCache.insert(key, new QImage(img), img.sizeInBytes());
-                }
-                return img;
-            }
-            qDebug().noquote() << "Poster: 磁盘缓存解码失败,回源" << path;
-        }
-    }
-    // 2) 回源:占闸(后台阻塞无碍);thread_local QNAM —— 栈对象会让每张
+    // 占闸(后台阻塞无碍);thread_local QNAM —— 栈对象会让每张
     // 图付全额 TCP+TLS 握手、零连接复用;
     // 线程池线程长寿,复用自然建立,且不破线程亲和。
     g_fetchGate.acquire();
@@ -317,11 +366,24 @@ QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QStr
     return img;
 }
 
+QImage PosterProvider::loadImageSync(const QUrl &url, const QString &token, QString *error,
+                                     const QNetworkProxy &proxy, const QString &idKey)
+{
+    // 同步调用方(取色等):磁盘命中直出,未命中回源。
+    const QImage disk = loadDisk(idKey.isEmpty() ? url.toString() : idKey);
+    if (!disk.isNull()) {
+        if (error)
+            error->clear();
+        return disk;
+    }
+    return fetchNetwork(url, token, error, proxy, idKey);
+}
+
 PosterResponse::PosterResponse(const QUrl &url, const QString &token,
                                const QNetworkProxy &proxy, const QString &idKey)
 {
-    // 加载(磁盘/网络)全部在线程池线程执行,不阻塞调用线程(GUI)。
-    QThreadPool::globalInstance()->start(new LoadTask(QPointer<PosterResponse>(this), url, token, proxy, idKey));
+    // 磁盘读 → 未命中转网络池;均不阻塞调用线程(GUI)。
+    diskPool().start(new DiskTask(QPointer<PosterResponse>(this), url, token, proxy, idKey));
 }
 
 PosterResponse::PosterResponse(const QUrl &url, const QImage &img, const QString &error)
