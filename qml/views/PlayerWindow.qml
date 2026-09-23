@@ -103,7 +103,11 @@ Window {
     }
 
     // 系统点窗框 X:等同 goBack(停播回传 Stopped)。
-    onClosing: MpvClient.stop(root.sessionKey)
+    // closeSelf 幂等:未起播/协商失败时 stop 不发信号,补自关防窗口泄漏。
+    onClosing: {
+        MpvClient.stop(root.sessionKey)
+        closeSelf()
+    }
 
     function togglePause() {
         MpvClient.setPause(!video.paused, root.sessionKey)
@@ -131,8 +135,9 @@ Window {
     }
     function episodeJump(delta) {
         // 播放列表跳集:占位条目经 on_load hook 协商真实地址(连播链路)。
+        // 会话键必须带账号前缀(与所有控制调用一致),裸 itemId 查无会话。
         MpvClient.command([delta > 0 ? "playlist-next" : "playlist-prev"],
-                          root.meta.itemId || "")
+                          root.sessionKey)
     }
 
     // 章节磁吸:距章节点阈值内即吸附(返回章节时间;无 = -1)。
@@ -600,17 +605,32 @@ Window {
                                 id: previewLoader
                                 anchors.fill: parent
                                 anchors.margins: 3
-                                // 仅 hover 且有播放地址时建立预览实例。
-                                active: (seekBar.hovered || seekBar.scrubbing)
+                                property bool _keep: false
+                                property string _loadedUrl: ""
+                                active: ((seekBar.hovered || seekBar.scrubbing) || previewLoader._keep)
                                         && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""
                                 sourceComponent: MpvVideoItem { id: previewVideo }
+                                // 换集后实例保活但内容过期:hover 时换到新集地址。
+                                function reloadIfStale() {
+                                    if (!item)
+                                        return
+                                    const info = MpvClient.previewInfo(root.sessionKey)
+                                    if (info.url && info.url !== _loadedUrl) {
+                                        item.sendCommand(["loadfile", info.url, "replace"])
+                                        _loadedUrl = info.url
+                                    }
+                                }
                                 onLoaded: {
                                     const info = MpvClient.previewInfo(root.sessionKey)
+                                    // 与主视频/外部模式同口径:显式下发代理。
+                                    item.sendCommand(["set_property", "http-proxy", ConfigManager.proxy || ""])
                                     if (info.headers && info.headers.length > 0)
                                         item.sendCommand(["set_property", "http-header-fields", info.headers.join(",")])
                                     item.sendCommand(["set_property", "mute", true])
                                     item.sendCommand(["set_property", "pause", true])
                                     item.sendCommand(["loadfile", info.url, "replace"])
+                                    previewLoader._loadedUrl = info.url
+                                    previewLoader._keep = true
                                 }
                             }
                             AppText {
@@ -635,6 +655,7 @@ Window {
                             onTriggered: {
                                 if (!previewLoader.item)
                                     return
+                                previewLoader.reloadIfStale()
                                 const t = seekBar.scrubbing ? seekBar.value
                                         : (seekBar.hoverFrac >= 0 ? seekBar.hoverFrac * seekBar.to : -1)
                                 if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5) {

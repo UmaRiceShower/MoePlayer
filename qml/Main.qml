@@ -249,6 +249,19 @@ ApplicationWindow {
     // 连播协商响应(与 Detail 的主动播放协商并存:按在途缓存区分)。
     Connections {
         target: EmbyClient
+        // fetchAllEpisodes 失败只发 errorOccurred(无 allEpisodesReady)——
+        // 挂起的起播交付须在此结算(fail 关窗),否则播放窗永久加载态。
+        function onErrorOccurred(serverUrl, message) {
+            if (!root._deliverPending)
+                return
+            if (!message.startsWith("获取剧集全部分集"))
+                return
+            const meta = root._deliverMeta
+            root._deliverPending = false
+            root._deliverMeta = null
+            if (meta && meta.itemId)
+                MpvClient.fail(meta.itemId, message)
+        }
         function onAllEpisodesReady(serverUrl, accountId, seriesId) {
             // 集详情直达场景:全集序列就绪后重试进链/重排列表。
             if (root._pendingChain && root._pendingChain.serverUrl === serverUrl
