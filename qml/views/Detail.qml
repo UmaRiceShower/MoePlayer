@@ -2121,14 +2121,21 @@ Item {
         }
 
         // ---- 右栏:竖向选集条(剧集/集详情) ----
-        Column {
-            id: sidebar
+        FrostedGlass {
+            id: sidebarGlass
             width: Constants.detailSidebarW
             height: parent.height
-            spacing: 10
+            radius: 16
+            blurSource: detailBg
             visible: root.detail.type === "Series" || root.detail.type === "Episode"
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 220 } }
+
+            Column {
+                id: sidebar
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 10
 
             // 选季条:显示当前季,悬停时仅数字区变化(候选数字原位放大 +
             // 上下邻季淡入),条本身高度/背景/描边保持固定。
@@ -2459,6 +2466,7 @@ Item {
                         }
                     }
                 }
+            }
             }
         }
     }
