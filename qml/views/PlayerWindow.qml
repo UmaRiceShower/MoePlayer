@@ -71,6 +71,8 @@ Window {
     property var chapters: []
     // 时长显示形态:false = 总时长,true = 剩余(负号),点击切换。
     property bool showRemaining: false
+    // 唤出侧面板的按钮(面板右缘对齐其右缘);关面板清空。
+    property var panelAnchor: null
 
     function wake() {
         chromeVisible = true
@@ -740,40 +742,48 @@ Window {
                         tip: "倍速(点击循环)"
                     }
                     IconBtn {
+                        id: audioBtn
                         icon.source: "qrc:/icons/audio.svg"
                         tip: "音轨"
                         onClicked: {
                             root.panel = root.panel === "audio" ? "" : "audio"
+                            root.panelAnchor = root.panel === "audio" ? audioBtn : null
                             if (root.panel === "audio")
                                 MpvClient.refreshTracks(root.sessionKey)
                             root.wake()
                         }
                     }
                     IconBtn {
+                        id: subBtn
                         icon.source: "qrc:/icons/subtitle.svg"
                         tip: "字幕"
                         onClicked: {
                             root.panel = root.panel === "sub" ? "" : "sub"
+                            root.panelAnchor = root.panel === "sub" ? subBtn : null
                             if (root.panel === "sub")
                                 MpvClient.refreshTracks(root.sessionKey)
                             root.wake()
                         }
                     }
                     IconBtn {
+                        id: wandBtn
                         icon.source: "qrc:/icons/wand.svg"
                         tip: "超分(Anime4K)"
                         onClicked: {
                             root.panel = root.panel === "superres" ? "" : "superres"
+                            root.panelAnchor = root.panel === "superres" ? wandBtn : null
                             root.wake()
                         }
                     }
                     // 选集仅剧集(有播放列表)可见;右簇功能钮面板互斥。
                     IconBtn {
+                        id: epBtn
                         visible: (root.meta.seriesId || "") !== ""
                         icon.source: "qrc:/icons/episodes.svg"
                         tip: "选集"
                         onClicked: {
                             root.panel = root.panel === "episodes" ? "" : "episodes"
+                            root.panelAnchor = root.panel === "episodes" ? epBtn : null
                             root.wake()
                         }
                     }
@@ -787,15 +797,26 @@ Window {
         }
     }
 
-    // ---- 右侧面板(选集 / 轨道;玻璃,压在控制层上)----
+    // ---- 侧面板(选集 / 轨道 / 超分;玻璃,压在控制层上)----
     FrostedGlass {
         id: sidePanel
-        anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: bottomBar.height + 8
-        anchors.rightMargin: 16
+        anchors.bottomMargin: barCol.height + 18
         width: 320
-        height: Math.min(parent.height * 0.6, 420)
+        property int _rows: root.panel === "episodes" ? (epList.model ? epList.model.count : 0)
+                : (root.panel === "superres" ? MpvClient.superResOptions().length
+                   : ((root.panel === "audio" || root.panel === "sub") ? trackList.model.length : 0))
+        property int _rowH: root.panel === "episodes" ? 40 : 36
+        height: Math.min(root.height * 0.6, 420,
+                22 + 8 + _rows * _rowH + (root.panel === "superres" ? 44 : 0) + 24)
+        x: {
+            const a = root.panelAnchor
+            if (!a)
+                return root.width - width - 16
+            void (a.x + a.width)
+            return Math.max(8, Math.min(root.width - width - 8,
+                    a.mapToItem(null, a.width, 0).x - width))
+        }
         radius: 14
         blurSource: video
         visible: root.panel !== "" && root.chromeVisible
@@ -804,6 +825,7 @@ Window {
         MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
 
         Column {
+            id: panelCol
             anchors.fill: parent
             anchors.margins: 12
             spacing: 8
