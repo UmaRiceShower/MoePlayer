@@ -1,11 +1,13 @@
 pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Window
 import MoePlayer.Core
 
 //! 条目详情页(Hero + 左栏正文 + 右侧竖向选集条)。
 //! 无状态浏览:详情/播放协商/已看/收藏/相似推荐均按 serverUrl 凭据路由。
-//! 选集条替代原"分季→全屏分集网格":剧集页与集详情页共用右侧竖向列表,
+//! 选集条替代原"分季→全屏分集网格":剧集页与集详情页共用右侧竖向列表;
+//! 同剧换集 = 页内轻替换(无历史);跨条目(相似推荐)= 栈推新页。
 //! 滚轮/上下键滚动,hover 放大;点集原地替换(集详情页内切集,不叠栈)。
 Item {
     id: root
@@ -18,37 +20,15 @@ Item {
     // 浏览用账号 id(主窗口导航时注入)。
     property string accountId: ""
 
-    // 详情间导航历史(相似推荐原地替换):栈内保存被替换前的条目,
-    // back 时逐级恢复,替代"压新页再 pop"的整页重建。
-    property var detailHistory: []
-    // 本页初始打开的条目类型
-    property string _originType: ""
+    // 跨条目导航走真栈页(Main.pushDetail):返回 = 自然逐级退栈;
+    // 页内替换仅剩选集条同剧换集(轻替换,无历史)。
     // 相似推荐数据已过期(条目切换后、新推荐到达前):隐藏旧推荐防误导。
     property bool similarStale: true
     // 相似推荐双击防抖(沿用原 Main 侧逻辑)。
     property string lastItemPush: ""
     property int lastItemPushTime: 0
-    // 原地替换动画:数据落地前先淡出旧正文(replacing 期间 detail 暂存
-    // pendingDetail),动画中 applyDetail 落地并淡入,完成后复位。
-    // 只对文字层淡入淡出(textFade),图片各自走圆形扩散溶解(CrossfadeImage)。
-    property bool replacing: false
     // 当前替换是否同剧换集(保留正文/选集滚动;换其它条目复位)。
     property bool replaceKeepScroll: false
-    property var pendingDetail: null
-    // 文字层透明度:详情切换时正文文字淡出→换字→淡入;图片不受此影响。
-    property real textFade: 1
-    // hero 文字块双树揭示动画状态:换字前快照旧文字到旧树(heroOldTree,
-    // 右缘固定),新树(heroNewTree,左缘固定)绑当前 detail;textReveal 1→0
-    // 一趟:旧树宽度 W→0(从左往右消失)、新树 0→W(从左往右出现),配合
-    // old/newOpacity 交叉淡化(旧淡出/新淡入),压住透明文字间隙透出对方的
-    // 叠影。稳态 textReveal=0/oldOpacity=0/newOpacity=1(新树全宽全显)。
-    property real textReveal: 0
-    property real oldTextOpacity: 0
-    property real newTextOpacity: 1
-    // 旧树内容快照(换字前冻结旧值,动画期间旧树显示旧文字)。
-    property string heroOldTitle: ""
-    property string heroOldMeta: ""
-    property string heroOldEpisode: ""
 
     // 标识本页为详情页(Main 据此防止双击卡片重复 push)。
     readonly property bool isDetailPage: true
@@ -277,65 +257,39 @@ Item {
         root.itemId = newItemId
         root.posterId = newPosterId
         root.title = newTitle
-        // 重置条目相关状态:季与收藏(新 detail 到达前不显示旧条目状态)、
-        // 候选季、相似推荐(stale 隐藏旧推荐)。
-        root.currentSeasonId = ""
+        // 重置条目相关状态:收藏(新 detail 到达前不显示旧条目状态)、
+        // 相似推荐(stale 隐藏旧推荐)。同剧换集(keepScroll)保留季/续播
+        // 状态——清空 currentSeasonId 会让选集条模型绑定先取空模型
+        // (creates-on-miss)整栏销毁,seasons 回来再回填:闪空+重建+滚动丢。
         root.isFavorite = false
-        root.seasonNos = []
-        root.seasonCandidate = 1
-        root._resumePending = false
-        root._nextUpReady = false
-        root._resumeSeasonNo = 0
-        root._resumeEpisodeNo = 0
-        root._resumeEpisodeId = ""
-        root._userPickedSeason = false
+        if (!keepScroll) {
+            root.currentSeasonId = ""
+            root.seasonNos = []
+            root.seasonCandidate = 1
+            root._resumePending = false
+            root._nextUpReady = false
+            root._resumeSeasonNo = 0
+            root._resumeEpisodeNo = 0
+            root._resumeEpisodeId = ""
+            root._userPickedSeason = false
+        }
         root.similarStale = true
-        root.replacing = true
         root.replaceKeepScroll = !!keepScroll
         // 同剧换集保留滚动位置(内容原地连续);换其它条目/返回回顶。
         if (!keepScroll)
             overview.contentY = 0
     }
-    // 相似推荐点击:压历史(记录当前条目)后原地替换,不 push 新页。
+    // 相似推荐点击:跨条目 = 栈推新页(返回自然逐级回);防抖保留。
     function openItemDetail(itemId, posterId, title, serverUrl) {
         const now = Date.now()
         if (itemId === root.lastItemPush && now - root.lastItemPushTime < Constants.episodePushDebounceMs)
             return
         root.lastItemPush = itemId
         root.lastItemPushTime = now
-        // 历史深度上限,防相似推荐链无限增长。
-        if (root.detailHistory.length >= 16)
-            root.detailHistory.shift()
-        root.detailHistory.push({
-            itemId: root.itemId, posterId: root.posterId,
-            title: root.title, serverUrl: root.serverUrl
-        })
-        root.replaceItem(itemId, posterId, title)
+        ApplicationWindow.window.pushDetail(itemId, posterId, title, serverUrl, root.accountId)
     }
-    // 页内返回契约:Alt+Left 由 Main 统一分发到此处(Esc 只关浮层,不进页面栈)。
-    // 先沿详情历史逐级恢复;「剧页内钻进集」回父剧;外部直达集详情不消费
-    // (返回 false 退栈回来源页)。
-    function goBack() {
-        // 浏览链优先(相似推荐等原地替换链逐级恢复)。
-        if (root.detailHistory.length > 0) {
-            const prev = root.detailHistory.pop()
-            root.replaceItem(prev.itemId, prev.posterId, prev.title)
-            return true
-        }
-        // 仅「本页由剧集页原地钻进集」才回父剧(选集条不换页,这是其
-        // 唯一回程);外部直达的集详情(历史/搜索)退栈回来源页。
-        if (root.detail.type === "Episode" && root.detail.seriesId
-                && root._originType === "Series") {
-            root.replaceItem(root.detail.seriesId, "", root.detail.seriesName)
-            return true
-        }
-        return false
-    }
-    // 数据落地:赋值 detail 并拉选集/推荐(正文替换的"换字"一步);
-    // fadeInOut 动画中调用(正文已淡出),文字揭示动画由其自身编排。
+    // 数据落地:赋值 detail 并拉选集/推荐。
     function applyDetail(d) {
-        if (root._originType === "")
-            root._originType = d.type || ""
         root.detail = d
         root.resetPlaybackSelection()
         root.isFavorite = d.isFavorite
@@ -856,70 +810,6 @@ Item {
             return "外挂"
         return s.isExternal ? "外挂" : "内嵌"
     }
-    // 快照旧文字并让旧树就位:旧树全宽全显盖住新树(此刻两者内容一致,
-    // 无缝;新树随后被 applyDetail 换新值,但 opacity 已 0,不产生叠影)。
-    function snapshotOldText() {
-        root.heroOldTitle = root.heroTitle()
-        root.heroOldMeta = root.metaLine()
-        root.heroOldEpisode = root.heroEpisodeLine()
-        root.textReveal = 1
-        root.oldTextOpacity = 1
-        root.newTextOpacity = 0
-    }
-    // 动画结束复位:旧树隐藏,新树全宽全显(稳态)。
-    function finishTextSwap() {
-        root.textReveal = 0
-        root.oldTextOpacity = 0
-        root.newTextOpacity = 1
-    }
-
-    // hero 文字块滑动揭示:换字前快照旧文字 → 落地新值(新树在下层被旧树
-    // 盖住)→ 单程动画:旧树右缘固定宽度 W→0(从左往右消失)+ 新树左缘
-    // 固定 0→W(从左往右出现),同时交叉淡化(旧淡出/新淡入)。
-    // 图片(backdrop/海报/演职/缩略图)不走此层,各自圆形扩散溶解。
-    // 其余文字区(按钮行/演职/相似推荐/选集)仍乘 textFade 整体淡入淡出。
-    SequentialAnimation {
-        id: fadeInOut
-        ScriptAction { script: root.snapshotOldText() }
-        ScriptAction {
-            script: {
-                const d = root.pendingDetail
-                root.pendingDetail = null
-                root.applyDetail(d)
-            }
-        }
-        ParallelAnimation {
-            NumberAnimation {
-                target: root
-                property: "textReveal"
-                to: 0
-                duration: Constants.detailTextRevealMs
-                easing.type: Easing.InQuad
-            }
-            NumberAnimation {
-                target: root
-                property: "oldTextOpacity"
-                to: 0
-                duration: Constants.detailTextRevealMs
-                easing.type: Easing.InQuad
-            }
-            NumberAnimation {
-                target: root
-                property: "newTextOpacity"
-                to: 1
-                duration: Constants.detailTextRevealMs
-                easing.type: Easing.OutCubic
-            }
-        }
-        ScriptAction { script: root.finishTextSwap() }
-        onFinished: root.replacing = false
-        onStopped: {
-            root.replacing = false
-            root.finishTextSwap()
-        }
-    }
-
-
     // 页面底色 + Hero 背景:正文玻璃控件的采样源(在 overview 之下,不含
     // 正文控件 → 无自采样)。
     Rectangle {
@@ -1118,88 +1008,22 @@ Item {
                         }
                     }
 
-                    // hero 文字块:双树滑动揭示(结构不变)。宽高与位置
-                    // 全部由 textSlot 决定(静态锚定,判断在槽内)。
+                    // hero 文字块:宽高与位置全部由 textSlot 决定(静态锚定)。
                     Item {
                         id: heroTextArea
                         anchors.fill: textSlot
 
-                        Item {
-                            id: heroOldTree
-                            anchors.right: heroTextArea.right
-                            width: heroTextArea.width * root.textReveal
-                            // Item 的 implicitHeight 默认 0(不随子项传播),
-                            // 显式取列高,否则 clip 后文字被裁没。
-                            height: heroTextArea.height
-                            clip: true
-                            opacity: root.oldTextOpacity
-                            visible: root.oldTextOpacity > 0
-                            Column {
-                                id: heroOldCol
-                                // 右缘贴容器右缘:容器右缘固定、宽度收缩时
-                                // 列原点恒 0,裁剪落在列右半(左先消失)。
-                                anchors.right: heroOldTree.right
-                                width: heroTextArea.width
-                                // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                // bottom/followPoster 沉底——简介文字底缘
-                                // 对齐文字槽底(槽底随锚定 = 海报下缘)。
-                                y: root.textSlotVertical() === "top"
-                                    ? 0 : (root.textSlotVertical() === "middle"
-                                            ? (parent.height - implicitHeight) / 2
-                                            : parent.height - implicitHeight)
-                                spacing: 8
-                                Row {
-                                    width: parent.width
-                                    spacing: 12
-                                    AppText {
-                                        text: root.heroOldTitle
-                                        color: Theme.textPrimary
-                                        font.pixelSize: 30
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        width: parent.width
-                                        horizontalAlignment: root.heroTextAlign
-                                    }
-                                }
-                                AppText {
-                                    text: root.heroOldEpisode
-                                    color: Theme.textPrimary
-                                    font.pixelSize: 18
-                                    elide: Text.ElideRight
-                                    width: parent.width
-                                    horizontalAlignment: root.heroTextAlign
-                                    visible: text !== ""
-                                }
-                                AppText {
-                                    text: root.heroOldMeta
-                                    color: root.detail.rating > 0 ? Theme.rating : Theme.textMuted
-                                    font.pixelSize: 14
-                                    // 显式宽 + 对齐跟随:文字区靠右时评分/
-                                    // 时间行右对齐(隐式宽下对齐无效)。
-                                    width: parent.width
-                                    horizontalAlignment: root.heroTextAlign
-                                    opacity: text !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                                }
-                            }
-                        }
-                        Item {
-                            id: heroNewTree
+                        Column {
+                            id: heroNewCol
                             anchors.left: heroTextArea.left
-                            width: heroTextArea.width * (1 - root.textReveal)
-                            height: heroTextArea.height
-                            clip: true
-                            opacity: root.newTextOpacity
-                            Column {
-                                id: heroNewCol
-                                width: heroTextArea.width
-                                // 内容垂直:top 顶部对齐;middle 垂直居中;
-                                // bottom/followPoster 沉底(简介文字底缘
-                                // 对齐文字槽底,同 heroOldCol)。
-                                y: root.textSlotVertical() === "top"
-                                    ? 0 : (root.textSlotVertical() === "middle"
-                                            ? (parent.height - implicitHeight) / 2
-                                            : parent.height - implicitHeight)
+                            width: heroTextArea.width
+                            // 内容垂直:top 顶部对齐;middle 垂直居中;
+                            // bottom/followPoster 沉底(简介文字底缘对齐
+                            // 文字槽底)。
+                            y: root.textSlotVertical() === "top"
+                                ? 0 : (root.textSlotVertical() === "middle"
+                                        ? (heroTextArea.height - implicitHeight) / 2
+                                        : heroTextArea.height - implicitHeight)
                                 spacing: 8
                                 Row {
                                     width: parent.width
@@ -1233,7 +1057,6 @@ Item {
                                     opacity: text !== "" ? 1 : 0
                                     Behavior on opacity { NumberAnimation { duration: 100 } }
                                 }
-                            }
                         }
                     }
                     Item {
@@ -1306,7 +1129,6 @@ Item {
                             // LayoutMirroring 只反转子项,按钮内容不镜像;
                             LayoutMirroring.enabled: !btnHolder._leftSide
                             spacing: 10
-                            opacity: root.textFade
                             Button {
                                 id: playBtn
                                 text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
@@ -1493,7 +1315,6 @@ Item {
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 6
                     visible: (root.detail.mediaSources || []).length > 0
-                    opacity: root.textFade
 
                     // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
                     // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
@@ -1717,7 +1538,7 @@ Item {
                     spacing: 8
                     // 空/缺失简介不显示该节。
                     visible: !!root.detail.overview && root.detail.overview.length > 0
-                    opacity: root.textFade * visible
+                    opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
                     AppText {
@@ -1764,7 +1585,7 @@ Item {
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 8
                     visible: !!root.detail.people && root.detail.people.length > 0
-                    opacity: root.textFade * visible
+                    opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
                     AppText {
@@ -1869,7 +1690,7 @@ Item {
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 8
                     visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
-                    opacity: root.textFade * visible
+                    opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
                     AppText {
@@ -2188,7 +2009,7 @@ Item {
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 8
                     visible: !root.similarStale && EmbyClient.similarModelFor(root.serverUrl, root.accountId, root.itemId).count > 0
-                    opacity: root.textFade * visible
+                    opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
                     AppText {
@@ -2559,7 +2380,6 @@ Item {
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             elide: Text.ElideRight
-                            opacity: root.textFade
                         }
                     }
                     // 悬停高亮/点击选集:Pointer Handler 组合(替代
@@ -2584,14 +2404,7 @@ Item {
             if (serverUrl !== root.serverUrl || d.id !== root.itemId)
                 return
             console.info("Detail: 详情数据到达", d.id, d.name || "")
-            // 原地替换且旧正文在显示:先淡出旧内容,动画中落地数据再淡入;
-            // 首次进入(加载动画中)直接落地渲染。
-            if (root.replacing && root.loaded) {
-                root.pendingDetail = d
-                fadeInOut.restart()
-            } else {
-                root.applyDetail(d)
-            }
+            root.applyDetail(d)
             root.refreshSeriesPlayText()
         }
         function onSeasonsReceived(serverUrl, accountId, seriesId) {
