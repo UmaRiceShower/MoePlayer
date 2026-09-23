@@ -2111,22 +2111,28 @@ Item {
         }
 
         // ---- 右栏:竖向选集条(剧集/集详情) ----
-        FrostedGlass {
-            id: sidebarGlass
+        // 玻璃底可关(配置 detail.sidebarGlass):关闭后内容直接浮在背景图上。
+        Item {
+            id: sidebarBox
             width: Constants.detailSidebarW
             height: parent.height
-            radius: 0
-            blurSource: detailBg
-            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.25)
-                                          : Qt.rgba(1, 1, 1, 0.05)
-            borderColor: Theme.borderSoft
-            thickness: 0
-            frostAmount: 0.12
-            edgeLight: 0.45
-            saturation: 0.35
             visible: root.detail.type === "Series" || root.detail.type === "Episode"
             opacity: visible ? 1 : 0
             Behavior on opacity { NumberAnimation { duration: 220 } }
+            FrostedGlass {
+                id: sidebarGlass
+                anchors.fill: parent
+                radius: 0
+                blurSource: detailBg
+                glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.25)
+                                              : Qt.rgba(1, 1, 1, 0.05)
+                borderColor: Theme.borderSoft
+                thickness: 0
+                frostAmount: 0.12
+                edgeLight: 0.45
+                saturation: 0.35
+                visible: ConfigManager.detailSidebarGlass
+            }
 
             Column {
                 id: sidebar
