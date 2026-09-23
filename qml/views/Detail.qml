@@ -372,6 +372,19 @@ Item {
         }
         return ""
     }
+    // 选集栏定位当前集到栏顶(集详情直达:历史/搜索进来看下一集不用
+    // 下滑)。每季只定位一次:用户翻栏浏览后不打断。
+    property string _stripSeason: ""
+    function scrollToCurrentEpisode() {
+        const m = EmbyClient.episodesModelFor(root.serverUrl, root.accountId, root.currentSeasonId)
+        for (let i = 0; i < m.count; i++) {
+            if (m.itemAt(i).id === root.itemId) {
+                const idx = i
+                Qt.callLater(() => episodeList.positionViewAtIndex(idx, ListView.Beginning))
+                return
+            }
+        }
+    }
     // 选集栏滚动到上次播放的集(成为首个可见项);仅展示,不改选中态。
     function scrollToResumeEpisode() {
         if (!root._resumeEpisodeId)
@@ -2479,6 +2492,11 @@ Item {
             root.refreshSeriesPlayText()
             // 上次播放的集滚到首个可见(仅展示,不自动播放)。
             root.scrollToResumeEpisode()
+            // 集详情:定位当前集到栏顶(换季/进页各一次)。
+            if (root.detail.type === "Episode" && root._stripSeason !== root.currentSeasonId) {
+                root._stripSeason = root.currentSeasonId
+                root.scrollToCurrentEpisode()
+            }
         }
         function onSimilarReady(serverUrl, accountId, itemId) {
             if (serverUrl !== root.serverUrl || accountId !== root.accountId
