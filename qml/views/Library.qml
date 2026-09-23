@@ -307,6 +307,7 @@ Item {
             onAboutToShow: {
                 width = Math.min(root.width - 48,
                                  Math.max(fpanel.width, root.maxFilterTextWidth() + 32))
+                yearField.text = root.yearInputText()
             }
             closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
             implicitHeight: contentItem.implicitHeight
@@ -418,6 +419,7 @@ Item {
                         leftPadding: 10
                     }
                     TextField {
+                        id: yearField
                         x: 6
                         width: fpanelPopup.width - 24
                         height: 30
@@ -1374,6 +1376,13 @@ Item {
     Connections {
         target: grid
         function onContentYChanged() { if (topBtn.visible) topBtn.refresh() }
+    }
+    // 静止期兜底:海报异步装载/触底追加都不变 contentY,事件驱动抓不到。
+    Timer {
+        interval: 250
+        running: topBtn.visible
+        repeat: true
+        onTriggered: topBtn.refresh()
     }
 
     // ========================= 异步结果 =========================

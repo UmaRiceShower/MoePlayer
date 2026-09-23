@@ -502,6 +502,7 @@ Item {
                 root.rebuildRows(false)
                 list.positionViewAtBeginning()
             }
+            Keys.onShortcutOverride: (event) => event.accepted = event.key === Qt.Key_Escape
             Keys.onEscapePressed: searchField.text = ""
         }
 

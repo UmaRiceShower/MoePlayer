@@ -2580,7 +2580,7 @@ Item {
             // 首次进入(加载动画中)直接落地渲染。
             if (root.replacing && root.loaded) {
                 root.pendingDetail = d
-                fadeInOut.start()
+                fadeInOut.restart()
             } else {
                 root.applyDetail(d)
             }
