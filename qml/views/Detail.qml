@@ -385,6 +385,17 @@ Item {
             }
         }
     }
+    // 快速跳转:按集号(episodeNo,用户心智序号,非列表下标)定位到栏中。
+    function jumpToEpisode(no) {
+        const m = EmbyClient.episodesModelFor(root.serverUrl, root.accountId, root.currentSeasonId)
+        for (let i = 0; i < m.count; i++) {
+            if ((m.itemAt(i).episodeNo || 0) === no) {
+                const idx = i
+                Qt.callLater(() => episodeList.positionViewAtIndex(idx, ListView.Center))
+                return
+            }
+        }
+    }
     // 选集栏滚动到上次播放的集(成为首个可见项);仅展示,不改选中态。
     function scrollToResumeEpisode() {
         if (!root._resumeEpisodeId)
@@ -2238,10 +2249,51 @@ Item {
                 }
             }
 
+            // 快速跳转:集数大(>30)的季,滚动找集太慢;输入集号 Enter
+            // 定位到栏中。
+            TextField {
+                id: jumpField
+                visible: episodeList.model && episodeList.model.count > 30
+                // 紧凑幽灵框:辅助控件不抢视觉(窄、居中、半透明深底+细
+                // 描边;全宽实心盒在暗底上是视觉事故)。
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: Math.min(parent.width * 0.62, 150)
+                height: visible ? 26 : 0
+                placeholderText: "跳至集号"
+                placeholderTextColor: Theme.textMuted
+                color: Theme.textPrimary
+                font.pixelSize: 12
+                horizontalAlignment: Text.AlignHCenter
+                leftPadding: 8
+                rightPadding: 8
+                validator: IntValidator { bottom: 1; top: 9999 }
+                background: Rectangle {
+                    radius: 13
+                    color: Qt.rgba(Theme.bg.r, Theme.bg.g, Theme.bg.b, 0.55)
+                    border.width: 1
+                    border.color: jumpField.activeFocus ? Theme.accent : Theme.borderSoft
+                    Behavior on border.color { ColorAnimation { duration: 160 } }
+                }
+                // 全局 Esc Shortcut 在 override 阶段先消费,须接管才能收到键。
+                Keys.onShortcutOverride: (e) => e.accepted = e.key === Qt.Key_Escape
+                Keys.onEscapePressed: {
+                    text = ""
+                    focus = false
+                }
+                onAccepted: {
+                    const n = parseInt(text)
+                    if (!isNaN(n))
+                        root.jumpToEpisode(n)
+                    text = ""
+                    focus = false
+                }
+            }
+
             ListView {
                 id: episodeList
                 width: parent.width
                 height: parent.height - seasonStrip.height - sidebar.spacing
+                        - (jumpField.visible ? jumpField.height + sidebar.spacing : 0)
                 clip: true
                 focus: true
                 keyNavigationWraps: true
