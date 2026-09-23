@@ -69,6 +69,8 @@ Window {
     property var tracks: []
     // 章节表(MpvClient.chaptersChanged 喂;[{time,title}],进度条刻度)。
     property var chapters: []
+    // 时长显示形态:false = 总时长,true = 剩余(负号),点击切换。
+    property bool showRemaining: false
 
     function wake() {
         chromeVisible = true
@@ -397,11 +399,26 @@ Window {
                     width: barCol.width
                     spacing: 10
 
-                    AppText {
+                    Row {
                         Layout.alignment: Qt.AlignVCenter
-                        text: root.fmtTime(video.position) + " / " + root.fmtTime(video.duration)
-                        color: Qt.rgba(1, 1, 1, 0.85)
-                        font.pixelSize: 12
+                        spacing: 4
+                        AppText {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: root.fmtTime(video.position) + " /"
+                            color: Qt.rgba(1, 1, 1, 0.85)
+                            font.pixelSize: 12
+                        }
+                        AppText {
+                            anchors.verticalCenter: parent.verticalCenter
+                            // 总时长 ⇄ 剩余(负号)两形态,点击切换。
+                            text: root.showRemaining
+                                  ? "-" + root.fmtTime(Math.max(0, video.duration - video.position))
+                                  : root.fmtTime(video.duration)
+                            color: durHover.hovered ? "white" : Qt.rgba(1, 1, 1, 0.85)
+                            font.pixelSize: 12
+                            TapHandler { onTapped: root.showRemaining = !root.showRemaining }
+                            HoverHandler { id: durHover; cursorShape: Qt.PointingHandCursor }
+                        }
                     }
 
                     Slider {
