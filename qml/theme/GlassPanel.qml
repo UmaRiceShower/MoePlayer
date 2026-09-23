@@ -22,13 +22,21 @@ Rectangle {
     ShaderEffectSource {
         id: bgSource
         sourceItem: root.blurSource
-        sourceRect: Qt.rect(0, 0,
-                            root.blurSource ? root.blurSource.width : 0,
-                            root.blurSource ? root.blurSource.height : 0)
+        sourceRect: {
+            if (!root.blurSource)
+                return Qt.rect(0, 0, 0, 0)
+            const g = root.mapToGlobal(0, 0)
+            const b = root.blurSource.mapToGlobal(0, 0)
+            const x = Math.max(0, g.x - b.x)
+            const y = Math.max(0, g.y - b.y)
+            return Qt.rect(x, y,
+                           Math.min(root.width, root.blurSource.width - x),
+                           Math.min(root.height, root.blurSource.height - y))
+        }
         // 降低采样分辨率,让高斯模糊更明显、性能更好。
         textureSize: Qt.size(
-            root.blurSource ? Math.max(1, root.blurSource.width / 2) : 1,
-            root.blurSource ? Math.max(1, root.blurSource.height / 2) : 1)
+            Math.max(1, bgSource.sourceRect.width / 2),
+            Math.max(1, bgSource.sourceRect.height / 2))
         live: true
         hideSource: false
     }

@@ -547,11 +547,14 @@ Item {
                                       : Theme.borderSoft
                     }
                     onTextChanged: root.filterText = text.trim()
+                    // 全局 Esc Shortcut 在 override 阶段先消费:两段式
+                    // (先清词、空时关浮层)只能在本框内闭环。
+                    Keys.onShortcutOverride: (event) => event.accepted = event.key === Qt.Key_Escape
                     Keys.onEscapePressed: (event) => {
                         if (text !== "")
                             text = ""
                         else
-                            event.accepted = false
+                            root.close()
                     }
                 }
                 AppText {
