@@ -524,6 +524,13 @@ void ConfigManager::reload()
         m_watcher->addPath(m_path);
         return;
     }
+    // 自写回触发的事件:内容与上次 commit 写出一致,跳过(否则每次
+    // setValue 都附带一次全量重解析+全 NOTIFY 风暴)。
+    QFile f(m_path);
+    if (f.open(QIODevice::ReadOnly) && qHash(f.readAll()) == m_lastWrittenHash) {
+        m_watcher->addPath(m_path); // inode 可能已换,重挂监视(同下)
+        return;
+    }
     loadFromFile();
 }
 
@@ -617,8 +624,6 @@ void ConfigManager::loadFromFile()
 
 void ConfigManager::commit()
 {
-    // 自写回不触发热重载(否则 fileChanged → reload → 无意义重解析)。
-    m_suppressReload = true;
     QString out = QStringLiteral("# MoePlayer 用户配置(TOML)\n"
                                  "# 启动时读取;外部修改后自动热重载(立即生效)。\n"
                                  "# 缺失或类型不合法的键回退默认值;删除本文件即恢复出厂。\n"
@@ -645,21 +650,22 @@ void ConfigManager::commit()
         out += QStringLiteral("%1 = %2\n").arg(QString::fromUtf8(it.tomlKey),
                                                tomlValue(it.type, v));
     }
+    const QByteArray bytes = out.toUtf8();
     QSaveFile file(m_path);
     if (file.open(QIODevice::WriteOnly)) {
-        file.write(out.toUtf8());
+        file.write(bytes);
         if (!file.commit())
             qWarning().noquote() << "ConfigManager: failed to commit" << m_path << file.errorString();
     } else {
         qWarning().noquote() << "ConfigManager: failed to open for write" << m_path << file.errorString();
     }
-    m_suppressReload = false;
+    // 自写回识别靠内容哈希(fileChanged 经事件循环异步到达,布尔标志
+    // 拦不住):reload 时文件内容与此一致即跳过,不重演全量重载。
+    m_lastWrittenHash = qHash(bytes);
 }
 
 void ConfigManager::scheduleReload()
 {
-    if (m_suppressReload)
-        return;
     // 编辑器保存/原子替换常更换文件 inode,QFileSystemWatcher 在首次
     // fileChanged 后即失效(仍监视旧 inode),须重新挂载,否则后续修改
     // 不再触发(sed -i 一次后热重载即断)。
