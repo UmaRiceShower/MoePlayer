@@ -119,10 +119,6 @@ QtObject {
 
     // ---- Hero 文字揭示/布局 ----
     readonly property int detailTextRevealMs: 1000 // hero 文字滑动揭示动画时长
-    readonly property int detailPosterW: 200      // Hero 海报宽(2:3 竖版)
-    readonly property int detailPosterH: 300      // Hero 海报高
-    readonly property int detailSidebarW: 260     // 右侧选集条宽
-    readonly property int detailEpisodeRowH: 165   // 选集条行高(含海报缩略图)
     readonly property int detailEpisodeRowMargin: 15
     readonly property real detailEpisodeHoverScale: 1.06 // 选集条行 hover 放大
     // 正文区块(演职/媒体信息/相似推荐)靠左边距;区块宽 = 内容区 - 2×边距。

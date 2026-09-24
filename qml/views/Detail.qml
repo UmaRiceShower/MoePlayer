@@ -40,10 +40,21 @@ Item {
     readonly property var _monet: ConfigManager.monetEnabled
                                      ? (ColorProvider.colors[root.detail.posterId || root.posterId] || null)
                                      : null
-    // hero 文字水平对齐:LayoutMirroring 不镜像 Text 内容,文字区靠右时
-    // 须显式右对齐(靠文字区起始侧),与靠左时对称。
-    readonly property int heroTextAlign: root.textSide() === "right" ? Text.AlignRight
-                                         : root.textSide() === "center" ? Text.AlignHCenter
+    // ---- 等比尺寸
+    readonly property int heroPosterW: Math.round(Math.min(300, Math.max(160, root.width * 0.128)))
+    readonly property int heroPosterH: heroPosterW * 3 / 2
+    readonly property int heroTitlePx: Math.round(Math.min(40, Math.max(22, root.width * 0.019)))
+    readonly property int heroEpPx: Math.round(Math.min(24, Math.max(15, root.width * 0.0115)))
+    readonly property int heroMetaPx: Math.round(Math.min(18, Math.max(12, root.width * 0.009)))
+    readonly property int heroBtnH: Math.round(Math.min(56, Math.max(38, root.width * 0.028)))
+    readonly property int heroBtnPx: Math.round(Math.min(18, Math.max(13, root.width * 0.0102)))
+    readonly property int heroSectionPx: Math.round(Math.min(22, Math.max(16, root.width * 0.0125)))
+    readonly property int sidebarW: Math.round(Math.min(380, Math.max(220, root.width * 0.166)))
+    readonly property int episodeRowH: Math.round(Math.min(240, Math.max(140, root.width * 0.105)))
+    readonly property bool heroNarrow: overview.width < heroPosterW
+                                       + ConfigManager.detailTextWidth + 96
+    readonly property int heroTextAlign: (heroNarrow || posterCentered) ? Text.AlignHCenter
+                                         : textSideEffective === "left" ? Text.AlignRight
                                          : Text.AlignLeft
     // 海报水平侧(left/center/right):posterPos 字符串推导。
     function posterSide() {
@@ -52,21 +63,16 @@ Item {
         if (p.endsWith("-center")) return "center"
         return "left"
     }
-    // 文字区水平侧:followPoster → 取海报侧;否则取 textPos 侧。
-    function textSide() {
-        const t = ConfigManager.detailTextPos
-        if (t === "followPoster") return root.posterSide()
-        if (t.endsWith("-right")) return "right"
-        if (t.endsWith("-center")) return "center"
-        return "left"
-    }
-    // 文字区垂直预设:top/middle/bottom(揭示列内容锚位;followPoster 沉底)。
-    function textSlotVertical() {
-        const t = ConfigManager.detailTextPos
-        if (t === "followPoster" || t.startsWith("bottom-")) return "bottom"
-        if (t.startsWith("top-")) return "top"
+    // 海报纵向行(top/middle/bottom):居中列三档仍区分(堆栈整体上/中/下)。
+    function posterRow() {
+        const p = ConfigManager.detailPosterPos
+        if (p.startsWith("top-")) return "top"
+        if (p.startsWith("bottom-")) return "bottom"
         return "middle"
     }
+    readonly property bool posterCentered: posterSide() === "center"
+    readonly property string textSideEffective: posterCentered ? "below"
+                                                : (posterSide() === "right" ? "left" : "right")
     // 莫奈强调色(播放按钮/季胶囊选中/选集行/进度条);取色未完成/失败回退 accent。
     property color accentColor: root._monet ? root._monet.accent : Theme.accent
     // 分裂互补辅助色(次要按钮/描边/焦点,30% 层)与极暗藏色(渐变暗部埋补色)。
@@ -866,6 +872,18 @@ Item {
         }
     }
 
+    component VectorIcon: Image {
+        property string inner: ""
+        property color iconColor: "white"
+        source: "data:image/svg+xml;utf8," + encodeURIComponent(
+            "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>"
+            + inner.split("$C").join(iconColor.toString()) + "</svg>")
+        sourceSize: Qt.size(Math.ceil(width), Math.ceil(height))
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        asynchronous: true
+    }
+
     // 页面底色 + Hero 背景:正文玻璃控件的采样源(在 overview 之下,不含
     // 正文控件 → 无自采样)。
     Rectangle {
@@ -879,8 +897,6 @@ Item {
             height: parent.height
             visible: root.loaded
             z: 0
-            // 背景图:圆形扩散溶解换图(Canvas drawImage 走 GPU,大图可承受;
-            // 与海报同速,切换时氛围同步换新)。
             CrossfadeImage {
                 anchors.fill: parent
                 source: root.backdropSource()
@@ -916,15 +932,14 @@ Item {
         anchors.fill: parent
         visible: root.loaded
         z: 2
-        // 选季栏左/右:只镜像本 positioner 的子项顺序(官方 RTL 机制,
-        // 不 childrenInherit,overview/sidebar 内部布局不受影响)。
+        // 选季栏左/右
         LayoutMirroring.enabled: ConfigManager.detailSidebarLeft
 
-        // ---- 左栏:正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
+        // ---- 正文(Hero + 演职人员 + 媒体信息 + 相似推荐) ----
         Flickable {
             id: overview
             ScrollBar.vertical: MoeScrollBar {}
-            width: parent.width - (sidebar.visible ? Constants.detailSidebarW : 0)
+            width: parent.width - (sidebar.visible ? root.sidebarW : 0)
             height: parent.height
             clip: true
             contentHeight: overviewColumn.implicitHeight
@@ -935,83 +950,248 @@ Item {
 
                 // ================= Hero =================
                 Item {
+                    width: 1
+                    height: posterRow() === "top" ? 0
+                            : Math.max(0, (posterRow() === "middle" ? 0.5 : 1.0)
+                                          * (overview.height - heroItem.height))
+                }
+                Item {
                     id: heroItem
                     width: parent.width
-                    // 内容区与背景图同高(16:9 随窗口):bottom-* 位置即
-                    // 背景图底部,海报/文字/按钮相对背景图定位成立。
-                    height: root.width * 9 / 16
-                    // ===== 定位代理(slot):三个槽各自用 states +
-                    // AnchorChanges(官方推荐的条件锚切换机制,自动处理
-                    // 解锚/设锚顺序,免手动坐标计算)。poster/text 槽按
-                    // 9 宫格锚定,参考 heroItem 内容区(背景图 heroBackdrop
-                    // 在槽的祖父级,Qt 锚仅限兄弟/直接父项,故以 heroItem
-                    // 为参考——右侧位置天然避开选集栏);按钮槽按
-                    // poster/text/backdrop 三模式。=====
+                    height: root.heroNarrow
+                            ? posterSlot.height + 16 + 12 + textSlot.height + 24
+                            : (root.posterCentered
+                                  ? posterSlot.height + 24 + 12 + textSlot.height + 24
+                                  : posterSlot.height + 48)
 
-                    // 海报槽:posterPos 9 宫格(边距 32/24)。AnchorChanges
-                    // 只支持锚线(margin 属性不存在),边距走槽上的普通
-                    // 绑定——仅对应边被锚定时生效,其余态惰性。
+                    // 海报槽
                     Item {
                         id: posterSlot
-                        width: Constants.detailPosterW
-                        height: Constants.detailPosterH
+                        width: root.heroNarrow ? 120 : root.heroPosterW
+                        height: root.heroNarrow ? 180 : root.heroPosterH
                         anchors.leftMargin: 32
                         anchors.rightMargin: 32
-                        anchors.topMargin: 24
+                        anchors.topMargin: root.heroNarrow ? 16 : 24
                         anchors.bottomMargin: 24
-                        state: ConfigManager.detailPosterPos
+                        state: root.heroNarrow ? "narrow"
+                               : (root.posterCentered ? "stacked" : posterSide())
                         states: [
-                            State { name: "top-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
-                            State { name: "top-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
-                            State { name: "top-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
-                            State { name: "middle-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "middle-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "middle-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "bottom-left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
-                            State { name: "bottom-center"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
-                            State { name: "bottom-right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } }
+                            State { name: "narrow"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                            State { name: "stacked"; AnchorChanges { target: posterSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
+                            State { name: "left"; AnchorChanges { target: posterSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
+                            State { name: "right"; AnchorChanges { target: posterSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } }
                         ]
                     }
-                    // 文字槽:textPos 9 宫格(相对 heroItem,边距 32/24);
-                    // followPoster → 跟随海报:水平贴海报外侧(海报左/中 →
-                    // 右侧,海报右 → 左侧,边距 24),垂直底缘对齐海报底
-                    // (按钮组跟随海报时上缩 60 避让)。边距绑定实时算。
+                    // 文字槽
                     Item {
                         id: textSlot
-                        width: ConfigManager.detailTextWidth
-                        height: ConfigManager.detailTextHeight
-                        anchors.leftMargin: ConfigManager.detailTextPos === "followPoster"
-                                             && root.textSide() !== "right" ? 24 : 32
-                        anchors.rightMargin: ConfigManager.detailTextPos === "followPoster"
-                                              && root.textSide() === "right" ? 24 : 32
-                        anchors.topMargin: 24
-                        anchors.bottomMargin: ConfigManager.detailTextPos === "followPoster"
-                                               && ConfigManager.detailButtonsPos === "poster" ? 60 : 24
-                        state: {
-                            const t = ConfigManager.detailTextPos
-                            if (t !== "followPoster")
-                                return t
-                            return "follow-" + (root.posterSide() === "right" ? "right" : "left")
-                        }
+                        readonly property real _avail: root.textSideEffective === "left"
+                            ? posterSlot.x - 24 - 32
+                            : heroItem.width - posterSlot.x - posterSlot.width - 24 - 32
+                        width: (root.heroNarrow || root.posterCentered)
+                               ? Math.max(120, heroItem.width - 48)
+                               : Math.min(ConfigManager.detailTextWidth, Math.max(120, _avail))
+                        height: heroNewCol.implicitHeight
+                        anchors.leftMargin: 24
+                        anchors.rightMargin: 24
+                        anchors.topMargin: 12
+                        state: root.heroNarrow ? "narrow" : root.textSideEffective
                         states: [
-                            State { name: "top-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.top: heroItem.top } },
-                            State { name: "top-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: heroItem.top } },
-                            State { name: "top-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.top: heroItem.top } },
-                            State { name: "middle-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "middle-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "middle-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.verticalCenter: heroItem.verticalCenter } },
-                            State { name: "bottom-left"; AnchorChanges { target: textSlot; anchors.left: heroItem.left; anchors.bottom: heroItem.bottom } },
-                            State { name: "bottom-center"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.bottom: heroItem.bottom } },
-                            State { name: "bottom-right"; AnchorChanges { target: textSlot; anchors.right: heroItem.right; anchors.bottom: heroItem.bottom } },
-                            State { name: "follow-left"; AnchorChanges { target: textSlot; anchors.left: posterSlot.right; anchors.bottom: posterSlot.bottom } },
-                            State { name: "follow-right"; AnchorChanges { target: textSlot; anchors.right: posterSlot.left; anchors.bottom: posterSlot.bottom } }
+                            State { name: "narrow"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: posterSlot.bottom } },
+                            State { name: "below"; AnchorChanges { target: textSlot; anchors.horizontalCenter: heroItem.horizontalCenter; anchors.top: posterSlot.bottom } },
+                            State { name: "left"; AnchorChanges { target: textSlot; anchors.right: posterSlot.left; anchors.bottom: posterSlot.bottom } },
+                            State { name: "right"; AnchorChanges { target: textSlot; anchors.left: posterSlot.right; anchors.bottom: posterSlot.bottom } }
                         ]
+                        Column {
+                            id: heroNewCol
+                            width: parent.width
+                            spacing: 8
+                            Row {
+                                width: parent.width
+                                spacing: 12
+                                ShadowText {
+                                    id: heroNewTitle
+                                    text: root.heroTitle()
+                                    color: root.hasBackdrop ? "white" : Theme.textPrimary
+                                    pixelSize: root.heroTitlePx
+                                    bold: true
+                                    width: parent.width
+                                    hAlign: root.heroTextAlign
+                                }
+                            }
+                            ShadowText {
+                                text: root.heroEpisodeLine()
+                                color: root.hasBackdrop ? "white" : Theme.textPrimary
+                                pixelSize: root.heroEpPx
+                                width: parent.width
+                                hAlign: root.heroTextAlign
+                                visible: text !== ""
+                            }
+                            ShadowText {
+                                text: root.metaLine()
+                                color: Theme.rating
+                                pixelSize: root.heroMetaPx
+                                width: parent.width
+                                hAlign: root.heroTextAlign
+                                opacity: text !== "" ? 1 : 0
+                                Behavior on opacity { NumberAnimation { duration: 100 } }
+                            }
+                            Item {
+                                id: btnHolder
+                                width: parent.width
+                                height: btnRow.height
+                                readonly property real _playW: Math.min(220, Math.max(120,
+                                    width - root.heroBtnH * 2 - 20
+                                    - (replayBtn.visible ? replayBtn.width + 10 : 0)))
+                                Row {
+                                    id: btnRow
+                                    LayoutMirroring.enabled: !root.heroNarrow && !root.posterCentered
+                                                             && root.heroTextAlign === Text.AlignRight
+                                    x: (root.heroNarrow || root.posterCentered)
+                                       ? (parent.width - width) / 2
+                                       : (root.heroTextAlign === Text.AlignRight
+                                          ? parent.width - width : 0)
+                                    spacing: 10
+                                    Button {
+                                        id: playBtn
+                                        text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
+                                        width: btnHolder._playW
+                                        height: root.heroBtnH
+                                        font.pixelSize: root.heroBtnPx
+                                        onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
+                                        background: FrostedGlass {
+                                            radius: height / 2
+                                            blurSource: detailBg
+                                            scrollParent: overview
+                                            glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
+                                                            root.accentColor.b,
+                                                            ThemeStore.isLight ? 0.72 : 0.62)
+                                            borderColor: Theme.glassRim
+                                            thickness: 0
+                                            frostAmount: 0.15
+                                            edgeLight: 0.5
+                                            saturation: 0.4
+                                            blurRadius: 6
+                                            sampleMargin: 48
+                                            elevation: 6
+                                        }
+                                        contentItem: AppText {
+                                            text: playBtn.text
+                                            color: ThemeStore.isLight ? Theme.textPrimary : "white"
+                                            font.pixelSize: root.heroBtnPx
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                    }
+                                    Button {
+                                        id: favBtn
+                                        width: root.heroBtnH
+                                        height: root.heroBtnH
+                                        onClicked: root.toggleFavorite()
+                                        background: FrostedGlass {
+                                            radius: height / 2
+                                            blurSource: detailBg
+                                            scrollParent: overview
+                                            // 次要按钮:complement 色调玻璃,透出背景折射。
+                                            // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
+                                            glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                            root.complementColor.b,
+                                                            ThemeStore.isLight ? 0.68 : 0.58)
+                                            borderColor: Theme.glassRim
+                                            thickness: 0
+                                            frostAmount: 0.15
+                                            edgeLight: 0.5
+                                            saturation: 0.4
+                                            blurRadius: 6
+                                            sampleMargin: 48
+                                            elevation: 5
+                                        }
+                                        contentItem: Item {
+                                            anchors.fill: parent
+                                            VectorIcon {
+                                                anchors.centerIn: parent
+                                                width: Math.round(root.heroBtnH * 0.5)
+                                                height: Math.round(root.heroBtnH * 0.5)
+                                                inner: "<path d='M2 9.1371C2 14 6.01943 16.5914 8.96173 18.9109C10 19.7294 11 20.5 12 20.5C13 20.5 14 19.7294 15.0383 18.9109C17.9806 16.5914 22 14 22 9.1371C22 4.27416 16.4998 0.825464 12 5.50063C7.50016 0.825464 2 4.27416 2 9.1371Z' fill='$C'/>"
+                                                iconColor: root.isFavorite ? Theme.accent : root.iconWhite
+                                            }
+                                        }
+                                    }
+                                    Button {
+                                        id: watchedBtn
+                                        width: root.heroBtnH
+                                        height: root.heroBtnH
+                                        onClicked: root.toggleWatched()
+                                        background: FrostedGlass {
+                                            radius: height / 2
+                                            blurSource: detailBg
+                                            scrollParent: overview
+                                            // 次要按钮:complement 色调玻璃,透出背景折射。
+                                            // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
+                                            glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                            root.complementColor.b,
+                                                            ThemeStore.isLight ? 0.68 : 0.58)
+                                            borderColor: Theme.glassRim
+                                            thickness: 0
+                                            frostAmount: 0.15
+                                            edgeLight: 0.5
+                                            saturation: 0.4
+                                            blurRadius: 6
+                                            sampleMargin: 48
+                                            elevation: 5
+                                        }
+                                        contentItem: Item {
+                                            anchors.fill: parent
+                                            VectorIcon {
+                                                anchors.centerIn: parent
+                                                width: Math.round(root.heroBtnH * 0.5)
+                                                height: Math.round(root.heroBtnH * 0.5)
+                                                inner: "<path d='M4 12.6111L8.92308 17.5L20 6.5' fill='none' stroke='$C' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/>"
+                                                iconColor: root.detail.played ? Theme.success : root.iconWhite
+                                            }
+                                        }
+                                    }
+                                    Button {
+                                        id: replayBtn
+                                        text: "从头播放"
+                                        visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
+                                        width: 110
+                                        height: root.heroBtnH
+                                        onClicked: root.startPlayback(false)
+                                        background: FrostedGlass {
+                                            radius: height / 2
+                                            blurSource: detailBg
+                                            scrollParent: overview
+                                            // 次要按钮:complement 色调玻璃,透出背景折射。
+                                            // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
+                                            glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
+                                                            root.complementColor.b,
+                                                            ThemeStore.isLight ? 0.68 : 0.58)
+                                            borderColor: Theme.glassRim
+                                            thickness: 0
+                                            frostAmount: 0.15
+                                            edgeLight: 0.5
+                                            saturation: 0.4
+                                            blurRadius: 6
+                                            sampleMargin: 48
+                                            elevation: 5
+                                        }
+                                        contentItem: AppText {
+                                            text: replayBtn.text
+                                            color: ThemeStore.isLight ? Theme.textPrimary : "white"
+                                            font.pixelSize: root.heroBtnPx - 2
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
-                    // 海报(2:3 竖版):静态锚定海报槽(位置由 posterSlot
-                    // 决定,内容不再计算坐标)。
+                    // 海报(2:3 竖版)
                     Rectangle {
-                        width: Constants.detailPosterW
-                        height: Constants.detailPosterH
+                        width: root.heroPosterW
+                        height: root.heroPosterH
                         color: root.surfaceTint
                         radius: 18
                         clip: true
@@ -1027,297 +1207,6 @@ Item {
                             duration: 800
                         }
                     }
-
-                    // hero 文字块:宽高与位置全部由 textSlot 决定(静态锚定)。
-                    Item {
-                        id: heroTextArea
-                        anchors.fill: textSlot
-
-                        Column {
-                            id: heroNewCol
-                            anchors.left: heroTextArea.left
-                            width: heroTextArea.width
-                            // 内容垂直:top 顶部对齐;middle 垂直居中;
-                            // bottom/followPoster 沉底(简介文字底缘对齐
-                            // 文字槽底)。
-                            y: root.textSlotVertical() === "top"
-                                ? 0 : (root.textSlotVertical() === "middle"
-                                        ? (heroTextArea.height - implicitHeight) / 2
-                                        : heroTextArea.height - implicitHeight)
-                                spacing: 8
-                                Row {
-                                    width: parent.width
-                                    spacing: 12
-                                    ShadowText {
-                                        id: heroNewTitle
-                                        text: root.heroTitle()
-                                        color: root.hasBackdrop ? "white" : Theme.textPrimary
-                                        pixelSize: 30
-                                        bold: true
-                                        width: parent.width
-                                        hAlign: root.heroTextAlign
-                                    }
-                                }
-                                ShadowText {
-                                    text: root.heroEpisodeLine()
-                                    color: root.hasBackdrop ? "white" : Theme.textPrimary
-                                    pixelSize: 18
-                                    width: parent.width
-                                    hAlign: root.heroTextAlign
-                                    visible: text !== ""
-                                }
-                                ShadowText {
-                                    text: root.metaLine()
-                                    color: Theme.rating
-                                    pixelSize: 14
-                                    width: parent.width
-                                    hAlign: root.heroTextAlign
-                                    opacity: text !== "" ? 1 : 0
-                                    Behavior on opacity { NumberAnimation { duration: 100 } }
-                                }
-                        }
-                    }
-                    Item {
-                        id: btnHolder
-                        // 按钮行锚定容器:锚点放这里(自身无 LayoutMirroring,
-                        // anchors 不反转);宽 = 行隐式宽(单向绑定,无环),
-                        // 右锚时整块从参考点向左展开。行在内部只做子项
-                        // 镜像(播放键贴参考端),不受锚点影响。
-                        width: btnRow.width
-                        height: btnRow.height
-                        anchors.leftMargin: ConfigManager.detailButtonsPos === "backdrop"
-                                             ? (ConfigManager.detailSidebarLeft
-                                                    ? Constants.detailSidebarW + 32 : 32)
-                                             : 24
-                        anchors.rightMargin: 24
-                        state: {
-                            const b = ConfigManager.detailButtonsPos
-                            if (b === "backdrop")
-                                return "backdrop"
-                            if (b === "poster")
-                                return "poster-" + (root.posterSide() === "right" ? "right" : "left")
-                            return "text-" + (root.textSide() === "right" ? "right" : "left")
-                        }
-                        states: [
-                            State { name: "poster-left"; AnchorChanges { target: btnHolder; anchors.left: posterSlot.right } },
-                            State { name: "poster-right"; AnchorChanges { target: btnHolder; anchors.right: posterSlot.left } },
-                            State { name: "text-left"; AnchorChanges { target: btnHolder; anchors.left: textSlot.right } },
-                            State { name: "text-right"; AnchorChanges { target: btnHolder; anchors.right: textSlot.left } },
-                            State { name: "backdrop"; AnchorChanges { target: btnHolder; anchors.left: heroItem.left } }
-                        ]
-                        // 左锚参考距(弹性播放键宽用):poster → 海报外侧
-                        // 256;text → 标题区外侧;backdrop → 左缘。
-                        readonly property real _ref: {
-                            const b = ConfigManager.detailButtonsPos
-                            if (b === "backdrop")
-                                return ConfigManager.detailSidebarLeft ? Constants.detailSidebarW + 32 : 32
-                            if (b === "poster")
-                                return 32 + Constants.detailPosterW + 24
-                            return root.textSide() === "right"
-                                   ? parent.width - textSlot.x + 24
-                                   : textSlot.x + textSlot.width + 24
-                        }
-                        readonly property bool _leftSide: {
-                            const b = ConfigManager.detailButtonsPos
-                            if (b === "backdrop")
-                                return true
-                            if (b === "poster")
-                                return root.posterSide() !== "right"
-                            return root.textSide() !== "right"
-                        }
-                        // 播放键弹性宽:锚距内放不下时压缩(下限 120 保可点)。
-                        readonly property real _playW: Math.min(220, Math.max(120,
-                            parent.width - _ref - 16 - 44 - 20))
-                        // 垂直:backdrop → 背景 16:9 底缘(背景高 = 宽*9/16,
-                        // 与 heroBackdrop 同式);poster → 海报底对齐;
-                        // text → 标题行顶(与标题对齐;标题在揭示树深处
-                        // 不可锚,故 y 用绑定,与水平锚不同轴不冲突)。
-                        y: ConfigManager.detailButtonsPos === "backdrop"
-                            ? root.width * 9 / 16 - 44 - 24
-                            : (ConfigManager.detailButtonsPos === "poster"
-                                   ? posterSlot.y + posterSlot.height - 44
-                                   : textSlot.y + heroNewCol.y)
-
-
-                        Row {
-                            id: btnRow
-                            // 按钮行:位置由 btnHolder 锚定;仅在此反转子序——
-                            // 右缘锚定(参考在行左侧)时 [已看][收藏][播放],
-                            // 主播放键贴参考端;左缘锚定保持 [播放][收藏][已看]。
-                            // LayoutMirroring 只反转子项,按钮内容不镜像;
-                            LayoutMirroring.enabled: !btnHolder._leftSide
-                            spacing: 10
-                            Button {
-                                id: playBtn
-                                text: root.detail.type === "Series" ? root.seriesPlayCache : root.playButtonText()
-                                // 弹性宽由 _playW 决定(锚距内放不下时压缩,
-                                // 下限 120 保可点区域)。
-                                width: btnHolder._playW
-                                height: 44
-                                font.pixelSize: 16
-                                onClicked: root.detail.type === "Series" ? root.playSeries() : root.startPlayback(true)
-                                background: FrostedGlass {
-                                    radius: height / 2
-                                    blurSource: detailBg
-                                    scrollParent: overview
-                                    glassColor: Qt.rgba(root.accentColor.r, root.accentColor.g,
-                                                       root.accentColor.b,
-                                                       ThemeStore.isLight ? 0.72 : 0.62)
-                                    borderColor: Theme.glassRim
-                                    thickness: 0
-                                    frostAmount: 0.15
-                                    edgeLight: 0.5
-                                    saturation: 0.4
-                                    blurRadius: 6
-                                    sampleMargin: 48
-                                    elevation: 6
-                                }
-                                contentItem: AppText {
-                                    text: playBtn.text
-                                    color: ThemeStore.isLight ? Theme.textPrimary : "white"
-                                    font.pixelSize: 16
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-                            // 收藏:Canvas 绘制爱心。未收藏藏白实心,已收藏粉实心。
-                            Button {
-                                id: favBtn
-                                width: 44
-                                height: 44
-                                onClicked: root.toggleFavorite()
-                                background: FrostedGlass {
-                                    radius: height / 2
-                                    blurSource: detailBg
-                                    scrollParent: overview
-                                    // 次要按钮:complement 色调玻璃,透出背景折射。
-                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
-                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.68 : 0.58)
-                                    borderColor: Theme.glassRim
-                                    thickness: 0
-                                    frostAmount: 0.15
-                                    edgeLight: 0.5
-                                    saturation: 0.4
-                                    blurRadius: 6
-                                    sampleMargin: 48
-                                    elevation: 5
-                                }
-                                contentItem: Item {
-                                    anchors.fill: parent
-                                    Canvas {
-                                        anchors.centerIn: parent
-                                        width: 22
-                                        height: 22
-                                        property color fillColor: root.isFavorite ? Theme.accent : root.iconWhite
-                                        onFillColorChanged: requestPaint()
-                                        onPaint: {
-                                            const ctx = getContext("2d")
-                                            ctx.clearRect(0, 0, width, height)
-                                            ctx.beginPath()
-                                            ctx.moveTo(11, 19)
-                                            ctx.bezierCurveTo(11, 19, 3, 13, 3, 8)
-                                            ctx.bezierCurveTo(3, 5, 6, 3, 9, 5)
-                                            ctx.bezierCurveTo(10, 5, 11, 6, 11, 7)
-                                            ctx.bezierCurveTo(11, 6, 12, 5, 13, 5)
-                                            ctx.bezierCurveTo(16, 3, 19, 5, 19, 8)
-                                            ctx.bezierCurveTo(19, 13, 11, 19, 11, 19)
-                                            ctx.closePath()
-                                            ctx.fillStyle = fillColor
-                                            ctx.fill()
-                                        }
-                                    }
-                                }
-                            }
-                            // 已看/未看:Canvas 绘制圆圈 + 勾。已看绿色,未看藏白。
-                            Button {
-                                id: watchedBtn
-                                width: 44
-                                height: 44
-                                onClicked: root.toggleWatched()
-                                background: FrostedGlass {
-                                    radius: height / 2
-                                    blurSource: detailBg
-                                    scrollParent: overview
-                                    // 次要按钮:complement 色调玻璃,透出背景折射。
-                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
-                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.68 : 0.58)
-                                    borderColor: Theme.glassRim
-                                    thickness: 0
-                                    frostAmount: 0.15
-                                    edgeLight: 0.5
-                                    saturation: 0.4
-                                    blurRadius: 6
-                                    sampleMargin: 48
-                                    elevation: 5
-                                }
-                                contentItem: Item {
-                                    anchors.fill: parent
-                                    Canvas {
-                                        anchors.centerIn: parent
-                                        width: 22
-                                        height: 22
-                                        property color strokeColor: root.detail.played ? Theme.success : root.iconWhite
-                                        onStrokeColorChanged: requestPaint()
-                                        onPaint: {
-                                            const ctx = getContext("2d")
-                                            ctx.clearRect(0, 0, width, height)
-                                            ctx.lineCap = "round"
-                                            ctx.lineJoin = "round"
-                                            ctx.lineWidth = 2.5
-                                            ctx.strokeStyle = strokeColor
-                                            // 圆圈
-                                            ctx.beginPath()
-                                            ctx.arc(width / 2, height / 2, 8, 0, Math.PI * 2)
-                                            ctx.stroke()
-                                            // 勾
-                                            ctx.beginPath()
-                                            ctx.moveTo(7, 11)
-                                            ctx.lineTo(10, 14)
-                                            ctx.lineTo(15, 8)
-                                            ctx.stroke()
-                                        }
-                                    }
-                                }
-                            }
-                            Button {
-                                id: replayBtn
-                                text: "从头播放"
-                                visible: root.detail.type !== "Series" && root.detail.positionTicks > 0 && !root.detail.played
-                                width: 110
-                                height: 44
-                                onClicked: root.startPlayback(false)
-                                background: FrostedGlass {
-                                    radius: height / 2
-                                    blurSource: detailBg
-                                    scrollParent: overview
-                                    // 次要按钮:complement 色调玻璃,透出背景折射。
-                                    // 亮色系按钮位落在浅复合底上:玻璃加深、rim 压深(白字改深字在 contentItem)
-                                    glassColor: Qt.rgba(root.complementColor.r, root.complementColor.g,
-                                                       root.complementColor.b,
-                                                       ThemeStore.isLight ? 0.68 : 0.58)
-                                    borderColor: Theme.glassRim
-                                    thickness: 0
-                                    frostAmount: 0.15
-                                    edgeLight: 0.5
-                                    saturation: 0.4
-                                    blurRadius: 6
-                                    sampleMargin: 48
-                                    elevation: 5
-                                }
-                                contentItem: AppText {
-                                    text: replayBtn.text
-                                    color: ThemeStore.isLight ? Theme.textPrimary : "white"
-                                    font.pixelSize: 14
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                            }
-                        }
-                    }                    
                 }
 
                 // ================= 播放选项(版本/音频/字幕) =================
@@ -1560,7 +1449,7 @@ Item {
                     ShadowText {
                         text: "简介"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: 18
+                        pixelSize: root.heroSectionPx
                         bold: true
                     }
                     // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
@@ -1607,7 +1496,7 @@ Item {
                     ShadowText {
                         text: "演职人员"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: 18
+                        pixelSize: root.heroSectionPx
                         bold: true
                     }
                     Flickable {
@@ -1710,7 +1599,7 @@ Item {
                     ShadowText {
                         text: "媒体信息"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: 18
+                        pixelSize: root.heroSectionPx
                         bold: true
                     }
                     Repeater {
@@ -2029,7 +1918,7 @@ Item {
                     ShadowText {
                         text: "相似推荐"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: 18
+                        pixelSize: root.heroSectionPx
                         bold: true
                     }
                     ListView {
@@ -2114,7 +2003,7 @@ Item {
         // 玻璃底可关(配置 detail.sidebarGlass):关闭后内容直接浮在背景图上。
         Item {
             id: sidebarBox
-            width: Constants.detailSidebarW
+            width: root.sidebarW
             height: parent.height
             visible: root.detail.type === "Series" || root.detail.type === "Episode"
             opacity: visible ? 1 : 0
@@ -2320,7 +2209,7 @@ Item {
                     // 详情/播放中的当前集:选中态(莫奈边框/白色标题)。
                     readonly property bool selected: model.id === root.itemId
                     width: episodeList.width
-                    height: Constants.detailEpisodeRowH
+                    height: root.episodeRowH
                     // hover 放大(基础样式)
                     scale: episodeHover.hovered ? Constants.detailEpisodeHoverScale : 1.0
                     Behavior on scale { NumberAnimation { duration: Constants.animMaxMs } }
@@ -2335,7 +2224,7 @@ Item {
                         // 海报缩略图(16:9 剧照)
                         Rectangle {
                             id: thumbBox
-                            height: Constants.detailEpisodeRowH - Constants.detailEpisodeRowMargin*2
+                            height: root.episodeRowH - Constants.detailEpisodeRowMargin*2
                                    - cardCol.spacing - episodeTitle.implicitHeight
                             width: height/9*16
                             color: Theme.bg
