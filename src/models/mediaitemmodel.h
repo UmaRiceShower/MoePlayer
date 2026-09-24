@@ -63,6 +63,7 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     int count() const { return m_items.size(); }
+    bool patchUserData(const QString &itemId, bool played, double positionTicks);
     int totalCount() const { return m_total; }
     bool hasMore() const { return m_hasMore; }
 

@@ -495,7 +495,7 @@ void MpvClient::fail(const QString &itemId, const QString &message)
     const QString metaItemId = s->meta.value(QStringLiteral("itemId")).toString();
     destroySession(s);
     if (!key.isEmpty())
-        emit playbackFinished(key, metaItemId, false);
+        emit playbackFinished(key, metaItemId, false, 0.0, 0.0);
 }
 
 void MpvClient::start(const QString &url, const QVariantList &headers,
@@ -922,8 +922,12 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
                 }
             }
             // 查不到(列表已被外部清空等)= 按播完处理。
-            if (index < 0 || index >= list.size() - 1)
+            if (index < 0 || index >= list.size() - 1) {
                 stopAndConsiderEnd(s->key, false);
+            } else if (index < s->playlistIds.size()) {
+                // 中间集真播完(eof 且非末条,mpv 继续连播):本地乐观标记已看。
+                emit episodeFinished(s->key, s->playlistIds.at(index));
+            }
         } else if (rid == kSuperResListRequestId) {
             // glsl-shaders 回读:实际挂载数 + 是否含尺寸门槛 pass。
             const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
@@ -1006,6 +1010,10 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             const QVariantMap pm = s->episodeMeta.value(s->pendingFileId);
             if (!pm.isEmpty()) {
                 const QString oldSid = s->meta.value(QStringLiteral("playSessionId")).toString();
+                if (s->loadIssued
+                    && s->meta.value(QStringLiteral("itemId")).toString()
+                        != pm.value(QStringLiteral("itemId")).toString())
+                    reportStopped(s);
                 s->meta = pm;
                 if (!pm.value(QStringLiteral("playSessionId")).toString().isEmpty()
                     && pm.value(QStringLiteral("playSessionId")).toString() != oldSid)
@@ -1554,9 +1562,10 @@ void MpvClient::stopAndConsiderEnd(QString key, bool errored)
     reportStopped(s);
     const bool played = s->loadIssued;
     const QString bareId = s->meta.value(QStringLiteral("itemId")).toString();
+    const double pos = s->position, dur = s->duration;
     destroySession(s);
     if (played)
-        emit playbackFinished(key, bareId, errored);
+        emit playbackFinished(key, bareId, errored, pos, dur);
 }
 
 void MpvClient::destroySession(Session *s)

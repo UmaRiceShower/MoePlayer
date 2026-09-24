@@ -148,6 +148,8 @@ EmbyClient::EmbyClient(QObject *parent)
     // 后台连接池同样显式直连(见 m_bgNam 注释),超时与前台一致。
     m_bgNam.setProxy(QNetworkProxy::NoProxy);
     m_bgNam.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    m_stopRetryTimer.setInterval(15000);
+    connect(&m_stopRetryTimer, &QTimer::timeout, this, &EmbyClient::flushPendingStops);
 }
 
 void EmbyClient::setProxy(const QNetworkProxy &proxy)
@@ -359,14 +361,29 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
     });
 }
 
+void EmbyClient::patchLocalUserData(const QString &serverUrl, const QString &accountId,
+                                    const QString &itemId, bool played, double positionTicks)
+{
+    const QString prefix = serverUrl.trimmed() + QLatin1Char('\n') + accountId;
+    const auto patchAll = [&](const QHash<QString, MediaItemModel *> &models) {
+        for (auto it = models.constBegin(); it != models.constEnd(); ++it) {
+            if (it.key().startsWith(prefix))
+                it.value()->patchUserData(itemId, played, positionTicks);
+        }
+    };
+    patchAll(m_episodesModels);
+    patchAll(m_allEpisodesModels);
+}
+
 void EmbyClient::postJson(const QString &serverUrl, const QString &token, const QString &userId,
                           const QString &path, const QJsonObject &body,
                           std::function<void(const QJsonDocument &)> onOk, const QString &what,
-                          std::function<void()> onFail)
+                          std::function<void()> onFail, std::function<void()> onFailTransport)
 {
     QNetworkReply *reply = m_nam.post(makeRequest(serverUrl, token, userId, path, true),
                                       QJsonDocument(body).toJson(QJsonDocument::Compact));
-    connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
+    connect(reply, &QNetworkReply::finished, this,
+            [this, reply, serverUrl, onOk, onFail, onFailTransport, what]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
@@ -383,7 +400,9 @@ void EmbyClient::postJson(const QString &serverUrl, const QString &token, const 
                                         : QStringLiteral("<closed>"));
             emit serverRequestFailed(serverUrl, msg);
             emit errorOccurred(serverUrl, msg);
-            if (onFail)
+            if (status == 0 && onFailTransport)
+                onFailTransport();
+            else if (onFail)
                 onFail();
             return;
         }
@@ -1791,7 +1810,51 @@ void EmbyClient::reportPlaybackStopped(const QString &serverUrl, const QString &
     b.insert(QStringLiteral("MediaSourceId"), mediaSourceId);
     b.insert(QStringLiteral("PlaySessionId"), playSessionId);
     b.insert(QStringLiteral("PositionTicks"), qint64(positionSecs * MoePlayer::kTicksPerSecond));
-    postReport(serverUrl, token, userId, QStringLiteral("/Sessions/Playing/Stopped"), b);
+    // 仅传输层失败(HTTP 0,断网/抖动)入队重试,网络恢复后补传;
+    // 4xx/5xx = 服务器确定性拒绝,重试无意义。周期进度上报可弃不兜。
+    auto onFailTransport = [this, serverUrl, token, userId, itemId,
+                            mediaSourceId, playSessionId, positionSecs] {
+        for (auto &e : m_pendingStops) {
+            if (e.playSessionId == playSessionId) {
+                e.positionSecs = positionSecs; // 同会话去重,取最新位置
+                m_stopRetryTimer.start();
+                return;
+            }
+        }
+        m_pendingStops.append({serverUrl, token, userId, itemId,
+                               mediaSourceId, playSessionId, positionSecs, 0});
+        qWarning() << "Emby: 停止上报失败(传输层),入队重试" << itemId;
+        m_stopRetryTimer.start();
+    };
+    postJson(serverUrl, token, userId, QStringLiteral("/Sessions/Playing/Stopped"), b,
+             [](const QJsonDocument &) {}, QStringLiteral("播放停止上报"),
+             nullptr, onFailTransport);
+}
+
+void EmbyClient::flushPendingStops()
+{
+    if (m_pendingStops.isEmpty()) {
+        m_stopRetryTimer.stop();
+        return;
+    }
+    const auto pending = m_pendingStops;
+    for (const auto &e : pending) {
+        QJsonObject b;
+        b.insert(QStringLiteral("ItemId"), e.itemId);
+        b.insert(QStringLiteral("MediaSourceId"), e.mediaSourceId);
+        b.insert(QStringLiteral("PlaySessionId"), e.playSessionId);
+        b.insert(QStringLiteral("PositionTicks"), qint64(e.positionSecs * MoePlayer::kTicksPerSecond));
+        const QString psid = e.playSessionId;
+        auto onOkStop = [this, psid](const QJsonDocument &) {
+            m_pendingStops.removeIf([&](const PendingStop &x) { return x.playSessionId == psid; });
+            qInfo() << "Emby: 停止上报补传成功" << psid;
+        };
+        auto onFailDrop = [this, psid] {
+            m_pendingStops.removeIf([&](const PendingStop &x) { return x.playSessionId == psid; });
+        };
+        postJson(e.serverUrl, e.token, e.userId, QStringLiteral("/Sessions/Playing/Stopped"), b,
+                 onOkStop, QStringLiteral("播放停止补传"), onFailDrop, [] {});
+    }
 }
 
 void EmbyClient::reportPlaybackPing(const QString &serverUrl, const QString &token,

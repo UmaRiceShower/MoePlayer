@@ -211,9 +211,22 @@ ApplicationWindow {
         function onPlaybackStarted(sessionKey, itemId) {
             ScreenInhibit.acquire()
         }
-        function onPlaybackFinished(sessionKey, itemId, error) {
+        function onPlaybackFinished(sessionKey, itemId, error, positionSec, durationSec) {
             ScreenInhibit.release()
             console.info("Main: 播放结束", itemId, "error:", error)
+            if (durationSec > 0) {
+                const played = !error && positionSec >= durationSec - 12
+                const ticks = played ? 0 : Math.round(positionSec * 10000000)
+                const em = root._epUrlCache[itemId]
+                const mm = em && em.meta ? em.meta : root._curMeta
+                if (mm && mm.serverUrl && mm.accountId) {
+                    AccountManager.applyLocalPlaybackState(mm.serverUrl, mm.accountId,
+                                                           itemId, played, ticks)
+                    const cur = stackView.currentItem
+                    if (cur && typeof cur.applyLocalPlayState === "function")
+                        cur.applyLocalPlayState(itemId, played, ticks)
+                }
+            }
             root._listPrimed = false // 会话终结:下次起播(新剧)重建列表
             // 定点刷新刚播的那条历史(延后拉取与合并都在 AccountManager 内):
             // 历史页下次打开即是新时间,不必等整表刷新。账号/服务器取会话
@@ -224,6 +237,16 @@ ApplicationWindow {
             if (m && m.serverUrl && m.accountId)
                 AccountManager.refreshHistoryItem(m.serverUrl, m.accountId, itemId)
             root.refreshCurrentAfterPlayback()
+        }
+        function onEpisodeFinished(sessionKey, itemId) {
+            const e = root._epUrlCache[itemId]
+            const m = e && e.meta ? e.meta : root._curMeta
+            if (m && m.serverUrl && m.accountId) {
+                AccountManager.applyLocalPlaybackState(m.serverUrl, m.accountId, itemId, true, 0)
+                const cur = stackView.currentItem
+                if (cur && typeof cur.applyLocalPlayState === "function")
+                    cur.applyLocalPlayState(itemId, true, 0)
+            }
         }
         function onPlaybackContextChanged(meta) {
             console.info("Main: 切集", meta.itemId)

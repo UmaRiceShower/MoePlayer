@@ -1255,6 +1255,16 @@ void AccountManager::refreshPlaybackHistory()
     startPlaybackHistoryFetch();
 }
 
+void AccountManager::applyLocalPlaybackState(const QString &serverUrl, const QString &accountId,
+                                             const QString &itemId, bool played, double positionTicks)
+{
+    m_client->patchLocalUserData(serverUrl, accountId, itemId, played, positionTicks);
+    m_playbackHistory->mergeItemUserData(serverUrl, accountId, itemId, -1,
+                                         QDateTime::currentMSecsSinceEpoch(),
+                                         positionTicks, played);
+    m_historyFlushTimer.start();
+}
+
 void AccountManager::refreshHistoryItem(const QString &serverUrl, const QString &accountId,
                                         const QString &itemId)
 {

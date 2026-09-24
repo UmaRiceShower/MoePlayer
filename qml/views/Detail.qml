@@ -334,6 +334,12 @@ Item {
             EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
     }
     // 播放后刷新:保留当前结构与旧数据,静默重拉(不闪加载动画)。
+    function applyLocalPlayState(itemId, played, positionTicks) {
+        if (root.itemId !== itemId)
+            return
+        root.detail = Object.assign({}, root.detail,
+                                    { played: played, positionTicks: positionTicks })
+    }
     function refreshAfterPlayback() {
         const c = root.creds()
         if (root.itemId !== "")

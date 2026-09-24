@@ -148,7 +148,9 @@ signals:
     void episodeUrlRequested(const QString &sessionKey, const QString &itemId);
     // 播放结束(正常播完/出错/用户关窗)。error=true 表示异常退出。
     // 双轴:sessionKey 路由会话,itemId 为真实集 id(换集后随实际播放变)。
-    void playbackFinished(const QString &sessionKey, const QString &itemId, bool error);
+    void playbackFinished(const QString &sessionKey, const QString &itemId, bool error,
+                         double positionSec, double durationSec);
+    void episodeFinished(const QString &sessionKey, const QString &itemId);
 
 private:
     struct Session
