@@ -1088,6 +1088,22 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             return;
         }
         if (reason == QLatin1String("eof")) {
+            const bool early = s->duration > 12.0 && s->position > 0.5
+                               && s->position < s->duration - 12.0;
+            if (early && qAbs(s->position - s->lastEarlyEofPos) > 2.0) {
+                s->lastEarlyEofPos = s->position;
+                qWarning() << "MpvClient: 提前 EOF(断流),按失败重连" << s->position
+                           << "/" << s->duration << s->key;
+                s->failedEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
+                s->retryPos = s->position;
+                sendJson(s, QJsonObject{
+                                {QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("get_property"),
+                                            QStringLiteral("playlist")}},
+                                {QStringLiteral("request_id"), kPlaylistCheckRequestId},
+                            });
+                return;
+            }
             // 是否最后一项:按 playlist_entry_id 在播放列表里定位(无竞态;
             // 旧实现查 playlist-pos,应答到达时 mpv 可能已推进到下一项,
             // 倒数第二集会被误判为最后而提前关窗)。
