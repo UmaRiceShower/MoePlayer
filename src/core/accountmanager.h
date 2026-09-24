@@ -97,6 +97,8 @@ public:
     // 这两个字段;并发与落盘防抖见 constants)。列表全部到位即发
     // playbackHistoryReady,不等明细 —— 明细到达经 PlaybackHistory::
     // historyChanged 增量通知。
+    Q_INVOKABLE void applyLocalPlaybackState(const QString &serverUrl, const QString &accountId,
+                                             const QString &itemId, bool played, double positionTicks);
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
     // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):

@@ -37,6 +37,20 @@ QVariant MediaItemModel::data(const QModelIndex &index, int role) const
     return {};
 }
 
+bool MediaItemModel::patchUserData(const QString &itemId, bool played, double positionTicks)
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].id != itemId)
+            continue;
+        m_items[i].played = played;
+        m_items[i].positionTicks = positionTicks;
+        const QModelIndex idx = index(i);
+        emit dataChanged(idx, idx, { PlayedRole, PositionTicksRole });
+        return true;
+    }
+    return false;
+}
+
 QHash<int, QByteArray> MediaItemModel::roleNames() const
 {
     return {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QTimer>
 #include <QNetworkAccessManager>
 #include <QJsonArray>
 
@@ -42,6 +43,8 @@ public:
     Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl, const QString &accountId);
     Q_INVOKABLE MediaItemModel *seasonsModelFor(const QString &serverUrl, const QString &accountId,
                                                 const QString &seriesId);
+    void patchLocalUserData(const QString &serverUrl, const QString &accountId,
+                            const QString &itemId, bool played, double positionTicks);
     Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl, const QString &accountId,
                                                  const QString &seasonId);
     Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl,
@@ -360,11 +363,23 @@ private:
                   std::function<void(const QJsonDocument &)> onOk,
                   std::function<void()> onFail, const QString &what);
     // POST JSON(带认证):失败发 serverRequestFailed + errorOccurred 并调用
-    // onFail(可为空;播放协商失败精确复位用)。
+    // onFail(可为空;播放协商失败精确复位用);onFailTransport 仅传输层
+    // 失败(HTTP 0:连接断/对端重置/超时)触发——4xx/5xx 是服务器确定性
+    // 拒绝,重试无意义;传输层失败多为网络抖动/断网,值得重试。
+    // 停止上报重试队列:断网时 Stopped 失败入队,网络恢复后补传
+    struct PendingStop {
+        QString serverUrl, token, userId, itemId, mediaSourceId, playSessionId;
+        double positionSecs = 0;
+        int attempts = 0;
+    };
+    QList<PendingStop> m_pendingStops;
+    QTimer m_stopRetryTimer;
+    void flushPendingStops();
     void postJson(const QString &serverUrl, const QString &token, const QString &userId,
                   const QString &path, const QJsonObject &body,
                   std::function<void(const QJsonDocument &)> onOk, const QString &what,
-                  std::function<void()> onFail = nullptr);
+                  std::function<void()> onFail = nullptr,
+                  std::function<void()> onFailTransport = nullptr);
     // DELETE 请求(无请求体),失败同上。
     void del(const QString &serverUrl, const QString &token, const QString &userId,
              const QString &path, std::function<void(const QJsonDocument &)> onOk,

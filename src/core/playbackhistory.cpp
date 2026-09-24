@@ -117,7 +117,8 @@ void PlaybackHistory::mergeItemUserData(const QString &serverUrl, const QString 
         if (m.value(QStringLiteral("scope")).toString() != scope
             || m.value(QStringLiteral("id")).toString() != itemId)
             continue;
-        m.insert(QStringLiteral("playCount"), playCount);
+        if (playCount >= 0)
+            m.insert(QStringLiteral("playCount"), playCount);
         m.insert(QStringLiteral("lastPlayedAt"), lastPlayedAt);
         // 查过单条端点即置位(即使服务器没有 LastPlayedDate):变更检测据此不再重复补(见 constants)。
         m.insert(QStringLiteral("dateFetched"), true);
