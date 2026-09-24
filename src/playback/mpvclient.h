@@ -191,6 +191,7 @@ private:
         // 位置、已重试次数(超过快速重试次数后转慢速,等待网络恢复)。
         int retryIndex = -1;
         double retryPos = 0.0;
+        double lastEarlyEofPos = -1.0; // 上次提前 EOF 的位置(判文件截断用)
         int retryCount = 0;
         int failedEntryId = -1;
         QTimer *retryTimer = nullptr;
