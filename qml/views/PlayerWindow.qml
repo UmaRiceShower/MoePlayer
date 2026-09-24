@@ -268,9 +268,15 @@ Window {
         id: inputArea
         anchors.fill: parent
         hoverEnabled: true
-        acceptedButtons: Qt.LeftButton
+        acceptedButtons: Qt.LeftButton | Qt.BackButton | Qt.ForwardButton
         cursorShape: root.chromeVisible ? Qt.ArrowCursor : Qt.BlankCursor
         onPositionChanged: root.wake()
+        onPressed: (mouse) => {
+            if (mouse.button === Qt.BackButton)
+                root.episodeJump(-1)
+            else if (mouse.button === Qt.ForwardButton)
+                root.episodeJump(1)
+        }
         onWheel: (wheel) => {
             root.wake()
             root.adjustVolume(wheel.angleDelta.y > 0 ? 5 : -5)
@@ -1129,16 +1135,118 @@ Window {
         }
     }
 
-    // ---- 键盘(mpv/通用播放器约定)----
-    Shortcut { sequences: ["Space", "K"]; onActivated: root.togglePause() }
+    // ---- 键盘 ----
+    Shortcut { sequences: ["Space", "K", "P"]; onActivated: root.togglePause() }
     Shortcut { sequences: ["Left"]; onActivated: { root.wake(); root.seekBy(-5) } }
     Shortcut { sequences: ["Right"]; onActivated: { root.wake(); root.seekBy(5) } }
-    Shortcut { sequences: ["Shift+Left"]; onActivated: { root.wake(); root.seekBy(-30) } }
-    Shortcut { sequences: ["Shift+Right"]; onActivated: { root.wake(); root.seekBy(30) } }
+    Shortcut { sequences: ["Shift+Left"]; onActivated: { root.wake(); MpvClient.command(["no-osd", "seek", -1, "exact"], root.sessionKey) } }
+    Shortcut { sequences: ["Shift+Right"]; onActivated: { root.wake(); MpvClient.command(["no-osd", "seek", 1, "exact"], root.sessionKey) } }
     Shortcut { sequences: ["Up"]; onActivated: root.adjustVolume(5) }
     Shortcut { sequences: ["Down"]; onActivated: root.adjustVolume(-5) }
+    Shortcut { sequences: ["0", "Shift+*", "Shift+8"]; onActivated: root.adjustVolume(2) }
+    Shortcut { sequences: ["9", "/"]; onActivated: root.adjustVolume(-2) }
     Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["cycle", "mute"], root.sessionKey) }
     Shortcut { sequences: ["F"]; onActivated: root.toggleFullscreen() }
-    Shortcut { sequences: ["N"]; onActivated: root.episodeJump(1) }
-    Shortcut { sequences: ["P"]; onActivated: root.episodeJump(-1) }
+    Shortcut { sequences: [">", "Return", "Shift+>", "Shift+."]; onActivated: root.episodeJump(1) }
+    Shortcut { sequences: ["<", "Shift+<", "Shift+,"]; onActivated: root.episodeJump(-1) }
+    Shortcut { sequences: ["Esc"]; onActivated: {
+        if (root.visibility === Window.FullScreen)
+            root.toggleFullscreen()
+        } 
+    }
+    // 媒体键
+    Shortcut { sequences: ["Media Play"]; onActivated: MpvClient.setPause(false, root.sessionKey) }
+    Shortcut { sequences: ["Media Pause"]; onActivated: MpvClient.setPause(true, root.sessionKey) }
+    Shortcut { sequences: ["Media Next"]; onActivated: root.episodeJump(1) }
+    Shortcut { sequences: ["Media Previous"]; onActivated: root.episodeJump(-1) }
+    Shortcut { sequences: ["Volume Up"]; onActivated: root.adjustVolume(2) }
+    Shortcut { sequences: ["Volume Down"]; onActivated: root.adjustVolume(-2) }
+    Shortcut { sequences: ["Volume Mute"]; onActivated: MpvClient.command(["cycle", "mute"], root.sessionKey) }
+    // 超分档位热键
+    Instantiator {
+        model: MpvClient.superResOptions()
+        delegate: Shortcut {
+            required property var modelData
+            sequence: modelData.hotkey
+            onActivated: ConfigManager.setValue("superRes", modelData.key)
+        }
+    }
+    // 其余 mpv 默认键位:[键序列数组] → mpv 命令数组,批量注册。
+    // 移位标点(!@#?{}_*<>等)绑两种带 Shift 的形态:"Shift+符号" 与
+    // "Shift+基础键"——按键事件给哪种(移位后符号键码+Shift,或基础键
+    // +Shift)随平台/布局不定;裸符号序列不可达(该符号本就须按 Shift
+    // 才能输入,事件恒带 Shift 修饰)。
+    readonly property var mpvKeys: [
+        // 帧步进 / 倍速(mpv: [ ] { } BS)
+        [["."], ["frame-step"]], [[","], ["frame-back-step"]],
+        [["["], ["multiply", "speed", 0.9091]], [["]"], ["multiply", "speed", 1.1]],
+        [["Shift+{", "Shift+["], ["multiply", "speed", 0.5]],
+        [["Shift+}", "Shift+]"], ["multiply", "speed", 2.0]],
+        [["Backspace"], ["set_property", "speed", 1.0]],
+        [["Shift+Backspace"], ["revert-seek"]],
+        [["Ctrl+Shift+Backspace"], ["revert-seek", "mark"]],
+        // 章节 / 长跳 / 回开头
+        [["PgUp"], ["add", "chapter", 1]], [["PgDown"], ["add", "chapter", -1]],
+        [["Shift+!", "Shift+1"], ["add", "chapter", -1]],
+        [["Shift+@", "Shift+2"], ["add", "chapter", 1]],
+        [["Shift+Up"], ["no-osd", "seek", 5, "exact"]],
+        [["Shift+Down"], ["no-osd", "seek", -5, "exact"]],
+        [["Ctrl+Left"], ["no-osd", "sub-seek", -1]],
+        [["Ctrl+Right"], ["no-osd", "sub-seek", 1]],
+        [["Ctrl+Shift+Left"], ["sub-step", -1]],
+        [["Ctrl+Shift+Right"], ["sub-step", 1]],
+        [["Shift+PgUp"], ["seek", 600, "relative"]],
+        [["Shift+PgDown"], ["seek", -600, "relative"]],
+        [["Home"], ["seek", 0, "absolute"]],
+        // 进度 OSD / 统计 / 控制台
+        [["O"], ["show-progress"]], [["Shift+P"], ["show-progress"]],
+        [["Shift+O"], ["cycle-values", "osd-level", "3", "1"]],
+        [["I"], ["script-binding", "stats/display-stats"]],
+        [["Shift+I"], ["script-binding", "stats/display-stats-toggle"]],
+        [["Shift+?", "Shift+/"], ["script-binding", "stats/display-page-4-toggle"]],
+        // 字幕:延迟 / 字号 / 位置 / 可见性 / 切轨
+        [["Z"], ["add", "sub-delay", -0.1]], [["X"], ["add", "sub-delay", 0.1]],
+        [["Shift+Z"], ["add", "sub-delay", 0.1]],
+        [["Ctrl++", "Ctrl+Shift++", "Ctrl+Shift+="], ["add", "audio-delay", 0.1]],
+        [["Ctrl+-"], ["add", "audio-delay", -0.1]],
+        [["Shift+G"], ["add", "sub-scale", 0.1]], [["Shift+F"], ["add", "sub-scale", -0.1]],
+        [["R"], ["add", "sub-pos", -1]], [["Shift+R"], ["add", "sub-pos", 1]],
+        [["T"], ["add", "sub-pos", 1]],
+        [["V"], ["cycle", "sub-visibility"]],
+        [["Alt+V"], ["cycle", "secondary-sub-visibility"]],
+        [["Shift+V"], ["cycle", "sub-ass-use-video-data"]],
+        [["U"], ["cycle-values", "sub-ass-override", "force", "scale"]],
+        [["J"], ["cycle", "sub"]], [["Shift+J"], ["cycle", "sub", "down"]],
+        // 轨道切换(mpv: # = 音轨,_ = 视频轨)
+        [["Shift+#", "Shift+3"], ["cycle", "audio"]],
+        [["Shift+_", "Shift+-"], ["cycle", "video"]],
+        // 画面微调(mpv: 1-8 对比/亮度/伽马/饱和)
+        [["1"], ["add", "contrast", -1]], [["2"], ["add", "contrast", 1]],
+        [["3"], ["add", "brightness", -1]], [["4"], ["add", "brightness", 1]],
+        [["5"], ["add", "gamma", -1]], [["6"], ["add", "gamma", 1]],
+        [["7"], ["add", "saturation", -1]], [["8"], ["add", "saturation", 1]],
+        // 去带 / 反交错 / 硬解切换 / panscan / 宽高比 / edition
+        [["B"], ["cycle", "deband"]], [["D"], ["cycle", "deinterlace"]],
+        [["Ctrl+H"], ["cycle-values", "hwdec", "no", "auto"]],
+        [["W"], ["add", "panscan", -0.1]], [["Shift+W"], ["add", "panscan", 0.1]],
+        [["E"], ["add", "panscan", 0.1]],
+        [["Shift+A"], ["cycle-values", "video-aspect-override", "16:9", "4:3", "2.35:1", "no"]],
+        [["Shift+E"], ["cycle", "edition"]],
+        // 截图(mpv: s 全画面 / S 仅视频 / Ctrl+s 含窗口 / Alt+s 逐帧开关)
+        [["S"], ["screenshot"]], [["Shift+S"], ["screenshot", "video"]],
+        [["Ctrl+S"], ["screenshot", "window"]], [["Alt+S"], ["screenshot", "each-frame"]],
+        // AB 循环 / 单集循环 / 窗口置顶
+        [["L"], ["ab-loop"]], [["Shift+L"], ["cycle-values", "loop-file", "inf", "no"]],
+        [["Shift+T"], ["cycle", "ontop"]],
+        // 播放列表 / 轨道列表 OSD(show-text 自带属性展开)
+        [["F8"], ["show-text", "${playlist}"]], [["F9"], ["show-text", "${track-list}"]]
+    ]
+    Instantiator {
+        model: root.mpvKeys
+        delegate: Shortcut {
+            required property var modelData
+            sequences: modelData[0]
+            onActivated: { root.wake(); MpvClient.command(modelData[1], root.sessionKey) }
+        }
+    }
 }
