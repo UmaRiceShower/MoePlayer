@@ -126,10 +126,12 @@ Window {
                           ? Window.Windowed : Window.FullScreen
     }
     // 倍速档位循环(常用档,mpv 侧持久到换集)。
+    property real _prevSpeed: 1.0
     function cycleSpeed() {
         const speeds = [1.0, 1.25, 1.5, 2.0, 0.5]
         let i = speeds.findIndex(s => Math.abs(s - video.speed) < 0.01)
         const next = speeds[(i + 1) % speeds.length]
+        _prevSpeed = video.speed
         MpvClient.command(["set_property", "speed", next], root.sessionKey)
         osd.showText("倍速 " + next + "x")
     }
@@ -263,7 +265,7 @@ Window {
         anchors.fill: parent
     }
 
-    // 输入层:单击=播放/暂停(300ms 内双击=全屏),滚轮=音量,移动=唤醒。
+    // 输入层:单击=播放/暂停,双击=全屏,滚轮=音量,移动=唤醒。
     MouseArea {
         id: inputArea
         anchors.fill: parent
@@ -281,22 +283,22 @@ Window {
             root.wake()
             root.adjustVolume(wheel.angleDelta.y > 0 ? 5 : -5)
         }
+        property bool _clickToggled: false
         onClicked: {
             // 面板开着:点视频区 = 收面板(不换暂停态),符合"点空白处关闭"。
             if (root.panel !== "") {
                 root.panel = ""
+                _clickToggled = false
                 return
             }
-            clickTimer.start() // 双击优先:延迟判定
+            root.togglePause()
+            _clickToggled = true
         }
         onDoubleClicked: {
-            clickTimer.stop()
+            if (_clickToggled)
+                root.togglePause() // 撤销单击的切换,暂停态净不变
+            _clickToggled = false
             root.toggleFullscreen()
-        }
-        Timer {
-            id: clickTimer
-            interval: 300
-            onTriggered: root.togglePause()
         }
     }
 
@@ -739,9 +741,11 @@ Window {
                                 font.pixelSize: 16
                                 font.weight: Font.Medium
                                 TapHandler {
+                                    onSingleTapped: if (!speedBtn.editing) root.cycleSpeed()
                                     onDoubleTapped: {
-                                        speedClickTimer.stop()
-                                        speedEdit.text = String(Math.round(video.speed * 100) / 100)
+                                        MpvClient.command(["set_property", "speed", root._prevSpeed],
+                                                          root.sessionKey)
+                                        speedEdit.text = String(Math.round(root._prevSpeed * 100) / 100)
                                         speedBtn.editing = true
                                         speedEdit.forceActiveFocus()
                                         speedEdit.selectAll()
@@ -783,14 +787,6 @@ Window {
                                 onActiveFocusChanged: if (!activeFocus)
                                     speedBtn.editing = false
                             }
-                        }
-                        // 单击延迟 300ms
-                        onClicked: if (!editing)
-                            speedClickTimer.restart()
-                        Timer {
-                            id: speedClickTimer
-                            interval: 200
-                            onTriggered: root.cycleSpeed()
                         }
                         tip: "倍速(单击循环,双击输入)"
                     }
