@@ -837,6 +837,12 @@ Item {
         return s.isExternal ? "外挂" : "内嵌"
     }
     readonly property bool hasBackdrop: !!(root.detail.backdropId || root.detail.parentBackdropId)
+    readonly property color panelGlass: root.hasBackdrop ? Qt.rgba(0.07, 0.09, 0.17, 0.55)
+                                        : (ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
+                                                              : Qt.rgba(0.07, 0.09, 0.17, 0.55))
+    readonly property color panelText: root.hasBackdrop ? "white" : Theme.textPrimary
+    readonly property color panelTextMuted: root.hasBackdrop ? Qt.rgba(1, 1, 1, 0.65)
+                                                             : Theme.textMuted
 
     component ShadowText: Item {
         property string text: ""
@@ -1238,8 +1244,7 @@ Item {
                         // 透出背景 + 选中时 accent 描边。
                         blurSource: detailBg
                             scrollParent: overview
-                        glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                      : Qt.rgba(0.07, 0.09, 0.17, 0.55)
+                        glassColor: root.panelGlass
                         borderColor: drop.opened ? root.accentColor : Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
@@ -1257,7 +1262,7 @@ Item {
                                 width: 28
                                 height: parent.height
                                 text: optRow.icon
-                                color: Theme.textMuted
+                                color: root.panelTextMuted
                                 font.pixelSize: 16
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -1269,7 +1274,7 @@ Item {
                                 AppText {
                                     width: parent.width
                                     text: optRow.mainText
-                                    color: Theme.textPrimary
+                                    color: root.panelText
                                     font.pixelSize: 13
                                     elide: Text.ElideRight
                                 }
@@ -1277,7 +1282,7 @@ Item {
                                     width: parent.width
                                     visible: optRow.subText !== ""
                                     text: optRow.subText
-                                    color: Theme.textMuted
+                                    color: root.panelTextMuted
                                     font.pixelSize: 11
                                     elide: Text.ElideRight
                                 }
@@ -1286,7 +1291,7 @@ Item {
                                 width: 24
                                 height: parent.height
                                 text: drop.opened ? "▴" : "▾"
-                                color: Theme.textMuted
+                                color: root.panelTextMuted
                                 font.pixelSize: 13
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
@@ -1462,8 +1467,7 @@ Item {
                         scrollParent: overview
                         // 玻璃底色淡一点(白底微透,非黑底)——黑色太深会盖住
                         // 磨砂模糊的透亮感,淡色透出下方模糊内容才显玻璃质感。
-                        glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                      : Qt.rgba(0.07, 0.09, 0.17, 0.55)
+                        glassColor: root.panelGlass
                         borderColor: Theme.borderSoft
                         thickness: 0
                         frostAmount: 0.15
@@ -1477,6 +1481,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 12
                             text: root.detail.overview || ""
+                            color: root.panelText
                             font.pixelSize: 14
                             wrapMode: Text.Wrap
                         }
@@ -1616,8 +1621,7 @@ Item {
                             // 媒体信息卡玻璃:透出背景,微折射。
                             blurSource: detailBg
                             scrollParent: overview
-                            glassColor: ThemeStore.isLight ? Qt.rgba(1, 1, 1, 0.55)
-                                                          : Qt.rgba(0.07, 0.09, 0.17, 0.55)
+                            glassColor: root.panelGlass
                             borderColor: Theme.borderSoft
                             thickness: 0
                             frostAmount: 0.15
@@ -1776,7 +1780,7 @@ Item {
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter
                                         text: "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
-                                        color: Theme.textPrimary
+                                        color: root.panelText
                                         font.pixelSize: 14
                                         font.bold: true
                                     }
@@ -1803,7 +1807,7 @@ Item {
                                                     id: badgeText
                                                     anchors.centerIn: parent
                                                     text: modelData
-                                                    color: Theme.textPrimary
+                                                    color: root.panelText
                                                     font.pixelSize: 12
                                                 }
                                             }
@@ -2159,8 +2163,8 @@ Item {
                 width: Math.min(parent.width * 0.62, 150)
                 height: visible ? 26 : 0
                 placeholderText: "跳至集号"
-                placeholderTextColor: Theme.textMuted
-                color: Theme.textPrimary
+                placeholderTextColor: root.panelTextMuted
+                color: root.panelText
                 font.pixelSize: 12
                 horizontalAlignment: Text.AlignHCenter
                 leftPadding: 8
