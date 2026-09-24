@@ -25,13 +25,6 @@ const QStringList kGrid9 = {
     QStringLiteral("middle-left"), QStringLiteral("middle-center"), QStringLiteral("middle-right"),
     QStringLiteral("bottom-left"), QStringLiteral("bottom-center"), QStringLiteral("bottom-right"),
 };
-// 文字区位置枚举:followPoster + 9 宫格。
-const QStringList kTextPos = {
-    QStringLiteral("followPoster"),
-    QStringLiteral("top-left"), QStringLiteral("top-center"), QStringLiteral("top-right"),
-    QStringLiteral("middle-left"), QStringLiteral("middle-center"), QStringLiteral("middle-right"),
-    QStringLiteral("bottom-left"), QStringLiteral("bottom-center"), QStringLiteral("bottom-right"),
-};
 
 // 解析代理串为 QNetworkProxy;空串/非法 → NoProxy(直连),并告警。
 // 仅支持 HTTP 代理:http:// / https://(Qt 对 https 目标走 CONNECT 隧道),
@@ -180,57 +173,22 @@ QVariantList optionsLibrarySortOrder()
 QVariantList optionsDetailPosterPos()
 {
     return optionsFrom({{ QStringLiteral("左上"), QStringLiteral("top-left") },
-                        { QStringLiteral("上中"), QStringLiteral("top-center") },
-                        { QStringLiteral("右上"), QStringLiteral("top-right") },
                         { QStringLiteral("左中"), QStringLiteral("middle-left") },
-                        { QStringLiteral("正中"), QStringLiteral("middle-center") },
-                        { QStringLiteral("右中"), QStringLiteral("middle-right") },
                         { QStringLiteral("左下"), QStringLiteral("bottom-left") },
-                        { QStringLiteral("下中"), QStringLiteral("bottom-center") },
+                        { QStringLiteral("中上"), QStringLiteral("top-center") },
+                        { QStringLiteral("中中"), QStringLiteral("middle-center") },
+                        { QStringLiteral("中下"), QStringLiteral("bottom-center") },
+                        { QStringLiteral("右上"), QStringLiteral("top-right") },
+                        { QStringLiteral("右中"), QStringLiteral("middle-right") },
                         { QStringLiteral("右下"), QStringLiteral("bottom-right") }});
 }
 
-QVariantList optionsDetailTextPos()
-{
-    return optionsFrom({
-        { QStringLiteral("跟随海报"), QStringLiteral("followPoster") },
-        { QStringLiteral("左上"), QStringLiteral("top-left") },
-        { QStringLiteral("上中"), QStringLiteral("top-center") },
-        { QStringLiteral("右上"), QStringLiteral("top-right") },
-        { QStringLiteral("左中"), QStringLiteral("middle-left") },
-        { QStringLiteral("正中"), QStringLiteral("middle-center") },
-        { QStringLiteral("右中"), QStringLiteral("middle-right") },
-        { QStringLiteral("左下"), QStringLiteral("bottom-left") },
-        { QStringLiteral("下中"), QStringLiteral("bottom-center") },
-        { QStringLiteral("右下"), QStringLiteral("bottom-right") },
-    });
-}
-
-QVariantList optionsDetailButtonsPos()
-{
-    return optionsFrom({
-        { QStringLiteral("跟随标题"), QStringLiteral("text") },
-        { QStringLiteral("跟随海报"), QStringLiteral("poster") },
-        { QStringLiteral("背景图左下"), QStringLiteral("backdrop") },
-    });
-}
 
 bool validatePosterPos(const QVariant &v)
 {
     return kGrid9.contains(v.toString());
 }
 
-bool validateTextPos(const QVariant &v)
-{
-    return kTextPos.contains(v.toString());
-}
-
-bool validateButtonsPos(const QVariant &v)
-{
-    const QString s = v.toString();
-    return s == QLatin1String("text") || s == QLatin1String("poster")
-           || s == QLatin1String("backdrop");
-}
 
 bool validateProxy(const QVariant &v)
 {
