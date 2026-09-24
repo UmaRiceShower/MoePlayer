@@ -312,25 +312,6 @@ Window {
         }
     }
 
-    // 暂停时的中央大播放键(播放中不出现;控制层显隐独立)。
-    ToolButton {
-        anchors.centerIn: parent
-        width: 88
-        height: 88
-        visible: video.paused && !video.buffering && root._everStarted
-        opacity: visible ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 200 } }
-        icon.source: "qrc:/icons/play.svg"
-        icon.width: 64
-        icon.height: 64
-        icon.color: "white"
-        onClicked: root.togglePause()
-        background: Rectangle {
-            radius: width / 2
-            color: Qt.rgba(0, 0, 0, 0.45)
-        }
-    }
-
     // ---- 控制层(自动隐藏)----
     Item {
         id: chrome
