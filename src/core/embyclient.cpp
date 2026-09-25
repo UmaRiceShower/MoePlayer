@@ -7,9 +7,9 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QNetworkProxy>
+#include <QSysInfo>
 #include <QUrl>
 #include <QUrlQuery>
-#include <QUuid>
 #include <QDebug>
 #include <QCoreApplication>
 #include <QDateTime>
@@ -17,11 +17,14 @@
 
 namespace {
 
-// 设备 id:进程内持久的随机 UUID(X-Emby-Authorization 的 DeviceId,见 authHeaderFor)。
-QString deviceId()
+// 设备名:X-Emby-Authorization 的 Device 字段(服务器会话/设备列表显示)。
+QString deviceName()
 {
-    static const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
-    return id;
+    static const QString name = [] {
+        const QString h = QSysInfo::machineHostName();
+        return h.isEmpty() ? QStringLiteral("Desktop") : h;
+    }();
+    return name;
 }
 
 QStringList requiredHeaders(const QJsonObject &source)
@@ -160,10 +163,10 @@ void EmbyClient::setProxy(const QNetworkProxy &proxy)
 
 QString EmbyClient::authHeaderFor(const QString &userId, const QString &token) const
 {
-    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"%4\", Device=\"Desktop\", "
+    QString h = QStringLiteral("Emby UserId=\"%1\", Client=\"%4\", Device=\"%5\", "
                                "DeviceId=\"%2\", Version=\"%3\"")
-                    .arg(userId, deviceId(), QCoreApplication::applicationVersion(),
-                         MoePlayer::kAppName);
+                    .arg(userId, m_deviceId, QCoreApplication::applicationVersion(),
+                         MoePlayer::kAppName, deviceName());
     if (!token.isEmpty())
         h += QStringLiteral(", Token=\"%1\"").arg(token);
     return h;
