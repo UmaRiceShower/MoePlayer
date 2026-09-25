@@ -141,9 +141,10 @@ Window {
     }
 
     // 章节磁吸:距章节点阈值内即吸附(返回章节时间;无 = -1)。
-    // 阈值 = max(5s, 时长 1.2%),长片不会一吸一大片。
-    function snapChapter(t) {
-        const th = Math.max(5, video.duration * 0.012)
+    function snapChapter(t, barW) {
+        if (!barW || video.duration <= 0)
+            return -1
+        const th = 10 / barW * video.duration
         for (const c of chapters)
             if (Math.abs(c.time - t) <= th)
                 return c.time
@@ -460,14 +461,19 @@ Window {
                         // 拖动中显示拖动值;否则跟随播放位置(Binding 门控,
                         // 避免 value 自引用绑定环)。
                         property bool scrubbing: false
+                        // 按下时刻的值:区分点按(未拖动)与刮擦——点按 =
+                        // 精确意图直接落点;磁吸只在拖动松手时生效。
+                        property real _pressValue: 0
                         Binding on value { when: !seekBar.scrubbing; value: video.position }
                         live: false
                         onPressedChanged: {
                             if (pressed) {
+                                _pressValue = value
                                 scrubbing = true
                             } else {
-                                // 松手落点过磁吸(与 hover 预览一致)。
-                                const target = root.snapChapter(value)
+                                const dragged = Math.abs(value - _pressValue)
+                                                / Math.max(1, to) * width > 4
+                                const target = dragged ? root.snapChapter(value, width) : -1
                                 MpvClient.seek(target >= 0 ? target : value, root.sessionKey)
                                 scrubbing = false
                             }
@@ -483,8 +489,10 @@ Window {
                         // hover/拖动目标时间(气泡与预览共用;章节磁吸)。
                         property real rawTime: scrubbing ? value
                                             : (hoverFrac >= 0 ? hoverFrac * to : value)
-                        property real snappedTime: root.snapChapter(rawTime)
-                        property real hoverTime: snappedTime >= 0 ? snappedTime : rawTime
+                        property real snappedTime: root.snapChapter(rawTime, width)
+                        // 气泡/预览时间 = 实际操作结果:悬停(点按将精确落点)
+                        // 显示指针时间;拖动松手会磁吸,显示吸附后时间。
+                        property real hoverTime: (scrubbing && snappedTime >= 0) ? snappedTime : rawTime
                         background: Rectangle {
                             implicitHeight: 4
                             radius: 2
