@@ -2252,20 +2252,6 @@ Item {
                                 duration: 500
                                 cache: true
                             }
-                            // 选中/悬停边框:透明覆盖层(同尺寸描边)。border 画在
-                            // 矩形自身边缘内侧,会被平铺的缩略图子项盖住,故置于
-                            // 图片之上;选中常显莫奈色,hover 放大 + 变浅。
-                            Rectangle {
-                                anchors.fill: parent
-                                radius: 18
-                                color: "transparent"
-                                border.width: (episodeItem.selected || episodeHover.hovered) ? 2 : 0
-                                border.color: episodeItem.selected && !episodeHover.hovered
-                                              ? root.accentColor
-                                              : Qt.lighter(root.accentColor, 1.35)
-                                Behavior on border.width { NumberAnimation { duration: Constants.animMinMs } }
-                                Behavior on border.color { ColorAnimation { duration: Constants.animMinMs } }
-                            }
                             // 无海报且无父级背景(都拿不到图)或加载失败回退:Canvas 播放图标。
                             Canvas {
                                 anchors.centerIn: parent
@@ -2354,6 +2340,20 @@ Item {
                             pixelSize: 14
                             hAlign: Text.AlignHCenter
                         }
+                    }
+                    Rectangle {
+                        x: cardCol.x + thumbBox.x - 2
+                        y: cardCol.y + thumbBox.y - 2
+                        width: thumbBox.width + 4
+                        height: thumbBox.height + 4
+                        color: "transparent"
+                        radius: 20
+                        border.width: (episodeItem.selected || episodeHover.hovered) ? 2 : 0
+                        border.color: episodeItem.selected && !episodeHover.hovered
+                                      ? root.accentColor
+                                      : Qt.lighter(root.accentColor, 1.35)
+                        Behavior on border.width { NumberAnimation { duration: Constants.animMinMs } }
+                        Behavior on border.color { ColorAnimation { duration: Constants.animMinMs } }
                     }
                     // 悬停高亮/点击选集:Pointer Handler 组合(替代
                     // MouseArea hover+click)。
