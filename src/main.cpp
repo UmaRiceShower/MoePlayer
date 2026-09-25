@@ -140,6 +140,8 @@ int main(int argc, char *argv[])
     // 全局代理(配置为空 = 直连):先按初始配置应用,热重载(用户手改
     // config.toml)后经 proxyChanged 再应用,新请求即时生效。
     embyClient.setProxy(configManager.proxyObject());
+    // 持久化设备标识(首启 ConfigManager 已生成落盘)。
+    embyClient.setDeviceId(configManager.deviceId());
     QObject::connect(&configManager, &ConfigManager::proxyChanged, &embyClient,
                      [&configManager, &embyClient]() { embyClient.setProxy(configManager.proxyObject()); });
     // 未显式设代理的 QNAM(QML Image 原始 URL 等)统一走配置代理。

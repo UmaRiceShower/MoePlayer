@@ -27,6 +27,8 @@ public:
     // 全局代理(来自 ConfigManager;NoProxy = 直连,默认)。热重载后
     // main.cpp 经 proxyChanged 重新调用,作用于之后的所有请求。
     void setProxy(const QNetworkProxy &proxy);
+    // 持久化设备标识(ConfigManager.deviceId;main.cpp 启动时注入一次)。
+    void setDeviceId(const QString &id) { m_deviceId = id; }
 
     // 多线路:身份键 serverUrl → 工作地址(当前线路)的解析器,由
     // AccountManager 在启动时注入;未注入 = 直通(serverUrl 即基址)。
@@ -402,6 +404,7 @@ private:
     // rel 含 icon 的标签;href 相对路径按 baseHtmlUrl 解析,返回绝对 URL。
     static QString parseFaviconLink(const QString &html, const QString &baseHtmlUrl);
 
+    QString m_deviceId; // 持久化设备标识(setDeviceId 注入)
     QNetworkAccessManager m_nam;
     // 后台专用连接池:QNetworkAccessManager 的每主机连接数(HTTP/1.1 默认 6,
     // 可用 QHttp1Configuration 调整)按实例计,独立实例使后台播放历史请求不与

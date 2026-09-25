@@ -8,6 +8,7 @@
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QSaveFile>
+#include <QUuid>
 #include <QTimer>
 
 #include <cmath>
@@ -405,6 +406,10 @@ ConfigManager::ConfigManager(QObject *parent)
     }
 
     loadFromFile();
+
+    if (deviceId().isEmpty())
+        setValue(QStringLiteral("deviceId"),
+                 QUuid::createUuid().toString(QUuid::WithoutBraces));
 
     // 外部修改热重载:防抖 400ms(编辑器保存常分多次写),值变化才发 NOTIFY。
     m_watcher = new QFileSystemWatcher(this);
