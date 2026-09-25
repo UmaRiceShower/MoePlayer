@@ -50,9 +50,13 @@ Item {
     readonly property int heroBtnPx: Math.round(Math.min(18, Math.max(13, root.width * 0.0102)))
     readonly property int heroSectionPx: Math.round(Math.min(22, Math.max(16, root.width * 0.0125)))
     readonly property int sidebarW: Math.round(Math.min(380, Math.max(220, root.width * 0.166)))
-    readonly property int episodeRowH: Math.round(Math.min(240, Math.max(140, root.width * 0.105)))
+    readonly property int episodeThumbW: Math.round(Math.min(sidebarW - 24, 280))
+    readonly property int episodeRowH: Math.round(episodeThumbW * 9 / 16)
+                                       + Constants.detailEpisodeRowMargin * 2 + 6 + 24
+    readonly property int heroTextW: Math.round(Math.min(720,
+                                         Math.max(ConfigManager.detailTextWidth, root.width * 0.24)))
     readonly property bool heroNarrow: overview.width < heroPosterW
-                                       + ConfigManager.detailTextWidth + 96
+                                       + heroTextW + 96
     readonly property int heroTextAlign: (heroNarrow || posterCentered) ? Text.AlignHCenter
                                          : textSideEffective === "left" ? Text.AlignRight
                                          : Text.AlignLeft
@@ -1002,7 +1006,7 @@ Item {
                             : heroItem.width - posterSlot.x - posterSlot.width - 24 - 32
                         width: (root.heroNarrow || root.posterCentered)
                                ? Math.max(120, heroItem.width - 48)
-                               : Math.min(ConfigManager.detailTextWidth, Math.max(120, _avail))
+                               : Math.min(root.heroTextW, Math.max(120, _avail))
                         height: heroNewCol.implicitHeight
                         anchors.leftMargin: 24
                         anchors.rightMargin: 24
@@ -2234,9 +2238,8 @@ Item {
                         // 海报缩略图(16:9 剧照)
                         Rectangle {
                             id: thumbBox
-                            height: root.episodeRowH - Constants.detailEpisodeRowMargin*2
-                                   - cardCol.spacing - episodeTitle.implicitHeight
-                            width: height/9*16
+                            width: root.episodeThumbW
+                            height: Math.round(width * 9 / 16)
                             color: Theme.bg
                             radius: 18
                             clip: true
