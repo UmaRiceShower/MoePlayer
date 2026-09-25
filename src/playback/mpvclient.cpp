@@ -1013,7 +1013,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                 if (s->loadIssued
                     && s->meta.value(QStringLiteral("itemId")).toString()
                         != pm.value(QStringLiteral("itemId")).toString())
-                    reportStopped(s);
+                    reportStopped(s, s->eofPos);
                 s->meta = pm;
                 if (!pm.value(QStringLiteral("playSessionId")).toString().isEmpty()
                     && pm.value(QStringLiteral("playSessionId")).toString() != oldSid)
@@ -1021,6 +1021,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             }
             s->pendingFileId.clear();
         }
+        s->eofPos = -1;
         s->loadIssued = true;
         qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
         if (s->retryCount > 0) {
@@ -1115,6 +1116,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             // 是否最后一项:按 playlist_entry_id 在播放列表里定位(无竞态;
             // 旧实现查 playlist-pos,应答到达时 mpv 可能已推进到下一项,
             // 倒数第二集会被误判为最后而提前关窗)。
+            s->eofPos = s->position; // 快照:新文件加载会复位 time-pos
             s->eofEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
             sendJson(s, QJsonObject{
                             {QStringLiteral("command"),
@@ -1534,10 +1536,11 @@ void MpvClient::reportProgress(Session *s, bool force)
         s->position, s->paused);
 }
 
-void MpvClient::reportStopped(Session *s)
+void MpvClient::reportStopped(Session *s, double posOverride)
 {
     if (!m_emby || !s->delivered)
         return;
+    const double pos = posOverride >= 0 ? posOverride : s->position;
     const QString sid = s->meta.value(QStringLiteral("playSessionId")).toString();
     const QString token = s->meta.value(QStringLiteral("token")).toString();
     if (sid.isEmpty() || token.isEmpty()) {
@@ -1549,7 +1552,7 @@ void MpvClient::reportStopped(Session *s)
         token, s->meta.value(QStringLiteral("userId")).toString(),
         s->meta.value(QStringLiteral("itemId")).toString(),
         s->meta.value(QStringLiteral("mediaSourceId")).toString(),
-        sid, s->position);
+        sid, pos);
 }
 
 void MpvClient::stopAndConsiderEnd(QString key, bool errored)
@@ -1559,10 +1562,12 @@ void MpvClient::stopAndConsiderEnd(QString key, bool errored)
         return;
     s->ended = true;
     // 结束前补一次停止回传(把最后位置写给服务器)。
-    reportStopped(s);
+    reportStopped(s, s->eofPos);
     const bool played = s->loadIssued;
     const QString bareId = s->meta.value(QStringLiteral("itemId")).toString();
-    const double pos = s->position, dur = s->duration;
+    // 与 Stopped 同快照
+    const double pos = s->eofPos >= 0 ? s->eofPos : s->position;
+    const double dur = s->duration;
     destroySession(s);
     if (played)
         emit playbackFinished(key, bareId, errored, pos, dur);
