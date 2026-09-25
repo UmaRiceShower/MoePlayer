@@ -161,20 +161,24 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl, userId),
                               itemId, tag, kind, requestedSize);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
-    // 键 = 海报 id(与 loadImageSync 同源)。
-    const QString ckey = base;
+    // 键 = 海报 id(与 loadImageSync 同源);Backdrop 拼请求档位——档位
+    // 可配,改档后旧档缓存成孤儿按 TTL 自弃,不会因键复用顶住新档。
+    const QString ckey = kind == QLatin1String("Backdrop")
+                         ? base + QStringLiteral("~w") + backdropTier()
+                         : base;
     {
         QMutexLocker locker(&g_memMutex);
         if (g_memCache.contains(ckey)) {
             return new PosterResponse(url, *g_memCache.object(ckey));
         }
     }
-    return new PosterResponse(url, token, proxy(), base);
+    return new PosterResponse(url, token, proxy(), ckey);
 }
 
-bool PosterProvider::resolveImageId(const QString &id, QString *serverUrl, QString *token, QString *userId,
+bool PosterProvider::resolveImageId(const QString &id0, QString *serverUrl, QString *token, QString *userId,
                                     QString *itemId, QString *tag, QString *kind) const
 {
+    const QString id = QString(id0).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
     if (serverUrl)
         serverUrl->clear();
     if (token)
@@ -240,20 +244,33 @@ QUrl PosterProvider::resolvedImageUrl(const QString &id, QString *token) const
     return imageUrl(m_accounts->activeUrlFor(serverUrl, userId), itemId, tag, kind);
 }
 
+QString PosterProvider::backdropTier() const
+{
+    if (m_config)
+        return m_config->backdropMaxWidth();
+    return QString::number(MoePlayer::kBackdropMaxWidth);
+}
+
 QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                               const QString &tag, const QString &kind,
-                              const QSize &requestedSize)
+                              const QSize &requestedSize) const
 {
     Q_UNUSED(requestedSize)
     // 固定厚档请求(服务器缩放并缓存缩略图,Emby 官方"web 客户端"行为):
-    // 海报/缩略图 512、背景 1600(kind 上限常量)。与显示尺寸解耦——
+    // 海报/缩略图 512(常量);背景走配置 backdropMaxWidth(见 backdropTier)。
+    // 与显示尺寸解耦——
     // URL 恒定,窗口缩放不重拉;客户端 sourceSize 负责显示缩放。
     // 较原图请求省流量与本地/服务器缓存空间。
     // URL 不含 api_key,重登换 token 不失效;认证经请求头。
     QUrlQuery q;
-    const int kindMax = kind == QLatin1String("Backdrop") ? MoePlayer::kBackdropMaxWidth
-                                                          : MoePlayer::kPosterMaxWidth;
-    q.addQueryItem(QStringLiteral("maxWidth"), QString::number(kindMax));
+    if (kind == QLatin1String("Backdrop")) {
+        // 档位可配(设置「详情页」背景图清晰度);original = 不带 maxWidth 拉原图。
+        const QString tier = backdropTier();
+        if (tier != QLatin1String("original"))
+            q.addQueryItem(QStringLiteral("maxWidth"), tier);
+    } else {
+        q.addQueryItem(QStringLiteral("maxWidth"), QString::number(MoePlayer::kPosterMaxWidth));
+    }
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
     return QUrl(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")

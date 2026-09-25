@@ -351,6 +351,30 @@ bool validatePageTransition(const QVariant &v)
     return keys.contains(v.toString());
 }
 
+QVariantList optionsBackdropMaxWidth()
+{
+    return QVariantList{
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("1600(省流量)")},
+                    {QStringLiteral("key"), QStringLiteral("1600")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("1920(默认,FHD)")},
+                    {QStringLiteral("key"), QStringLiteral("1920")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("2560(2K)")},
+                    {QStringLiteral("key"), QStringLiteral("2560")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("3840(4K)")},
+                    {QStringLiteral("key"), QStringLiteral("3840")}},
+        QVariantMap{{QStringLiteral("label"), QStringLiteral("原图(开销大)")},
+                    {QStringLiteral("key"), QStringLiteral("original")}},
+    };
+}
+
+bool validateBackdropMaxWidth(const QVariant &v)
+{
+    static const QStringList keys{QStringLiteral("1600"), QStringLiteral("1920"),
+                                  QStringLiteral("2560"), QStringLiteral("3840"),
+                                  QStringLiteral("original")};
+    return keys.contains(v.toString());
+}
+
 bool validatePercent(const QVariant &v)
 {
     const int i = v.toInt();

@@ -41,9 +41,11 @@ public:
     // 按解析结果构造回源 URL(缓存键稳定;maxWidth 按 kind 分级取固定厚档,
     // 与显示尺寸解耦 —— URL 恒定,窗口缩放不重拉;显示缩放由客户端
     // Image.sourceSize 负责,故 requestedSize 保留但未参与构造)。
-    static QUrl imageUrl(const QString &serverUrl, const QString &itemId,
-                         const QString &tag, const QString &kind,
-                         const QSize &requestedSize = QSize());
+    QUrl imageUrl(const QString &serverUrl, const QString &itemId,
+                  const QString &tag, const QString &kind,
+                  const QSize &requestedSize = QSize()) const;
+    // Backdrop 请求档位(配置 backdropMaxWidth;写入 URL 与缓存键)。
+    QString backdropTier() const; // const:imageUrl/resolvedImageUrl 同为 const
     // 后台线程同步加载:磁盘缓存命中直读,未命中回源(占并发闸);
     // 失败/解码失败返回空图,error 填错误描述。线程安全,供取色等复用。
     // proxy 用于回源请求(默认直连)。
