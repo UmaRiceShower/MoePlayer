@@ -110,15 +110,14 @@ Window {
     }
 
     function togglePause() {
-        MpvClient.setPause(!video.paused, root.sessionKey)
+        MpvClient.command(["osd-auto", "cycle", "pause"], root.sessionKey)
     }
     function seekBy(delta) {
-        MpvClient.command(["seek", delta, "relative"], root.sessionKey)
+        MpvClient.command(["osd-msg", "seek", delta, "relative"], root.sessionKey)
     }
     function adjustVolume(delta) {
         const v = Math.max(0, Math.min(100, Math.round(video.volume + delta)))
-        MpvClient.setVolume(v, root.sessionKey)
-        osd.showVolume(v)
+        MpvClient.command(["osd-auto", "set", "volume", String(v)], root.sessionKey)
     }
     function toggleFullscreen() {
         // 本窗独立全屏(主窗不受影响)。
@@ -132,8 +131,7 @@ Window {
         let i = speeds.findIndex(s => Math.abs(s - video.speed) < 0.01)
         const next = speeds[(i + 1) % speeds.length]
         _prevSpeed = video.speed
-        MpvClient.command(["set_property", "speed", next], root.sessionKey)
-        osd.showText("倍速 " + next + "x")
+        MpvClient.command(["osd-auto", "set", "speed", String(next)], root.sessionKey)
     }
     function episodeJump(delta) {
         // 播放列表跳集:占位条目经 on_load hook 协商真实地址(连播链路)。
@@ -774,8 +772,7 @@ Window {
                                     const v = parseFloat(text)
                                     speedBtn.editing = false
                                     if (!isNaN(v) && v >= 0.01 && v <= 32) {
-                                        MpvClient.command(["set_property", "speed", v], root.sessionKey)
-                                        osd.showText("倍速 " + v + "x")
+                                        MpvClient.command(["osd-auto", "set", "speed", String(v)], root.sessionKey)
                                     }
                                     root.wake()
                                 }
@@ -1077,41 +1074,6 @@ Window {
     }
     Component.onDestruction: hideTimer.stop()
 
-    // ---- OSD(轻量文本,顶部左上;mpv show-text 画进画面,此处只补
-    // 音量/倍速这类 QML 侧发起的反馈)----
-    Rectangle {
-        id: osd
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.margins: 24
-        anchors.topMargin: 84
-        visible: false
-        radius: 8
-        color: Qt.rgba(0, 0, 0, 0.55)
-        width: osdText.implicitWidth + 16
-        height: osdText.implicitHeight + 12
-        property alias text: osdText.text
-        function showText(t) {
-            text = t
-            visible = true
-            osdTimer.restart()
-        }
-        function showVolume(v) {
-            showText("音量 " + v + "%")
-        }
-        AppText {
-            id: osdText
-            anchors.centerIn: parent
-            color: "white"
-            font.pixelSize: 14
-        }
-        Timer {
-            id: osdTimer
-            interval: 1200
-            onTriggered: osd.visible = false
-        }
-    }
-
     // ---- 键盘 ----
     Shortcut { sequences: ["Space", "K", "P"]; onActivated: root.togglePause() }
     Shortcut { sequences: ["Left"]; onActivated: { root.wake(); root.seekBy(-5) } }
@@ -1122,7 +1084,7 @@ Window {
     Shortcut { sequences: ["Down"]; onActivated: root.adjustVolume(-5) }
     Shortcut { sequences: ["0", "Shift+*", "Shift+8"]; onActivated: root.adjustVolume(2) }
     Shortcut { sequences: ["9", "/"]; onActivated: root.adjustVolume(-2) }
-    Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["cycle", "mute"], root.sessionKey) }
+    Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["osd-auto", "cycle", "mute"], root.sessionKey) }
     Shortcut { sequences: ["F"]; onActivated: root.toggleFullscreen() }
     Shortcut { sequences: [">", "Return", "Shift+>", "Shift+."]; onActivated: root.episodeJump(1) }
     Shortcut { sequences: ["<", "Shift+<", "Shift+,"]; onActivated: root.episodeJump(-1) }
@@ -1138,7 +1100,7 @@ Window {
     Shortcut { sequences: ["Media Previous"]; onActivated: root.episodeJump(-1) }
     Shortcut { sequences: ["Volume Up"]; onActivated: root.adjustVolume(2) }
     Shortcut { sequences: ["Volume Down"]; onActivated: root.adjustVolume(-2) }
-    Shortcut { sequences: ["Volume Mute"]; onActivated: MpvClient.command(["cycle", "mute"], root.sessionKey) }
+    Shortcut { sequences: ["Volume Mute"]; onActivated: MpvClient.command(["osd-auto", "cycle", "mute"], root.sessionKey) }
     // 超分档位热键
     Instantiator {
         model: MpvClient.superResOptions()
@@ -1159,9 +1121,9 @@ Window {
         [["["], ["multiply", "speed", 0.9091]], [["]"], ["multiply", "speed", 1.1]],
         [["Shift+{", "Shift+["], ["multiply", "speed", 0.5]],
         [["Shift+}", "Shift+]"], ["multiply", "speed", 2.0]],
-        [["Backspace"], ["set_property", "speed", 1.0]],
-        [["Shift+Backspace"], ["revert-seek"]],
-        [["Ctrl+Shift+Backspace"], ["revert-seek", "mark"]],
+        [["Backspace"], ["set", "speed", "1.0"]],
+        [["Shift+Backspace"], ["osd-msg", "revert-seek"]],
+        [["Ctrl+Shift+Backspace"], ["osd-msg", "revert-seek", "mark"]],
         // 章节 / 长跳 / 回开头
         [["PgUp"], ["add", "chapter", 1]], [["PgDown"], ["add", "chapter", -1]],
         [["Shift+!", "Shift+1"], ["add", "chapter", -1]],
@@ -1172,9 +1134,9 @@ Window {
         [["Ctrl+Right"], ["no-osd", "sub-seek", 1]],
         [["Ctrl+Shift+Left"], ["sub-step", -1]],
         [["Ctrl+Shift+Right"], ["sub-step", 1]],
-        [["Shift+PgUp"], ["seek", 600, "relative"]],
-        [["Shift+PgDown"], ["seek", -600, "relative"]],
-        [["Home"], ["seek", 0, "absolute"]],
+        [["Shift+PgUp"], ["osd-msg", "seek", 600, "relative"]],
+        [["Shift+PgDown"], ["osd-msg", "seek", -600, "relative"]],
+        [["Home"], ["osd-msg", "seek", 0, "absolute"]],
         // 进度 OSD / 统计 / 控制台
         [["O"], ["show-progress"]], [["Shift+P"], ["show-progress"]],
         [["Shift+O"], ["cycle-values", "osd-level", "3", "1"]],
@@ -1218,12 +1180,26 @@ Window {
         // 播放列表 / 轨道列表 OSD(show-text 自带属性展开)
         [["F8"], ["show-text", "${playlist}"]], [["F9"], ["show-text", "${track-list}"]]
     ]
+    // 命令前缀表:IPC/脚本 API 默认 no-osd(input.conf 键位默认 osd-auto,
+    // 见 mpv input.rst 命令前缀节)——转发时统一补 osd-auto 还原键位行为的
+    // OSD 提示(速度/音量/延迟等以 mpv 原生格式画进视频帧);表里已带前缀的
+    // (no-osd/show-text 等)原样放行。get_property/set_property 是内嵌侧
+    // 特判命令、不认识前缀,故不前置(osd-auto 对它们本就只影响应答)。
+    readonly property var cmdPrefixes: ["osd-auto", "no-osd", "osd-msg", "osd-bar",
+        "osd-msg-bar", "raw", "expand-properties", "repeatable", "nonrepeatable",
+        "nonscalable", "async", "sync"]
     Instantiator {
         model: root.mpvKeys
         delegate: Shortcut {
             required property var modelData
             sequences: modelData[0]
-            onActivated: { root.wake(); MpvClient.command(modelData[1], root.sessionKey) }
+            onActivated: {
+                root.wake()
+                let c = modelData[1].slice()
+                if (root.cmdPrefixes.indexOf(c[0]) < 0 && c[0] !== "set_property" && c[0] !== "get_property")
+                    c.unshift("osd-auto")
+                MpvClient.command(c, root.sessionKey)
+            }
         }
     }
 }
