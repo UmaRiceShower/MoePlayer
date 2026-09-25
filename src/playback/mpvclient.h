@@ -165,6 +165,10 @@ private:
         // eof 结束判定:播完条目的 playlist_entry_id(按 id 在播放列表
         // 定位,无 playlist-pos 的推进竞态)。
         int eofEntryId = -1;
+        // end-file(eof) 时的位置快照:新文件加载会把 time-pos 复位成 0,
+        // 之后对该集发 Stopped 必须用快照值,否则服务器按"位置<5%"处理
+        // (清续播点且不标已看)。
+        double eofPos = -1;
         // 全集列表已灌入(第 0 条 = 当前集真 URL,经播放列表播放)。
         bool listSet = false;
         // --input-ipc-server 文件 socket(fd 继承的 --input-ipc-client 在 mpv
@@ -249,7 +253,7 @@ private:
     void requestSuperResState(Session *s);
     void reportStart(Session *s);
     void reportProgress(Session *s, bool force);
-    void reportStopped(Session *s);
+    void reportStopped(Session *s, double posOverride = -1);
     // 按 key 结束会话:内部经 sessionFor 查找,对象销毁后查不到即安全返回
     // (避免两个事件源——QProcess::finished 与 QLocalSocket::readyRead——都对
     // 同一裸 Session* 触发时,后到者访问已释放对象)。key 按值传入:
