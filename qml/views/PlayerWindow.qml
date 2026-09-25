@@ -151,6 +151,17 @@ Window {
         return -1
     }
 
+    // 悬停位置所在章节的标题(chapter-list 按时间升序;无 = "")。
+    function chapterTitleAt(t) {
+        let title = ""
+        for (const c of chapters) {
+            if (c.time > t)
+                break
+            title = c.title
+        }
+        return title
+    }
+
     function fmtTime(s) {
         s = Math.max(0, Math.floor(s))
         const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60
@@ -496,7 +507,15 @@ Window {
                         // hover/拖动目标时间(气泡与预览共用;章节磁吸)。
                         property real rawTime: scrubbing ? position * to
                                             : (hoverFrac >= 0 ? hoverFrac * to : value)
-                        property real snappedTime: root.snapChapter(rawTime, width)
+                        property real snappedTime: -1
+                        onRawTimeChanged: {
+                            if (snappedTime >= 0 && Math.abs(snappedTime - rawTime)
+                                    * (width / Math.max(1, to)) <= 16)
+                                return
+                            snappedTime = root.snapChapter(rawTime, width)
+                        }
+                        property real effectiveFrac: (scrubbing && snappedTime >= 0)
+                                                     ? snappedTime / to : visualPosition
                         // 气泡/预览时间 = 实际操作结果:悬停(点按将精确落点)
                         // 显示指针时间;拖动松手会磁吸,显示吸附后时间。
                         property real hoverTime: (scrubbing && snappedTime >= 0) ? snappedTime : rawTime
@@ -513,22 +532,25 @@ Window {
                                 color: Qt.rgba(1, 1, 1, 0.38)
                             }
                             Rectangle {
-                                width: seekBar.visualPosition * parent.width
+                                // 右端延伸到手柄圆心下:圆角端藏进圆里,填充与
+                                // 手柄视觉连续;钳制不超出槽尾。
+                                width: Math.min(parent.width,
+                                       seekBar.effectiveFrac * parent.width
+                                       + (seekBar.handle ? seekBar.handle.width / 2 : 0))
                                 height: parent.height
                                 radius: 2
                                 color: "white"
                             }
-                            // 章节刻度(mpv chapter-list;白点压槽)。
                             Repeater {
                                 model: root.chapters
                                 Rectangle {
                                     required property var modelData
-                                    // 吸附该章节时点亮(放大提亮)。
+                                    // 吸附该章节时点亮(加粗提亮)。
                                     property bool snapped: seekBar.snappedTime === modelData.time
-                                    width: snapped ? 5 : 3
-                                    height: snapped ? 5 : 3
-                                    radius: 3
-                                    color: snapped ? "white" : Qt.rgba(1, 1, 1, 0.65)
+                                    width: snapped ? 4 : 3
+                                    height: 10
+                                    radius: 1.5
+                                    color: snapped ? "white" : Qt.rgba(1, 1, 1, 0.75)
                                     // 销毁期 parent 可能先走(Repeater 拆委托),
                                     // 用 y 绑定容忍 null,不用 anchors(垂直居中)。
                                     y: parent ? Math.round((parent.height - height) / 2) : 0
@@ -538,7 +560,9 @@ Window {
                             }
                         }
                         handle: Rectangle {
-                            x: seekBar.visualPosition * (seekBar.availableWidth - width)
+                            x: (seekBar.scrubbing && seekBar.snappedTime >= 0)
+                               ? seekBar.snappedTime / seekBar.to * seekBar.width - width / 2
+                               : seekBar.effectiveFrac * (seekBar.availableWidth - width)
                             anchors.verticalCenter: parent.verticalCenter
                             width: seekBar.hovered || seekBar.scrubbing ? 14 : 10
                             height: width
@@ -601,11 +625,19 @@ Window {
                             AppText {
                                 id: timeText
                                 anchors.horizontalCenter: parent.horizontalCenter
+                                width: previewLoader.active ? parent.width - 8 : implicitWidth
+                                elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter
                                 // 大泡压底、小泡垂直居中(纯 y,不与 anchors 混用)。
                                 y: previewLoader.active
                                 ? parent.height - height - 4
                                 : Math.round((parent.height - height) / 2)
-                                text: root.fmtTime(seekBar.hoverTime)
+                                // 气泡 = 章节标题 + 时间。
+                                text: {
+                                    const ch = root.chapterTitleAt(seekBar.hoverTime)
+                                    return ch ? ch + " · " + root.fmtTime(seekBar.hoverTime)
+                                              : root.fmtTime(seekBar.hoverTime)
+                                }
                                 color: "white"
                                 font.pixelSize: 12
                                 style: previewLoader.active ? Text.Outline : Text.Normal
