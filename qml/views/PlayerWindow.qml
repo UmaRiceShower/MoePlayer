@@ -461,22 +461,29 @@ Window {
                         // 拖动中显示拖动值;否则跟随播放位置(Binding 门控,
                         // 避免 value 自引用绑定环)。
                         property bool scrubbing: false
-                        // 按下时刻的值:区分点按(未拖动)与刮擦——点按 =
-                        // 精确意图直接落点;磁吸只在拖动松手时生效。
-                        property real _pressValue: 0
+                        property real _pressPos: -1
+                        property bool _dragSeen: false
                         Binding on value { when: !seekBar.scrubbing; value: video.position }
                         live: false
                         onPressedChanged: {
                             if (pressed) {
-                                _pressValue = value
+                                _pressPos = -1
+                                _dragSeen = false
                                 scrubbing = true
                             } else {
-                                const dragged = Math.abs(value - _pressValue)
-                                                / Math.max(1, to) * width > 4
-                                const target = dragged ? root.snapChapter(value, width) : -1
+                                const target = _dragSeen ? root.snapChapter(value, width) : -1
                                 MpvClient.seek(target >= 0 ? target : value, root.sessionKey)
                                 scrubbing = false
                             }
+                        }
+                        onPositionChanged: {
+                            if (!pressed)
+                                return
+                            if (_pressPos < 0)
+                                _pressPos = position
+                            else if (Math.abs(position - _pressPos) * width > 4)
+                                _dragSeen = true
+                            previewSeekTimer.restart()   // 拖动期预览帧跟随
                         }
                         onValueChanged: if (scrubbing) root.wake()
                         // hover 位置(0..1)与对应时间:预览气泡与提示共用。
@@ -487,7 +494,7 @@ Window {
                             onHoveredChanged: if (!hovered) seekBar.hoverFrac = -1
                         }
                         // hover/拖动目标时间(气泡与预览共用;章节磁吸)。
-                        property real rawTime: scrubbing ? value
+                        property real rawTime: scrubbing ? position * to
                                             : (hoverFrac >= 0 ? hoverFrac * to : value)
                         property real snappedTime: root.snapChapter(rawTime, width)
                         // 气泡/预览时间 = 实际操作结果:悬停(点按将精确落点)
@@ -614,7 +621,7 @@ Window {
                                 if (!previewLoader.item)
                                     return
                                 previewLoader.reloadIfStale()
-                                const t = seekBar.scrubbing ? seekBar.value
+                                const t = seekBar.scrubbing ? seekBar.position * seekBar.to
                                         : (seekBar.hoverFrac >= 0 ? seekBar.hoverFrac * seekBar.to : -1)
                                 if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5) {
                                     seekBar.lastPreviewSeek = t
