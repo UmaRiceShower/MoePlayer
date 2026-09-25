@@ -69,6 +69,14 @@ Window {
     property var tracks: []
     // 章节表(MpvClient.chaptersChanged 喂;[{time,title}],进度条刻度)。
     property var chapters: []
+    // 预览暖场:开窗 4s 后置位(避开主实例启动带宽峰),预览 Loader 据此
+    // 后台装载——不等首次 hover(远端冷启动要数十秒,现装来不及)。
+    property bool _previewWarm: false
+    Timer {
+        interval: 4000
+        running: true
+        onTriggered: root._previewWarm = true
+    }
     // 时长显示形态:false = 总时长,true = 剩余(负号),点击切换。
     property bool showRemaining: false
     // 唤出侧面板的按钮(面板右缘对齐其右缘);关面板清空。
@@ -494,7 +502,6 @@ Window {
                                 _pressPos = position
                             else if (Math.abs(position - _pressPos) * width > 4)
                                 _dragSeen = true
-                            previewSeekTimer.restart()   // 拖动期预览帧跟随
                         }
                         onValueChanged: if (scrubbing) root.wake()
                         // hover 位置(0..1)与对应时间:预览气泡与提示共用。
@@ -575,10 +582,14 @@ Window {
                         // 小时间泡;x 跟随鼠标位置并钳制在条内。
                         Rectangle {
                             id: previewBubble
-                            width: previewLoader.active ? 176 : timeText.implicitWidth + 20
-                            height: previewLoader.active ? 112 : timeText.implicitHeight + 12
+                            // 首帧到达前保持小时间泡:预览是独立 mpv 实例(独立
+                            // 缓存,远程服首帧要数秒),提前展开大泡 = 黑框。
+                            readonly property bool previewReady: previewLoader.active
+                                && previewLoader.item && previewLoader.item.hasFrame
+                            width: previewReady ? 176 : timeText.implicitWidth + 20
+                            height: previewReady ? 112 : timeText.implicitHeight + 12
                             radius: 8
-                            color: previewLoader.active ? "black" : Qt.rgba(0, 0, 0, 0.75)
+                            color: previewReady ? "black" : Qt.rgba(0, 0, 0, 0.75)
                             border.width: 1
                             border.color: Qt.rgba(1, 1, 1, 0.25)
                             visible: seekBar.hovered || seekBar.scrubbing
@@ -596,9 +607,12 @@ Window {
                                 anchors.margins: 3
                                 property bool _keep: false
                                 property string _loadedUrl: ""
-                                active: ((seekBar.hovered || seekBar.scrubbing) || previewLoader._keep)
+                                // 起播 4s 后后台暖场装载(避开主实例启动带宽峰;
+                                // 冷启动装载远端要数十秒,等 hover 才开端来不及)。
+                                active: ((seekBar.hovered || seekBar.scrubbing) || previewLoader._keep
+                                         || root._previewWarm)
                                         && (MpvClient.previewInfo(root.sessionKey).url || "") !== ""
-                                sourceComponent: MpvVideoItem { id: previewVideo }
+                                sourceComponent: MpvVideoItem { id: previewVideo; previewMode: true }
                                 // 换集后实例保活但内容过期:hover 时换到新集地址。
                                 function reloadIfStale() {
                                     if (!item)
@@ -614,22 +628,25 @@ Window {
                                     // 与主视频/外部模式同口径:显式下发代理。
                                     item.sendCommand(["set_property", "http-proxy", ConfigManager.proxy || ""])
                                     if (info.headers && info.headers.length > 0)
-                                        item.sendCommand(["set_property", "http-header-fields", info.headers.join(",")])
-                                    item.sendCommand(["set_property", "mute", true])
+                                        // 数组形态(string-list 选项原生收数组;拼逗号串会在
+                                        // header 值含字面逗号时被误切)。
+                                        item.sendCommand(["set_property", "http-header-fields", info.headers])
                                     item.sendCommand(["set_property", "pause", true])
                                     item.sendCommand(["loadfile", info.url, "replace"])
                                     previewLoader._loadedUrl = info.url
-                                    previewLoader._keep = true
+                                    // callLater 破绑定环:_keep 在 active 的绑定里,
+                                    // onLoaded 由 active 触发,直接写会被判环。
+                                    Qt.callLater(() => { previewLoader._keep = true })
                                 }
                             }
                             AppText {
                                 id: timeText
                                 anchors.horizontalCenter: parent.horizontalCenter
-                                width: previewLoader.active ? parent.width - 8 : implicitWidth
+                                width: previewBubble.previewReady ? parent.width - 8 : implicitWidth
                                 elide: Text.ElideRight
                                 horizontalAlignment: Text.AlignHCenter
                                 // 大泡压底、小泡垂直居中(纯 y,不与 anchors 混用)。
-                                y: previewLoader.active
+                                y: previewBubble.previewReady
                                 ? parent.height - height - 4
                                 : Math.round((parent.height - height) / 2)
                                 // 气泡 = 章节标题 + 时间。
@@ -640,29 +657,33 @@ Window {
                                 }
                                 color: "white"
                                 font.pixelSize: 12
-                                style: previewLoader.active ? Text.Outline : Text.Normal
+                                style: previewBubble.previewReady ? Text.Outline : Text.Normal
                                 styleColor: "black"
                             }
                         }
-                        // hover/拖动位置变化 → 预览实例跟随 seek(节流 120ms)。
+                        // hover/拖动位置变化 → 预览实例跟随 seek
                         property real lastPreviewSeek: -1
+                        property double lastPreviewSeekMs: 0
                         Timer {
                             id: previewSeekTimer
                             interval: 120
+                            repeat: true
+                            running: (seekBar.hovered || seekBar.scrubbing) && previewLoader.active
                             onTriggered: {
                                 if (!previewLoader.item)
                                     return
                                 previewLoader.reloadIfStale()
                                 const t = seekBar.scrubbing ? seekBar.position * seekBar.to
                                         : (seekBar.hoverFrac >= 0 ? seekBar.hoverFrac * seekBar.to : -1)
-                                if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5) {
+                                const now = Date.now()
+                                if (t >= 0 && Math.abs(t - seekBar.lastPreviewSeek) > 0.5
+                                        && now - seekBar.lastPreviewSeekMs >= 400) {
                                     seekBar.lastPreviewSeek = t
-                                    previewLoader.item.sendCommand(["seek", t, "absolute"])
+                                    seekBar.lastPreviewSeekMs = now
+                                    previewLoader.item.sendCommand(["seek", t, "absolute+keyframes"])
                                 }
                             }
                         }
-                        onHoverFracChanged: if (hoverFrac >= 0) previewSeekTimer.restart()
-                        onScrubbingChanged: if (scrubbing) previewSeekTimer.restart()
                     }
                 }
 

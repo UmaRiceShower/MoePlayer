@@ -49,6 +49,7 @@ struct MpvApi
     MOE_MPV_FN(int, mpv_render_context_create, (mpv_render_context **, mpv_handle *, mpv_render_param *))
     MOE_MPV_FN(void, mpv_render_context_free, (mpv_render_context *))
     MOE_MPV_FN(int, mpv_render_context_render, (mpv_render_context *, mpv_render_param *))
+    MOE_MPV_FN(uint64_t, mpv_render_context_update, (mpv_render_context *))
     MOE_MPV_FN(void, mpv_render_context_set_update_callback,
                (mpv_render_context *, mpv_render_update_fn, void *))
 #undef MOE_MPV_FN
@@ -106,6 +107,7 @@ struct MpvApi
             MOE_MPV_FN(int, mpv_render_context_create, (mpv_render_context **, mpv_handle *, mpv_render_param *))
             MOE_MPV_FN(void, mpv_render_context_free, (mpv_render_context *))
             MOE_MPV_FN(int, mpv_render_context_render, (mpv_render_context *, mpv_render_param *))
+            MOE_MPV_FN(uint64_t, mpv_render_context_update, (mpv_render_context *))
             MOE_MPV_FN(void, mpv_render_context_set_update_callback,
                        (mpv_render_context *, mpv_render_update_fn, void *))
 #undef MOE_MPV_FN
@@ -142,6 +144,7 @@ struct MpvApi
 #define mpv_render_context_create MpvApi::get().mpv_render_context_create
 #define mpv_render_context_free MpvApi::get().mpv_render_context_free
 #define mpv_render_context_render MpvApi::get().mpv_render_context_render
+#define mpv_render_context_update MpvApi::get().mpv_render_context_update
 #define mpv_render_context_set_update_callback MpvApi::get().mpv_render_context_set_update_callback
 
 namespace {
@@ -291,12 +294,13 @@ MpvRenderResources::~MpvRenderResources()
 }
 
 // 渲染线程(GL 上下文 current)把 mpv 帧渲进 fbo;首次调用建上下文。
-// 返回 false = 未就绪(黑帧)。
-static bool renderIntoFbo(MpvRenderResources &res, int fbo, int w, int h,
-                          MpvEmbeddedCore *updateTarget)
+// 返回 mpv_render_update_flag 组合(<0/0 = 未画帧;MPV_RENDER_UPDATE_FRAME
+// = 本帧真画了视频画面)。
+static int renderIntoFbo(MpvRenderResources &res, int fbo, int w, int h,
+                         MpvEmbeddedCore *updateTarget)
 {
     if (!res.mpv)
-        return false;
+        return 0;
     if (!res.ctx) {
         // 此刻共享 GL 上下文必 current(render 线程);捕获它供回调用,
         // 免依赖 mpv 调用线程的 current 状态。
@@ -310,7 +314,7 @@ static bool renderIntoFbo(MpvRenderResources &res, int fbo, int w, int h,
         if (mpv_render_context_create(&res.ctx, res.mpv, params) < 0) {
             qWarning() << "MpvEmbeddedCore: 渲染上下文创建失败";
             res.ctx = nullptr;
-            return false;
+            return 0;
         }
         // mpv 有新帧 → 排队重绘(回调只准做这一件事,严禁调任何 mpv 函数)。
         mpv_render_context_set_update_callback(
@@ -329,7 +333,10 @@ static bool renderIntoFbo(MpvRenderResources &res, int fbo, int w, int h,
         {MPV_RENDER_PARAM_FLIP_Y, &flip},
         {MPV_RENDER_PARAM_INVALID, nullptr},
     };
-    return mpv_render_context_render(res.ctx, params) >= 0;
+    const uint64_t uf = mpv_render_context_update(res.ctx);
+    if (mpv_render_context_render(res.ctx, params) < 0)
+        return 0;
+    return static_cast<int>(uf);
 }
 
 // ---------- 事件线程 ----------
@@ -385,7 +392,7 @@ bool MpvEmbeddedCore::runtimeAvailable()
     return MpvApi::get().ok;
 }
 
-bool MpvEmbeddedCore::start(const QString &hookScript)
+bool MpvEmbeddedCore::start(const QString &hookScript, bool preview)
 {
     if (m_res->mpv)
         return true;
@@ -411,7 +418,18 @@ bool MpvEmbeddedCore::start(const QString &hookScript)
     mpv_set_option_string(mpv, "input-terminal", "no");
     mpv_set_option_string(mpv, "terminal", "no");
     mpv_set_option_string(mpv, "cache", "yes");
-    mpv_set_option_string(mpv, "hwdec", "auto-safe");
+    if (preview) {
+        mpv_set_option_string(mpv, "audio", "no");
+        mpv_set_option_string(mpv, "sid", "no");
+        mpv_set_option_string(mpv, "hwdec", "no");
+        mpv_set_option_string(mpv, "vd-lavc-fast", "yes");
+        mpv_set_option_string(mpv, "vd-lavc-skiploopfilter", "all");
+        mpv_set_option_string(mpv, "vd-lavc-threads", "2");
+        mpv_set_option_string(mpv, "vf", "scale=352:-2");
+        mpv_set_option_string(mpv, "demuxer-max-bytes", "32MiB");
+    } else {
+        mpv_set_option_string(mpv, "hwdec", "auto-safe");
+    }
     mpv_set_option_string(mpv, "stop-screensaver", "yes");
     mpv_set_option_string(mpv, "osd-playlist-entry", "title");
     // 日志走 MPV_EVENT_LOG_MESSAGE(事件线程转发 [mpv] 前缀,与进程
@@ -468,6 +486,9 @@ QJsonObject MpvEmbeddedCore::execute(const QJsonObject &obj)
         return reply;
     }
     const QString name = cmd.first().toString();
+    // 新文件载入:首帧信号闸复位(预览换集后重新走"帧到才展示"流程)。
+    if (name == QLatin1String("loadfile"))
+        m_frameEmitted = false;
     mpv_handle *mpv = m_res->mpv;
 
     // observe/unobserve 走专用 API(命令形式在 libmpv 也支持,但直调更省转换)。
@@ -644,7 +665,10 @@ public:
         QMutexLocker lk(&m_res->mutex);
         if (m_res->mpv && m_core) {
             QOpenGLFramebufferObject *f = framebufferObject();
-            renderIntoFbo(*m_res, int(f->handle()), f->width(), f->height(), m_core);
+            const int flags = renderIntoFbo(*m_res, int(f->handle()),
+                                            f->width(), f->height(), m_core);
+            if (flags & MPV_RENDER_UPDATE_FRAME)
+                m_core->noteFrameDrawn();
         }
     }
 
@@ -661,6 +685,8 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
     // 新帧 → 重绘(渲染线程回调只发信号,GUI 线程执行 update)。
     connect(m_core, &MpvEmbeddedCore::redrawRequested, this,
             qOverload<>(&QQuickItem::update));
+    connect(m_core, &MpvEmbeddedCore::firstFrameRendered, this,
+            [this]() { setHasFrame(true); });
     // 播放状态镜像:直接从核心事件流喂(不经 MpvClient 回写,页面自洽)。
     connect(m_core, &MpvEmbeddedCore::jsonReceived, this,
             [this](const QJsonObject &obj) {
@@ -691,7 +717,21 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent)
                     setBuffered(end);
                 }
             });
-    m_core->start(MpvClient::findMoeHookScript());
+}
+
+void MpvVideoItem::componentComplete()
+{
+    QQuickFramebufferObject::componentComplete();
+    // 预览实例不挂换集钩子(无连播),走裁剪选项集。
+    m_core->start(m_previewMode ? QString() : MpvClient::findMoeHookScript(),
+                  m_previewMode);
+}
+
+// 渲染线程调用;emit 经 queued 落到 GUI 线程,回调路径不调任何 mpv 函数。
+void MpvEmbeddedCore::noteFrameDrawn()
+{
+    if (!m_frameEmitted.exchange(true))
+        emit firstFrameRendered();
 }
 
 MpvVideoItem::~MpvVideoItem() = default;
@@ -703,10 +743,20 @@ MpvVideoItem::Renderer *MpvVideoItem::createRenderer() const
 
 void MpvVideoItem::sendCommand(const QVariantList &cmd)
 {
+    if (!cmd.isEmpty() && cmd.first().toString() == QLatin1String("loadfile"))
+        setHasFrame(false);
     QJsonArray arr;
     for (const QVariant &v : cmd)
         arr.append(QJsonValue::fromVariant(v));
     m_core->sendJson(QJsonObject{{QStringLiteral("command"), arr}});
+}
+
+void MpvVideoItem::setHasFrame(bool v)
+{
+    if (m_hasFrame != v) {
+        m_hasFrame = v;
+        emit hasFrameChanged();
+    }
 }
 
 void MpvVideoItem::setPlaybackState(double position, double duration, bool paused)
@@ -781,10 +831,12 @@ MpvVideoItem::MpvVideoItem(QQuickItem *parent) : QQuickFramebufferObject(parent)
 {
     m_core = new MpvEmbeddedCore(this);
 }
+void MpvVideoItem::componentComplete() { QQuickFramebufferObject::componentComplete(); }
 MpvVideoItem::~MpvVideoItem() = default;
 MpvVideoItem::Renderer *MpvVideoItem::createRenderer() const { return new NullRenderer; }
 void MpvVideoItem::setPlaybackState(double, double, bool) {}
 void MpvVideoItem::sendCommand(const QVariantList &) {}
+void MpvVideoItem::setHasFrame(bool) {}
 void MpvVideoItem::setVolumeSpeed(double, double) {}
 void MpvVideoItem::setBuffered(double) {}
 void MpvVideoItem::setBuffering(bool) {}
