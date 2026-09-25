@@ -58,17 +58,13 @@ public:
     // moe-hook.lua 路径(换集钩子;空 = 不挂,纯播放)。
     // 运行时可用性:编译带头文件 + dlopen 到 libmpv.so.2(全程只查一次)。
     static bool runtimeAvailable();
-    // preview=true 为悬停预览实例:不解音频/字幕、软解、解码端缩到
-    // 小尺寸(截帧即弃场景硬解无收益,且不与主实例争 GPU)。
-    bool start(const QString &hookScript = {}, bool preview = false);
+    bool start(const QString &hookScript = {});
     mpv_handle *handle() const { return m_res ? m_res->mpv : nullptr; }
     MpvRenderResourcesPtr renderResources() const { return m_res; }
 
     // 与外部进程模式 sendJson 等价:obj 形如 {"command":[...]} 或带
     // request_id 的查询。GUI 线程调用,立即返回。
     void sendJson(const QJsonObject &obj);
-    // 渲染线程回报:本帧真画出了视频画面(每次 loadfile 后只发一次信号)。
-    void noteFrameDrawn();
 
 signals:
     // 事件/应答的 JSON 化投递(GUI 线程)。格式与 mpv IPC 一致:
@@ -76,8 +72,6 @@ signals:
     void jsonReceived(const QJsonObject &obj);
     // mpv 有新帧待渲(渲染上下文的 update 回调转发;回调本身严禁调 mpv)。
     void redrawRequested();
-    // 首个视频帧真渲出(MPV_RENDER_UPDATE_FRAME;loadfile 后复位)。
-    void firstFrameRendered();
     // mpv 进程内退出(SHUTDOWN/实例销毁)。
     void terminated();
 
@@ -90,7 +84,6 @@ private:
 
     MpvRenderResourcesPtr m_res;
     std::atomic<bool> m_abort{false};
-    std::atomic<bool> m_frameEmitted{false};   // 首帧信号每次 loadfile 只发一次
     QMutex m_mutex;
     QQueue<QJsonObject> m_commands;
     class EventThread;
@@ -104,10 +97,6 @@ private:
 class MpvVideoItem : public QQuickFramebufferObject
 {
     Q_OBJECT
-    // 预览实例形态(不解音频/软解/解码端缩小;start 延迟到组件属性就位后)。
-    // (QQuickItem 自带 QQmlParserStatus,直接 override classBegin/
-    // componentComplete,不需再继承。)
-    Q_PROPERTY(bool previewMode MEMBER m_previewMode)   // 仅组件创建期生效(start 读一次)
     // 播放位置/时长/暂停态由 MpvClient 经 JSON 事件更新后写入(只读镜像)。
     Q_PROPERTY(double position READ position NOTIFY positionChanged)
     Q_PROPERTY(double duration READ duration NOTIFY durationChanged)
@@ -120,8 +109,6 @@ class MpvVideoItem : public QQuickFramebufferObject
     Q_PROPERTY(bool buffering READ buffering NOTIFY bufferingChanged)
     // libmpv 核心(MpvClient.attachEmbedded 的绑定对象;只读常驻)。
     Q_PROPERTY(MpvEmbeddedCore *core READ core CONSTANT)
-    // 首帧是否已渲出(预览泡等据此决定展示视频还是占位;loadfile 复位)。
-    Q_PROPERTY(bool hasFrame READ hasFrame NOTIFY hasFrameChanged)
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
     ~MpvVideoItem() override;
@@ -136,10 +123,9 @@ public:
     double speed() const { return m_speed; }
     double buffered() const { return m_buffered; }
     bool buffering() const { return m_buffering; }
-    bool hasFrame() const { return m_hasFrame; }
     // MpvClient 写镜像(GUI 线程)。
     void setPlaybackState(double position, double duration, bool paused);
-    // 直发命令(预览实例等 QML 自治场景;主会话控制请走 MpvClient)。
+    // 直发命令(attach 时下发 http-proxy;主会话控制请走 MpvClient)。
     Q_INVOKABLE void sendCommand(const QVariantList &cmd);
     void setVolumeSpeed(double volume, double speed);
     void setBuffered(double buffered);
@@ -153,16 +139,9 @@ signals:
     void speedChanged();
     void bufferedChanged();
     void bufferingChanged();
-    void hasFrameChanged();
 
 private:
-    // QQmlParserStatus:start 等 previewMode 等组件属性就位(QML 赋值晚于
-    // C++ 构造)。
-    void classBegin() override {}
-    void componentComplete() override;
-
     MpvEmbeddedCore *m_core = nullptr;
-    bool m_previewMode = false;
     double m_position = 0.0;
     double m_duration = 0.0;
     bool m_paused = false;
@@ -170,6 +149,4 @@ private:
     double m_speed = 1.0;
     double m_buffered = 0.0;
     bool m_buffering = false;
-    bool m_hasFrame = false;
-    void setHasFrame(bool v);
 };

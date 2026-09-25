@@ -192,15 +192,6 @@ void MpvClient::refreshChapters(const QString &itemId)
                             {QStringLiteral("request_id"), kChaptersRequestId}});
 }
 
-QVariantMap MpvClient::previewInfo(const QString &itemId) const
-{
-    const Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
-    if (!s || s->url.isEmpty())
-        return {};
-    return QVariantMap{{QStringLiteral("url"), s->url},
-                       {QStringLiteral("headers"), s->headers}};
-}
-
 void MpvClient::setEmbeddedOutputSize(const QString &itemId, double w, double h)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);
@@ -1366,7 +1357,7 @@ void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &item
     }
     if (!meta.isEmpty())
         s->episodeMeta.insert(itemId, meta);
-    // 换集真实地址同步进会话(进度条预览实例吃 s->url/s->headers,
+    // 换集真实地址同步进会话(后续 loadfile 吃 s->url/s->headers,
     // 不同步会一直拉首集或已过期地址)。
     if (!url.isEmpty()) {
         s->url = url;

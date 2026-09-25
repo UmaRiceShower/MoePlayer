@@ -124,8 +124,6 @@ public:
     // 直跳选集:episodeId 须在本次 setEpisodeList 的播放列表内(旋转序
     // 已存,内部映射成 playlist-play-index)。
     Q_INVOKABLE void playEpisode(const QString &itemId, const QString &episodeId);
-    // 进度条预览:当前片的播放地址与流头(供预览实例 loadfile;空 = 无)。
-    Q_INVOKABLE QVariantMap previewInfo(const QString &itemId) const;
     // 内嵌渲染输出尺寸(libmpv 无 osd-dimensions 概念,超分门槛判定用
     // 渲染目标尺寸;PlayerWindow 尺寸变化时上报)。
     Q_INVOKABLE void setEmbeddedOutputSize(const QString &itemId, double w, double h);
