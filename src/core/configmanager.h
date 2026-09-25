@@ -50,6 +50,8 @@ QVariantList optionsHomeLibraryRows();
 bool validateCustomLibrariesMode(const QVariant &v);
 QVariantList optionsDetailPosterPos();
 bool validatePosterPos(const QVariant &v);
+QVariantList optionsBackdropMaxWidth();
+bool validateBackdropMaxWidth(const QVariant &v);
 bool validateProxy(const QVariant &v);
 bool validatePositiveInt(const QVariant &v);
 bool validateSearchLimit(const QVariant &v);
@@ -111,6 +113,7 @@ bool validateShortcut(const QVariant &v);
     M(detailSidebarLeft, "sidebarLeft", bool, true, "detail", "详情页选集/季栏靠左(true)/靠右(false)", "详情页", "选集栏靠左", "开启后选季/选集栏靠左显示(默认);关闭靠右。", Switch, nullptr, nullptr) \
     M(detailSidebarGlass, "sidebarGlass", bool, true, "detail", "详情页选集栏磨砂玻璃底(true)/无玻璃(false)", "详情页", "选集栏玻璃", "开启后选季/选集栏带磨砂玻璃底(默认);关闭后内容直接浮在背景图上。", Switch, nullptr, nullptr) \
     M(detailPosterPos, "posterPos", QString, "bottom-right", "detail", "海报位置 9 宫格:top/middle/bottom × left/center/right(默认 bottom-right)", "详情页", "海报位置", "详情页海报在 hero 区的九宫格位置。", Combo, optionsDetailPosterPos, validatePosterPos) \
+    M(backdropMaxWidth, "backdropMaxWidth", QString, "1920", "detail", "详情页背景图请求宽度上限(original=原图)", "详情页", "背景图清晰度", "按屏幕分辨率选:1080p 屏 1920 足够,4K 屏选 3840;原图流量与内存开销大(换图期新旧双帧并存)。重启应用后生效(缓存按档分键,旧档自动过期,无需手动清理)。", Combo, optionsBackdropMaxWidth, validateBackdropMaxWidth) \
     M(detailTextWidth, "textWidth", int, 280, "detail", "标题+介绍区固定宽度(像素,不随内容自适应;默认 280)", "详情页", "文字区宽度", "标题+介绍区固定宽度(px),默认 280。", Field, nullptr, validatePositiveInt) \
     M(proxy, "proxy", QString, "", "network", "全局代理(空=直连):http://host:port 或 https://host:port(HTTP 代理,https 目标走 CONNECT 隧道;可带 user:pass@ 认证;仅支持 HTTP,播放经 mpv --http-proxy)", "代理", "代理地址", "仅支持 HTTP 代理(http:// 或 https://,https 目标走 CONNECT 隧道),可带 user:pass@ 认证;SOCKS 不支持。留空 = 直连;非法值忽略并回退直连。", Field, nullptr, validateProxy) \
     M(searchLimitPerAccount, "searchLimitPerAccount", int, 10, "search", "搜索每账号结果条数(一次上限,1-100;默认 10)", "界面", "搜索每账号条数", "搜索浮窗每台服务器最多返回的结果数(不翻页,1-100);修改后立即生效。", Field, nullptr, validateSearchLimit) \

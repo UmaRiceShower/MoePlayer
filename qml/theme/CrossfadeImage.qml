@@ -90,7 +90,8 @@ Item {
         // mipmap 预滤波层级是主解(同 PosterCard)。
         smooth: true
         mipmap: true
-        // 不设 sourceSize:源图尺寸已由 provider 按 kind 限制(海报 512/背景 1600),
+        // 不设 sourceSize:源图尺寸已由 provider 按 kind 限制(海报 512/背景按
+        // backdropMaxWidth 配置档),
         // 而本组件常用于随窗口缩放的背景 —— 设了会随尺寸变化反复重解码,
         // 显示缩放交给渲染器(已开 mipmap)。
         retainWhileLoading: true
