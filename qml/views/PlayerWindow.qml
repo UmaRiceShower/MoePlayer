@@ -321,43 +321,6 @@ Window {
         visible: opacity > 0
         Behavior on opacity { NumberAnimation { duration: 250 } }
 
-        // 顶部 渐变压暗罩(上深下透),无硬边分割
-        Item {
-            id: topBar
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 52
-
-            Rectangle {
-                anchors.fill: parent
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Qt.rgba(0, 0, 0, 0.45) }
-                    GradientStop { position: 0.7; color: Qt.rgba(0, 0, 0, 0.18) }
-                    GradientStop { position: 1.0; color: "transparent" }
-                }
-            }
-
-            // 吞点击与滚轮防穿透(同底栏)。
-            MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
-
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 8
-                anchors.rightMargin: 14
-                spacing: 4
-
-                IconBtn {
-                    Layout.alignment: Qt.AlignVCenter
-                    icon.source: "qrc:/icons/chevron-left.svg"
-                    icon.width: 22
-                    icon.height: 22
-                    tip: "返回"
-                    onClicked: root.goBack()
-                }
-            }
-        }
-
         // 底部控制条:渐变压暗罩(下深上透),控件直接坐在罩上,
         // 无硬边分割;罩略高于内容留出渐变过渡带。
         Item {
