@@ -74,10 +74,17 @@ Window {
     property bool showRemaining: false
     // 唤出侧面板的按钮(面板右缘对齐其右缘);关面板清空。
     property var panelAnchor: null
+    // 本次按压收了输入框焦点(focusGuard 置位;下层点击处理消费:
+    // 收框不连带切暂停/收面板)。每次按压由 focusGuard 重置。
+    property bool _inputDismissed: false
 
     function wake() {
         chromeVisible = true
         hideTimer.restart()
+        // 面板自关计时:悬停面板期间停表(注意力在面板上),由
+        // panelHover 进出接管;其余活动一律重置。
+        if (root.panel !== "" && !panelHover.hovered)
+            panelTimer.restart()
     }
 
     // 关窗幂等:stop 同步触发 onPlaybackFinished→closeSelf,与 goBack 兜底
@@ -296,6 +303,10 @@ Window {
         }
         property bool _clickToggled: false
         onClicked: {
+            // 收输入框的那次按压整口消费(与面板 dismiss 同语义,
+            // 不连带切暂停)。
+            if (root._inputDismissed)
+                return
             // 面板开着:点视频区 = 收面板(不换暂停态),符合"点空白处关闭"。
             if (root.panel !== "") {
                 root.panel = ""
@@ -355,8 +366,18 @@ Window {
             // 悬停钉住控制层用 HoverHandler 采集。
             HoverHandler { id: barHover }
             // 吞掉落在条上的点击与滚轮(防穿透到下层 inputArea 触发
-            // 暂停/全屏/音量;面板内列表的滚动由 ListView 自身优先处理)。
-            MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
+            // 暂停/全屏/音量;面板内列表的滚动由 ListView 自身优先处理);
+            // 面板开着时点条的空白区 = 收面板(点外即关)。
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    if (root._inputDismissed)
+                        return
+                    if (root.panel !== "")
+                        root.panel = ""
+                }
+                onWheel: (w) => w.accepted = true
+            }
 
             Column {
                 id: barCol
@@ -433,6 +454,7 @@ Window {
                                 onAccepted: {
                                     const t = root.parseTime(text)
                                     visible = false
+                                    focus = false
                                     if (t >= 0 && t <= video.duration)
                                         MpvClient.seek(t, root.sessionKey)
                                     root.wake()
@@ -441,6 +463,7 @@ Window {
                                 Keys.onEscapePressed: (e) => {
                                     e.accepted = true
                                     visible = false
+                                    focus = false
                                 }
                                 onActiveFocusChanged: if (!activeFocus)
                                     visible = false
@@ -718,6 +741,7 @@ Window {
                                 onAccepted: {
                                     const v = parseFloat(text)
                                     speedBtn.editing = false
+                                    focus = false
                                     if (!isNaN(v) && v >= 0.01 && v <= 32) {
                                         MpvClient.command(["osd-auto", "set", "speed", String(v)], root.sessionKey)
                                     }
@@ -726,6 +750,7 @@ Window {
                                 Keys.onShortcutOverride: (e) => e.accepted = true
                                 Keys.onEscapePressed: (e) => {
                                     e.accepted = true
+                                    focus = false
                                     speedBtn.editing = false
                                 }
                                 onActiveFocusChanged: if (!activeFocus)
@@ -814,6 +839,18 @@ Window {
         blurSource: video
         visible: root.panel !== "" && root.chromeVisible
 
+        // 悬停采集:悬停期间面板自关计时停表。
+        HoverHandler {
+            id: panelHover
+            onHoveredChanged: {
+                if (root.panel === "")
+                    return
+                if (hovered)
+                    panelTimer.stop()
+                else
+                    panelTimer.restart()
+            }
+        }
         // 吞点击与滚轮防穿透。
         MouseArea { anchors.fill: parent; onWheel: (w) => w.accepted = true }
 
@@ -1008,6 +1045,30 @@ Window {
         }
     }
 
+    // 输入框点外收焦观察层:声明在所有可视层之后(置顶),按压一律
+    // 拒收穿透,仅做判定——按压点在输入框外且框持焦时收焦(框随失焦
+    // 自动隐藏),并置 _inputDismissed 让下层消费该次点击。盖全区域
+    // (视频/底条/控件/面板都先经此层),逐控件补收焦必然漏面。
+    MouseArea {
+        id: focusGuard
+        anchors.fill: parent
+        propagateComposedEvents: true
+        onPressed: (mouse) => {
+            root._inputDismissed = false
+            const pp = posEdit.mapFromItem(null, mouse.x, mouse.y)
+            if (posEdit.focus && !posEdit.contains(pp)) {
+                posEdit.focus = false
+                root._inputDismissed = true
+            }
+            const sp = speedEdit.mapFromItem(null, mouse.x, mouse.y)
+            if (speedEdit.focus && !speedEdit.contains(sp)) {
+                speedEdit.focus = false
+                root._inputDismissed = true
+            }
+            mouse.accepted = false
+        }
+    }
+
     Timer {
         id: hideTimer
         interval: 3000
@@ -1019,7 +1080,29 @@ Window {
                 root.chromeVisible = false
         }
     }
-    Component.onDestruction: hideTimer.stop()
+    Component.onDestruction: {
+        hideTimer.stop()
+        panelTimer.stop()
+    }
+
+    // 面板无操作自关(读列表留比控制层更长的窗口);悬停面板停表,
+    // 其余窗口活动经 wake() 重置;自关后控制层走正常隐藏节拍。
+    Timer {
+        id: panelTimer
+        interval: 6000
+        onTriggered: {
+            if (root.panel !== "" && !panelHover.hovered) {
+                root.panel = ""
+                hideTimer.restart()
+            }
+        }
+    }
+    onPanelChanged: {
+        if (panel !== "")
+            panelTimer.restart()
+        else
+            panelTimer.stop()
+    }
 
     // ---- 键盘 ----
     Shortcut { sequences: ["Space", "K", "P"]; onActivated: root.togglePause() }
