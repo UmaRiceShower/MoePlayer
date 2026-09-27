@@ -411,6 +411,8 @@ bool MpvEmbeddedCore::start(const QString &hookScript)
     mpv_set_option_string(mpv, "input-terminal", "no");
     mpv_set_option_string(mpv, "terminal", "no");
     mpv_set_option_string(mpv, "cache", "yes");
+    // 预加载
+    mpv_set_option_string(mpv, "prefetch-playlist", "yes");
     mpv_set_option_string(mpv, "hwdec", "auto-safe");
     mpv_set_option_string(mpv, "stop-screensaver", "yes");
     mpv_set_option_string(mpv, "osd-playlist-entry", "title");

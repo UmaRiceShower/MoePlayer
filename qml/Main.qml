@@ -335,6 +335,8 @@ ApplicationWindow {
             console.info("Main: 协商就绪入缓存", id)
             root.cacheEpisodeUrl(id, url, headers, m)
             root.serveEpisodeUrl(id, "")
+            // 预加载
+            MpvClient.preloadEpisodeUrl(id, url, m, m.selectedSubtitleUrl || "")
         }
         function onPlaybackFailed(serverUrl, itemId, message) {
             // 协商失败:hook 若在等,放行占位(加载失败,mpv 跳过该条)。

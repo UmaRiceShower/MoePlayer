@@ -46,6 +46,10 @@ constexpr int kEofCheckRequestId = 997;
 constexpr int kPlaylistCheckRequestId = 996;
 // 面板轨道查询(播放页 refreshTracks)。
 constexpr int kTracksRequestId = 992;
+// 预加载改写
+constexpr int kPlaylistQueryRequestId = 990;
+constexpr int kPlaylistInsertRequestId = 988;
+constexpr int kPlaylistRemoveRequestId = 987;
 // 章节查询(播放页进度条刻度)。
 constexpr int kChaptersRequestId = 991;
 // 超分回读:glsl-shaders 挂载列表 / video-params / osd-dimensions。
@@ -632,6 +636,9 @@ void MpvClient::spawnMpv(Session *s)
          << QStringLiteral("--input-default-bindings=yes")
          << QStringLiteral("--input-cursor=yes")
          << QStringLiteral("--cache=yes")
+         // 预加载:当前集缓冲到尾(demuxer 读尽)时后台打开下一集地址灌
+         // 缓存——下一集地址已由 preloadEpisodeUrl 改写为真实 URL。
+         << QStringLiteral("--prefetch-playlist=yes")
          << QStringLiteral("--stop-screensaver=yes")
          << QStringLiteral("--screenshot-dir=") +
                 QStandardPaths::writableLocation(QStandardPaths::PicturesLocation) +
@@ -900,6 +907,97 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
             }
             s->retryIndex = index;
             scheduleRetry(s);
+        } else if (rid == kPlaylistQueryRequestId) {
+            // 预加载改写第 1 步:定位仍是占位的目标条目(正在加载/播放的
+            // 不动——hook 路径已接管该次加载),insert 确认后再 remove。
+            const QString id = s->preloadId;
+            if (id.isEmpty())
+                return;
+            const QJsonArray list = obj.value(QStringLiteral("data")).toArray();
+            int index = -1;
+            for (int i = 0; i < list.size(); ++i) {
+                const QJsonObject e = list.at(i).toObject();
+                if (e.value(QStringLiteral("filename")).toString()
+                        == QStringLiteral("moe://ep/") + id
+                    && !e.value(QStringLiteral("current")).toBool()
+                    && !e.value(QStringLiteral("playing")).toBool()) {
+                    index = i;
+                    break;
+                }
+            }
+            if (index < 0) {
+                // 占位已不在列表(已在播等)
+                if (s->preloadInserted)
+                    s->resolvedEps.insert(s->preloadId);
+                s->preloadId.clear();
+                return;
+            }
+            if (s->preloadInserted) {
+                // remove 重试
+                sendJson(s, QJsonObject{
+                                {QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("playlist-remove"),
+                                            index}},
+                                {QStringLiteral("request_id"),
+                                 kPlaylistRemoveRequestId},
+                            });
+                return;
+            }
+            QJsonArray cmd{QStringLiteral("loadfile"), s->preloadUrl,
+                           QStringLiteral("insert-at"), index};
+            // 外挂字幕作为文件本地选项随条目携带(同 hook 路径的
+            // file-local-options/sub-file)。
+            if (!s->preloadSub.isEmpty())
+                cmd.append(QJsonObject{{QStringLiteral("sub-file"), s->preloadSub}});
+            sendJson(s, QJsonObject{{QStringLiteral("command"), cmd},
+                                    {QStringLiteral("request_id"),
+                                     kPlaylistInsertRequestId}});
+        } else if (rid == kPlaylistInsertRequestId) {
+            // 第 2 步:insert 成功才删原位占位
+            if (obj.value(QStringLiteral("error")).toString()
+                != QLatin1String("success")) {
+                qWarning() << "MpvClient: 预加载 insert 失败,占位留 hook"
+                           << s->preloadId;
+                s->preloadId.clear();
+                return;
+            }
+            s->preloadInserted = true;
+            const int pos = s->playlistIds.indexOf(s->preloadId);
+            if (pos < 0) {
+                s->preloadId.clear();
+                return;
+            }
+            // 占位在播放列表中的实际位置:insert 后占位 = 原位置 + 1;
+            // 以 m3u 序(playlistIds)为准,indexOf 得到的是插入前下标。
+            sendJson(s, QJsonObject{
+                            {QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("playlist-remove"),
+                                        pos + 1}},
+                            {QStringLiteral("request_id"),
+                             kPlaylistRemoveRequestId},
+                        });
+        } else if (rid == kPlaylistRemoveRequestId) {
+            if (obj.value(QStringLiteral("error")).toString()
+                == QLatin1String("success")) {
+                s->resolvedEps.insert(s->preloadId);
+                qInfo() << "MpvClient: 预加载改写完成" << s->preloadId;
+                s->preloadId.clear();
+                return;
+            }
+            // 删除失败重查重删
+            if (++s->preloadTries < 2) {
+                sendJson(s, QJsonObject{
+                                {QStringLiteral("command"),
+                                 QJsonArray{QStringLiteral("get_property"),
+                                            QStringLiteral("playlist")}},
+                                {QStringLiteral("request_id"),
+                                 kPlaylistQueryRequestId},
+                            });
+            } else {
+                qWarning() << "MpvClient: 预加载 remove 重试失败,残留占位"
+                           << s->preloadId;
+                s->preloadId.clear();
+            }
         } else if (rid == kEofCheckRequestId) {
             // eof 应答:ended 条目在播放列表中的索引 ≥ 末位 = 播完(结束
             // 会话);否则 mpv 自动连播下一项(占位 → on_load hook 重定向)。
@@ -985,6 +1083,12 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             reportProgress(s, false);
         } else if (name == QLatin1String("duration")) {
             s->duration = data.isDouble() ? data.toDouble() : s->duration;
+        } else if (name == QLatin1String("playlist-pos")) {
+            // 换集归位:占位集此时尚在协商(episodeMeta 空,幂等跳过,
+            // file-loaded 的 pendingFileId 兜底);预加载集 meta 已在,同步换。
+            const int pos = data.toInt(-1);
+            if (pos >= 0 && pos < s->playlistIds.size())
+                applyEpisodeSwitch(s, s->playlistIds.at(pos));
         } else if (name == QLatin1String("pause")) {
             s->paused = data.isBool() ? data.toBool() : s->paused;
             reportProgress(s, true);
@@ -998,18 +1102,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         // on_load hook 路径(playlist 占位):QML 协商 meta 按 pendingFileId 归位;
         // 首集(用户点播)保持会话初值(pendingFileId 为空)。
         if (!s->pendingFileId.isEmpty()) {
-            const QVariantMap pm = s->episodeMeta.value(s->pendingFileId);
-            if (!pm.isEmpty()) {
-                const QString oldSid = s->meta.value(QStringLiteral("playSessionId")).toString();
-                if (s->loadIssued
-                    && s->meta.value(QStringLiteral("itemId")).toString()
-                        != pm.value(QStringLiteral("itemId")).toString())
-                    reportStopped(s, s->eofPos);
-                s->meta = pm;
-                if (!pm.value(QStringLiteral("playSessionId")).toString().isEmpty()
-                    && pm.value(QStringLiteral("playSessionId")).toString() != oldSid)
-                    reportStart(s);
-            }
+            applyEpisodeSwitch(s, s->pendingFileId);
             s->pendingFileId.clear();
         }
         s->eofPos = -1;
@@ -1158,6 +1251,10 @@ void MpvClient::observe(Session *s)
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 3,
                                         QStringLiteral("pause")}}});
+    // id 9:playlist-pos——换集识别
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 9,
+                                        QStringLiteral("playlist-pos")}}});
     // id 4-8 只服务内嵌(超分回读/UI 镜像);外部模式 OSC 自管,不发
     // (每个 observe = 每条变化一条 IPC 流量,外部纯浪费)。
     if (!s->embedded)
@@ -1289,6 +1386,8 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
     // 可重复调用(重播同集/续链):清旧播放表 + 删旧 m3u(否则 ids 翻倍、
     // 旧文件泄漏)。
     s->playlistIds.clear();
+    s->resolvedEps.clear();
+    s->preloadId.clear();
     if (!s->m3uPath.isEmpty()) {
         QFile::remove(s->m3uPath);
         s->m3uPath.clear();
@@ -1342,6 +1441,53 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                 });
     s->listSet = true;
     qInfo() << "MpvClient: 下发 loadlist" << s->key;
+}
+
+void MpvClient::applyEpisodeSwitch(Session *s, const QString &episodeId)
+{
+    const QVariantMap pm = s->episodeMeta.value(episodeId);
+    if (pm.isEmpty())
+        return;
+    const QString oldSid = s->meta.value(QStringLiteral("playSessionId")).toString();
+    if (s->loadIssued
+        && s->meta.value(QStringLiteral("itemId")).toString()
+               != pm.value(QStringLiteral("itemId")).toString())
+        reportStopped(s, s->eofPos);
+    s->meta = pm;
+    if (!pm.value(QStringLiteral("playSessionId")).toString().isEmpty()
+        && pm.value(QStringLiteral("playSessionId")).toString() != oldSid)
+        reportStart(s);
+}
+
+// 预加载:把协商好的真实地址写回播放列表(原位替换占位条目)。
+// 之后 mpv 的 prefetch-playlist 在当前集缓冲到尾时即可后台开流;
+// 条目实际加载时无 on_load hook,file-loaded 经 playlist-pos 反查归位。
+void MpvClient::preloadEpisodeUrl(const QString &itemId, const QString &url,
+                                  const QVariantMap &meta, const QString &subtitleUrl)
+{
+    if (url.isEmpty())
+        return;
+    for (Session *s : std::as_const(m_sessions)) {
+        if (!s->ready || !s->listSet)
+            continue;
+        if (s->resolvedEps.contains(itemId) || !s->playlistIds.contains(itemId))
+            continue;
+        if (!s->preloadId.isEmpty())
+            continue; // 每会话一单在途;错过的集由 hook 按需协商兜底
+        if (!meta.isEmpty())
+            s->episodeMeta.insert(itemId, meta);
+        s->preloadId = itemId;
+        s->preloadUrl = url;
+        s->preloadSub = subtitleUrl;
+        s->preloadInserted = false;
+        s->preloadTries = 0;
+        sendJson(s, QJsonObject{
+                        {QStringLiteral("command"),
+                         QJsonArray{QStringLiteral("get_property"),
+                                    QStringLiteral("playlist")}},
+                        {QStringLiteral("request_id"), kPlaylistQueryRequestId},
+                    });
+    }
 }
 
 void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &itemId,
