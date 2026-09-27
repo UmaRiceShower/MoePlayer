@@ -97,6 +97,11 @@ public:
                                     const QString &currentItemId, int currentIndex,
                                     const QString &url, const QVariantList &headers,
                                     const QVariantMap &meta);
+    // 预加载:协商好的集真实地址直接改写进播放列表(替换占位条目),
+    // prefetch-playlist 便能在当前集缓冲到尾时提前开流灌缓存(无缝连播)。
+    // 内部按"播放列表含该集"定位会话(多窗同剧都改写)
+    Q_INVOKABLE void preloadEpisodeUrl(const QString &itemId, const QString &url,
+                                       const QVariantMap &meta, const QString &subtitleUrl);
     // on_load hook 应答:占位条目经 moe-url 请求,QML 协商后的真实地址、
     // 流头、元数据与(可选)外挂字幕 URL;meta 供 file-loaded 归位/选轨。
     // url 为空 = 协商失败:通知 hook 继续(占位加载失败,mpv 跳过该条)。
@@ -203,6 +208,15 @@ private:
         // 播放列表旋转序的条目 id(第 0 条 = 点播集):选集面板直跳映射
         // episodeId → playlist-play-index 用。
         QStringList playlistIds;
+        // 已预加载改写(占位→真实地址)的集:防重复改写;重建列表时清空。
+        QSet<QString> resolvedEps;
+        // 在途的预加载改写(每会话一单;查列表→insert 确认→remove 占位的
+        // 应答状态机;preloadInserted 区分重试只删不插)。
+        QString preloadId;
+        QString preloadUrl;
+        QString preloadSub;
+        bool preloadInserted = false;
+        int preloadTries = 0;
         // IPC 未就绪时暂存的播放列表调用(setEpisodeList 早到;就绪 flush
         // 原样补灌)。
         QVariantList pendingEpisodes;
@@ -227,6 +241,9 @@ private:
     void handleJson(Session *s, const QJsonObject &obj);
     // 章节表:file-loaded 时主动推送 → chaptersChanged(仅内部调用)。
     void refreshChapters(const QString &itemId);
+    // 换集元数据归位:episodeMeta → s->meta,跨集时先 Stopped 旧集再
+    // Started 新集(hook 占位与预加载真实条目共用)。
+    void applyEpisodeSwitch(Session *s, const QString &episodeId);
     // 结束并销毁会话(清理资源;结束语义与回传由 stopAndConsiderEnd 承担)。
     void destroySession(Session *s);
     void spawnMpv(Session *s);
