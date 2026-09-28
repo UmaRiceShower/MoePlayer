@@ -835,11 +835,101 @@ ApplicationWindow {
         }
     }
 
+    // ---- 全局浏览器式命令菜单 ----
+    function openMainMenu(anchor) {
+        if (mainMenu.visible) {
+            mainMenu.close()
+            return
+        }
+        const p = anchor.mapToItem(null, 0, anchor.height + 8)
+        mainMenu.x = Math.max(8, Math.min(p.x, root.width - mainMenu.width - 12))
+        mainMenu.y = p.y
+        mainMenu.open()
+    }
+
+    Popup {
+        id: mainMenu
+        width: 184
+        padding: 6
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        background: Rectangle {
+            color: Qt.rgba(Theme.scrim.r, Theme.scrim.g, Theme.scrim.b, 0.92)
+            radius: 10
+            border.width: 1
+            border.color: Theme.borderSoft
+        }
+        contentItem: ListView {
+            implicitHeight: contentHeight
+            interactive: false
+            // 动作在 onClicked 按 index 分发(函数不进 model)。
+            model: [
+                { icon: "search",   label: "搜索" },
+                { icon: "history",  label: "播放历史" },
+                { icon: "server",   label: "服务器管理" },
+                { icon: "settings", label: "设置" },
+                { icon: "chevron-up", label: "回首页" }
+            ]
+            delegate: ItemDelegate {
+                id: menuItem
+                required property int index
+                required property var modelData
+                width: ListView.view.width
+                height: 38
+                padding: 0
+                onClicked: {
+                    mainMenu.close()
+                    if (menuItem.index === 0)
+                        root.toggleSearch()
+                    else if (menuItem.index === 1)
+                        root.pushHistory()
+                    else if (menuItem.index === 2)
+                        stackView.push(serverManagerPage)
+                    else if (menuItem.index === 3)
+                        settingsOverlay.open()
+                    else
+                        stackView.pop(null)
+                }
+                contentItem: Row {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    spacing: 10
+                    Image {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 16
+                        height: 16
+                        source: "qrc:/icons/" + (ThemeStore.isLight ? "dark/" : "")
+                                + menuItem.modelData.icon + ".svg"
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true
+                        sourceSize.width: Math.max(1, Math.round(16 * Screen.devicePixelRatio))
+                        sourceSize.height: Math.max(1, Math.round(16 * Screen.devicePixelRatio))
+                    }
+                    AppText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: menuItem.modelData.label
+                        color: Theme.textPrimary
+                        font.pixelSize: 13
+                    }
+                }
+                background: Rectangle {
+                    radius: 6
+                    color: menuItem.hovered
+                           ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.18)
+                           : "transparent"
+                }
+            }
+        }
+    }
+
     // Alt+Left 的返回分发:浮层先关(优先级与 Esc 相同,但不穿透到下面的页面),
     // 其次给当前页的页内层级(如详情页的 集→父剧 / 浏览历史链)消费,最后才退页面栈。
     // 页内契约:页面可选实现 goBack() -> bool(返回是否已消费)。
     // 注意 Esc 不走这里:Esc 只关浮层(页面内 Esc 另有"清输入/关下拉"语义)。
     function goBack() {
+        if (mainMenu.visible) {
+            mainMenu.close()
+            return;
+        }
         if (settingsOverlay.visible) {
             settingsOverlay.close()
             return;

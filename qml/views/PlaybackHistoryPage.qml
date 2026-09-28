@@ -431,6 +431,7 @@ Item {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: root.pageMargin
+        anchors.topMargin: 16
         height: root.topBarH
 
         Row {
@@ -439,6 +440,9 @@ Item {
             anchors.verticalCenter: parent.verticalCenter
             spacing: 8
             BackCircleButton {
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            MenuCircleButton {
                 anchors.verticalCenter: parent.verticalCenter
             }
             AppText {

@@ -808,7 +808,7 @@ Item {
         anchors.top: parent.top
         anchors.leftMargin: 24
         anchors.rightMargin: 24
-        anchors.topMargin: 24
+        anchors.topMargin: 16
         height: 42
         visible: root.browseReady
 
@@ -816,6 +816,11 @@ Item {
         BackCircleButton {
             id: libBackBtn
             anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        MenuCircleButton {
+            anchors.left: libBackBtn.right
+            anchors.leftMargin: 8
             anchors.verticalCenter: parent.verticalCenter
         }
         // 面包屑链(扁平文本式):服务器 / 库名 ▾ / 文件夹 ▾。

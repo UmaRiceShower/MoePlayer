@@ -998,8 +998,12 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.margins: 24
+        anchors.topMargin: 16
         spacing: 12
         BackCircleButton {
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        MenuCircleButton {
             anchors.verticalCenter: parent.verticalCenter
         }
         AppText {

@@ -2500,6 +2500,15 @@ Item {
         z: 20
         blurSource: detailBg
     }
+    // 全局菜单钮(返回钮右):鼠标路径的全局入口。
+    MenuCircleButton {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.leftMargin: 64
+        anchors.topMargin: 24
+        z: 20
+        blurSource: detailBg
+    }
 
     // 继续观看列表(Resume)到达(进详情页时请求):该剧的续播目标即首个匹配项;
     // 与当前目标一致时不重复定位(避免选集栏两次跳动)。信号属 AccountManager,

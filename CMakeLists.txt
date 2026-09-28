@@ -128,6 +128,7 @@ qt_add_qml_module(MoePlayer
         qml/views/PlaybackHistoryPage.qml
         qml/views/PlayerWindow.qml
         qml/views/BackCircleButton.qml
+        qml/views/MenuCircleButton.qml
         qml/views/NavGlyph.qml
 )
 
