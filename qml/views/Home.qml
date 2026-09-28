@@ -342,26 +342,16 @@ Item {
         z: 10
         height: root.navH
         width: parent.width
-        AppText {
-            id: navTitle
-            anchors.left: parent.left
-            anchors.leftMargin: Constants.homeNavMarginL
-            anchors.verticalCenter: parent.verticalCenter
-            text: "MoePlayer"
-            color: Theme.textPrimary
-            font.pixelSize: Constants.homeNavTitlePx
-            font.bold: true
-        }
-        // 过滤框(标题右):模糊过滤媒体库/服务器(拼音可),聚焦出服务器
+        // 过滤框(左端):模糊过滤媒体库/服务器(拼音可),聚焦出服务器
         // 快选下拉(点服名填入框中,过滤即按服名命中);✕/Esc 清除;
         // 回车 = 进入首个命中库。
         TextField {
             id: filterField
-            anchors.left: navTitle.right
-            anchors.leftMargin: 14
+            anchors.left: parent.left
+            anchors.leftMargin: Constants.homeNavMarginL
             anchors.verticalCenter: parent.verticalCenter
-            width: 220
-            height: 30
+            width: 260
+            height: 34
             leftPadding: 12
             rightPadding: 26
             placeholderText: "过滤服务器 / 媒体库…"
@@ -371,7 +361,9 @@ Item {
             selectByMouse: true
             background: Rectangle {
                 radius: height / 2
-                color: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
+                color: ThemeStore.isLight
+                       ? Qt.rgba(1, 1, 1, 0.5)
+                       : Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.45)
                 border.width: 1
                 border.color: filterField.activeFocus
                               ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.55)
@@ -474,109 +466,30 @@ Item {
                 }
             }
         }
-        // 刷新策略 = 滚动驱动 + 定时兜底:滚轮直接写 contentY(不产生 moving/flick),
-        // 挂 contentYChanged 滚动时逐帧刷新;33ms(30fps)定时器兜住非滚动的内容变化
-        // (图片异步装载等)。
-        GlassBlurSource { id: navGlassBlur; sourceItem: pageList }
-        Connections {
-            target: pageList
-            function onContentYChanged() { navGlassBlur.refresh() }
-        }
-
-        // iOS 毛玻璃导航:三个圆形通透毛玻璃按钮(背景模糊 + 半透明 + 微光)。
-        // 模糊源用滚动内容 pageList,内容滚过按钮时实时通透模糊。
         Row {
             anchors.right: parent.right
             anchors.rightMargin: Constants.homeNavMarginR
             anchors.verticalCenter: parent.verticalCenter
             spacing: Constants.homeNavSpacing
-            FrostedGlass {
-                width: Constants.homeNavBtnSize
-                height: Constants.homeNavBtnSize
-                radius: Constants.homeNavBtnSize / 2
-                blurSource: pageList
-                blurGroup: navGlassBlur
-                thickness: 22
-                bend: 1.8
-                frostAmount: 0.35
-                edgeLight: 0.55
-                saturation: 0.4
-                blurRadius: 5
-                sampleMargin: 48
-                elevation: 4
-                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
-                borderColor: Theme.glassRim
-                GlassCircleButton {
-                    anchors.centerIn: parent
-                    iconName: "search"
-                    onClicked: root.openSearch()
-                }
+            NavButton {
+                iconName: "search"
+                tipText: "搜索"
+                onClicked: root.openSearch()
             }
-            FrostedGlass {
-                width: Constants.homeNavBtnSize
-                height: Constants.homeNavBtnSize
-                radius: Constants.homeNavBtnSize / 2
-                blurSource: pageList
-                blurGroup: navGlassBlur
-                thickness: 22
-                bend: 1.8
-                frostAmount: 0.35
-                edgeLight: 0.55
-                saturation: 0.4
-                blurRadius: 5
-                sampleMargin: 48
-                elevation: 4
-                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
-                borderColor: Theme.glassRim
-                GlassCircleButton {
-                    anchors.centerIn: parent
-                    iconName: "history"
-                    onClicked: root.openHistory()
-                }
+            NavButton {
+                iconName: "history"
+                tipText: "播放历史"
+                onClicked: root.openHistory()
             }
-            FrostedGlass {
-                width: Constants.homeNavBtnSize
-                height: Constants.homeNavBtnSize
-                radius: Constants.homeNavBtnSize / 2
-                blurSource: pageList
-                blurGroup: navGlassBlur
-                thickness: 22
-                bend: 1.8
-                frostAmount: 0.35
-                edgeLight: 0.55
-                saturation: 0.4
-                blurRadius: 5
-                sampleMargin: 48
-                elevation: 4
-                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
-                borderColor: Theme.glassRim
-                GlassCircleButton {
-                    anchors.centerIn: parent
-                    iconName: "server"
-                    onClicked: root.openServerManager()
-                }
+            NavButton {
+                iconName: "server"
+                tipText: "服务器管理"
+                onClicked: root.openServerManager()
             }
-            FrostedGlass {
-                width: Constants.homeNavBtnSize
-                height: Constants.homeNavBtnSize
-                radius: Constants.homeNavBtnSize / 2
-                blurSource: pageList
-                blurGroup: navGlassBlur
-                thickness: 22
-                bend: 1.8
-                frostAmount: 0.35
-                edgeLight: 0.55
-                saturation: 0.4
-                blurRadius: 5
-                sampleMargin: 48
-                elevation: 4
-                glassColor: Qt.rgba(Theme.scrimSoft.r, Theme.scrimSoft.g, Theme.scrimSoft.b, 0.25)
-                borderColor: Theme.glassRim
-                GlassCircleButton {
-                    anchors.centerIn: parent
-                    iconName: "settings"
-                    onClicked: root.openSettings()
-                }
+            NavButton {
+                iconName: "settings"
+                tipText: "设置"
+                onClicked: root.openSettings()
             }
         }
     }
@@ -907,25 +820,21 @@ Item {
         }
     }
 
-    // 全宽磨砂顶栏
-    FrostedGlass {
+    // 全宽顶栏
+    Rectangle {
         id: topBar
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
         height: Constants.homeNavH
-        radius: 0
-        blurSource: pageList
-        blurGroup: navGlassBlur
-        blurRadius: 6
-        frostAmount: 0.5
-        saturation: 0.4
-        edgeLight: 0.0
-        elevation: 0
-        rimMask: Qt.vector4d(0, 0, 1, 0) // 只留底缘发丝线作分隔(上,右,下,左)
-        glassColor: Qt.rgba(ThemeStore.background.baseTop.r,
-                            ThemeStore.background.baseTop.g,
-                            ThemeStore.background.baseTop.b, 0.55)
+        color: ThemeStore.background.baseTop
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: Theme.borderSoft
+        }
     }
 
 
@@ -1159,39 +1068,33 @@ Item {
         }
     }
 
-    // 圆形毛玻璃按钮(放大镜等):圆形玻璃底 + 居中图标。
-    component GlassCircleButton: Button {
+    component NavButton: Button {
         id: gcb
         property string iconName: ""
-        width: Constants.homeNavBtnSize
-        height: Constants.homeNavBtnSize
+        property string tipText: ""
+        width: 36
+        height: 36
         padding: 0
         hoverEnabled: true
-        background: Item {
-            Rectangle {
-                anchors.fill: parent
-                radius: width / 2
-                color: gcb.hovered
-                       ? (ThemeStore.isLight ? Qt.rgba(0, 0, 0, 0.10)
-                                             : Qt.rgba(1, 1, 1, 0.14))
-                       : "transparent"
-                Behavior on color { ColorAnimation { duration: 150 } }
-            }
+        background: Rectangle {
+            radius: 8
+            color: gcb.hovered ? Theme.tint : "transparent"
+            Behavior on color { ColorAnimation { duration: 120 } }
         }
-        // contentItem 会被 Button 拉伸至全尺寸,图标须放进容器内居中才能保持小尺寸。
-        // SVG 按显示尺寸×DPR 栅格化:避免大图降采样把细描边摊灰。
-        // 图标是白色描边 SVG:亮色系配色换 dark/ 下的暗色变体(蒙版着色有锯齿,弃用)。
+        ToolTip.visible: hovered && tipText !== ""
+        ToolTip.text: tipText
+        ToolTip.delay: 600
         contentItem: Item {
             Image {
-                width: 14
-                height: 14
+                width: 20
+                height: 20
                 anchors.centerIn: parent
                 source: gcb.iconName ? ("qrc:/icons/" + (ThemeStore.isLight ? "dark/" : "")
                                         + gcb.iconName + ".svg") : ""
                 fillMode: Image.PreserveAspectFit
                 smooth: true
-                sourceSize.width: Math.max(1, Math.round(14 * Screen.devicePixelRatio))
-                sourceSize.height: Math.max(1, Math.round(14 * Screen.devicePixelRatio))
+                sourceSize.width: Math.max(1, Math.round(20 * Screen.devicePixelRatio))
+                sourceSize.height: Math.max(1, Math.round(20 * Screen.devicePixelRatio))
             }
         }
     }
