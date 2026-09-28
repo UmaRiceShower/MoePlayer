@@ -329,6 +329,7 @@ Window {
     BusyIndicator {
         anchors.centerIn: parent
         running: !root._everStarted || video.buffering
+        visible: running
         palette.dark: "white"
         Connections {
             target: video
@@ -1045,13 +1046,11 @@ Window {
         }
     }
 
-    // 输入框点外收焦观察层:声明在所有可视层之后(置顶),按压一律
-    // 拒收穿透,仅做判定——按压点在输入框外且框持焦时收焦(框随失焦
-    // 自动隐藏),并置 _inputDismissed 让下层消费该次点击。盖全区域
-    // (视频/底条/控件/面板都先经此层),逐控件补收焦必然漏面。
+    // 输入框点外收焦观察层
     MouseArea {
         id: focusGuard
         anchors.fill: parent
+        visible: posEdit.activeFocus || speedEdit.activeFocus
         propagateComposedEvents: true
         onPressed: (mouse) => {
             root._inputDismissed = false
