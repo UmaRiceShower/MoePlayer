@@ -53,10 +53,8 @@ QtObject {
     // ===================== Home.qml =====================
 
     // ---- 顶部导航 ----
-    readonly property int homeNavH: 48                    // 导航高
-    readonly property int homeNavTitlePx: 22              // 导航标题字号
-    readonly property int homeNavBtnSize: 42              // 圆形按钮尺寸
-    readonly property int homeNavMarginL: 20              // 标题左边距
+    readonly property int homeNavH: 56                    // 导航高
+    readonly property int homeNavMarginL: 20              // 左端边距(过滤框)
     readonly property int homeNavMarginR: 16              // 按钮组右边距
     readonly property int homeNavSpacing: 12              // 按钮间距
 
@@ -67,7 +65,7 @@ QtObject {
     // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.33×窗口宽);
     // 窄窗时 hero 高收缩、卡片保持满带宽,宽窗由高度预算/上限决定。
     readonly property real homeHeroWidthRatio: homeHeroCardWCap / homeHeroCardAspect / homeHeroCardH
-    readonly property int homeHeroTopPad: 40            // hero 区顶部留白(卡顶越过 48px 顶栏)
+    readonly property int homeHeroTopPad: homeNavH + 12 // hero 区顶部留白(顶栏实面,卡顶贴栏下缘)
     readonly property real homeHeroPathStartX: 0.12       // 路径左弧 x 比例
     readonly property real homeHeroPathCenterX: 0.5       // 路径中弧 x 比例
     readonly property real homeHeroPathEndX: 0.88         // 路径右弧 x 比例
