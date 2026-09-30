@@ -867,7 +867,7 @@ Item {
 
             AppText {
                 anchors.horizontalCenter: parent.horizontalCenter
-                text: "MoePlayer"
+                text: Qt.application.name
                 color: Theme.textPrimary
                 font.pixelSize: 32
                 font.bold: true
