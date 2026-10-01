@@ -35,6 +35,35 @@ Item {
 
     property var detail: ({})
     property bool isFavorite: false
+    // 跨服版本卡列表
+    property var crossVersions: []
+    // 逐集选源表:"S{季}E{集}" → 各服源条目(剧/集页都拉;媒体信息段消费)。
+    property var crossEpSources: ({})
+    // 媒体信息块模型:本服版本 + 他服源版本(同构渲染,块头标服务器名)。
+    readonly property var mediaBlocksModel: {
+        const out = []
+        for (const v of (root.detail.mediaSources || []))
+            out.push(v)
+        if (root.detail.type !== "Series") {
+            for (const e of root.crossSourceEntries()) {
+                for (const v of (e.card.versions || [])) {
+                    const vv = Object.assign({}, v)
+                    vv._crossName = e.card.accountName || ""
+                    out.push(vv)
+                }
+            }
+        }
+        return out
+    }
+    // 当前集的他服源(媒体信息段源块模型;仅集视图有值)。
+    readonly property var crossEpCurrent: {
+        if (root.detail.type !== "Episode")
+            return []
+        return root.crossEpSources["S" + (root.detail.seasonNo || 0)
+                                   + "E" + (root.detail.episodeNo || 0)] || []
+    }
+    // 选源状态(版本行)
+    property var selSource: null
     // 莫奈取色缓存:单次 map 查找供全部颜色属性复用(原 7 个属性各自重复
     // 求值 pid + map 查找)。本页单卡,绑定重算开销可忽略。
     readonly property var _monet: ConfigManager.monetEnabled
@@ -123,6 +152,8 @@ Item {
 
     // ---- 播放:Series/Episode/Movie 统一走 playItem,按目标条目 id 协商。 ----
     property string pendingPlayItemId: ""
+    // 跨服播放的应答守卫:playbackReady 的 serverUrl 需匹配发起服。
+    property string _pendingPlayServer: ""
     property double resumeTicks: 0
     property bool playbackPending: false
     // ---- 播放选项(版本/音频/字幕,Q2=B:持久选择,非一次性指令)。----
@@ -156,41 +187,61 @@ Item {
         return AccountManager.credsForAccount(root.accountId)
     }
 
-    function playItem(itemId, resume) {
-        if (root.playbackPending || !itemId)
+    // src 非空 = 跨服源播放(版本行选定):目标服/账号/条目都来自条目本身,
+    // 连播与上报上下文经 meta 跟随目标服(syncEpisodeList 按 meta.serverUrl
+    // 键控取模型,天然成立)。版本/音轨/字幕选择只在本服播放时下推。
+    function playItem(itemId, resume, src) {
+        if (root.playbackPending || (!itemId && !src))
             return
-        console.info("Detail: 播放发起", itemId, resume > 0 ? "续播" : "从头")
+        const srv = src ? src.serverUrl : root.serverUrl
+        const acc = src ? src.accountId : root.accountId
+        const targetId = src && src.playId ? src.playId : itemId
+        console.info("Detail: 播放发起", targetId, resume > 0 ? "续播" : "从头",
+                     src ? "(跨服 " + srv + ")" : "")
         root.playbackPending = true
-        root.pendingPlayItemId = itemId
+        root.pendingPlayItemId = targetId
+        root._pendingPlayServer = srv
         root.resumeTicks = resume
         // 先开窗(加载态),播放地址后台协商,避免网络延迟期间无反馈。
         const isSeries = root.detail.type === "Series"
-        const seriesId = isSeries ? root.detail.id : (root.detail.seriesId || "")
+        const seriesId = src ? src.seriesId
+                         : isSeries ? root.detail.id : (root.detail.seriesId || "")
         const seriesName = isSeries ? root.detail.name : (root.detail.seriesName || "")
         root.playWindowRequested({
-            serverUrl: root.serverUrl,
+            serverUrl: srv,
             // 账号随播放上下文下推:EmbyClient 的 playbackReady meta 不含
             // accountId,而按集续链/全季拉取都要按账号定位(Main 收下即并入)。
-            accountId: root.accountId,
-            itemId: itemId,
+            accountId: acc,
+            itemId: targetId,
             displayName: root.heroFullTitle(),
             seriesId: seriesId,
             seriesName: seriesName
         })
-        const c = root.creds()
+        const c = AccountManager.credsForAccount(acc)
         // 携带播放选项:版本 + 音轨/字幕轨 index。后端仅 >=0 写入请求体锁轨
         // (转码路径);-1 未选/-2 显式关均不落请求,由后端按所选轨解析进 meta,
-        // mpv 起播后据 track-list 匹配选轨(-2 → sid no)。
-        EmbyClient.fetchPlaybackInfo(root.serverUrl, c.token, c.userId, itemId,
-                                     root.selMediaSourceId, seriesId,
+        // mpv 起播后据 track-list 匹配选轨(-2 → sid no)。跨服源锁到所选版本
+        // (条目按「服 × 版本」展开,versionId 是该服的 MediaSourceId),轨道按
+        // 该服容器 index 照常锁(轨道行数据源 = activeVersion)。
+        EmbyClient.fetchPlaybackInfo(srv, c.token, c.userId, targetId,
+                                     src ? (src.versionId || "") : root.selMediaSourceId,
+                                     seriesId,
                                      root.selAudioIndex,
                                      root.selSubtitleIndex)
     }
     // 播放当前详情条目:resume 为 true 时从上次位置续播。
     function startPlayback(resume) {
-        const t = resume && root.detail.positionTicks > 0 && !root.detail.played
+        let t = resume && root.detail.positionTicks > 0 && !root.detail.played
                 ? root.detail.positionTicks : 0
-        root.playItem(root.itemId, t)
+        const src = root.selSource
+        if (src && src.playId && resume) {
+            // 跨服源:续播位置取各服已知进度最大值;目标服已看完则从头。
+            const cardPos = src.card ? (src.card.positionTicks || 0) : 0
+            t = Math.max(t, cardPos)
+            if (src.card && src.card.played)
+                t = 0
+        }
+        root.playItem(root.itemId, t, src && src.playId ? src : null)
     }
     // 本页剧集 id(剧集页 = 自身 id;集页 = 父剧 id):模型范围键用。
     function pageSeriesId() {
@@ -198,6 +249,39 @@ Item {
     }
     // 剧集页播放:跨季续播(全部集里第一条有进度的),否则第一集。
     function playSeries() {
+        // 跨服源(剧级):从该服分集表定位——最早有进度未看完,否则最早未看
+        const src = root.selSource
+        if (src && root.detail.type === "Series") {
+            const eps = []
+            for (const k of Object.keys(root.crossEpSources)) {
+                for (const e of root.crossEpSources[k]) {
+                    if (e.serverUrl === src.serverUrl && e.accountId === src.accountId)
+                        eps.push(e)
+                }
+            }
+            eps.sort((a, b) => ((a.seasonNo || 0) - (b.seasonNo || 0))
+                              || ((a.episodeNo || 0) - (b.episodeNo || 0)))
+            let target = null
+            for (const e of eps) {
+                if (e.positionTicks > 0 && !e.played) { target = e; break }
+            }
+            if (!target)
+                for (const e of eps) {
+                    if (!e.played) { target = e; break }
+                }
+            if (!target && eps.length > 0)
+                target = eps[0]
+            if (!target) {
+                console.warn("Detail: 他服分集表未就绪,无法定位续播集")
+                return
+            }
+            console.info("Detail: 跨服剧集起播", src.serverUrl,
+                         "S" + target.seasonNo + "E" + target.episodeNo)
+            root.playItem(target.id,
+                          target.positionTicks > 0 && !target.played ? target.positionTicks : 0,
+                          src)
+            return
+        }
         const model = EmbyClient.allEpisodesModelFor(root.serverUrl, root.accountId, root.pageSeriesId())
         let target = null
         // 优先续播目标(NextUp,与详情定位/按钮文案同源)。
@@ -286,13 +370,82 @@ Item {
             overview.contentY = 0
     }
     // 相似推荐点击:跨条目 = 栈推新页(返回自然逐级回);防抖保留。
-    function openItemDetail(itemId, posterId, title, serverUrl) {
+    function openItemDetail(itemId, posterId, title, serverUrl, accountId) {
         const now = Date.now()
         if (itemId === root.lastItemPush && now - root.lastItemPushTime < Constants.episodePushDebounceMs)
             return
         root.lastItemPush = itemId
         root.lastItemPushTime = now
-        ApplicationWindow.window.pushDetail(itemId, posterId, title, serverUrl, root.accountId)
+        ApplicationWindow.window.pushDetail(itemId, posterId, title, serverUrl,
+                                            accountId || root.accountId)
+    }
+    // 跨服源条目(版本行与媒体信息共用模型):按「服 × 版本」展开——
+    // 他服与本服同权,每个版本一个条目;集页 = 本集各服源,影页 = 各服
+    // 同片,剧页 = 各服同剧(剧级,playId/versionId 空,起播时再定集)。
+    function crossSourceEntries() {
+        const out = []
+        const srcs = root.detail.type === "Episode" ? root.crossEpCurrent
+                     : root.crossVersions
+        for (const c of srcs) {
+            const prefix = (c.accountName || "") + " · "
+            const isEp = root.detail.type === "Episode"
+            const versions = c.versions || []
+            // 连播键要目标服的剧 id:剧/影页卡 id 即是;集页 c.id 是分集 id,
+            // 剧 id 从跨服卡(同服同账号)反查——错传集 id 会让连播链
+            // /Shows/{集id}/Episodes 404 整场协商失败。
+            let sid = c.id
+            if (isEp) {
+                for (const card of root.crossVersions) {
+                    if (card.serverUrl === c.serverUrl && card.accountId === c.accountId) {
+                        sid = card.id
+                        break
+                    }
+                }
+            }
+            if ((isEp || root.detail.type === "Movie") && versions.length > 0) {
+                for (const v of versions) {
+                    const sub = root.versionSubLabel(v)
+                    out.push({
+                        key: c.serverUrl + "|" + c.accountId + "|" + c.id + "|" + v.id,
+                        serverUrl: c.serverUrl,
+                        accountId: c.accountId,
+                        playId: c.id,
+                        versionId: v.id,
+                        seriesId: sid,
+                        label: prefix + (v.name || "版本") + (sub !== "" ? "  ·  " + sub : ""),
+                        card: c,
+                        version: v
+                    })
+                }
+            } else {
+                // 剧级(或该服无版本明细):一服一条目,摘要走体量行。
+                const badge = root.crossBadgeLine(c)
+                out.push({
+                    key: c.serverUrl + "|" + c.accountId + "|" + c.id,
+                    serverUrl: c.serverUrl,
+                    accountId: c.accountId,
+                    playId: root.detail.type === "Movie" ? c.id : "",
+                    versionId: "",
+                    seriesId: c.id,
+                    label: prefix + (badge !== "" ? badge : (c.name || "")),
+                    card: c,
+                    version: null
+                })
+            }
+        }
+        return out
+    }
+    function selectCrossSource(key) {
+        for (const e of root.crossSourceEntries()) {
+            if (e.key === key) {
+                root.selSource = e
+                // 轨道按所选版本的默认轨(容器 index 语义与本服一致)。
+                const v = e.version
+                root.selAudioIndex = root.defaultTrackIndex("Audio", v ? (v.defaultAudioStreamIndex ?? -1) : -1)
+                root.selSubtitleIndex = root.defaultTrackIndex("Subtitle", v ? (v.defaultSubtitleStreamIndex ?? -1) : -1)
+                return
+            }
+        }
     }
     // 数据落地:赋值 detail 并拉选集/推荐。
     function applyDetail(d) {
@@ -320,6 +473,9 @@ Item {
             EmbyClient.fetchNextUp(root.serverUrl, root.accountId, c.token, c.userId, d.id, 1)
         } else if (d.type === "Episode" && d.seriesId) {
             EmbyClient.fetchSeasons(root.serverUrl, root.accountId, c.token, c.userId, d.seriesId)
+            // 集页也出跨服角标/卡行:分集自身不带外部 ID,补取父剧的。
+            EmbyClient.fetchItemProviderIds(root.serverUrl, c.token, c.userId,
+                                            d.seriesId, root.itemId)
         } else {
             // 电影等无选集:detail 到达即渲染完整结构。
             root.loaded = true
@@ -328,7 +484,47 @@ Item {
         // 拉取期间 stale 隐藏旧推荐,similarReady 到达后恢复。
         root.similarStale = true
         EmbyClient.fetchSimilar(root.serverUrl, root.accountId, c.token, c.userId, root.itemId)
+        // 跨服版本检索:仅剧/影级且有外部 ID;无键不检索
+        root.crossVersions = []
+        root.crossEpSources = ({})
+        if ((d.type === "Series" || d.type === "Movie")
+            && (d.tmdbId || d.imdbId || d.tvdbId))
+            AccountManager.fetchCrossVersions(root.serverUrl, d.id,
+                                              d.tmdbId || "", d.imdbId || "",
+                                              d.tvdbId || "", d.type)
     }
+    // ---- 跨服版本卡文案 ----
+    // 徽章行:电影 = 质量(分辨率/编码/动态范围/大小)+ 字幕音轨;
+    // 剧集 = 体量(季/集,集数不全/更新慢是选源判据)+ 年份。
+    function crossBadgeLine(c) {
+        const parts = []
+        if ((c.episodeCount || 0) > 0) {
+            if ((c.seasonCount || 0) > 0)
+                parts.push(c.seasonCount + " 季")
+            parts.push(c.episodeCount + " 集")
+            if (c.year > 0)
+                parts.push(c.year)
+            return parts.join(" · ")
+        }
+        const h = c.resH || 0
+        if (h >= 2000)
+            parts.push("4K")
+        else if (h > 0)
+            parts.push(h + "p")
+        if (c.vcodec)
+            parts.push(c.vcodec)
+        if (c.range && c.range !== "SDR")
+            parts.push(c.range)
+        if (c.sizeBytes > 0)
+            parts.push((c.sizeBytes / 1073741824).toFixed(1) + " GB")
+        const subs = c.subLangs || []
+        if (subs.length > 0)
+            parts.push("字幕 " + subs.join("/"))
+        if (parts.length === 0 && c.year > 0)
+            parts.push(c.year)
+        return parts.join(" · ")
+    }
+
     // 首次进入/切集共用:原地替换时保持旧正文显示(loaded 不变,新
     // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
     function reload() {
@@ -585,9 +781,31 @@ Item {
         }
         return ms[0]
     }
+    // 当前生效版本:跨服源选中时 = 所选的那个版本(条目按「服 × 版本」
+    // 展开;剧级条目无版本 = null,轨道行回「默认」占位,绝不穿透到本服
+    // 版本——否则会把本服容器 index 锁给目标服);否则本服 selVersion。
+    function activeVersion() {
+        // selSource 由升级应答同步换新对象(见 refreshSelSource),直读即可;
+        // 剧级条目无版本 = null,轨道行回「默认」,绝不穿透本服版本。
+        if (root.selSource)
+            return root.selSource.version || null
+        return root.selVersion()
+    }
+    // 跨服版本明细异步补到后,按 key 把选源态指向新条目对象(轨道选择
+    // selAudioIndex/selSubtitleIndex 不动;旧对象的 version 引用已过期)。
+    function refreshSelSource() {
+        if (!root.selSource)
+            return
+        for (const e of root.crossSourceEntries()) {
+            if (e.key === root.selSource.key) {
+                root.selSource = e
+                return
+            }
+        }
+    }
     // 当前源内按类型筛流(kind 归一:Video/Audio/Subtitle/Attachment)。
     function streamsOfKind(kind) {
-        const v = root.selVersion()
+        const v = root.activeVersion()
         const out = []
         if (!v)
             return out
@@ -615,6 +833,7 @@ Item {
     }
     // 重置为服务器默认轨(详情落地/换版本时调用)。
     function resetPlaybackSelection() {
+        root.selSource = null
         const v = root.selVersion()
         root.selMediaSourceId = v ? v.id : ""
         // 有轨选服务器默认轨(具体轨);无轨回「默认」(-1,仅此时显示"默认")。
@@ -623,6 +842,7 @@ Item {
     }
     // 切换版本:重设该源默认轨。
     function selectVersion(id) {
+        root.selSource = null
         root.selMediaSourceId = id
         const v = root.selVersion()
         root.selAudioIndex = root.defaultTrackIndex("Audio", v ? (v.defaultAudioStreamIndex ?? -1) : -1)
@@ -685,8 +905,11 @@ Item {
     }
     // 当前选中摘要(三段行首行文字)。
     function currentVersionLabel() {
+        if (root.selSource)
+            return root.selSource.label
         const v = root.selVersion()
-        return v ? (v.name || "版本") : ""
+        const p = root.pageAccountName()
+        return v ? ((p !== "" ? p + " · " : "") + (v.name || "版本")) : ""
     }
     function currentAudioLabel() {
         if (root.selAudioIndex === -2)
@@ -722,7 +945,24 @@ Item {
             parts.push(root.detail.genres.join("/"))
         if (root.detail.runtimeSecs > 0)
             parts.push(formatTime(root.detail.runtimeSecs))
+        const accName = root.pageAccountName()
+        if (accName !== "")
+            parts.push(accName)
         return parts.join(" · ")
+    }
+    // 本页来源账号显示名(单账号环境返回空串,不占 meta 行)。
+    function pageAccountName() {
+        const accs = AccountManager.accounts
+        let visible = 0
+        let mine = ""
+        for (const a of accs) {
+            if (!AccountManager.accountVisible(a.id))
+                continue
+            visible++
+            if (a.id === root.accountId)
+                mine = a.name || a.userName || ""
+        }
+        return visible > 1 ? mine : ""
     }
     function heroPosterSource() {
         if (root.detail.posterId)
@@ -1394,26 +1634,42 @@ Item {
                         }
                     }
 
-                    // ---- 版本行(多版本才显示) ----
+                    // ---- 版本/来源行(本服版本 + 他服同源条目) ----
                     OptRow {
                         icon: "🎞"
                         rowWidth: playOptsCol.width
                         visible: (root.detail.mediaSources || []).length > 0
+                                 || root.crossSourceEntries().length > 0
                         mainText: root.currentVersionLabel()
-                        subText: root.versionSubLabel(root.selVersion())
+                        subText: root.versionSubLabel(root.activeVersion())
                         listModel: {
-                            const ms = root.detail.mediaSources || []
                             const out = []
+                            // 统一「服名 · 版本名 · 摘要」格式(多账号环境本服也带
+                            // 前缀;单账号环境前缀为空自动不落)。
+                            const selfPrefix = root.pageAccountName()
+                            const ms = root.detail.mediaSources || []
                             for (let i = 0; i < ms.length; ++i) {
                                 const v = ms[i]
-                                out.push({ id: v.id, _sel: v.id === root.selMediaSourceId,
-                                           _label: (v.name || "版本") + (root.versionSubLabel(v) !== "" ? "  ·  " + root.versionSubLabel(v) : "") })
+                                out.push({ id: v.id, _sel: !root.selSource && v.id === root.selMediaSourceId,
+                                           _label: (selfPrefix !== "" ? selfPrefix + " · " : "")
+                                                   + (v.name || "版本")
+                                                   + (root.versionSubLabel(v) !== "" ? "  ·  " + root.versionSubLabel(v) : "") })
                             }
+                            // 他服源条目(账号名打头;选中态与本服版本互斥)。
+                            for (const e of root.crossSourceEntries())
+                                out.push({ id: e.key, _cross: true,
+                                           _sel: !!root.selSource && root.selSource.key === e.key,
+                                           _label: e.label })
                             return out
                         }
-                        onPicked: function (entry) { root.selectVersion(entry.id) }
+                        onPicked: function (entry) {
+                            if (entry._cross)
+                                root.selectCrossSource(entry.id)
+                            else
+                                root.selectVersion(entry.id)
+                        }
                     }
-                    // ---- 音频行(当前源有音频才显示) ----
+                    // ---- 音频行(当前源有音频才显示;跨服源显该服轨) ----
                     OptRow {
                         icon: "♪"
                         rowWidth: playOptsCol.width
@@ -1431,7 +1687,7 @@ Item {
                         }
                         onPicked: function (entry) { root.selAudioIndex = entry.index }
                     }
-                    // ---- 字幕行(常显;含 关闭字幕/默认/各轨) ----
+                    // ---- 字幕行(常显;含 关闭字幕/默认/各轨;跨服源显该服轨) ----
                     OptRow {
                         icon: "󰨗"
                         rowWidth: playOptsCol.width
@@ -1607,7 +1863,7 @@ Item {
                     anchors.leftMargin: Constants.detailSectionMargin
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 8
-                    visible: !!root.detail.mediaSources && root.detail.mediaSources.length > 0
+                    visible: root.mediaBlocksModel.length > 0
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
@@ -1618,7 +1874,7 @@ Item {
                         bold: true
                     }
                     Repeater {
-                        model: root.detail.mediaSources
+                        model: root.mediaBlocksModel
                         // 每版本一整块:头部版本名+徽章,下方流卡片横排。
                         delegate: FrostedGlass {
                             id: verBlock
@@ -1761,10 +2017,11 @@ Item {
                                     rows.push({ k: "格式", v: Object.keys(attFormats).map(function (f) { return f + "×" + attFormats[f] }).join(" · ") })
                                     out.push({ cap: root.streamTypeLabel("Attachment"), tag: false, rows: rows })
                                 }
-                                // 时间卡(添加/修改,条目级):每个版本块都出。
+                                // 时间卡(添加/修改,条目级):本服版本块才出
+                                // (跨服块的日期在另一服,语义不同源,不出)。
                                 const dc = (root.detail.dateCreated || "").slice(0, 10)
                                 const dm = (root.detail.dateModified || "").slice(0, 10)
-                                if (dc || dm) {
+                                if (!verBlock.modelData._crossName && (dc || dm)) {
                                     const rows = []
                                     if (dc)
                                         rows.push({ k: "添加", v: dc })
@@ -1789,7 +2046,10 @@ Item {
                                     AppText {
                                         anchors.left: parent.left
                                         anchors.verticalCenter: parent.verticalCenter
-                                        text: "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
+                                        text: verBlock.modelData._crossName
+                                              ? verBlock.modelData._crossName + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
+                                              : (root.pageAccountName() !== "" ? root.pageAccountName() + " · " : "")
+                                                + "版本 " + (verBlock.index + 1) + (verBlock.modelData.name ? " · " + verBlock.modelData.name : "")
                                         color: root.panelText
                                         font.pixelSize: 14
                                         font.bold: true
@@ -2384,6 +2644,60 @@ Item {
             root.applyDetail(d)
             root.refreshSeriesPlayText()
         }
+        function onItemProviderIdsReceived(contextItemId, seriesId, tmdbId, imdbId, tvdbId) {
+            if (contextItemId !== root.itemId || root.detail.type !== "Episode")
+                return
+            // 父剧外部 ID 到手:按剧集级起跨服检索(匹配键是剧的,集按 S/E 归键)。
+            if (tmdbId || imdbId || tvdbId)
+                AccountManager.fetchCrossVersions(root.serverUrl, seriesId,
+                                                  tmdbId || "", imdbId || "",
+                                                  tvdbId || "", "Series")
+        }
+        function onItemVersionsReceived(tag, serverUrl, itemId, versions) {
+            if (tag !== root.itemId || versions.length === 0)
+                return
+            // 影页:明细挂跨服卡;集页:挂分集源表条目。整表重赋值触发绑定。
+            if (root.detail.type === "Movie") {
+                let hit = false
+                const cards = []
+                for (const c of root.crossVersions) {
+                    if (c.serverUrl === serverUrl && c.id === itemId) {
+                        const cc = Object.assign({}, c)
+                        cc.versions = versions
+                        cards.push(cc)
+                        hit = true
+                    } else
+                        cards.push(c)
+                }
+                if (hit)
+                    root.crossVersions = cards
+                root.refreshSelSource()
+                return
+            }
+            const key = "S" + (root.detail.seasonNo || 0) + "E" + (root.detail.episodeNo || 0)
+            const srcs = root.crossEpSources[key]
+            if (!srcs)
+                return
+            let hit = false
+            const lst = []
+            for (const e of srcs) {
+                if (e.serverUrl === serverUrl && e.id === itemId) {
+                    const ee = Object.assign({}, e)
+                    ee.versions = versions
+                    lst.push(ee)
+                    hit = true
+                } else
+                    lst.push(e)
+            }
+            if (!hit)
+                return
+            const m = {}
+            for (const k of Object.keys(root.crossEpSources))
+                m[k] = root.crossEpSources[k]
+            m[key] = lst
+            root.crossEpSources = m
+            root.refreshSelSource()
+        }
         function onSeasonsReceived(serverUrl, accountId, seriesId) {
             if (serverUrl !== root.serverUrl || accountId !== root.accountId
                 || seriesId !== root.pageSeriesId())
@@ -2471,7 +2785,9 @@ Item {
         }
         function onPlaybackReady(serverUrl, url, headers, meta) {
             root.playbackPending = false
-            if (serverUrl === root.serverUrl && meta.itemId === root.pendingPlayItemId) {
+            // 跨服播放时发起服不是本页 serverUrl,按 playItem 记录的目标服核对。
+            if (serverUrl === (root._pendingPlayServer || root.serverUrl)
+                && meta.itemId === root.pendingPlayItemId) {
                 console.info("Detail: 播放协商就绪", meta.itemId)
                 const m = Object.assign({}, meta)
                 m.resumePositionTicks = root.resumeTicks || 0
@@ -2481,7 +2797,7 @@ Item {
         // 播放协商失败(精确信号,仅播放请求触发):复位防抖并通知
         // 主窗口关闭加载态窗口(显示失败信息)。
         function onPlaybackFailed(serverUrl, itemId, message) {
-            if (serverUrl !== root.serverUrl)
+            if (serverUrl !== (root._pendingPlayServer || root.serverUrl))
                 return
             console.warn("Detail: 播放协商失败", itemId, message)
             root.playbackPending = false
@@ -2515,6 +2831,35 @@ Item {
     // 不可并入上方 target: EmbyClient 的块。
     Connections {
         target: AccountManager
+        function onCrossVersionsReady(itemId, cards) {
+            // 集页的跨服检索以父剧 id 起键(见 onItemProviderIdsReceived)。
+            if (itemId !== root.itemId && itemId !== root.pageSeriesId())
+                return
+            root.crossVersions = cards
+            // 影页:列表端点 MediaSources 被服务器截到单个,逐卡补单条端点全量。
+            if (root.detail.type === "Movie") {
+                for (const c of cards) {
+                    const cr = AccountManager.credsForAccount(c.accountId)
+                    if (cr.token)
+                        EmbyClient.fetchItemVersions(c.serverUrl, cr.token, cr.userId,
+                                                     c.id, root.itemId)
+                }
+            }
+        }
+        function onCrossEpisodeSourcesReady(itemId, sources) {
+            if (itemId !== root.itemId && itemId !== root.pageSeriesId())
+                return
+            root.crossEpSources = sources
+            // 集页:同上,当前集的各服源补单条端点全量版本。
+            if (root.detail.type === "Episode") {
+                for (const e of root.crossEpCurrent) {
+                    const cr = AccountManager.credsForAccount(e.accountId)
+                    if (cr.token)
+                        EmbyClient.fetchItemVersions(e.serverUrl, cr.token, cr.userId,
+                                                     e.id, root.itemId)
+                }
+            }
+        }
         function onAccountHistoryRefreshed(serverUrl, accountId, items) {
             if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return

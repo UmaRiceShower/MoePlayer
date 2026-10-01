@@ -212,6 +212,26 @@ public:
     // 条目详情(/Users/{id}/Items/{itemId}),发 itemDetailReady。
     Q_INVOKABLE void fetchItemDetail(const QString &serverUrl, const QString &token,
                                      const QString &userId, const QString &itemId);
+    // 跨服版本检索(/Users/{id}/Items?AnyProviderIdEquals=…,一次性后台请求):
+    // 按外部 ID 在该服找同内容条目
+    void fetchCrossVersions(const QString &serverUrl, const QString &token,
+                            const QString &userId, const QString &accountId,
+                            const QString &contextItemId, const QString &providerParam,
+                            const QString &includeTypes);
+    // 跨服逐集检索(/Shows/{seriesId}/Episodes)
+    void fetchCrossEpisodes(const QString &serverUrl, const QString &token,
+                            const QString &userId, const QString &accountId,
+                            const QString &contextItemId, const QString &seriesId);
+    // 一次性取条目外部 ID
+    Q_INVOKABLE void fetchItemProviderIds(const QString &serverUrl, const QString &token,
+                                          const QString &userId, const QString &itemId,
+                                          const QString &contextItemId);
+    // 一次性取条目全部版本明细(/Users/{id}/Items/{itemId},Fields=MediaSources)。
+    // 列表端点(/Shows/Episodes、/Items 查询)的 MediaSources 被服务器截到单个,
+    // 全版本只能走单条端点。tag 原样回传供调用方丢弃过期应答。
+    Q_INVOKABLE void fetchItemVersions(const QString &serverUrl, const QString &token,
+                                       const QString &userId, const QString &itemId,
+                                       const QString &tag);
     // 相似推荐(/Items/{id}/Similar),填充该服务器的 similarModel,发 similarReady。
     Q_INVOKABLE void fetchSimilar(const QString &serverUrl, const QString &accountId,
                                 const QString &token,
@@ -265,6 +285,19 @@ signals:
     void foldersReceived(const QString &serverUrl, const QString &accountId);
     // 条目详情(Overview/Genres/ProductionYear/CommunityRating/RunTimeTicks 等)。
     void itemDetailReady(const QString &serverUrl, const QVariantMap &detail);
+    // 跨服版本检索应答(见 fetchCrossVersions);失败为(items 空)。
+    void crossVersionsReceived(const QString &contextItemId, const QString &serverUrl,
+                               const QString &accountId, const QVariantList &items);
+    // 跨服逐集检索应答(见 fetchCrossEpisodes);失败为(episodes 空)。
+    void crossEpisodesReceived(const QString &contextItemId, const QString &serverUrl,
+                               const QString &accountId, const QVariantList &episodes);
+    // 外部 ID 一次性应答(见 fetchItemProviderIds);失败三键全空。
+    void itemProviderIdsReceived(const QString &contextItemId, const QString &itemId,
+                                 const QString &tmdbId, const QString &imdbId,
+                                 const QString &tvdbId);
+    // 版本明细一次性应答(见 fetchItemVersions);失败 versions 空。
+    void itemVersionsReceived(const QString &tag, const QString &serverUrl,
+                              const QString &itemId, const QVariantList &versions);
     // 登录成功:携带目标服务器与凭据(AccountManager 存账号 / 页面直连浏览)。
     // accountId 为 login 调用方传入的上下文,直连浏览时为空。
     void loginSucceeded(const QString &serverUrl, const QString &token,
