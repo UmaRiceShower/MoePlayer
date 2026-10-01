@@ -1010,12 +1010,17 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
                     break;
                 }
             }
+            // "播完"按全集序列最后一集判定
             // 查不到(列表已被外部清空等)= 按播完处理。
-            if (index < 0 || index >= list.size() - 1) {
+            const QString endedEpId =
+                (index >= 0 && index < s->playlistIds.size())
+                    ? s->playlistIds.at(index) : QString();
+            if (index < 0 || endedEpId.isEmpty()
+                || endedEpId == s->finalEpisodeId) {
                 stopAndConsiderEnd(s->key, false);
-            } else if (index < s->playlistIds.size()) {
-                // 中间集真播完(eof 且非末条,mpv 继续连播):本地乐观标记已看。
-                emit episodeFinished(s->key, s->playlistIds.at(index));
+            } else {
+                // 中间集真播完(eof 且非末集,mpv 继续连播):本地乐观标记已看。
+                emit episodeFinished(s->key, endedEpId);
             }
         } else if (rid == kSuperResListRequestId) {
             // glsl-shaders 回读:实际挂载数 + 是否含尺寸门槛 pass。
@@ -1405,6 +1410,9 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
     // 全集(占位),最后 = 前部(第 0 集..当前集-1,占位)。此前集条目均
     // 占位,经 on_load hook 重定向;本条真 URL passthrough。
     const int n = episodes.size();
+    // 全集序列最后一集(eof"播完"判定的真锚;环绕前部不是"下一集")。
+    s->finalEpisodeId =
+        episodes.last().toMap().value(QStringLiteral("id")).toString();
     QByteArray body2 = "#EXTM3U\n";
     for (int k = 0; k < n; ++k) {
         const int i = (currentIndex + k) % n;
