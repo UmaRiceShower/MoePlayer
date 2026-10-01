@@ -208,6 +208,8 @@ private:
         // 播放列表旋转序的条目 id(第 0 条 = 点播集):选集面板直跳映射
         // episodeId → playlist-play-index 用。
         QStringList playlistIds;
+        // 全集序列最后一集的 id
+        QString finalEpisodeId;
         // 已预加载改写(占位→真实地址)的集:防重复改写;重建列表时清空。
         QSet<QString> resolvedEps;
         // 在途的预加载改写(每会话一单;查列表→insert 确认→remove 占位的
