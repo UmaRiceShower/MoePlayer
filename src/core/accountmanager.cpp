@@ -176,6 +176,106 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     connect(m_client, &EmbyClient::resumeReceived, this, &AccountManager::onResumeReceived);
     connect(m_client, &EmbyClient::allEpisodesParsed, this, &AccountManager::onAllEpisodesParsed);
 
+    // 跨服版本检索应答汇聚
+    connect(m_client, &EmbyClient::crossVersionsReceived, this,
+            [this](const QString &context, const QString &serverUrl,
+                   const QString &accountId, const QVariantList &items) {
+                if (context != m_crossContext)
+                    return;
+                if (m_crossPending > 0)
+                    --m_crossPending;
+                for (const QVariant &iv : items) {
+                    QVariantMap c = iv.toMap();
+                    c.insert(QStringLiteral("serverUrl"), serverUrl);
+                    c.insert(QStringLiteral("accountId"), accountId);
+                    // 同服多账号查到的是同一文件(同 item id),按服去重只留首张。
+                    bool dup = false;
+                    for (const QVariant &ev : m_crossCards) {
+                        if (ev.toMap().value(QStringLiteral("serverUrl")).toString() == serverUrl) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (dup)
+                        continue;
+                    for (const auto &a : m_accounts) {
+                        if (a.id == accountId) {
+                            // 显示名口径与全站一致:name 空回退 userName。
+                            c.insert(QStringLiteral("accountName"),
+                                     a.name.isEmpty() ? a.userName : a.name);
+                            c.insert(QStringLiteral("accountIcon"), a.icon);
+                            break;
+                        }
+                    }
+                    m_crossCards.append(c);
+                }
+                if (m_crossPending <= 0) {
+                    m_crossPending = 0;
+                    emit crossVersionsReady(m_crossItemId, m_crossCards);
+                    // 剧集:卡就绪后续拉各服分集(逐集选源表)。
+                    if (m_crossItemType == QLatin1String("Series")
+                        && !m_crossCards.isEmpty()) {
+                        int issued = 0;
+                        for (const QVariant &cv : m_crossCards) {
+                            const QVariantMap c = cv.toMap();
+                            const QVariantMap cred =
+                                credsForAccount(c.value(QStringLiteral("accountId")).toString());
+                            const QString token = cred.value(QStringLiteral("token")).toString();
+                            const QString userId = cred.value(QStringLiteral("userId")).toString();
+                            if (token.isEmpty() || userId.isEmpty())
+                                continue;
+                            ++issued;
+                            m_client->fetchCrossEpisodes(
+                                c.value(QStringLiteral("serverUrl")).toString(), token, userId,
+                                c.value(QStringLiteral("accountId")).toString(), m_crossContext,
+                                c.value(QStringLiteral("id")).toString());
+                        }
+                        m_crossEpPending = issued;
+                        if (issued == 0)
+                            emit crossEpisodeSourcesReady(m_crossItemId, {});
+                    } else {
+                        emit crossEpisodeSourcesReady(m_crossItemId, {});
+                    }
+                }
+            });
+
+    // 跨服逐集应答汇聚:按 "S{季}E{集}" 归键,附服身份;失败服回空不计。
+    connect(m_client, &EmbyClient::crossEpisodesReceived, this,
+            [this](const QString &context, const QString &serverUrl,
+                   const QString &accountId, const QVariantList &episodes) {
+                if (context != m_crossContext)
+                    return;
+                if (m_crossEpPending > 0)
+                    --m_crossEpPending;
+                QString accountName, accountIcon;
+                for (const auto &a : m_accounts) {
+                    if (a.id == accountId) {
+                        accountName = a.name.isEmpty() ? a.userName : a.name;
+                        accountIcon = a.icon;
+                        break;
+                    }
+                }
+                for (const QVariant &ev : episodes) {
+                    QVariantMap e = ev.toMap();
+                    if (e.value(QStringLiteral("seasonNo")).toInt() <= 0)
+                        continue; // 特典/SP 不参与选源(与续播定位同纪律)
+                    e.insert(QStringLiteral("serverUrl"), serverUrl);
+                    e.insert(QStringLiteral("accountId"), accountId);
+                    e.insert(QStringLiteral("accountName"), accountName);
+                    e.insert(QStringLiteral("accountIcon"), accountIcon);
+                    const QString k = QStringLiteral("S%1E%2")
+                                          .arg(e.value(QStringLiteral("seasonNo")).toInt())
+                                          .arg(e.value(QStringLiteral("episodeNo")).toInt());
+                    QVariantList lst = m_crossEpSources.value(k).toList();
+                    lst.append(e);
+                    m_crossEpSources.insert(k, lst);
+                }
+                if (m_crossEpPending <= 0) {
+                    m_crossEpPending = 0;
+                    emit crossEpisodeSourcesReady(m_crossItemId, m_crossEpSources);
+                }
+            });
+
     // 登录成功:来自 addAccount(有 pending 且服务器匹配)则保存账号;
     // 否则(表单直连)由页面监听 loginSucceeded 自行浏览,不落账号。
     connect(m_client, &EmbyClient::loginSucceeded, this,
@@ -1232,6 +1332,47 @@ void AccountManager::reorderHomeRows()
     m_homeRowsModel->setRows(visibleHomeRows());
     rebuildCustomHomeRows();
 }
+
+void AccountManager::fetchCrossVersions(const QString &currentServerUrl, const QString &itemId,
+                                        const QString &tmdbId, const QString &imdbId,
+                                        const QString &tvdbId, const QString &itemType)
+{
+    ++m_crossSeq;
+    m_crossContext = itemId + QLatin1Char('#') + QString::number(m_crossSeq);
+    m_crossItemId = itemId;
+    m_crossItemType = itemType;
+    m_crossCards.clear();
+    m_crossEpSources.clear();
+    m_crossEpPending = 0;
+    QStringList ids;
+    if (!tmdbId.isEmpty())
+        ids << QStringLiteral("tmdb.") + tmdbId;
+    if (!imdbId.isEmpty())
+        ids << QStringLiteral("imdb.") + imdbId;
+    if (!tvdbId.isEmpty())
+        ids << QStringLiteral("tvdb.") + tvdbId;
+    // 无外部 ID 不检索(与聚合去重"无键不并"同纪律,防误并)。
+    if (ids.isEmpty()) {
+        m_crossPending = 0;
+        emit crossVersionsReady(itemId, {});
+        return;
+    }
+    const QString param = ids.join(QLatin1Char(','));
+    const QString cur = currentServerUrl.trimmed();
+    int issued = 0;
+    for (const auto &a : m_accounts) {
+        // 隐藏账号在 Alt+S 露出期间照常参与(与同步循环同纪律)。
+        if (a.serverUrl == cur || !accountVisible(a.id) || a.token.isEmpty())
+            continue;
+        ++issued;
+        m_client->fetchCrossVersions(a.serverUrl, a.token, a.userId, a.id,
+                                     m_crossContext, param, itemType);
+    }
+    m_crossPending = issued;
+    if (issued == 0)
+        emit crossVersionsReady(itemId, {});
+}
+
 
 // 播放历史拉取(见 fetchPlaybackHistory):延迟到首页聚合之后开拉,已调度
 // 则忽略重复调用。

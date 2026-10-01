@@ -1295,6 +1295,63 @@ void EmbyClient::loginFor(const QString &serverUrl, const QString &username,
              QStringLiteral("登录"));
 }
 
+// 版本全明细解析(容器/大小/码率 + 逐流字段)
+static QVariantList parseVersionsJson(const QJsonObject &o)
+{
+    QVariantList versions;
+    for (const auto &sv : o.value(QLatin1String("MediaSources")).toArray()) {
+        const QJsonObject so = sv.toObject();
+        QVariantMap vm;
+        vm.insert(QStringLiteral("id"), so.value(QLatin1String("Id")).toString());
+        vm.insert(QStringLiteral("name"), so.value(QLatin1String("Name")).toString());
+        vm.insert(QStringLiteral("container"), so.value(QLatin1String("Container")).toString());
+        vm.insert(QStringLiteral("sizeBytes"), so.value(QLatin1String("Size")).toInteger());
+        vm.insert(QStringLiteral("bitrate"), so.value(QLatin1String("Bitrate")).toInteger());
+        vm.insert(QStringLiteral("runTimeTicks"), so.value(QLatin1String("RunTimeTicks")).toInteger());
+        vm.insert(QStringLiteral("defaultAudioStreamIndex"), so.value(QLatin1String("DefaultAudioStreamIndex")).toInt(-1));
+        vm.insert(QStringLiteral("defaultSubtitleStreamIndex"), so.value(QLatin1String("DefaultSubtitleStreamIndex")).toInt(-1));
+        QVariantList streams;
+        for (const auto &stv : so.value(QLatin1String("MediaStreams")).toArray()) {
+            const QJsonObject sto = stv.toObject();
+            QVariantMap sm;
+            sm.insert(QStringLiteral("type"), sto.value(QLatin1String("Type")).toString());
+            sm.insert(QStringLiteral("codec"), sto.value(QLatin1String("Codec")).toString());
+            sm.insert(QStringLiteral("displayTitle"), sto.value(QLatin1String("DisplayTitle")).toString());
+            sm.insert(QStringLiteral("bitrate"), sto.value(QLatin1String("BitRate")).toInteger());
+            sm.insert(QStringLiteral("channels"), sto.value(QLatin1String("Channels")).toInt(0));
+            sm.insert(QStringLiteral("channelLayout"), sto.value(QLatin1String("ChannelLayout")).toString());
+            sm.insert(QStringLiteral("sampleRate"), sto.value(QLatin1String("SampleRate")).toInt(0));
+            sm.insert(QStringLiteral("bitDepth"), sto.value(QLatin1String("BitDepth")).toInt(0));
+            sm.insert(QStringLiteral("language"), sto.value(QLatin1String("Language")).toString());
+            sm.insert(QStringLiteral("displayLanguage"), sto.value(QLatin1String("DisplayLanguage")).toString());
+            sm.insert(QStringLiteral("width"), sto.value(QLatin1String("Width")).toInt(0));
+            sm.insert(QStringLiteral("height"), sto.value(QLatin1String("Height")).toInt(0));
+            sm.insert(QStringLiteral("profile"), sto.value(QLatin1String("Profile")).toString());
+            sm.insert(QStringLiteral("videoRange"), sto.value(QLatin1String("VideoRange")).toString());
+            sm.insert(QStringLiteral("frameRate"), sto.value(QLatin1String("RealFrameRate")).toDouble(0));
+            sm.insert(QStringLiteral("level"), sto.value(QLatin1String("Level")).toDouble(0));
+            sm.insert(QStringLiteral("aspectRatio"), sto.value(QLatin1String("AspectRatio")).toString());
+            sm.insert(QStringLiteral("pixelFormat"), sto.value(QLatin1String("PixelFormat")).toString());
+            sm.insert(QStringLiteral("isInterlaced"), sto.value(QLatin1String("IsInterlaced")).toBool(false));
+            sm.insert(QStringLiteral("isDefault"), sto.value(QLatin1String("IsDefault")).toBool(false));
+            sm.insert(QStringLiteral("isForced"), sto.value(QLatin1String("IsForced")).toBool(false));
+            sm.insert(QStringLiteral("isExternal"), sto.value(QLatin1String("IsExternal")).toBool(false));
+            sm.insert(QStringLiteral("index"), sto.value(QLatin1String("Index")).toInt(-1));
+            sm.insert(QStringLiteral("title"), sto.value(QLatin1String("Title")).toString());
+            sm.insert(QStringLiteral("videoRangeType"), sto.value(QLatin1String("VideoRangeType")).toString());
+            sm.insert(QStringLiteral("colorSpace"), sto.value(QLatin1String("ColorSpace")).toString());
+            sm.insert(QStringLiteral("colorTransfer"), sto.value(QLatin1String("ColorTransfer")).toString());
+            sm.insert(QStringLiteral("colorPrimaries"), sto.value(QLatin1String("ColorPrimaries")).toString());
+            sm.insert(QStringLiteral("locationType"), sto.value(QLatin1String("SubtitleLocationType")).toString());
+            sm.insert(QStringLiteral("attachmentSize"), sto.value(QLatin1String("AttachmentSize")).toInteger());
+            streams.append(sm);
+        }
+        vm.insert(QStringLiteral("streams"), streams);
+        versions.append(vm);
+    }
+    return versions;
+}
+
 // ---------- 条目详情 / 播放协商 ----------
 
 void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
@@ -1305,7 +1362,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
     // UserData 携带已看状态/播放位置/收藏;People 供演职人员;Series 相关字段
     // 供剧集详情显示"剧名 + S/E"与选集条定位;Backdrop 标签供 Hero 背景。
     q.addQueryItem(QStringLiteral("Fields"),
-                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId,DateCreated,DateModified,PrimaryImageAspectRatio"));
+                   QStringLiteral("Overview,Genres,ProductionYear,CommunityRating,MediaSources,UserData,People,ParentBackdropImageTags,BackdropImageTags,SeriesId,SeriesName,IndexNumber,ParentIndexNumber,SeasonId,DateCreated,DateModified,PrimaryImageAspectRatio,ProviderIds"));
     qDebug() << "Emby: 拉取条目详情" << itemId << "on" << key;
     get(key, token, userId, userPath(userId, QStringLiteral("/Items/%1?%2").arg(itemId, q.toString())),
         [this, key, token, userId](const QJsonDocument &doc) {
@@ -1323,6 +1380,13 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
             // 类型标签(metaLine 显示);Fields 已请求 Genres,此前漏解析导致永不显示。
             m.insert(QStringLiteral("genres"), o.value(QLatin1String("Genres")).toArray().toVariantList());
+            // 外部 ID(跨服版本检索的匹配键;无则不参与跨服聚合)。
+            {
+                const QJsonObject pid = o.value(QLatin1String("ProviderIds")).toObject();
+                m.insert(QStringLiteral("tmdbId"), pid.value(QLatin1String("Tmdb")).toString());
+                m.insert(QStringLiteral("imdbId"), pid.value(QLatin1String("Imdb")).toString());
+                m.insert(QStringLiteral("tvdbId"), pid.value(QLatin1String("Tvdb")).toString());
+            }
             // 条目级时间:加入库时间 / 数据最近变更时间(ISO8601,展示侧截取日期)。
             m.insert(QStringLiteral("dateCreated"), o.value(QLatin1String("DateCreated")).toString());
             m.insert(QStringLiteral("dateModified"), o.value(QLatin1String("DateModified")).toString());
@@ -1369,58 +1433,7 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
             }
             m.insert(QStringLiteral("people"), people);
             // 媒体信息:版本 + 流(视频/音轨/字幕),只读展示用。
-            QVariantList versions;
-            for (const auto &s : o.value(QLatin1String("MediaSources")).toArray()) {
-                const QJsonObject so = s.toObject();
-                QVariantMap vm;
-                vm.insert(QStringLiteral("id"), so.value(QLatin1String("Id")).toString());
-                vm.insert(QStringLiteral("name"), so.value(QLatin1String("Name")).toString());
-                vm.insert(QStringLiteral("container"), so.value(QLatin1String("Container")).toString());
-                vm.insert(QStringLiteral("sizeBytes"), so.value(QLatin1String("Size")).toInteger());
-                vm.insert(QStringLiteral("bitrate"), so.value(QLatin1String("Bitrate")).toInteger());
-                vm.insert(QStringLiteral("runTimeTicks"), so.value(QLatin1String("RunTimeTicks")).toInteger());
-                vm.insert(QStringLiteral("defaultAudioStreamIndex"), so.value(QLatin1String("DefaultAudioStreamIndex")).toInt(-1));
-                vm.insert(QStringLiteral("defaultSubtitleStreamIndex"), so.value(QLatin1String("DefaultSubtitleStreamIndex")).toInt(-1));
-                QVariantList streams;
-                for (const auto &st : so.value(QLatin1String("MediaStreams")).toArray()) {
-                    const QJsonObject sto = st.toObject();
-                    QVariantMap sm;
-                    sm.insert(QStringLiteral("type"), sto.value(QLatin1String("Type")).toString());
-                    sm.insert(QStringLiteral("codec"), sto.value(QLatin1String("Codec")).toString());
-                    sm.insert(QStringLiteral("displayTitle"), sto.value(QLatin1String("DisplayTitle")).toString());
-                    sm.insert(QStringLiteral("bitrate"), sto.value(QLatin1String("BitRate")).toInteger());
-                    sm.insert(QStringLiteral("channels"), sto.value(QLatin1String("Channels")).toInt(0));
-                    sm.insert(QStringLiteral("channelLayout"), sto.value(QLatin1String("ChannelLayout")).toString());
-                    sm.insert(QStringLiteral("sampleRate"), sto.value(QLatin1String("SampleRate")).toInt(0));
-                    sm.insert(QStringLiteral("bitDepth"), sto.value(QLatin1String("BitDepth")).toInt(0));
-                    sm.insert(QStringLiteral("language"), sto.value(QLatin1String("Language")).toString());
-                    sm.insert(QStringLiteral("displayLanguage"), sto.value(QLatin1String("DisplayLanguage")).toString());
-                    sm.insert(QStringLiteral("width"), sto.value(QLatin1String("Width")).toInt(0));
-                    sm.insert(QStringLiteral("height"), sto.value(QLatin1String("Height")).toInt(0));
-                    sm.insert(QStringLiteral("profile"), sto.value(QLatin1String("Profile")).toString());
-                    sm.insert(QStringLiteral("videoRange"), sto.value(QLatin1String("VideoRange")).toString());
-                    sm.insert(QStringLiteral("frameRate"), sto.value(QLatin1String("RealFrameRate")).toDouble(0));
-                    sm.insert(QStringLiteral("level"), sto.value(QLatin1String("Level")).toDouble(0));
-                    sm.insert(QStringLiteral("aspectRatio"), sto.value(QLatin1String("AspectRatio")).toString());
-                    sm.insert(QStringLiteral("pixelFormat"), sto.value(QLatin1String("PixelFormat")).toString());
-                    sm.insert(QStringLiteral("isInterlaced"), sto.value(QLatin1String("IsInterlaced")).toBool(false));
-                    sm.insert(QStringLiteral("isDefault"), sto.value(QLatin1String("IsDefault")).toBool(false));
-                    sm.insert(QStringLiteral("isForced"), sto.value(QLatin1String("IsForced")).toBool(false));
-                    sm.insert(QStringLiteral("isExternal"), sto.value(QLatin1String("IsExternal")).toBool(false));
-                    sm.insert(QStringLiteral("index"), sto.value(QLatin1String("Index")).toInt(-1));
-                    sm.insert(QStringLiteral("title"), sto.value(QLatin1String("Title")).toString());
-                    sm.insert(QStringLiteral("videoRangeType"), sto.value(QLatin1String("VideoRangeType")).toString());
-                    sm.insert(QStringLiteral("colorSpace"), sto.value(QLatin1String("ColorSpace")).toString());
-                    sm.insert(QStringLiteral("colorTransfer"), sto.value(QLatin1String("ColorTransfer")).toString());
-                    sm.insert(QStringLiteral("colorPrimaries"), sto.value(QLatin1String("ColorPrimaries")).toString());
-                    sm.insert(QStringLiteral("locationType"), sto.value(QLatin1String("SubtitleLocationType")).toString());
-                    sm.insert(QStringLiteral("attachmentSize"), sto.value(QLatin1String("AttachmentSize")).toInteger());
-                    streams.append(sm);
-                }
-                vm.insert(QStringLiteral("streams"), streams);
-                versions.append(vm);
-            }
-            m.insert(QStringLiteral("mediaSources"), versions);
+            m.insert(QStringLiteral("mediaSources"), parseVersionsJson(o));
             // 单集主图多为 16:9 剧照,入 2:3 海报槽违和:自身 Primary 非竖版
             // (aspect 缺失或 >0.75)时按 季→剧 借竖版海报(父级比例批量补查,
             // 仅横版条目付这一次请求);借不到回退自身 Primary。
@@ -1466,6 +1479,170 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                 [this, key, m]() mutable { emit itemDetailReady(key, m); },
                 QStringLiteral("获取父级海报"));
         }, nullptr, QStringLiteral("获取条目详情"));
+}
+
+// 首个 MediaSource 的质量摘要写入 map
+static void fillSourceSummary(const QJsonObject &o, QVariantMap &c)
+{
+    const QJsonArray srcs = o.value(QLatin1String("MediaSources")).toArray();
+    if (srcs.isEmpty())
+        return;
+    const QJsonObject so = srcs.first().toObject();
+    c.insert(QStringLiteral("sizeBytes"), so.value(QLatin1String("Size")).toInteger());
+    QStringList subs, audios;
+    for (const auto &sv : so.value(QLatin1String("MediaStreams")).toArray()) {
+        const QJsonObject st = sv.toObject();
+        const QString type = st.value(QLatin1String("Type")).toString();
+        if (type == QLatin1String("Video")) {
+            c.insert(QStringLiteral("resH"), st.value(QLatin1String("Height")).toInt(0));
+            c.insert(QStringLiteral("vcodec"),
+                     st.value(QLatin1String("Codec")).toString().toUpper());
+            const QString rt = st.value(QLatin1String("VideoRangeType")).toString();
+            c.insert(QStringLiteral("range"), rt.isEmpty() ? QStringLiteral("SDR") : rt);
+        } else if (type == QLatin1String("Audio")) {
+            const QString l = st.value(QLatin1String("DisplayLanguage")).toString();
+            if (!l.isEmpty() && !audios.contains(l))
+                audios << l;
+        } else if (type == QLatin1String("Subtitle")) {
+            const QString l = st.value(QLatin1String("DisplayLanguage")).toString();
+            if (!l.isEmpty() && !subs.contains(l))
+                subs << l;
+        }
+    }
+    c.insert(QStringLiteral("subLangs"), subs);
+    c.insert(QStringLiteral("audioLangs"), audios);
+}
+
+void EmbyClient::fetchCrossVersions(const QString &serverUrl, const QString &token,
+                                    const QString &userId, const QString &accountId,
+                                    const QString &contextItemId, const QString &providerParam,
+                                    const QString &includeTypes)
+{
+    const QString key = serverUrl.trimmed();
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Recursive"), QStringLiteral("true"));
+    q.addQueryItem(QStringLiteral("AnyProviderIdEquals"), providerParam);
+    q.addQueryItem(QStringLiteral("IncludeItemTypes"), includeTypes);
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("ProviderIds,MediaSources,UserData,ProductionYear,RunTimeTicks,ChildCount,RecursiveItemCount"));
+    q.addQueryItem(QStringLiteral("Limit"), QStringLiteral("10"));
+    get(key, token, userId, userPath(userId, QStringLiteral("/Items?%1").arg(q.toString())),
+        [this, contextItemId, key, accountId](const QJsonDocument &doc) {
+            QVariantList cards;
+            const QJsonArray arr = doc.object().value(QLatin1String("Items")).toArray();
+            for (const auto &v : arr) {
+                const QJsonObject o = v.toObject();
+                QVariantMap c;
+                c.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+                c.insert(QStringLiteral("name"), o.value(QLatin1String("Name")).toString());
+                c.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
+                const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+                c.insert(QStringLiteral("played"), ud.value(QLatin1String("Played")).toBool(false));
+                c.insert(QStringLiteral("positionTicks"),
+                         ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
+                c.insert(QStringLiteral("runtimeTicks"),
+                         o.value(QLatin1String("RunTimeTicks")).toDouble(0));
+                // 剧集体量:季数/总集数/未看集数
+                c.insert(QStringLiteral("seasonCount"),
+                         o.value(QLatin1String("ChildCount")).toInt(0));
+                c.insert(QStringLiteral("episodeCount"),
+                         o.value(QLatin1String("RecursiveItemCount")).toInt(0));
+                c.insert(QStringLiteral("unplayedCount"),
+                         ud.value(QLatin1String("UnplayedItemCount")).toInt(0));
+                // 质量摘要取第一个 MediaSource(与详情页"默认第一个"口径一致);
+                // 全明细版本结构一并带(媒体信息段的跨服块与本服版本同构渲染)。
+                fillSourceSummary(o, c);
+                c.insert(QStringLiteral("versions"), parseVersionsJson(o));
+                cards.append(c);
+            }
+            emit crossVersionsReceived(contextItemId, key, accountId, cards);
+        },
+        [this, contextItemId, key, accountId] {
+            // 失败回空列表:该服静默缺席,不让编排方干等。
+            emit crossVersionsReceived(contextItemId, key, accountId, {});
+        },
+        QStringLiteral("跨服版本"), true);
+}
+
+void EmbyClient::fetchCrossEpisodes(const QString &serverUrl, const QString &token,
+                                    const QString &userId, const QString &accountId,
+                                    const QString &contextItemId, const QString &seriesId)
+{
+    const QString key = serverUrl.trimmed();
+    QUrlQuery q;
+    q.addQueryItem(QStringLiteral("Fields"),
+                   QStringLiteral("MediaSources,UserData,RunTimeTicks,IndexNumber,ParentIndexNumber"));
+    // UserId 显式查询参(与 fetchAllEpisodes 同拼法):不带则 UserData 缺席,
+    // 观看态静默失真(不是报错)。
+    q.addQueryItem(QStringLiteral("UserId"), userId);
+    get(key, token, userId,
+        QStringLiteral("/Shows/%1/Episodes?%2").arg(seriesId, q.toString()),
+        [this, contextItemId, key, accountId](const QJsonDocument &doc) {
+            QVariantList eps;
+            const QJsonArray arr = doc.object().value(QLatin1String("Items")).toArray();
+            for (const auto &v : arr) {
+                const QJsonObject o = v.toObject();
+                QVariantMap e;
+                e.insert(QStringLiteral("id"), o.value(QLatin1String("Id")).toString());
+                e.insert(QStringLiteral("seasonNo"),
+                         o.value(QLatin1String("ParentIndexNumber")).toInt(0));
+                e.insert(QStringLiteral("episodeNo"),
+                         o.value(QLatin1String("IndexNumber")).toInt(0));
+                const QJsonObject ud = o.value(QLatin1String("UserData")).toObject();
+                e.insert(QStringLiteral("played"),
+                         ud.value(QLatin1String("Played")).toBool(false));
+                e.insert(QStringLiteral("positionTicks"),
+                         ud.value(QLatin1String("PlaybackPositionTicks")).toDouble(0));
+                e.insert(QStringLiteral("runtimeTicks"),
+                         o.value(QLatin1String("RunTimeTicks")).toDouble(0));
+                fillSourceSummary(o, e);
+                e.insert(QStringLiteral("versions"), parseVersionsJson(o));
+                eps.append(e);
+            }
+            emit crossEpisodesReceived(contextItemId, key, accountId, eps);
+        },
+        [this, contextItemId, key, accountId] {
+            emit crossEpisodesReceived(contextItemId, key, accountId, {});
+        },
+        QStringLiteral("跨服分集"), true);
+}
+
+void EmbyClient::fetchItemProviderIds(const QString &serverUrl, const QString &token,
+                                      const QString &userId, const QString &itemId,
+                                      const QString &contextItemId)
+{
+    const QString key = serverUrl.trimmed();
+    get(key, token, userId,
+        userPath(userId, QStringLiteral("/Items/%1?Fields=ProviderIds").arg(itemId)),
+        [this, contextItemId, itemId](const QJsonDocument &doc) {
+            const QJsonObject pid =
+                doc.object().value(QLatin1String("ProviderIds")).toObject();
+            emit itemProviderIdsReceived(contextItemId, itemId,
+                                         pid.value(QLatin1String("Tmdb")).toString(),
+                                         pid.value(QLatin1String("Imdb")).toString(),
+                                         pid.value(QLatin1String("Tvdb")).toString());
+        },
+        [this, contextItemId, itemId] {
+            emit itemProviderIdsReceived(contextItemId, itemId, {}, {}, {});
+        },
+        QStringLiteral("条目外部ID"), true);
+}
+
+void EmbyClient::fetchItemVersions(const QString &serverUrl, const QString &token,
+                                   const QString &userId, const QString &itemId,
+                                   const QString &tag)
+{
+    const QString key = serverUrl.trimmed();
+    get(key, token, userId,
+        userPath(userId, QStringLiteral("/Items/%1?Fields=MediaSources").arg(itemId)),
+        [this, tag, key, itemId](const QJsonDocument &doc) {
+            emit itemVersionsReceived(tag, key, itemId,
+                                      parseVersionsJson(doc.object()));
+        },
+        [this, tag, key, itemId] {
+            emit itemVersionsReceived(tag, key, itemId, {});
+        },
+        QStringLiteral("条目版本明细"), true);
 }
 
 void EmbyClient::fetchSimilar(const QString &serverUrl, const QString &accountId,

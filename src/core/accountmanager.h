@@ -101,6 +101,12 @@ public:
                                              const QString &itemId, bool played, double positionTicks);
     // 触发条件当前仅"应用启动"(Home 页 onCompleted 调一次,见该处注释)。
     Q_INVOKABLE void fetchPlaybackHistory();
+    // 跨服版本检索:按外部 ID 在其他可见账号所在服找同内容条目;本服
+    // (同 id 即同文件,非新源)与不可见账号跳过。全部应答/失败到齐后发
+    // crossVersionsReady;无外部 ID 或无其他可见账号时立即发空列表。
+    Q_INVOKABLE void fetchCrossVersions(const QString &currentServerUrl, const QString &itemId,
+                                        const QString &tmdbId, const QString &imdbId,
+                                        const QString &tvdbId, const QString &itemType);
     // 立即拉取列表(fetchPlaybackHistory 是启动一次性调度,页面刷新用这个):
     // 已在拉取中则由 startPlaybackHistoryFetch 的在途保护跳过。
     Q_INVOKABLE void refreshPlaybackHistory();
@@ -195,6 +201,13 @@ signals:
     // 同构(含剧集归属),请求失败为空列表。
     void accountHistoryRefreshed(const QString &serverUrl, const QString &accountId,
                                  const QVariantList &items);
+    // 跨服版本卡列表就绪(见 fetchCrossVersions);itemId 为请求条目,
+    // 卡片含 serverUrl/accountId/accountName + 质量摘要字段。
+    void crossVersionsReady(const QString &itemId, const QVariantList &cards);
+    // 逐集选源表就绪(仅剧集;卡在 crossVersionsReady 之后到):map 键
+    // "S{季}E{集}",值 = 各服源条目列表(serverUrl/accountId/itemId/
+    // 质量摘要/观看态)。无源发空 map。
+    void crossEpisodeSourcesReady(const QString &itemId, const QVariantMap &sources);
 private:
     struct AccountInfo {
         QString id;
@@ -278,6 +291,15 @@ private:
 const QString &accountId) const;
 
     EmbyClient *m_client;
+    // 跨服版本检索的编排状态:context 带轮次序号,过期轮应答按失配丢弃。
+    QString m_crossContext;
+    QString m_crossItemId;
+    QString m_crossItemType; // Series 时卡就绪后续拉各服分集(逐集选源)
+    int m_crossSeq = 0;
+    int m_crossPending = 0;
+    QVariantList m_crossCards;
+    int m_crossEpPending = 0;
+    QVariantMap m_crossEpSources; // "S{季}E{集}" → 各服源条目列表
     // 存储路径经 AppPaths 统一分配(便携模式重定向,详见 apppaths.h)。
 
     // 缓存文件 JSON 持久化(CacheLocation;账号域走 accounts.json,不经此类)。
