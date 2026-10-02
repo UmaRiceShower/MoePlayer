@@ -318,8 +318,6 @@ QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QStri
     nam.setProxy(proxy);
     nam.setTransferTimeout(MoePlayer::kImageTimeoutMs);
     QNetworkRequest req(url);
-    // h1:与 API 同口径(独立连接,防御性)
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     // 统一 UA(软件名/版本号),不用 Qt 默认 UA。
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     if (!token.isEmpty())
