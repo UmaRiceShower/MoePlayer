@@ -547,11 +547,13 @@ void MpvClient::scheduleRetry(Session *s)
             Session *cur = sessionFor(key);
             if (!cur || cur->retryIndex < 0)
                 return;
-            // 播放列表模式:占位条目的 on_load hook 挂起时,mpv 会吞掉所有
-            // 播放列表操作(playlist-pos 变了但不加载)——先清空列表
-            // (除当前)、放行挂起的占位,待 mpv 回到 idle 再重新灌入 m3u
-            // (第 0 条 = 当前集真实 URL),实现"重连当前集"。
+            // 播放列表模式
             if (cur->listSet && !cur->m3uPath.isEmpty()) {
+                sendJson(cur, QJsonObject{
+                                 {QStringLiteral("command"),
+                                  QJsonArray{QStringLiteral("playlist-play-index"),
+                                             QStringLiteral("none")}},
+                             });
                 sendJson(cur, QJsonObject{
                                  {QStringLiteral("command"),
                                   QJsonArray{QStringLiteral("playlist-clear")}},
@@ -570,13 +572,23 @@ void MpvClient::scheduleRetry(Session *s)
                 }
                 QTimer::singleShot(400, this, [this, key]() {
                     Session *c2 = sessionFor(key);
-                    if (c2 && !c2->m3uPath.isEmpty()) {
+                    if (!c2)
+                        return;
+                    if (rewriteRetryM3u(c2)) {
                         qInfo() << "MpvClient: 重新灌入播放列表重试" << c2->key;
                         sendJson(c2, QJsonObject{
                                          {QStringLiteral("command"),
                                           QJsonArray{QStringLiteral("loadlist"),
                                                      c2->m3uPath, QStringLiteral("replace")}},
                                      });
+                    } else {
+                        // 失败集地址未知(正常不会发生:失败集在播过必有地址),
+                        // 重灌旧表会退回起播集——放弃重试,保持停播等用户操作。
+                        qWarning() << "MpvClient: 失败集地址缺失,放弃自动重连" << c2->key;
+                        c2->retryIndex = -1;
+                        c2->retryCount = 0;
+                        c2->retryPos = 0.0;
+                        c2->retryItemId.clear();
                     }
                 });
                 return;
@@ -906,6 +918,10 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
                 return;
             }
             s->retryIndex = index;
+            // 失败集 id 落账:重试恢复的 file-loaded 校验落点用(mpv 在
+            // end-file 后会立即推进下一条目,加载成功的未必是失败集)。
+            s->retryItemId = (index >= 0 && index < s->playlistIds.size())
+                                 ? s->playlistIds.at(index) : QString();
             scheduleRetry(s);
         } else if (rid == kPlaylistQueryRequestId) {
             // 预加载改写第 1 步:定位仍是占位的目标条目(正在加载/播放的
@@ -1085,9 +1101,13 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         const QJsonValue data = ev.value(QStringLiteral("data"));
         if (name == QLatin1String("time-pos")) {
             s->position = data.isDouble() ? data.toDouble() : s->position;
+            if (data.isDouble())
+                s->lastGoodPos = data.toDouble();
             reportProgress(s, false);
         } else if (name == QLatin1String("duration")) {
             s->duration = data.isDouble() ? data.toDouble() : s->duration;
+            if (data.isDouble() && data.toDouble() > 0.0)
+                s->lastGoodDuration = data.toDouble();
         } else if (name == QLatin1String("playlist-pos")) {
             // 换集归位:占位集此时尚在协商(episodeMeta 空,幂等跳过,
             // file-loaded 的 pendingFileId 兜底);预加载集 meta 已在,同步换。
@@ -1114,17 +1134,27 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         s->loadIssued = true;
         qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
         if (s->retryCount > 0) {
-            if (s->retryPos > 0.5) {
-                qInfo() << "MpvClient: 重试成功,恢复到" << s->retryPos << "s" << s->key;
-                sendJson(s, QJsonObject{
-                                {QStringLiteral("command"),
-                                 QJsonArray{QStringLiteral("seek"), s->retryPos,
-                                            QStringLiteral("absolute")}},
-                            });
+            // 落点校验:end-file 后 mpv 会立即推进下一条目,重试期间加载
+            // 成功的未必是失败集——进度只能 seek 回失败集,错位则重新调度。
+            const QString curId = s->meta.value(QStringLiteral("itemId")).toString();
+            if (!s->retryItemId.isEmpty() && curId != s->retryItemId) {
+                qWarning() << "MpvClient: 重试落点错位(载入" << curId << "应为"
+                           << s->retryItemId << "),重新调度" << s->key;
+                scheduleRetry(s);
+            } else {
+                if (s->retryPos > 0.5) {
+                    qInfo() << "MpvClient: 重试成功,恢复到" << s->retryPos << "s" << s->key;
+                    sendJson(s, QJsonObject{
+                                    {QStringLiteral("command"),
+                                     QJsonArray{QStringLiteral("seek"), s->retryPos,
+                                                QStringLiteral("absolute")}},
+                                });
+                }
+                s->retryCount = 0;
+                s->retryIndex = -1;
+                s->retryPos = 0.0;
+                s->retryItemId.clear();
             }
-            s->retryCount = 0;
-            s->retryIndex = -1;
-            s->retryPos = 0.0;
         }
         // 文件就绪即查 track-list,匹配 Emby 所选轨(两模式共享;外部经
         // IPC 同样可行——修正外部模式正数 ordinal 选轨静默丢弃的缺口)。
@@ -1176,7 +1206,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             // 协商失败 → 跳过(现状);真实集失败(网络中断)→ 退避重试,
             // 用户切好代理/网络后自动继续(见 scheduleRetry)。
             s->failedEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
-            s->retryPos = s->position;
+            s->retryPos = s->lastGoodPos;
             sendJson(s, QJsonObject{
                             {QStringLiteral("command"),
                              QJsonArray{QStringLiteral("get_property"),
@@ -1186,14 +1216,19 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             return;
         }
         if (reason == QLatin1String("eof")) {
-            const bool early = s->duration > 12.0 && s->position > 0.5
-                               && s->position < s->duration - 12.0;
-            if (early && qAbs(s->position - s->lastEarlyEofPos) > 2.0) {
-                s->lastEarlyEofPos = s->position;
-                qWarning() << "MpvClient: 提前 EOF(断流),按失败重连" << s->position
-                           << "/" << s->duration << s->key;
+            // 判据用快照:处理 end-file 时 time-pos/duration 的观察值可能
+            // 已被新文件加载复位(把断流误判成"播完"会直接跳下一条目)。
+            // 时长未知(dur≤0)按断流处理
+            const double pos = s->lastGoodPos;
+            const double dur = s->lastGoodDuration;
+            const bool early = pos > 0.5
+                               && (dur <= 0.0 || (dur > 12.0 && pos < dur - 12.0));
+            if (early && qAbs(pos - s->lastEarlyEofPos) > 2.0) {
+                s->lastEarlyEofPos = pos;
+                qWarning() << "MpvClient: 提前 EOF(断流),按失败重连" << pos
+                           << "/" << dur << s->key;
                 s->failedEntryId = ev.value(QStringLiteral("playlist_entry_id")).toInt(-1);
-                s->retryPos = s->position;
+                s->retryPos = pos;
                 sendJson(s, QJsonObject{
                                 {QStringLiteral("command"),
                                  QJsonArray{QStringLiteral("get_property"),
@@ -1386,6 +1421,8 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
     }
     if (!meta.isEmpty())
         s->episodeMeta.insert(currentItemId, meta);
+    if (!url.isEmpty())
+        s->episodeUrls.insert(currentItemId, url);
     // 写 m3u:条目标题(m3u EXTINF,mpv demux_playlist.c 解析为 playlist
     // entry title,经 --osd-playlist-entry=title 显示)+ 占位地址
     // 可重复调用(重播同集/续链):清旧播放表 + 删旧 m3u(否则 ids 翻倍、
@@ -1422,6 +1459,7 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
         title.replace(QLatin1Char('\n'), QLatin1Char(' ')).replace(QLatin1Char('\r'), QLatin1Char(' '));
         if (title.isEmpty())
             title = id;
+        s->episodeTitles.insert(id, title);
         body2 += "#EXTINF:0," + title.toUtf8() + "\n";
         body2 += (k == 0 ? url.toUtf8() : ("moe://ep/" + id.toUtf8())) + "\n";
         s->playlistIds << id;
@@ -1449,6 +1487,48 @@ void MpvClient::setEpisodeList(const QVariantList &episodes,
                 });
     s->listSet = true;
     qInfo() << "MpvClient: 下发 loadlist" << s->key;
+}
+
+// 断流重试的 m3u 重写
+bool MpvClient::rewriteRetryM3u(Session *s)
+{
+    if (s->retryIndex < 0 || s->retryIndex >= s->playlistIds.size())
+        return false;
+    const QString failedId = s->playlistIds.at(s->retryIndex);
+    const QString url = s->episodeUrls.value(failedId);
+    if (failedId.isEmpty() || url.isEmpty())
+        return false;
+    const int k = s->playlistIds.indexOf(failedId);
+    const QStringList rot = s->playlistIds.mid(k) + s->playlistIds.mid(0, k);
+    const QString path = QDir::tempPath() + QStringLiteral("/moe-ep-") +
+                         QUuid::createUuid().toString(QUuid::WithoutBraces) +
+                         QStringLiteral(".m3u");
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        qWarning() << "MpvClient: 不能写 m3u" << path << f.errorString();
+        return false;
+    }
+    QByteArray body = "#EXTM3U\n";
+    for (int i = 0; i < rot.size(); ++i) {
+        const QString id = rot.at(i);
+        QString title = s->episodeTitles.value(id, id);
+        title.replace(QLatin1Char('\n'), QLatin1Char(' '))
+            .replace(QLatin1Char('\r'), QLatin1Char(' '));
+        body += "#EXTINF:0," + title.toUtf8() + "\n";
+        body += (i == 0 ? url.toUtf8() : ("moe://ep/" + id.toUtf8())) + "\n";
+    }
+    f.write(body);
+    f.close();
+    if (!s->m3uPath.isEmpty())
+        QFile::remove(s->m3uPath);
+    s->m3uPath = path;
+    s->playlistIds = rot;
+    s->retryIndex = 0;
+    s->resolvedEps.clear();
+    s->resolvedEps.insert(failedId);
+    s->preloadId.clear();
+    s->preloadInserted = false;
+    return true;
 }
 
 void MpvClient::applyEpisodeSwitch(Session *s, const QString &episodeId)
@@ -1489,6 +1569,7 @@ void MpvClient::preloadEpisodeUrl(const QString &itemId, const QString &url,
         s->preloadSub = subtitleUrl;
         s->preloadInserted = false;
         s->preloadTries = 0;
+        s->episodeUrls.insert(itemId, url);
         sendJson(s, QJsonObject{
                         {QStringLiteral("command"),
                          QJsonArray{QStringLiteral("get_property"),
@@ -1516,6 +1597,7 @@ void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &item
     if (!url.isEmpty()) {
         s->url = url;
         s->headers = headers;
+        s->episodeUrls.insert(itemId, url);
     }
     // 流头(可能跨服务器变化):切换全局头,后续加载生效。
     if (!headers.isEmpty()) {
