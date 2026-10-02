@@ -142,7 +142,6 @@ qt_add_shaders(MoePlayer moeplayer_shaders
     GLSL "100es,120,150"
     FILES shaders/background.frag
           shaders/crossfade.frag
-          shaders/episode-fade.frag
           shaders/glass-refract.frag
           shaders/round-rect.frag
           shaders/hero.vert
