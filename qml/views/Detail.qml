@@ -1094,40 +1094,6 @@ Item {
     readonly property color panelTextMuted: root.hasBackdrop ? Qt.rgba(1, 1, 1, 0.65)
                                                              : Theme.textMuted
 
-    component ShadowText: Item {
-        property string text: ""
-        property color color: "white"
-        property int pixelSize: 14
-        property bool bold: false
-        property bool shadowOn: root.hasBackdrop
-        property int hAlign: Text.AlignLeft
-        implicitWidth: stMain.implicitWidth
-        implicitHeight: stMain.implicitHeight + 1
-        AppText {
-            anchors.fill: parent
-            anchors.topMargin: 1
-            visible: parent.shadowOn
-            text: parent.text
-            color: Qt.rgba(0, 0, 0, 0.55)
-            font.pixelSize: parent.pixelSize
-            font.bold: parent.bold
-            elide: Text.ElideRight
-            horizontalAlignment: parent.hAlign
-            verticalAlignment: Text.AlignVCenter
-        }
-        AppText {
-            id: stMain
-            anchors.fill: parent
-            text: parent.text
-            color: parent.color
-            font.pixelSize: parent.pixelSize
-            font.bold: parent.bold
-            elide: Text.ElideRight
-            horizontalAlignment: parent.hAlign
-            verticalAlignment: Text.AlignVCenter
-        }
-    }
-
     component VectorIcon: Image {
         property string inner: ""
         property color iconColor: "white"
@@ -1265,30 +1231,33 @@ Item {
                             Row {
                                 width: parent.width
                                 spacing: 12
-                                ShadowText {
+                                AppText {
                                     id: heroNewTitle
                                     text: root.heroTitle()
                                     color: root.hasBackdrop ? "white" : Theme.textPrimary
-                                    pixelSize: root.heroTitlePx
-                                    bold: true
+                                    font.pixelSize: root.heroTitlePx
+                                    font.bold: true
                                     width: parent.width
-                                    hAlign: root.heroTextAlign
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: root.heroTextAlign
                                 }
                             }
-                            ShadowText {
+                            AppText {
                                 text: root.heroEpisodeLine()
                                 color: root.hasBackdrop ? "white" : Theme.textPrimary
-                                pixelSize: root.heroEpPx
+                                font.pixelSize: root.heroEpPx
                                 width: parent.width
-                                hAlign: root.heroTextAlign
+                                elide: Text.ElideRight
+                                horizontalAlignment: root.heroTextAlign
                                 visible: text !== ""
                             }
-                            ShadowText {
+                            AppText {
                                 text: root.metaLine()
                                 color: Theme.rating
-                                pixelSize: root.heroMetaPx
+                                font.pixelSize: root.heroMetaPx
                                 width: parent.width
-                                hAlign: root.heroTextAlign
+                                elide: Text.ElideRight
+                                horizontalAlignment: root.heroTextAlign
                                 opacity: text !== "" ? 1 : 0
                                 Behavior on opacity { NumberAnimation { duration: 100 } }
                             }
@@ -1717,11 +1686,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    ShadowText {
+                    AppText {
                         text: "简介"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: root.heroSectionPx
-                        bold: true
+                        font.pixelSize: root.heroSectionPx
+                        font.bold: true
                     }
                     // 简介文字框:玻璃质感(透出下方背景),完整显示不截断。
                     FrostedGlass {
@@ -1764,11 +1733,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    ShadowText {
+                    AppText {
                         text: "演职人员"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: root.heroSectionPx
-                        bold: true
+                        font.pixelSize: root.heroSectionPx
+                        font.bold: true
                     }
                     Flickable {
                         width: parent.width
@@ -1836,19 +1805,21 @@ Item {
                                                 Behavior on opacity { NumberAnimation { duration: 160 } }
                                             }
                                         }
-                                        ShadowText {
+                                        AppText {
                                             text: peopleCard.modelData.name || ""
                                             color: root.hasBackdrop ? "white" : Theme.textPrimary
-                                            pixelSize: 12
+                                            font.pixelSize: 12
                                             width: 72
-                                            hAlign: Text.AlignHCenter
+                                            elide: Text.ElideRight
+                                            horizontalAlignment: Text.AlignHCenter
                                         }
-                                        ShadowText {
+                                        AppText {
                                             text: peopleCard.modelData.role || peopleCard.modelData.type || ""
                                             color: root.hasBackdrop ? Qt.rgba(1, 1, 1, 0.75) : Theme.textMuted
-                                            pixelSize: 11
+                                            font.pixelSize: 11
                                             width: 72
-                                            hAlign: Text.AlignHCenter
+                                            elide: Text.ElideRight
+                                            horizontalAlignment: Text.AlignHCenter
                                         }
                                     }
                                 }
@@ -1867,11 +1838,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    ShadowText {
+                    AppText {
                         text: "媒体信息"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: root.heroSectionPx
-                        bold: true
+                        font.pixelSize: root.heroSectionPx
+                        font.bold: true
                     }
                     Repeater {
                         model: root.mediaBlocksModel
@@ -2189,11 +2160,11 @@ Item {
                     opacity: visible ? 1 : 0
                     Behavior on opacity { NumberAnimation { duration: 200 } }
 
-                    ShadowText {
+                    AppText {
                         text: "相似推荐"
                         color: root.hasBackdrop ? "white" : Theme.textPrimary
-                        pixelSize: root.heroSectionPx
-                        bold: true
+                        font.pixelSize: root.heroSectionPx
+                        font.bold: true
                     }
                     ListView {
                         width: parent.width
@@ -2318,11 +2289,11 @@ Item {
 
                 // "第"/"季":锚定数字牌两侧(右/左缘贴牌边 8px 间隙),
                 // 往数字牌靠近且随其位置跟随,不再贴条边缘。
-                ShadowText {
+                AppText {
                     text: "第"
                     color: seasonStrip.stripHovered ? Theme.accent
                            : (root.hasBackdrop ? "white" : Theme.textPrimary)
-                    pixelSize: 14
+                    font.pixelSize: 14
                     anchors.right: digitCol.left
                     anchors.rightMargin: 8
                     anchors.top: parent.top
@@ -2341,15 +2312,15 @@ Item {
                     height: 94
                     spacing: 0
                     // 上一季(列表内实际存在的季;无则隐藏)。
-                    ShadowText {
+                    AppText {
                         id: upText
                         width: 66
                         height: 16
                         text: seasonStrip.stripHovered && root.seasonPrevNo() > 0
                               ? root.pad2(root.seasonPrevNo()) : ""
                         color: root.hasBackdrop ? "white" : Theme.textMuted
-                        pixelSize: 12
-                        hAlign: Text.AlignHCenter
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
                         opacity: seasonStrip.stripHovered
                                  && root.seasonPrevNo() > 0 ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 160 } }
@@ -2380,26 +2351,26 @@ Item {
                         }
                     }
                     // 下一季(列表内实际存在的季;无则隐藏)。
-                    ShadowText {
+                    AppText {
                         id: downText
                         width: 66
                         height: 16
                         text: seasonStrip.stripHovered && root.seasonNextNo() > 0
                               ? root.pad2(root.seasonNextNo()) : ""
                         color: root.hasBackdrop ? "white" : Theme.textMuted
-                        pixelSize: 12
-                        hAlign: Text.AlignHCenter
+                        font.pixelSize: 12
+                        horizontalAlignment: Text.AlignHCenter
                         opacity: seasonStrip.stripHovered
                                  && root.seasonNextNo() > 0 ? 1 : 0
                         Behavior on opacity { NumberAnimation { duration: 160 } }
                     }
                 }
                 // "季" 同样锚定数字牌(左缘贴牌边 8px)。
-                ShadowText {
+                AppText {
                     text: "季"
                     color: seasonStrip.stripHovered ? Theme.accent
                            : (root.hasBackdrop ? "white" : Theme.textPrimary)
-                    pixelSize: 14
+                    font.pixelSize: 14
                     anchors.left: digitCol.right
                     anchors.leftMargin: 8
                     anchors.top: parent.top
@@ -2471,13 +2442,15 @@ Item {
                 focus: true
                 keyNavigationWraps: true
                 model: EmbyClient.episodesModelFor(root.serverUrl, root.accountId, root.currentSeasonId)
-                layer.enabled: true
-                layer.effect: ShaderEffect {
-                    property real u_margin: Constants.detailEpisodeRowMargin / episodeList.height
-                    fragmentShader: "qrc:/qt/qml/MoePlayer/Core/shaders/episode-fade.frag.qsb"
-                }
                 delegate: Item {
                     id: episodeItem
+                    // 顶底缘淡出:逐委托不透明度替代 layer+shader 的 FBO 方案——
+                    // FBO 把文字渲染进纹理再采样,分数偏移(分数缩放/滚动)下
+                    // 双线性采样拆出彩色毛边。
+                    // 淡出带取半档行高:带太窄时整行不透明度近乎瞬断,滚动读作闪现。
+                    readonly property real _fade: root.episodeRowH * 0.5
+                    opacity: Math.max(0, Math.min((y - episodeList.contentY + height) / _fade,
+                                                  (episodeList.height - (y - episodeList.contentY)) / _fade, 1))
                     // 同上:required 声明识别 C++ 模型角色。
                     required property var model
                     // 详情/播放中的当前集:选中态(莫奈边框/白色标题)。
@@ -2593,15 +2566,16 @@ Item {
                                 }
                             }
                         }
-                        // 集名:缩略图下方居中;压图白字(+影),无图回主题色。
-                        ShadowText {
+                        // 集名:缩略图下方居中;压图白字,无图回主题色。
+                        AppText {
                             id: episodeTitle
                             width: thumbBox.width
                             text: episodeItem.model.name
                             color: episodeItem.selected ? Theme.accent
                                    : (root.hasBackdrop ? "white" : Theme.textPrimary)
-                            pixelSize: 14
-                            hAlign: Text.AlignHCenter
+                            font.pixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            elide: Text.ElideRight
                         }
                     }
                     Rectangle {
