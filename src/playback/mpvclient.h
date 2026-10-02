@@ -203,13 +203,22 @@ private:
         double lastEarlyEofPos = -1.0; // 上次提前 EOF 的位置(判文件截断用)
         int retryCount = 0;
         int failedEntryId = -1;
+        QString retryItemId; // 失败条目的集 id:重试恢复时校验 file-loaded 落点
         QTimer *retryTimer = nullptr;
+        // 提前 EOF 判据快照:换集/拆链时属性观察会复位成 nil/0,end-file
+        // 处理若读 live 值会把断流误判成"播完"。取最后一次有效观察。
+        double lastGoodPos = 0.0;
+        double lastGoodDuration = 0.0;
         QString m3uPath;           // 播放列表 m3u(重试时重新灌入)
         // 播放列表旋转序的条目 id(第 0 条 = 点播集):选集面板直跳映射
         // episodeId → playlist-play-index 用。
         QStringList playlistIds;
         // 全集序列最后一集的 id
         QString finalEpisodeId;
+        // 每集已知真实播放地址与标题(起播集/预加载改写/hook 应答三处
+        // 落账):断流重试时以失败集为第 0 条重写 m3u。
+        QHash<QString, QString> episodeUrls;
+        QHash<QString, QString> episodeTitles;
         // 已预加载改写(占位→真实地址)的集:防重复改写;重建列表时清空。
         QSet<QString> resolvedEps;
         // 在途的预加载改写(每会话一单;查列表→insert 确认→remove 占位的
@@ -251,6 +260,8 @@ private:
     void spawnMpv(Session *s);
     // 加载失败后按退避策略重试失败条目(快速几次后转慢速,等网络恢复)。
     void scheduleRetry(Session *s);
+    // 断流重试:以失败集为第 0 条重写会话 m3u(返回 false = 失败集地址未知)。
+    bool rewriteRetryM3u(Session *s);
     void sendJson(Session *s, const QJsonObject &obj);
     void handleLine(Session *s, const QByteArray &line);
     void handleEvent(Session *s, const QJsonObject &ev);
