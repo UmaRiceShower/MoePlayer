@@ -262,9 +262,7 @@ QNetworkRequest EmbyClient::makeRequest(const QString &serverUrl, const QString 
     if (json)
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-    // h1:保守选择——h2 多路复用会把请求命运绑到共享连接上;h1 每请求
-    // 独立连接,故障域天然隔离(低风险防御,复用收益本场景很小)
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
+    // h2 多路复用
     return req;
 }
 
@@ -337,7 +335,6 @@ void EmbyClient::postFrom(const QString &serverUrl, const QString &path, const Q
     req.setRawHeader(MoePlayer::kHeaderAuth, authHeaderFor(QString(), QString()).toUtf8());
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     QNetworkReply *reply = m_nam.post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply, serverUrl, onOk, onFail, what]() {
         reply->deleteLater();
@@ -642,7 +639,6 @@ void EmbyClient::fetchServerIcon(const QString &serverUrl)
     QNetworkRequest req{QUrl(htmlUrl)};
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, serverUrl, htmlUrl]() {
@@ -671,7 +667,6 @@ void EmbyClient::downloadServerIconImage(const QString &serverUrl, const QString
     QNetworkRequest req{QUrl(iconUrl)};
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, serverUrl, iconUrl]() {
@@ -693,7 +688,6 @@ void EmbyClient::downloadImage(const QString &url, std::function<void(const QByt
     QNetworkRequest req{QUrl(url)};
     req.setRawHeader(MoePlayer::kHeaderUserAgent, MoePlayer::userAgent().toUtf8());
     req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
-    req.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     QNetworkReply *reply = m_nam.get(req);
     connect(reply, &QNetworkReply::finished, this,
             [reply, onDone = std::move(onDone)]() {
