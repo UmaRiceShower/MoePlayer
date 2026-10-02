@@ -556,11 +556,12 @@ Window {
                                 color: Qt.rgba(1, 1, 1, 0.38)
                             }
                             Rectangle {
-                                // 右端延伸到手柄圆心下:圆角端藏进圆里,填充与
-                                // 手柄视觉连续;钳制不超出槽尾。
-                                width: Math.min(parent.width,
-                                       seekBar.effectiveFrac * parent.width
-                                       + (seekBar.handle ? seekBar.handle.width / 2 : 0))
+                                // 右端 = 手柄圆心
+                                width: {
+                                    const h = seekBar.handle ? seekBar.handle.width : 0
+                                    return Math.min(parent.width,
+                                        seekBar.effectiveFrac * (parent.width - h) + h / 2)
+                                }
                                 height: parent.height
                                 radius: 2
                                 color: "white"
