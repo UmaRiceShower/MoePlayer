@@ -105,17 +105,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                     if (!map.contains(sid) || map.value(sid) < dt)
                         map.insert(sid, dt);
                 }
-                qInfo() << "AccountManager: 系列最新入库映射" << serverUrl << accountId.left(8) << map.size() << "部";
-                rebuildCustomHomeRows(false); // 排序键到位重排(非终态,不写缓存)
-                // 落盘(全量重写):重启首帧用上次的排序键,Latest 回执到达不再重排。
-                QVariantMap root;
-                for (auto it = m_seriesRecency.constBegin(); it != m_seriesRecency.constEnd(); ++it) {
-                    QVariantMap perSeries;
-                    for (auto jt = it.value().constBegin(); jt != it.value().constEnd(); ++jt)
-                        perSeries.insert(jt.key(), jt.value().toString(Qt::ISODateWithMs));
-                    root.insert(it.key(), perSeries);
-                }
-                m_persist.saveCache(kSeriesRecencyCacheName, root);
+                finishLatestBatch(accountId);
             });
     connect(m_config, &ConfigManager::homeHideNoImageChanged,
             this, [this] {
@@ -512,6 +502,13 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                                                v.toMap().value(QStringLiteral("id")).toString(),
                                                v.toMap().value(QStringLiteral("name")).toString(),
                                                m_homeLimit);
+                    const QString ct = v.toMap().value(QStringLiteral("collectionType")).toString();
+                    if (ct.isEmpty() || ct == QLatin1String("tvshows")) {
+                        m_latestPending[accountId] += 1;
+                        m_client->fetchLatestMedia(serverUrl, accountId, a->token, a->userId,
+                                                   60, v.toMap().value(QStringLiteral("id")).toString(),
+                                                   [this, accountId]() { finishLatestBatch(accountId); });
+                    }
                 }
                 maybeAssembleHomeRows();
             });
@@ -1295,11 +1292,34 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         }
         ++m_homePending; // 该服视图请求
         m_client->fetchServerViews(a.serverUrl, a.id, a.token, a.userId);
-        // 桶内混排排序键:系列最近内容入库时间(Latest 派生,DTO 无直读字段)
-        m_client->fetchLatestMedia(a.serverUrl, a.id, a.token, a.userId, 150);
+        // 桶内混排排序键
     }
     if (m_homePending == 0)
         finishHomeFetch();
+}
+
+// 按库 Latest 批次结算:在途数减一,该账号归零才重排+落盘一次。
+void AccountManager::finishLatestBatch(const QString &accountId)
+{
+    auto it = m_latestPending.find(accountId);
+    if (it == m_latestPending.end())
+        return;
+    if (--it.value() > 0)
+        return;
+    m_latestPending.erase(it);
+    const QString serverUrl = accountById(accountId)
+                                  ? accountById(accountId)->serverUrl : QString();
+    qInfo() << "AccountManager: 系列最新入库映射" << serverUrl << accountId.left(8)
+            << m_seriesRecency.value(accountId).size() << "部";
+    rebuildCustomHomeRows(false);
+    QVariantMap root;
+    for (auto it2 = m_seriesRecency.constBegin(); it2 != m_seriesRecency.constEnd(); ++it2) {
+        QVariantMap perSeries;
+        for (auto jt = it2.value().constBegin(); jt != it2.value().constEnd(); ++jt)
+            perSeries.insert(jt.key(), jt.value().toString(Qt::ISODateWithMs));
+        root.insert(it2.key(), perSeries);
+    }
+    m_persist.saveCache(kSeriesRecencyCacheName, root);
 }
 
 // 结束本轮聚合:释放串行标记;飞行中排队的触发(账号状态已变)重跑一次。

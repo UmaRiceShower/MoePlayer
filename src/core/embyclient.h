@@ -163,8 +163,11 @@ public:
     // accountId 为触发账号,回调按 id 准确归位;viewName 仅用于日志标识。
     // /Items/Latest:最近入库的集(Episode)
     // DateCreated)。回执 latestMediaReceived,items = [{seriesId, dateAdded}]。
+    // parentId 非空 = 按库限定
     void fetchLatestMedia(const QString &serverUrl, const QString &accountId,
-                          const QString &token, const QString &userId, int limit);
+                          const QString &token, const QString &userId, int limit,
+                          const QString &parentId = QString(),
+                          std::function<void()> onFail = nullptr);
     Q_INVOKABLE void fetchServerItems(const QString &serverUrl, const QString &accountId,
                                       const QString &token, const QString &userId,
                                       const QString &viewId, const QString &viewName,
@@ -371,7 +374,8 @@ private:
     QString idPrefixFor(const QString &serverUrl, const QString &userId) const;
     // 按显式服务器/凭据拼接路径与认证头。
     QNetworkRequest makeRequest(const QString &serverUrl, const QString &token,
-                                const QString &userId, const QString &path, bool json) const;
+                                const QString &userId, const QString &path, bool json,
+                                int timeoutMs = 0) const;
     // 解析 Emby Items 响应的 "Items" 数组到模型(setItems 或 appendItems;
     // withPosters 控制是否解析 ImageTags.Primary,文件夹等无海报类型传 false)。
     // 图片 id 前缀按取数账号铸(身份不可变);每次填充前更新模型前缀。
@@ -387,12 +391,12 @@ private:
     // 并调用 onFail(可为空;聚合计数推进用)。
     void get(const QString &serverUrl, const QString &token, const QString &userId,
              const QString &path, std::function<void(const QJsonDocument &)> onOk,
-             std::function<void()> onFail, const QString &what, bool background = false);
+             std::function<void()> onFail, const QString &what, bool background = false, int timeoutMs = 0);
     // get 的实现体;retried 标记传输层重试已发生(仅一次)。
     void sendGet(const QString &serverUrl, const QString &token, const QString &userId,
                  const QString &path, std::function<void(const QJsonDocument &)> onOk,
                  std::function<void()> onFail, const QString &what, bool background,
-                 bool retried);
+                 int retryAttempt = 0, int timeoutMs = 0);
     // 跨服务器 POST(无认证头,登录端点用),失败发 serverRequestFailed 并调用 onFail。
     void postFrom(const QString &serverUrl, const QString &path, const QJsonObject &body,
                   std::function<void(const QJsonDocument &)> onOk,

@@ -244,6 +244,8 @@ private:
     // final=true 时才发 info 级汇总(聚合完成/配置变更等一次性事件);
     // 增量中途重排解 debug,不刷屏。
     void rebuildCustomHomeRows(bool final = true);
+    // 按库 Latest 批次结算:在途数减一,归零才重排+落盘
+    void finishLatestBatch(const QString &accountId);
     // 首页聚合串行化:结束本轮,飞行中排队的触发重跑一次。
     void finishHomeFetch();
     // 文件夹结构(见 folders 属性)。
@@ -327,6 +329,8 @@ const QString &accountId) const;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调
     QHash<QString, int> m_homeReqGen; // 账号 id -> 发起聚合的代次
+    // 按库 Latest 批次的在途数
+    QHash<QString, int> m_latestPending;
     // 系列最近内容入库时间(Latest 派生):账号 id → seriesId → 最新集 DateCreated。
     // 桶内混排排序键用;缺失回落条目 dateAdded(=DateCreated)。
     QHash<QString, QHash<QString, QDateTime>> m_seriesRecency;

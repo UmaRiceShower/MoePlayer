@@ -17,6 +17,7 @@ inline const QString kAppName = QStringLiteral(MOEPLAYER_NAME);
 inline const QString kAppId = QStringLiteral(MOEPLAYER_APP_ID);
 // 常规 API 请求超时(ms)。
 inline constexpr int kNetworkTimeoutMs = 20000;
+inline constexpr int kSlowNetworkTimeoutMs = 45000;
 // 图片回源超时(ms,停摆超时:零字节持续该时长才掐断)
 inline constexpr int kImageTimeoutMs = 30000;
 // 分页上限(Emby 单页上限 200)。

@@ -247,7 +247,7 @@ QString EmbyClient::userPath(const QString &userId, const QString &rest)
 
 QNetworkRequest EmbyClient::makeRequest(const QString &serverUrl, const QString &token,
                                         const QString &userId, const QString &path,
-                                        bool json) const
+                                        bool json, int timeoutMs) const
 {
     const QString base = m_baseUrlResolver ? m_baseUrlResolver(serverUrl.trimmed(), userId)
                                            : serverUrl.trimmed();
@@ -261,17 +261,18 @@ QNetworkRequest EmbyClient::makeRequest(const QString &serverUrl, const QString 
         req.setRawHeader(MoePlayer::kHeaderToken, token.toUtf8());
     if (json)
         req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
-    req.setTransferTimeout(MoePlayer::kNetworkTimeoutMs);
+    req.setTransferTimeout(timeoutMs > 0 ? timeoutMs : MoePlayer::kNetworkTimeoutMs);
     // h2 多路复用
     return req;
 }
 
 void EmbyClient::get(const QString &serverUrl, const QString &token, const QString &userId,
                      const QString &path, std::function<void(const QJsonDocument &)> onOk,
-                     std::function<void()> onFail, const QString &what, bool background)
+                     std::function<void()> onFail, const QString &what, bool background,
+                     int timeoutMs)
 {
     sendGet(serverUrl, token, userId, path, std::move(onOk), std::move(onFail), what,
-            background, false);
+            background, 0, timeoutMs);
 }
 
 // get 的实现体。传输层失败(HTTP 0:连接断/对端重置等)换连接重试一次——
@@ -280,29 +281,41 @@ void EmbyClient::get(const QString &serverUrl, const QString &token, const QStri
 void EmbyClient::sendGet(const QString &serverUrl, const QString &token, const QString &userId,
                          const QString &path, std::function<void(const QJsonDocument &)> onOk,
                          std::function<void()> onFail, const QString &what, bool background,
-                         bool retried)
+                         int retryAttempt, int timeoutMs)
 {
     QNetworkAccessManager &nam = background ? m_bgNam : m_nam;
-    QNetworkReply *reply = nam.get(makeRequest(serverUrl, token, userId, path, false));
+    QNetworkReply *reply = nam.get(makeRequest(serverUrl, token, userId, path, false, timeoutMs));
     connect(reply, &QNetworkReply::finished, this,
-            [this, reply, serverUrl, token, userId, path, onOk, onFail, what, background, retried]() {
+            [this, reply, serverUrl, token, userId, path, onOk, onFail, what, background,
+             retryAttempt, timeoutMs]() {
         reply->deleteLater();
         if (reply->error() != QNetworkReply::NoError) {
             const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            if (status == 0 && reply->error() != QNetworkReply::OperationCanceledError && !retried) {
-                // GUI 线程不能 sleep:400ms 后换连接重发(隧道半死连接重建窗口);
-                // clearAccessCache 只丢空闲 keep-alive 连接,不打断在途请求。
-                qInfo().noquote() << "Emby:" << what << "传输层失败,换连接重试" << serverUrl;
-                (background ? m_bgNam : m_nam).clearAccessCache();
-                QTimer::singleShot(400, this, [this, serverUrl, token, userId, path,
-                                               onOk, onFail, what, background]() {
-                    sendGet(serverUrl, token, userId, path, onOk, onFail, what, background, true);
-                });
-                return;
+            const auto err = reply->error();
+            const bool isTimeout = err == QNetworkReply::OperationCanceledError
+                                   || err == QNetworkReply::TimeoutError;
+            // 分层重试
+            if (status == 0) {
+                const int maxRetries = isTimeout ? 1 : 2;
+                if (retryAttempt < maxRetries) {
+                    const int delayMs = isTimeout ? 4000 : (retryAttempt == 0 ? 400 : 2000);
+                    qInfo().noquote() << "Emby:" << what
+                                      << (isTimeout ? QStringLiteral("传输超时,延迟重试")
+                                                    : QStringLiteral("传输层失败,换连接重试"))
+                                      << serverUrl;
+                    (background ? m_bgNam : m_nam).clearAccessCache();
+                    QTimer::singleShot(delayMs, this, [this, serverUrl, token, userId, path,
+                                                       onOk, onFail, what, background, timeoutMs,
+                                                       retryAttempt]() {
+                        sendGet(serverUrl, token, userId, path, onOk, onFail, what, background,
+                                retryAttempt + 1, timeoutMs);
+                    });
+                    return;
+                }
             }
-            // OperationCanceled 在 setTransferTimeout 路径 = 传输超时中止
-            const QString reason = reply->error() == QNetworkReply::OperationCanceledError
-                                       ? QStringLiteral("传输超时(20s 无应答)")
+            const int effTimeout = timeoutMs > 0 ? timeoutMs : MoePlayer::kNetworkTimeoutMs;
+            const QString reason = isTimeout
+                                       ? QStringLiteral("传输超时(%1s 无应答)").arg(effTimeout / 1000)
                                        : reply->errorString();
             const QString msg = what + QStringLiteral(" 失败: ") + reason
                                 + QStringLiteral(" (HTTP ") + QString::number(status) + QLatin1Char(')');
@@ -1050,13 +1063,16 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
 }
 
 void EmbyClient::fetchLatestMedia(const QString &serverUrl, const QString &accountId,
-                                  const QString &token, const QString &userId, int limit)
+                                  const QString &token, const QString &userId, int limit,
+                                  const QString &parentId, std::function<void()> onFail)
 {
     QUrlQuery q;
     q.addQueryItem(QStringLiteral("IncludeItemTypes"), QStringLiteral("Episode"));
     q.addQueryItem(QStringLiteral("GroupItems"), QStringLiteral("false"));
     q.addQueryItem(QStringLiteral("Limit"), QString::number(limit));
     q.addQueryItem(QStringLiteral("Fields"), QStringLiteral("DateCreated"));
+    if (!parentId.isEmpty())
+        q.addQueryItem(QStringLiteral("ParentId"), parentId);
     get(serverUrl, token, userId,
         QStringLiteral("/Users/%1/Items/Latest?%2").arg(userId, q.toString()),
         [this, serverUrl, accountId](const QJsonDocument &doc) {
@@ -1072,7 +1088,7 @@ void EmbyClient::fetchLatestMedia(const QString &serverUrl, const QString &accou
                 items.append(m);
             }
             emit latestMediaReceived(serverUrl, accountId, items);
-        }, nullptr, QStringLiteral("拉取最新入库"));
+        }, std::move(onFail), QStringLiteral("拉取最新入库"), false, MoePlayer::kSlowNetworkTimeoutMs);
 }
 
 void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accountId,
@@ -1145,7 +1161,7 @@ void EmbyClient::fetchPlaybackHistory(const QString &serverUrl, const QString &a
         [this, serverUrl, accountId, from] {
             emit playbackHistoryReceived(serverUrl, accountId, from, QVariantList(), 0, false);
         },
-        QStringLiteral("拉取播放历史"), true /*后台连接池*/);
+        QStringLiteral("拉取播放历史"), true /*后台连接池*/, MoePlayer::kSlowNetworkTimeoutMs);
 }
 
 
@@ -1263,7 +1279,7 @@ void EmbyClient::fetchServerSuggestions(const QString &serverUrl, const QString 
         // 调用方把失败账号的推荐当成"清空"处理(缓存侧按"无回执 = 保留上次推荐"
         // 处理)。失败原因仍经 serverRequestFailed/errorOccurred 报出。
         nullptr,
-        QStringLiteral("获取首页建议"));
+        QStringLiteral("获取首页建议"), false, MoePlayer::kSlowNetworkTimeoutMs);
 }
 
 void EmbyClient::loginFor(const QString &serverUrl, const QString &username,
