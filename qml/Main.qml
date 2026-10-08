@@ -339,7 +339,9 @@ ApplicationWindow {
             MpvClient.preloadEpisodeUrl(id, url, m, m.selectedSubtitleUrl || "")
         }
         function onPlaybackFailed(serverUrl, itemId, message) {
-            // 协商失败:hook 若在等,放行占位(加载失败,mpv 跳过该条)。
+            // 协商失败两职责:①hook 在等的连播占位放行(加载失败,mpv
+            // 跳过该条);②起播失败关会话 + 用户可见提示(任何页面发起的
+            // 起播都经此,挂页面组件内则直达起播无人接)。
             if (root._pendingUrls[itemId]) {
                 console.warn("Main: 协商失败,放行占位", itemId, message)
                 delete root._pendingUrls[itemId]
@@ -348,6 +350,9 @@ ApplicationWindow {
                     delete root._wantedUrls[itemId]
                     MpvClient.deliverEpisodeUrl(w.session, itemId, "", [], {})
                 }
+            } else {
+                MpvClient.fail(itemId, message)
+                toast.show("播放失败:" + message)
             }
         }
     }
@@ -574,6 +579,40 @@ ApplicationWindow {
         anchors.fill: parent
         visible: false
         backgroundSource: stackView
+    }
+
+    // 轻量提示条
+    Rectangle {
+        id: toast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 56
+        width: Math.min(toastText.implicitWidth + 44, parent.width - 80)
+        height: toastText.implicitHeight + 22
+        radius: 11
+        color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.94)
+        border.color: Theme.danger
+        border.width: 1
+        visible: opacity > 0
+        opacity: 0
+        function show(msg) {
+            toastText.text = msg
+            toastAnim.restart()
+        }
+        SequentialAnimation {
+            id: toastAnim
+            NumberAnimation { target: toast; property: "opacity"; to: 1; duration: 160 }
+            PauseAnimation { duration: 3600 }
+            NumberAnimation { target: toast; property: "opacity"; to: 0; duration: 400 }
+        }
+        AppText {
+            id: toastText
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, toast.width - 44)
+            wrapMode: Text.Wrap
+            horizontalAlignment: Text.AlignHCenter
+            color: Theme.textPrimary
+        }
     }
 
     // 鼠标返回层:后退侧键与中键左滑手势 = 返回(分发规则同 Alt+Left,
@@ -816,9 +855,6 @@ ApplicationWindow {
                     return
                 }
                 MpvClient.deliver(url, headers, meta)
-            }
-            onPlaybackFailed: function (itemId, message) {
-                MpvClient.fail(itemId, message)
             }
         }
     }
