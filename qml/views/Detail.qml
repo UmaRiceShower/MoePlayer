@@ -1125,7 +1125,7 @@ Item {
                 fillMode: Image.PreserveAspectCrop
                 asynchronous: true
                 duration: 800
-                cache: true
+                cache: false
             }
         }
         // 加载动画:detail 未到(首次进入/切集)时显示,到达后隐藏,

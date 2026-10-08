@@ -23,7 +23,8 @@ Item {
     property string itemId: ""
     property string posterId: ""
     // 创建时查询一次即可:门控销毁/重建的卡在重建时刻判定,期间缓存状态不变
-    readonly property bool _posterCached: posterId !== "" && PosterProvider.isCached(posterId)
+    readonly property string _reqId: posterId === "" ? "" : posterId + "~w" + Constants.posterCardReqW
+    readonly property bool _posterCached: _reqId !== "" && PosterProvider.isCached(_reqId)
     property string title: ""
     property int year: 0
     property real rating: 0
@@ -153,7 +154,7 @@ Item {
             // 同源秒回错误不发新请求——换 ~r<N> 外衣重请求(provider 剥
             // 标记,缓存键不变),1.5s × 最多 5 次。委托复用时复位。
             property int _retry: 0
-            source: root.posterId ? "image://emby/" + root.posterId
+            source: root._reqId ? "image://emby/" + root._reqId
                         + (posterImg._retry > 0 ? "~r" + posterImg._retry : "") : ""
             onStatusChanged: {
                 if (status === Image.Error && posterImg._retry < 5)

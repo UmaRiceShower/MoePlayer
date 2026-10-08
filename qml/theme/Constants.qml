@@ -62,6 +62,7 @@ QtObject {
     readonly property real homeHeroCardH: 0.86            // 卡高占 hero 区比例
     readonly property real homeHeroCardAspect: 16.0 / 9.0 // 卡宽高比
     readonly property real homeHeroCardWCap: 0.50         // 卡宽上限 = 窗口宽 × 比例
+    readonly property int homeHeroBackdropW: 1920
     // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.33×窗口宽);
     // 窄窗时 hero 高收缩、卡片保持满带宽,宽窗由高度预算/上限决定。
     readonly property real homeHeroWidthRatio: homeHeroCardWCap / homeHeroCardAspect / homeHeroCardH
@@ -107,6 +108,7 @@ QtObject {
 
     // ---- 库行卡片尺寸 ----
     readonly property int rowCardMinW: 140                 // 首页行卡宽下限
+    readonly property int posterCardReqW: 340
     readonly property int rowCardMaxW: 165                 // 首页行卡宽上限
     readonly property int rowTitleH: 24                   // 行标题行高
     readonly property int rowSpacing: 12                  // 条目卡间距

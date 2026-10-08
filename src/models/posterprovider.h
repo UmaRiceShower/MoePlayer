@@ -10,7 +10,9 @@ class AccountManager;
 class ConfigManager;
 
 //! 异步图片提供器,注册为 "image://emby/<id>"。
-//! 无状态浏览下海报 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>~<kind>
+//! 无状态浏览下海报 id 一律为 <encodeServerKey(accountId)>~<itemId>~<tag>~<kind>,
+//! 可追加 "~w<px>" 请求侧清晰度覆盖(仅 Backdrop 有效;hero 卡等显示宽度
+//! 有界的场景用以钳制档位,省内存与流量,缓存键按覆盖值分档)。
 //! (kind 为图片类型 Primary/Backdrop/Thumb,缺省 Primary 兼容旧三段 id;
 //! 模型填充时统一加前缀),提供器按前缀路由到对应服务器的账号 token。
 //! 请求路径 /Items/{id}/Images/{kind}(maxWidth 按 kind 分档 + tag;URL 不含
@@ -43,9 +45,12 @@ public:
     // Image.sourceSize 负责,故 requestedSize 保留但未参与构造)。
     QUrl imageUrl(const QString &serverUrl, const QString &itemId,
                   const QString &tag, const QString &kind,
-                  const QSize &requestedSize = QSize()) const;
+                  const QSize &requestedSize = QSize(), int maxWidthOverride = 0) const;
     // Backdrop 请求档位(配置 backdropMaxWidth;写入 URL 与缓存键)。
     QString backdropTier() const; // const:imageUrl/resolvedImageUrl 同为 const
+    // 缓存键统一口径(剥 ~r/解析 ~w/Backdrop 补默认档);
+    // requestImageResponse/warmDisk/isCached 共用。
+    QString cacheKeyFor(const QString &id) const;
     // 后台线程同步加载:磁盘缓存命中直读,未命中回源(占并发闸);
     // 失败/解码失败返回空图,error 填错误描述。线程安全,供取色等复用。
     // proxy 用于回源请求(默认直连)。
@@ -59,6 +64,15 @@ public:
     static QImage loadDisk(const QString &idKey);
     static QImage fetchNetwork(const QUrl &url, const QString &token, QString *error,
                                const QNetworkProxy &proxy, const QString &idKey);
+    // 字节层(fetchNetwork 的传输部分):占闸回源返回原始字节,不解码不写缓存。
+    static QByteArray fetchNetworkBytes(const QUrl &url, const QString &token, QString *error,
+                                        const QNetworkProxy &proxy);
+    // 磁盘写(解码路径与暖缓存路径共用;写失败静默)。
+    static void writeDisk(const QString &key, const QByteArray &data);
+    // 磁盘缓存淘汰:过期先删,再按容量上限从最旧删起。线程安全(纯文件操作)。
+    static void pruneDiskCache();
+
+    Q_INVOKABLE void warmDisk(const QString &id);
 
 private:
     EmbyClient *m_client;

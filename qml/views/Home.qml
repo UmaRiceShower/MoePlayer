@@ -619,9 +619,7 @@ Item {
                     root.heroHovered = hovered && heroCar._hoverMoved
                 }
             }
-            // 全图慢速灌缓存:启动 10s 后每 1.5s 一张灌进磁盘缓存(会话中期
-            // 空闲时,不挤启动)。随机建议的新条目图从未显示=从未入缓存,
-            // 下次启动轮到只能现场拉(会白卡);灌过则下次全命中。
+            // 全图慢速灌缓存
             property int _heroWarmIdx: 0
             Timer {
                 id: heroWarmStarter
@@ -645,18 +643,10 @@ Item {
                     }
                     const m = heroModel.get(heroCar._heroWarmIdx)
                     const id = m ? (m.backdropId || m.parentBackdropId || m.posterId || "") : ""
-                    heroWarmImg.source = id ? "image://emby/" + id : ""
+                    if (id)
+                        PosterProvider.warmDisk(id + "~w" + Constants.homeHeroBackdropW)
                     heroCar._heroWarmIdx++
                 }
-            }
-            Image {
-                id: heroWarmImg
-                visible: false
-                width: 0
-                height: 0
-                asynchronous: true
-                cache: true
-                // 缓存键 = 海报 id(与尺寸无关),无需对齐卡面尺寸。
             }
             // 只预载"下一张"卡图
             Image {
@@ -664,13 +654,13 @@ Item {
                 width: 0
                 height: 0
                 asynchronous: true
-                cache: true
+                cache: false
                 source: {
                     if (heroModel.count < 2)
                         return ""
                     const m = heroModel.get((heroPv.currentIndex + 2) % heroModel.count)
                     const id = m.backdropId || m.parentBackdropId || m.posterId || ""
-                    return id ? "image://emby/" + id : ""
+                    return id ? "image://emby/" + id + "~w" + Constants.homeHeroBackdropW : ""
                 }
                 // provider 图不设 sourceSize(恒回固定档,只污染缓存键);
                 // retainWhileLoading 防 source 重绑闪空。
@@ -941,8 +931,9 @@ Item {
         width: parent ? parent.width : 0
         // 视口门控:壳高由几何公式定死(与卡是否实例化无关),离屏行的
         // 卡片/海报不创建,内存与 ListView 按需持平;回滚经磁盘缓存快速重现。
-        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - pageList.height
-                                          && libRow.y < pageList.contentY + pageList.height * 2
+        // 带余量 = 上方半屏 + 下方 1 屏
+        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - pageList.height * 0.5
+                                          && libRow.y < pageList.contentY + pageList.height * 1.5
         // 标题贴近自身海报(下间距 < 与上一节的上间距)。
         spacing: Constants.homeRowTitleGap
 
@@ -1173,7 +1164,7 @@ Item {
                 source: {
                     const m = hcard.modelData
                     const id = m.backdropId || m.parentBackdropId || m.posterId || ""
-                    return id ? "image://emby/" + id : ""
+                    return id ? "image://emby/" + id + "~w" + Constants.homeHeroBackdropW : ""
                 }
                 fillMode: Image.PreserveAspectCrop
                 // 平滑缩放:mipmap 预滤波层级,降采样(窗口缩小/解码尺寸大于
@@ -1185,6 +1176,8 @@ Item {
                 // 重载),不设;mipmap 承担降采样质量。retainWhileLoading 防重绑闪空。
                 asynchronous: true
                 retainWhileLoading: true
+                // 大图(背景档)不进 QML 图片缓存
+                cache: false
             }
             // 玻璃信息条(仅中心卡):半透明 scrim + 顶部 1px 均匀细 rim
             Rectangle {

@@ -1,5 +1,8 @@
 #include <QDir>
 #include <QGuiApplication>
+#if defined(Q_OS_LINUX) && defined(__GLIBC__)
+#include <malloc.h>
+#endif
 #include <QLockFile>
 #include <QNetworkProxy>
 #include <QNetworkProxyFactory>
@@ -60,6 +63,14 @@ extern void qml_register_types_MoePlayer_Core();
 
 int main(int argc, char *argv[])
 {
+#if defined(Q_OS_LINUX) && defined(__GLIBC__)
+    // glibc 按线程开独立 arena(默认上限 8×核数),图像解码分撒到 20+ 池
+    // 线程后,各 arena 留存的释放块不归还 OS,是长跑进程 RSS 虚高的来源;
+    // 限 2 个收敛驻留。mallopt 须在解码池启动前;环境变量优先,便于回退。
+    if (!qEnvironmentVariableIsSet("MALLOC_ARENA_MAX"))
+        mallopt(M_ARENA_MAX, 2);
+#endif
+
     // 固定 OpenGL 场景图后端,须在 QGuiApplication 构造前设置。
     // Windows 例外:保持默认(D3D11)—— 强制桌面 GL 在部分 Windows 驱动上
     // 不稳,而 qsb 烘焙已含各 RHI 后端变体,D3D11 跑同一套着色器。

@@ -13,6 +13,9 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QPointer>
+#include <QSaveFile>
+#include <algorithm>
+#include <utility>
 #include <QQuickTextureFactory>
 #include <QRegularExpression>
 #include <QSemaphore>
@@ -27,31 +30,21 @@
 #include "core/constants.h"
 #include "core/embyclient.h"
 
-PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts,
-                               ConfigManager *config)
-    : m_client(client)
-    , m_accounts(accounts)
-    , m_config(config)
-{
-}
-
-QNetworkProxy PosterProvider::proxy() const
-{
-    return m_config ? m_config->proxyObject() : QNetworkProxy::NoProxy;
-}
 
 namespace {
 // 共享缓存设施(线程安全;缓存读写可能来自 GUI 或线程池线程):
-// - 内存层:解码后的 QImage,按缓存键 LRU 淘汰,上限 64MB;
+// - 内存层:解码后的 QImage,按缓存键 LRU 淘汰,上限 96MB;
 // - 磁盘层:CacheLocation/emby-images/<键哈希>.img,30 天 TTL;
-// - 回源闸:最多 6 张图同时回源。封面与 API 请求共用服务器连接,
+// - 回源闸:最多 16 张图同时回源。封面与 API 请求共用服务器连接,
 //   无闸时一屏几十张图同时拉取会挤占 JSON 请求带宽;缓存命中不占名额。
 QMutex g_memMutex;
-constexpr int kCacheMaxBytes = 192 * 1024 * 1024; // 内存缓存上限
+constexpr int kCacheMaxBytes = 96 * 1024 * 1024; // 内存缓存上限
 constexpr int kFetchConcurrency = 16; // 回源并发
 QCache<QString, QImage> g_memCache(kCacheMaxBytes);
 QSemaphore g_fetchGate(kFetchConcurrency);
 constexpr qint64 kCacheTtlMs = 30LL * 24 * 3600 * 1000;
+// 磁盘缓存总容量上限:超限时按 mtime 从最旧删起。
+constexpr qint64 kDiskCacheMaxBytes = 1024LL * 1024 * 1024; // 1GB
 
 QString cacheFilePath(const QString &key)
 {
@@ -82,6 +75,29 @@ void deliver(const QPointer<PosterResponse> &self, const QImage &img, const QStr
                                   Q_ARG(QImage, img), Q_ARG(QString, err));
 }
 
+
+// 回源字节只写盘,不解码、不进内存缓存
+class WarmTask : public QRunnable
+{
+public:
+    WarmTask(const QUrl &url, const QString &token, const QNetworkProxy &proxy,
+             const QString &idKey)
+        : m_url(url), m_token(token), m_proxy(proxy), m_idKey(idKey)
+    {
+    }
+    void run() override
+    {
+        const QByteArray data = PosterProvider::fetchNetworkBytes(m_url, m_token, nullptr, m_proxy);
+        if (!data.isEmpty())
+            PosterProvider::writeDisk(m_idKey, data);
+    }
+
+private:
+    QUrl m_url;
+    QString m_token;
+    QNetworkProxy m_proxy;
+    QString m_idKey;
+};
 
 class NetTask : public QRunnable
 {
@@ -133,14 +149,87 @@ private:
 };
 } // namespace
 
-bool PosterProvider::isCached(const QString &id) const
+PosterProvider::PosterProvider(EmbyClient *client, AccountManager *accounts,
+                               ConfigManager *config)
+    : m_client(client)
+    , m_accounts(accounts)
+    , m_config(config)
 {
+    diskPool().start([] { pruneDiskCache(); });
+}
+
+
+QNetworkProxy PosterProvider::proxy() const
+{
+    return m_config ? m_config->proxyObject() : QNetworkProxy::NoProxy;
+}
+
+
+void PosterProvider::warmDisk(const QString &id)
+{
+    QString base = QString(id).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
+    int widthOverride = 0;
+    const QRegularExpression wRx(QStringLiteral("~w(\\d+)$"));
+    const auto wm = wRx.match(base);
+    if (wm.hasMatch()) {
+        widthOverride = wm.captured(1).toInt();
+        base.chop(wm.capturedLength());
+    }
+    QString serverUrl, token, userId, itemId, tag, kind;
+    if (!resolveImageId(base, &serverUrl, &token, &userId, &itemId, &tag, &kind))
+        return;
+    // 键与 requestImageResponse 同源(统一走 cacheKeyFor)。
+    const QString ckey = cacheKeyFor(id);
     {
         QMutexLocker locker(&g_memMutex);
-        if (g_memCache.contains(id))
+        if (g_memCache.contains(ckey))
+            return;
+    }
+    const QFileInfo fi(cacheFilePath(ckey));
+    if (fi.exists() && fi.lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs)
+        return;
+    netPool().start(new WarmTask(imageUrl(m_accounts->activeUrlFor(serverUrl, userId),
+                                          itemId, tag, kind, QSize(), widthOverride),
+                                 token, proxy(), ckey));
+}
+
+// 磁盘缓存淘汰:过期(TTL)先删,再按容量上限从最旧删起。
+void PosterProvider::pruneDiskCache()
+{
+    const QDir dir(AppPaths::cacheDir() + QStringLiteral("/emby-images"));
+    const QDateTime now = QDateTime::currentDateTime();
+    qint64 total = 0;
+    QList<QFileInfo> alive;
+    const auto entries = dir.entryInfoList({QStringLiteral("*.img")}, QDir::Files);
+    for (const auto &fi : entries) {
+        if (fi.lastModified().msecsTo(now) >= kCacheTtlMs) {
+            QFile::remove(fi.absoluteFilePath());
+            continue;
+        }
+        alive.append(fi);
+        total += fi.size();
+    }
+    // 旧→新排序,超限从最旧删起(LRU 近似:mtime = 最近写入/回源时间)。
+    std::sort(alive.begin(), alive.end(), [](const QFileInfo &a, const QFileInfo &b) {
+        return a.lastModified() < b.lastModified();
+    });
+    for (const auto &fi : std::as_const(alive)) {
+        if (total <= kDiskCacheMaxBytes)
+            break;
+        total -= fi.size();
+        QFile::remove(fi.absoluteFilePath());
+    }
+}
+
+bool PosterProvider::isCached(const QString &id) const
+{
+    const QString ckey = cacheKeyFor(id);
+    {
+        QMutexLocker locker(&g_memMutex);
+        if (g_memCache.contains(ckey))
             return true;
     }
-    const QFileInfo fi(cacheFilePath(id));
+    const QFileInfo fi(cacheFilePath(ckey));
     // 不存在文件的 lastModified 无效:msecsTo 对无效日期返 0,0 < TTL 恒真
     // —— 必须先 exists 判定。
     return fi.exists() && fi.lastModified().msecsTo(QDateTime::currentDateTime()) < kCacheTtlMs;
@@ -150,7 +239,14 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
                                                           const QSize &requestedSize)
 {
     Q_UNUSED(requestedSize)
-    const QString base = QString(id).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
+    QString base = QString(id).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
+    int widthOverride = 0;
+    const QRegularExpression wRx(QStringLiteral("~w(\\d+)$"));
+    const auto wm = wRx.match(base);
+    if (wm.hasMatch()) {
+        widthOverride = wm.captured(1).toInt();
+        base.chop(wm.capturedLength());
+    }
     QString serverUrl, token, userId, itemId, tag, kind;
     if (!resolveImageId(base, &serverUrl, &token, &userId, &itemId, &tag, &kind)) {
         qWarning().noquote() << "Poster: 图片地址无效" << id;
@@ -159,13 +255,11 @@ QQuickImageResponse *PosterProvider::requestImageResponse(const QString &id,
     // 多线路:取图走当前线路(activeUrlFor 收口;userId 为解析阶段同账号
     // 凭据,同服多账号不串)。
     const QUrl url = imageUrl(m_accounts->activeUrlFor(serverUrl, userId),
-                              itemId, tag, kind, requestedSize);
+                              itemId, tag, kind, requestedSize, widthOverride);
     // 内存命中:轻量查询(GUI 线程,互斥保护),命中即完成,不启动后台任务。
     // 键 = 海报 id(与 loadImageSync 同源);Backdrop 拼请求档位——档位
     // 可配,改档后旧档缓存成孤儿按 TTL 自弃,不会因键复用顶住新档。
-    const QString ckey = kind == QLatin1String("Backdrop")
-                         ? base + QStringLiteral("~w") + backdropTier()
-                         : base;
+    const QString ckey = cacheKeyFor(id);
     {
         QMutexLocker locker(&g_memMutex);
         if (g_memCache.contains(ckey)) {
@@ -244,6 +338,26 @@ QUrl PosterProvider::resolvedImageUrl(const QString &id, QString *token) const
     return imageUrl(m_accounts->activeUrlFor(serverUrl, userId), itemId, tag, kind);
 }
 
+QString PosterProvider::cacheKeyFor(const QString &id) const
+{
+    QString base = QString(id).remove(QRegularExpression(QStringLiteral("~r\\d+$")));
+    int widthOverride = 0;
+    const QRegularExpression wRx(QStringLiteral("~w(\\d+)$"));
+    const auto wm = wRx.match(base);
+    if (wm.hasMatch()) {
+        widthOverride = wm.captured(1).toInt();
+        base.chop(wm.capturedLength());
+    }
+    QString serverUrl, token, userId, itemId, tag, kind;
+    if (!resolveImageId(base, &serverUrl, &token, &userId, &itemId, &tag, &kind))
+        return base;
+    if (widthOverride > 0)
+        return base + QStringLiteral("~w") + QString::number(widthOverride);
+    if (kind == QLatin1String("Backdrop"))
+        return base + QStringLiteral("~w") + backdropTier();
+    return base;
+}
+
 QString PosterProvider::backdropTier() const
 {
     if (m_config)
@@ -253,7 +367,7 @@ QString PosterProvider::backdropTier() const
 
 QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
                               const QString &tag, const QString &kind,
-                              const QSize &requestedSize) const
+                              const QSize &requestedSize, int maxWidthOverride) const
 {
     Q_UNUSED(requestedSize)
     // 固定厚档请求(服务器缩放并缓存缩略图,Emby 官方"web 客户端"行为):
@@ -265,16 +379,36 @@ QUrl PosterProvider::imageUrl(const QString &serverUrl, const QString &itemId,
     QUrlQuery q;
     if (kind == QLatin1String("Backdrop")) {
         // 档位可配(设置「详情页」背景图清晰度);original = 不带 maxWidth 拉原图。
-        const QString tier = backdropTier();
+        const QString tier = maxWidthOverride > 0 ? QString::number(maxWidthOverride)
+                                                  : backdropTier();
         if (tier != QLatin1String("original"))
             q.addQueryItem(QStringLiteral("maxWidth"), tier);
     } else {
-        q.addQueryItem(QStringLiteral("maxWidth"), QString::number(MoePlayer::kPosterMaxWidth));
+        // 覆盖优先(列表卡按显示宽度 2× 取档),缺省走常量档。
+        q.addQueryItem(QStringLiteral("maxWidth"),
+                       QString::number(maxWidthOverride > 0 ? maxWidthOverride
+                                                            : MoePlayer::kPosterMaxWidth));
     }
     if (!tag.isEmpty())
         q.addQueryItem(QStringLiteral("tag"), tag);
     return QUrl(serverUrl + QStringLiteral("/Items/%1/Images/%2?%3")
                                    .arg(itemId, kind, q.toString()));
+}
+
+// 磁盘写
+void PosterProvider::writeDisk(const QString &key, const QByteArray &data)
+{
+    const QString path = cacheFilePath(key);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    // QSaveFile:临时文件 + rename 原子替换
+    QSaveFile f(path);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write(data);
+        if (!f.commit())
+            qDebug().noquote() << "Poster: 磁盘缓存提交失败(忽略)" << path << f.errorString();
+    } else {
+        qDebug().noquote() << "Poster: 磁盘缓存写入失败(忽略)" << path << f.errorString();
+    }
 }
 
 // 磁盘层(TTL 内):读文件解码,回填内存层;未命中/失败返回空图。
@@ -299,15 +433,12 @@ QImage PosterProvider::loadDisk(const QString &idKey)
     return img;
 }
 
-// 网络回源(并发闸 + 超时 + 一次传输重试),成功写磁盘与内存缓存。
-QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QString *error,
-                                    const QNetworkProxy &proxy, const QString &idKey)
+// 网络回源(并发闸 + 超时 + 一次传输重试),成功返回原始字节。
+QByteArray PosterProvider::fetchNetworkBytes(const QUrl &url, const QString &token,
+                                             QString *error, const QNetworkProxy &proxy)
 {
-    // 缓存键 = 海报 id(accountId~itemId~tag~kind,不可变身份)
-    const QString key = idKey.isEmpty() ? url.toString() : idKey;
     if (error)
         error->clear();
-    const QString path = cacheFilePath(key);
     // 占闸(后台阻塞无碍);thread_local QNAM —— 栈对象会让每张
     // 图付全额 TCP+TLS 握手、零连接复用;
     // 线程池线程长寿,复用自然建立,且不破线程亲和。
@@ -349,16 +480,27 @@ QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QStri
     // 注意:某些远程响应的 error()==NoError 但 errorString() 非空(如
     // "未知错误"),成功响应不得据此判失败——仅在 !ok 时填 error。
     const QByteArray data = ok ? reply->readAll() : QByteArray();
-    if (!ok && error)
-        *error = reply->errorString();
-    reply->deleteLater();
-    g_fetchGate.release();
     if (!ok) {
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        if (error)
+            *error = reply->errorString();
         qWarning().noquote() << "Poster: 图片回源失败" << url.toString()
                              << reply->errorString() << "HTTP" << status;
-        return QImage();
     }
+    reply->deleteLater();
+    g_fetchGate.release();
+    return data;
+}
+
+// 网络回源(并发闸 + 超时 + 一次传输重试),成功写磁盘与内存缓存。
+QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QString *error,
+                                    const QNetworkProxy &proxy, const QString &idKey)
+{
+    // 缓存键 = 海报 id(accountId~itemId~tag~kind,不可变身份)
+    const QString key = idKey.isEmpty() ? url.toString() : idKey;
+    const QByteArray data = fetchNetworkBytes(url, token, error, proxy);
+    if (data.isEmpty())
+        return QImage();
     QImage img;
     if (!img.loadFromData(data)) {
         qWarning().noquote() << "Poster: 图片解码失败(非图片数据?)" << url.toString()
@@ -367,13 +509,7 @@ QImage PosterProvider::fetchNetwork(const QUrl &url, const QString &token, QStri
             *error = QStringLiteral("图片解码失败");
         return QImage();
     }
-    // 回填磁盘与内存(写失败不算错:缓存只是优化)。
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QFile f(path);
-    if (f.open(QIODevice::WriteOnly))
-        f.write(data);
-    else
-        qDebug().noquote() << "Poster: 磁盘缓存写入失败(忽略)" << path << f.errorString();
+    writeDisk(key, data);
     {
         QMutexLocker locker(&g_memMutex);
         g_memCache.insert(key, new QImage(img), img.sizeInBytes());
