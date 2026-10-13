@@ -361,7 +361,7 @@ ApplicationWindow {
     }
 
     // 打开详情页:记录浏览服务器与账号(全局搜索路由),防抖在调用方。
-    function pushDetail(itemId, posterId, title, serverUrl, accountId) {
+    function pushDetail(itemId, posterId, title, serverUrl, accountId, fromSearch) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
         if (accountId)
@@ -372,7 +372,13 @@ ApplicationWindow {
             posterId: posterId,
             title: title,
             serverUrl: serverUrl || root.currentServerUrl,
-            accountId: accountId || root.currentAccountId
+            accountId: accountId || root.currentAccountId,
+            fromSearch: fromSearch === true
+        }
+        const cur = stackView.currentItem
+        if (fromSearch === true && cur && cur.fromSearch === true) {
+            stackView.replace(cur, detailPage, props)
+            return
         }
         if (stackView.depth > 8)
             stackView.replace(detailPage, props)
@@ -572,8 +578,9 @@ ApplicationWindow {
         onShowDetail: function (itemId, posterId, title, serverUrl, accountId) {
             searchOverlay.close()
             // 聚合搜索:结果来自多账号,必须带结果所属账号(单服时为空,
-            // 回退当前账号)。
-            root.pushDetail(itemId, posterId, title, serverUrl, accountId || root.currentAccountId)
+            // 回退当前账号)。fromSearch 标记供返回时自动重开浮窗。
+            root.pushDetail(itemId, posterId, title, serverUrl, accountId || root.currentAccountId,
+                            true)
         }
     }
     // 设置浮层(Ctrl+, / 首页设置按钮):左分类右设置项的两级面板。
@@ -988,8 +995,14 @@ ApplicationWindow {
         const cur = stackView.currentItem
         if (cur && typeof cur.goBack === "function" && cur.goBack())
             return;
-        if (stackView.depth > 1)
+        if (stackView.depth > 1) {
+            // 搜索来源的详情页:退栈即回搜索现场(浮窗状态全程保留),
+            // 「点错返回重选」不需要手动重开。
+            const fromSearch = cur && cur.fromSearch === true
             stackView.pop();
+            if (fromSearch)
+                searchOverlay.open()
+        }
     }
 
     // 快捷键:键位可在设置「快捷键」分类改(config.toml [shortcut] 段),

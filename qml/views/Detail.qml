@@ -19,6 +19,8 @@ Item {
     property string serverUrl: ""
     // 浏览用账号 id(主窗口导航时注入)。
     property string accountId: ""
+    // 本页由搜索结果推入(返回时 Main 据此自动重开搜索浮窗继续选)。
+    property bool fromSearch: false
 
     // 跨条目导航走真栈页(Main.pushDetail):返回 = 自然逐级退栈;
     // 页内替换仅剩选集条同剧换集(轻替换,无历史)。
