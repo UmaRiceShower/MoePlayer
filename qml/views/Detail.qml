@@ -338,6 +338,9 @@ Item {
                               root.itemId, played, 0, played ? 100 : 0)
         // 本地同步已看状态(按钮即时反馈;服务器为准,下次重拉校正)。
         root.detail = Object.assign({}, root.detail, { played: played })
+        // 列表模型同步翻牌(选集条徽标/库网格/搜索结果即时反映)。
+        EmbyClient.patchLocalUserData(root.serverUrl, root.accountId,
+                                      root.itemId, played, 0)
     }
 
     // ---- 原地替换(切集/相似推荐/返回恢复):更新自身 id 触发

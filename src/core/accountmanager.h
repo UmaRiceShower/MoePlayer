@@ -316,6 +316,10 @@ const QString &accountId) const;
     QVariantMap m_pending;
     // 首页聚合状态(见 fetchHomeRows)。
     QVariantList m_homeRows;
+    // 播放状态落账到首页行:命中行(含 byKey 真源与快照)整行重建写回。
+    // 返回是否有命中(无命中不触发模型重排)。
+    bool patchHomeRows(const QString &accountId, const QString &itemId,
+                       bool played, double positionTicks);
     // 首页聚合行模型(QML 渲染按行增量;m_homeRows 为快照,供缓存/语义比较)。
     ConfigManager *m_config = nullptr;
     HomeRowsModel *m_homeRowsModel = nullptr;

@@ -386,6 +386,9 @@ void EmbyClient::patchLocalUserData(const QString &serverUrl, const QString &acc
     };
     patchAll(m_episodesModels);
     patchAll(m_allEpisodesModels);
+    // 库页网格与搜索结果同键前缀,一并就地翻牌(返回这些列表不重拉)。
+    patchAll(m_itemsModels);
+    patchAll(m_searchModels);
 }
 
 void EmbyClient::postJson(const QString &serverUrl, const QString &token, const QString &userId,

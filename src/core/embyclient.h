@@ -45,8 +45,8 @@ public:
     Q_INVOKABLE MediaItemModel *itemsModelFor(const QString &serverUrl, const QString &accountId);
     Q_INVOKABLE MediaItemModel *seasonsModelFor(const QString &serverUrl, const QString &accountId,
                                                 const QString &seriesId);
-    void patchLocalUserData(const QString &serverUrl, const QString &accountId,
-                            const QString &itemId, bool played, double positionTicks);
+    Q_INVOKABLE void patchLocalUserData(const QString &serverUrl, const QString &accountId,
+                                        const QString &itemId, bool played, double positionTicks);
     Q_INVOKABLE MediaItemModel *episodesModelFor(const QString &serverUrl, const QString &accountId,
                                                  const QString &seasonId);
     Q_INVOKABLE MediaItemModel *searchModelFor(const QString &serverUrl,

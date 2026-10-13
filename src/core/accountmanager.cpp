@@ -1424,6 +1424,48 @@ void AccountManager::applyLocalPlaybackState(const QString &serverUrl, const QSt
                                          QDateTime::currentMSecsSinceEpoch(),
                                          positionTicks, played);
     m_historyFlushTimer.start();
+    // 首页行同步:行角标/进度/继续观看候选即时反映,不整页重拉。
+    if (patchHomeRows(accountId, itemId, played, positionTicks)) {
+        m_homeRowsModel->setRows(visibleHomeRows());
+        rebuildCustomHomeRows(false);
+        emit homeRowsReady();
+    }
+}
+
+bool AccountManager::patchHomeRows(const QString &accountId, const QString &itemId,
+                                   bool played, double positionTicks)
+{
+    bool hit = false;
+    for (auto it = m_homeRowByKey.begin(); it != m_homeRowByKey.end(); ++it) {
+        if (!it.key().startsWith(accountId + QLatin1Char('|')))
+            continue;
+        QVariantMap row = it.value();
+        QVariantList items = row.value(QStringLiteral("items")).toList();
+        bool rowHit = false;
+        for (int i = 0; i < items.size(); ++i) {
+            QVariantMap item = items[i].toMap();
+            if (item.value(QStringLiteral("id")).toString() != itemId)
+                continue;
+            item.insert(QStringLiteral("played"), played);
+            item.insert(QStringLiteral("positionTicks"), positionTicks);
+            items[i] = item;
+            rowHit = true;
+        }
+        if (!rowHit)
+            continue;
+        row.insert(QStringLiteral("items"), items);
+        it.value() = row;
+        for (auto &snap : m_homeRows) {
+            const QVariantMap s = snap.toMap();
+            if (s.value(QStringLiteral("accountId")).toString() + QLatin1Char('|')
+                    + s.value(QStringLiteral("viewId")).toString() == it.key()) {
+                snap = row;
+                break;
+            }
+        }
+        hit = true;
+    }
+    return hit;
 }
 
 void AccountManager::refreshHistoryItem(const QString &serverUrl, const QString &accountId,
