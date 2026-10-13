@@ -151,7 +151,22 @@ Window {
         _prevSpeed = video.speed
         MpvClient.command(["osd-auto", "set", "speed", String(next)], root.sessionKey)
     }
+    // 断流重试状态(MpvClient.retryStateChanged):重试期间播放列表已清空,
+    // 换集类操作作用于空表无效——禁用并显示常驻横幅。
+    property bool retrying: false
+    property int retryCount: 0
+    Connections {
+        target: MpvClient
+        function onRetryStateChanged(sessionKey, active, count) {
+            if (sessionKey === root.sessionKey) {
+                root.retrying = active
+                root.retryCount = count
+            }
+        }
+    }
     function episodeJump(delta) {
+        if (root.retrying)
+            return // 重试期播放列表已清空,跳集无效
         // 播放列表跳集:占位条目经 on_load hook 协商真实地址(连播链路)。
         // 会话键必须带账号前缀(与所有控制调用一致),裸 itemId 查无会话。
         MpvClient.command([delta > 0 ? "playlist-next" : "playlist-prev"],
@@ -331,6 +346,24 @@ Window {
                 root.togglePause() // 撤销单击的切换,暂停态净不变
             _clickToggled = false
             root.toggleFullscreen()
+        }
+    }
+
+    // 断流重试常驻横幅
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 48
+        width: retryText.implicitWidth + 36
+        height: retryText.implicitHeight + 16
+        radius: 9
+        color: Qt.rgba(0, 0, 0, 0.72)
+        visible: root.retrying
+        Text {
+            id: retryText
+            anchors.centerIn: parent
+            color: "white"
+            text: "网络中断,重连中(第 " + root.retryCount + " 次)…网络恢复后自动继续"
         }
     }
 
@@ -643,6 +676,8 @@ Window {
                     spacing: 2
 
                     IconBtn {
+                        enabled: !root.retrying
+                        opacity: enabled ? 1.0 : 0.35
                         icon.source: "qrc:/icons/prev.svg"
                         icon.color: "white"
                         icon.width: 20
@@ -658,6 +693,8 @@ Window {
                         onClicked: root.togglePause()
                     }
                     IconBtn {
+                        enabled: !root.retrying
+                        opacity: enabled ? 1.0 : 0.35
                         icon.source: "qrc:/icons/next.svg"
                         icon.color: "white"
                         icon.width: 20
@@ -932,7 +969,7 @@ Window {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            if (ep && ep.id)
+                            if (ep && ep.id && !root.retrying)
                                 MpvClient.playEpisode(root.sessionKey, ep.id)
                         }
                     }

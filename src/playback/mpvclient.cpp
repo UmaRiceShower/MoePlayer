@@ -433,6 +433,36 @@ MpvClient::Session *MpvClient::createSession(const QString &key)
     s->key = key;
     m_sessions.insert(key, s);
     m_active = s;
+    // 播放停摆看门狗
+    if (embeddedPreferred()) {
+        s->stallTimer = new QTimer(this);
+        s->stallTimer->setInterval(5000);
+        connect(s->stallTimer, &QTimer::timeout, this, [this, key]() {
+            Session *s = sessionFor(key);
+            if (!s || !s->loadIssued || s->ended || s->paused || s->bufferingCache
+                || (s->retryTimer && s->retryTimer->isActive())) {
+                if (s) {
+                    s->stallLastPos = -1.0;
+                    s->stallCount = 0;
+                }
+                return;
+            }
+            if (s->stallLastPos >= 0.0 && qAbs(s->position - s->stallLastPos) < 0.5) {
+                if (++s->stallCount >= 3) {
+                    qWarning() << "MpvClient: 播放停摆(time-pos 15s 无进展),按断流重连"
+                               << key;
+                    s->stallCount = 0;
+                    s->stallLastPos = -1.0;
+                    scheduleRetry(s);
+                    return;
+                }
+            } else {
+                s->stallCount = 0;
+            }
+            s->stallLastPos = s->position;
+        });
+        s->stallTimer->start();
+    }
     return s;
 }
 
@@ -549,14 +579,15 @@ void MpvClient::scheduleRetry(Session *s)
     const bool slow = s->retryCount >= fastCount;
     const int delayMs = slow ? kSlowRetryDelayMs : kFastRetryDelaysMs[s->retryCount];
     ++s->retryCount;
-    // OSD 提示:让用户看出是"在重连"而非卡死;慢速阶段说明恢复方式。
+    // OSD 提示覆盖整个等待期(每次重试重发)
     sendJson(s, QJsonObject{
                     {QStringLiteral("command"),
                      QJsonArray{QStringLiteral("show-text"),
                                 slow ? QStringLiteral("网络中断,持续重连中(网络恢复后自动继续)")
                                      : QStringLiteral("网络中断,正在重连…"),
-                                3000}},
+                                delayMs + 3000}},
                 });
+    emit retryStateChanged(s->key, true, s->retryCount);
     qWarning() << "MpvClient: 加载失败,第" << s->retryCount << "次重试,延迟" << delayMs
                << "ms 条目" << s->retryIndex << s->key;
     if (!s->retryTimer) {
@@ -1127,6 +1158,8 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             s->duration = data.isDouble() ? data.toDouble() : s->duration;
             if (data.isDouble() && data.toDouble() > 0.0)
                 s->lastGoodDuration = data.toDouble();
+        } else if (name == QLatin1String("paused-for-cache")) {
+            s->bufferingCache = data.isBool() ? data.toBool() : s->bufferingCache;
         } else if (name == QLatin1String("playlist-pos")) {
             // 换集归位:占位集此时尚在协商(episodeMeta 空,幂等跳过,
             // file-loaded 的 pendingFileId 兜底);预加载集 meta 已在,同步换。
@@ -1152,6 +1185,7 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         s->eofPos = -1;
         s->loadIssued = true;
         qInfo() << "MpvClient: file-loaded" << s->meta.value(QStringLiteral("itemId")).toString();
+        emit retryStateChanged(s->key, false, 0);
         if (s->retryCount > 0) {
             // 落点校验:end-file 后 mpv 会立即推进下一条目,重试期间加载
             // 成功的未必是失败集——进度只能 seek 回失败集,错位则重新调度。
@@ -1842,6 +1876,10 @@ void MpvClient::destroySession(Session *s)
     if (s->retryTimer) {
         s->retryTimer->stop();
         s->retryTimer->deleteLater();
+    }
+    if (s->stallTimer) {
+        s->stallTimer->stop();
+        s->stallTimer->deleteLater();
     }
     if (s->sock) {
         // 断开捕获 Session* 的 lambda,避免删除后再触发。

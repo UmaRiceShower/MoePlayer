@@ -159,6 +159,8 @@ signals:
     void episodeFinished(const QString &sessionKey, const QString &itemId);
     // 会话内切集成功(switchToEpisode);PlayerWindow 据此抬窗。
     void episodeSwitched(const QString &sessionKey);
+    // 断流重试状态(开始/结束):PlayerWindow 据此显示常驻横幅并禁用换集控件。
+    void retryStateChanged(const QString &sessionKey, bool retrying, int count);
 
 private:
     struct Session
@@ -210,6 +212,11 @@ private:
         int failedEntryId = -1;
         QString retryItemId; // 失败条目的集 id:重试恢复时校验 file-loaded 落点
         QTimer *retryTimer = nullptr;
+        // 播放停摆看门狗
+        QTimer *stallTimer = nullptr;
+        double stallLastPos = -1.0;
+        int stallCount = 0;
+        bool bufferingCache = false;
         // 提前 EOF 判据快照:换集/拆链时属性观察会复位成 nil/0,end-file
         // 处理若读 live 值会把断流误判成"播完"。取最后一次有效观察。
         double lastGoodPos = 0.0;

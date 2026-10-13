@@ -349,6 +349,9 @@ ApplicationWindow {
                     const w = root._wantedUrls[itemId]
                     delete root._wantedUrls[itemId]
                     MpvClient.deliverEpisodeUrl(w.session, itemId, "", [], {})
+                    // mpv 会跳过加载失败的条目——提示跳集,别让标题静默跳变。
+                    MpvClient.command(["show-text", "该集加载失败,已跳过", "4000"],
+                                      w.session)
                 }
             } else {
                 MpvClient.fail(itemId, message)
