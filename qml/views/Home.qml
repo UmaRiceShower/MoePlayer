@@ -671,6 +671,7 @@ Item {
                 interval: Constants.homeHeroTimerMs
                 repeat: true
                 running: heroModel.count > 1 && !root.heroHovered
+                         && root.StackView.status === StackView.Active
                 onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
             }
             // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
