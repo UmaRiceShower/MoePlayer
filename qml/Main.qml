@@ -808,6 +808,10 @@ ApplicationWindow {
         Detail {
             onPlayWindowRequested: function (meta) {
                 root._playAccountId = meta.accountId || ""
+                if (meta.seriesId && meta.seriesId !== ""
+                    && MpvClient.switchToEpisode(root._playAccountId, meta.seriesId,
+                                                 meta.itemId))
+                    return
                 MpvClient.startPending(meta)
             }
             onPlaybackDelivered: function (url, headers, meta) {

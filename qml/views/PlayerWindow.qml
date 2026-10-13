@@ -37,6 +37,16 @@ Window {
     // currentItemId(换集后变)只做展示与选集定位。
     readonly property string sessionKey: (meta.accountId ? meta.accountId + "|" : "")
                                          + (meta.itemId || "")
+    Connections {
+        target: MpvClient
+        function onEpisodeSwitched(sessionKey) {
+            if (sessionKey === root.sessionKey) {
+                root.show()
+                root.raise()
+                root.requestActivate()
+            }
+        }
+    }
     function episodeInfo() {
         const sid = meta.serverUrl || ""
         if (sid === "")

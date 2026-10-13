@@ -207,6 +207,25 @@ void MpvClient::setEmbeddedOutputSize(const QString &itemId, double w, double h)
         requestSuperResState(s);
 }
 
+bool MpvClient::switchToEpisode(const QString &accountId, const QString &seriesId,
+                                const QString &itemId)
+{
+    for (auto it = m_sessions.constBegin(); it != m_sessions.constEnd(); ++it) {
+        Session *s = it.value();
+        if (s->meta.value(QStringLiteral("accountId")).toString() != accountId)
+            continue;
+        if (s->meta.value(QStringLiteral("seriesId")).toString() != seriesId)
+            continue;
+        if (!s->playlistIds.contains(itemId))
+            continue;
+        qInfo() << "MpvClient: 同剧换集走会话内切集" << it.key() << itemId;
+        playEpisode(it.key(), itemId);
+        emit episodeSwitched(it.key());
+        return true;
+    }
+    return false;
+}
+
 void MpvClient::playEpisode(const QString &itemId, const QString &episodeId)
 {
     Session *s = itemId.isEmpty() ? m_active : sessionFor(itemId);

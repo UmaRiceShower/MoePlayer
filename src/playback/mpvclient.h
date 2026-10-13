@@ -129,6 +129,9 @@ public:
     // 直跳选集:episodeId 须在本次 setEpisodeList 的播放列表内(旋转序
     // 已存,内部映射成 playlist-play-index)。
     Q_INVOKABLE void playEpisode(const QString &itemId, const QString &episodeId);
+    // 同剧换集
+    Q_INVOKABLE bool switchToEpisode(const QString &accountId, const QString &seriesId,
+                                     const QString &itemId);
     // 内嵌渲染输出尺寸(libmpv 无 osd-dimensions 概念,超分门槛判定用
     // 渲染目标尺寸;PlayerWindow 尺寸变化时上报)。
     Q_INVOKABLE void setEmbeddedOutputSize(const QString &itemId, double w, double h);
@@ -154,6 +157,8 @@ signals:
     void playbackFinished(const QString &sessionKey, const QString &itemId, bool error,
                          double positionSec, double durationSec);
     void episodeFinished(const QString &sessionKey, const QString &itemId);
+    // 会话内切集成功(switchToEpisode);PlayerWindow 据此抬窗。
+    void episodeSwitched(const QString &sessionKey);
 
 private:
     struct Session
