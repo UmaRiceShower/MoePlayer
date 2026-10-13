@@ -27,6 +27,8 @@ Item {
     property string accountId: ""
     // 上次离开时的浏览状态(viewId/排序/滚动位置),恢复用。
     property var restore: null
+    // 入口解析结果(onCompleted 算一次)
+    property string _resolvedViewId: ""
     // 首屏数据就绪后要恢复的滚动位置(恢复时 onItemsReceived 消费一次)。
     property real pendingRestoreY: 0
 
@@ -677,21 +679,27 @@ Item {
             // fetchPage(置 busy 保持)或 onErrorOccurred 负责。
             root.busy = true
             EmbyClient.fetchViews(root.serverUrl, root.accountId, c.token, c.userId)
-            if (root.restore && root.restore.viewId !== "") {
+            // 显式入口意图优先
+            const r = root.restore
+            const explicitEntry = root.initialViewId !== ""
+            const restoreApplies = r && r.viewId !== ""
+                                   && (!explicitEntry || r.viewId === root.initialViewId)
+            root._resolvedViewId = explicitEntry ? root.initialViewId
+                                                 : (r ? r.viewId : "")
+            if (restoreApplies) {
                 // 恢复上次浏览状态:视图/排序/滚动位置,重拉后定位。
-                root.currentSortBy = root.restore.sortBy
-                root.currentSortOrder = root.restore.sortOrder
+                root.currentSortBy = r.sortBy
+                root.currentSortOrder = r.sortOrder
                 for (let i = 0; i < sortOptions.count; ++i) {
-                    if (sortOptions.get(i).key === root.restore.sortBy) {
+                    if (sortOptions.get(i).key === r.sortBy) {
                         sortSelector.currentIndex = i
                         break
                     }
                 }
-                root.pendingRestoreY = root.restore.contentY || 0
-                root.applyView(root.restore.viewId)
+                root.pendingRestoreY = r.contentY || 0
             } else {
-                // 无恢复状态:按配置默认排序(非默认值时下拉须同步到对应档位)。
-                root.applyView(root.initialViewId)
+                // 无恢复状态(或换了库):按配置默认排序(非默认值时下拉须
+                // 同步到对应档位)。
                 for (let i = 0; i < sortOptions.count; ++i) {
                     if (sortOptions.get(i).key === root.currentSortBy) {
                         sortSelector.currentIndex = i
@@ -699,6 +707,7 @@ Item {
                     }
                 }
             }
+            root.applyView(root._resolvedViewId)
         } else {
             // 无账号/凭据失效:页面不可浏览,账号由主界面(ServerManager)管理,
             // 此处无直连表单(旧框架残留已移除)。
@@ -1398,8 +1407,9 @@ Item {
         function onViewsReceived(serverUrl, accountId) {
             if (serverUrl !== root.serverUrl || accountId !== root.accountId)
                 return
-            if (root.vm && root.vm.count > 0)
-                root.applyView(root.initialViewId)
+            // 仅补首落地(currentViewId 仍空):已落地的不再重应用
+            if (root.vm && root.vm.count > 0 && root.currentViewId === "")
+                root.applyView(root._resolvedViewId)
             // 注意:此处不设 busy=false——applyView → reloadAll → fetchPage
             // 已置 busy=true,由 onItemsReceived/onErrorOccurred 清除;
             // 曾在此清空导致加载期间 busy=false 误显"暂无条目"。
