@@ -452,8 +452,18 @@ Item {
     }
     // 数据落地:赋值 detail 并拉选集/推荐。
     function applyDetail(d) {
+        // 同条目静默重拉(播放后刷新)保留用户已选的版本/音轨/字幕/跨服源;
+        // 换条目(切集/相似推荐,旧 detail.id ≠ 新 id)才重置为服务器默认。
+        const prev = (root.detail && root.detail.id && root.detail.id === d.id) ? {
+            "sourceKey": root.selSource ? root.selSource.key : "",
+            "msId": root.selMediaSourceId,
+            "audio": root.selAudioIndex,
+            "sub": root.selSubtitleIndex
+        } : null
         root.detail = d
         root.resetPlaybackSelection()
+        if (prev)
+            root._restorePlaybackSelection(prev)
         root.isFavorite = d.isFavorite
         // 海报莫奈取色(背景渐变顶色);幂等,后台线程执行,完成后淡入。
         // detail.posterId 为权威(带服务器前缀),缺省回退 push 参数。
@@ -842,6 +852,46 @@ Item {
         // 有轨选服务器默认轨(具体轨);无轨回「默认」(-1,仅此时显示"默认")。
         root.selAudioIndex = root.defaultTrackIndex("Audio", v ? (v.defaultAudioStreamIndex ?? -1) : -1)
         root.selSubtitleIndex = root.defaultTrackIndex("Subtitle", v ? (v.defaultSubtitleStreamIndex ?? -1) : -1)
+    }
+    // 同条目静默重拉后的选择恢复(applyDetail 调用):跨服源按 key、本服
+    // 版本按 id,仍存在才恢复;轨道按 index 校验,消失回该源默认轨
+    function _restorePlaybackSelection(prev) {
+        if (prev.sourceKey !== "") {
+            const es = root.crossSourceEntries()
+            for (const e of es) {
+                if (e.key === prev.sourceKey) {
+                    root.selSource = e
+                    break
+                }
+            }
+        }
+        if (root.selSource) {
+            const v = root.selSource.version
+            root.selMediaSourceId = v ? v.id : ""
+        } else {
+            const ms = root.detail.mediaSources || []
+            for (const m of ms) {
+                if (m.id === prev.msId) {
+                    root.selMediaSourceId = m.id
+                    break
+                }
+            }
+        }
+        root.selAudioIndex = root._clampTrackIndex("Audio", prev.audio)
+        root.selSubtitleIndex = root._clampTrackIndex("Subtitle", prev.sub)
+    }
+    function _clampTrackIndex(kind, want) {
+        if (want === -2 || want === -1)
+            return want
+        const ss = root.streamsOfKind(kind)
+        for (let i = 0; i < ss.length; ++i) {
+            if (ss[i].index === want)
+                return want
+        }
+        // 轨道在新数据里消失:回该源默认轨。
+        const v = root.activeVersion()
+        return root.defaultTrackIndex(kind, v ? ((kind === "Audio" ? v.defaultAudioStreamIndex
+                                                                      : v.defaultSubtitleStreamIndex) ?? -1) : -1)
     }
     // 切换版本:重设该源默认轨。
     function selectVersion(id) {
