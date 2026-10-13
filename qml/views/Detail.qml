@@ -1445,6 +1445,7 @@ Item {
                     width: parent.width - Constants.detailSectionMargin * 2
                     spacing: 6
                     visible: (root.detail.mediaSources || []).length > 0
+                             || root.crossSourceEntries().length > 0
 
                     // 通用行:图标 + 当前选中摘要 + ▾;点击弹出下拉浮层。
                     // 组件不引用外层 id(除 root),宽由 rowWidth 传入。
