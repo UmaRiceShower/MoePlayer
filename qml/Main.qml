@@ -669,8 +669,12 @@ ApplicationWindow {
             var dy = mouse.y - pressPos.y
             if (dx <= -80 && Math.abs(dx) > 2 * Math.abs(dy))
                 root.goBack()
-            else if (dy <= -80 && Math.abs(dy) > 2 * Math.abs(dx))
-                stackView.pop(null)
+            else if (dy <= -80 && Math.abs(dy) > 2 * Math.abs(dx)) {
+                if (searchOverlay.visible || settingsOverlay.visible)
+                    root.goBack()
+                else
+                    stackView.pop(null)
+            }
         }
         onCanceled: {
             arming = false
@@ -1000,11 +1004,17 @@ ApplicationWindow {
     // 回首页清栈:pop 到根(initialItem);已在首页时无操作。
     Shortcut {
         sequences: shortcutSeq(ConfigManager.shortcutHome)
-        onActivated: stackView.pop(null)
+        onActivated: if (searchOverlay.visible || settingsOverlay.visible)
+                         root.goBack()
+                     else
+                         stackView.pop(null)
     }
     Shortcut {
         sequences: shortcutSeq(ConfigManager.shortcutServerManager)
-        onActivated: stackView.push(serverManagerPage)
+        onActivated: if (searchOverlay.visible || settingsOverlay.visible)
+                         root.goBack()
+                     else
+                         stackView.push(serverManagerPage)
     }
     Shortcut {
         sequences: shortcutSeq(ConfigManager.shortcutSettings)
