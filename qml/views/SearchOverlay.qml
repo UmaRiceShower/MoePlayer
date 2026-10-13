@@ -137,6 +137,7 @@ Item {
     function searchNow() {
         if (!root.canSearch)
             return
+        aggFlick.contentY = 0
         root.searching = true
         console.info("Search: 发起", JSON.stringify(searchField.text), "目标", root.aggTargets.length, "个")
         root.pendingAccounts = root.aggTargets.length
