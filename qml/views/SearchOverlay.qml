@@ -860,16 +860,18 @@ Item {
                                 }
 
                                 // 网格:列数同根卡片计算(基于外层宽);高度 = 行数 ×
-                                // cellH,固定高不滚动(整组随外层 Flickable 滚)。
+                                // cellH + header 高(固定高不滚动,整组随外层 Flickable
+                                // 滚)。
                                 GridView {
                                     id: aggGrid
                                     width: parent.width
                                     height: Math.max(root.cellH,
                                         Math.ceil(gmodel.count / Math.max(1, Math.floor(parent.width / root.cellW)))
-                                        * root.cellH)
+                                        * root.cellH + 4)
                                     cellWidth: root.cellW
                                     cellHeight: root.cellH
                                     clip: true
+                                    interactive: false
                                     header: Item { width: 1; height: 4 }
                                     reuseItems: true
                                     cacheBuffer: 600
