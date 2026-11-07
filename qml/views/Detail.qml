@@ -134,6 +134,10 @@ Item {
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
+    // 详情拉取失败(网络/超时):加载动画换失败态+重试;reload/切集复位。
+    property bool loadFailed: false
+    // 分集拉取失败:解除选集加载门(页面照常渲染),选集条显示重试。
+    property bool episodesLoadFailed: false
     // 选集条当前季(Season id);空=尚未选择。
     property string currentSeasonId: ""
     // 选季胶囊状态:候选季号(滚轮调整,按服务器实际季遍历)、实际季号列表。
@@ -544,6 +548,8 @@ Item {
     // detail 到达后文字同帧替换),首次进入 loaded 默认 false 显示加载动画。
     function reload() {
         root.playbackPending = false
+        root.loadFailed = false
+        root.episodesLoadFailed = false
         const c = root.creds()
         if (root.itemId !== "")
             EmbyClient.fetchItemDetail(root.serverUrl, c.token, c.userId, root.itemId)
@@ -1193,13 +1199,45 @@ Item {
                 spacing: 12
                 BusyIndicator {
                     anchors.horizontalCenter: parent.horizontalCenter
-                    running: true
+                    running: !root.loadFailed
+                    visible: !root.loadFailed
                 }
                 AppText {
+                    visible: !root.loadFailed
                     text: "加载中…"
                     color: Theme.textMuted
                     font.pixelSize: 14
                     anchors.horizontalCenter: parent.horizontalCenter
+                }
+                // 拉取失败(网络/超时):换失败态,原地重试。
+                AppText {
+                    visible: root.loadFailed
+                    text: "详情加载失败"
+                    color: Theme.textPrimary
+                    font.pixelSize: 15
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                AppText {
+                    visible: root.loadFailed
+                    text: "请检查网络或服务器状态"
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                    anchors.horizontalCenter: parent.horizontalCenter
+                }
+                AppText {
+                    visible: root.loadFailed
+                    text: "重试"
+                    color: detailRetryTap.pressed ? Theme.accentDeep : Theme.accent
+                    font.pixelSize: 14
+                    font.bold: true
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    topPadding: 6
+                    MouseArea {
+                        id: detailRetryTap
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.reload()
+                    }
                 }
             }
         }
@@ -2661,6 +2699,38 @@ Item {
                     }
                 }
             }
+            // 分集拉取失败占位:解除加载门后列表为空,给原地重试
+            // (ListView 兄弟节点:置于其内会入内容坐标系,随滚动/裁剪)。
+            Column {
+                anchors.horizontalCenter: episodeList.horizontalCenter
+                anchors.top: episodeList.top
+                anchors.topMargin: 40
+                spacing: 10
+                visible: root.episodesLoadFailed
+                         && (!episodeList.model || episodeList.model.count === 0)
+                AppText {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "分集加载失败"
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                }
+                AppText {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "重试"
+                    color: epRetryTap.pressed ? Theme.accentDeep : Theme.accent
+                    font.pixelSize: 13
+                    font.bold: true
+                    MouseArea {
+                        id: epRetryTap
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root.episodesLoadFailed = false
+                            root.selectSeason(root.currentSeasonId, false)
+                        }
+                    }
+                }
+            }
             }
         }
     }
@@ -2671,8 +2741,27 @@ Item {
             if (serverUrl !== root.serverUrl || d.id !== root.itemId)
                 return
             console.info("Detail: 详情数据到达", d.id, d.name || "")
+            root.loadFailed = false
             root.applyDetail(d)
             root.refreshSeriesPlayText()
+        }
+        // 详情拉取失败:仅未渲染时换失败态;已渲染内容下的静默重拉
+        // (播放后刷新)失败不打断现有页面。
+        function onItemDetailFailed(serverUrl, itemId) {
+            if (serverUrl !== root.serverUrl || itemId !== root.itemId || root.loaded)
+                return
+            console.warn("Detail: 详情拉取失败", itemId)
+            root.loadFailed = true
+        }
+        // 分集拉取失败:解除选集加载门(页面照常渲染),选集条显示重试。
+        function onEpisodesFailed(serverUrl, accountId, seasonId) {
+            if (serverUrl !== root.serverUrl || accountId !== root.accountId
+                || seasonId !== root.currentSeasonId)
+                return
+            console.warn("Detail: 分集拉取失败", seasonId)
+            root.episodesLoadFailed = true
+            if (root.detail && root.detail.id)
+                root.loaded = true
         }
         function onItemProviderIdsReceived(contextItemId, seriesId, tmdbId, imdbId, tvdbId) {
             if (contextItemId !== root.itemId || root.detail.type !== "Episode")
@@ -2796,6 +2885,7 @@ Item {
                 return
             console.debug("Detail: 分集到达")
             // 分集到达:剧集/集详情的结构可渲染(detail 文本早已就绪)。
+            root.episodesLoadFailed = false
             root.loaded = true
             root.refreshSeriesPlayText()
             // 上次播放的集滚到首个可见(仅展示,不自动播放)。

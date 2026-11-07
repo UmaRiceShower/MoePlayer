@@ -1290,6 +1290,9 @@ Item {
                                 spacing: 6
                                 readonly property bool hiddenTag: root.isAccountHidden(cell.id)
                                                                  && AccountManager.showHidden
+                                // 会话级不可达标记(后台探测恢复即摘;与凭据失效独立)。
+                                readonly property bool unreachableTag:
+                                    AccountManager.unreachableServers.indexOf(card.modelData.serverUrl) >= 0
                                 AppText {
                                     text: card.modelData.name !== "" ? card.modelData.name : card.modelData.userName
                                     color: Theme.textPrimary
@@ -1299,10 +1302,17 @@ Item {
                                     width: parent.width
                                            - (card.modelData.authStatus === "invalid" ? 78 : 0)
                                            - (parent.hiddenTag ? 62 : 0)
+                                           - (parent.unreachableTag ? 62 : 0)
                                 }
                                 AppText {
                                     visible: card.modelData.authStatus === "invalid"
                                     text: "[凭据失效]"
+                                    color: Theme.danger
+                                    font.pixelSize: 12
+                                }
+                                AppText {
+                                    visible: parent.unreachableTag
+                                    text: "[不可达]"
                                     color: Theme.danger
                                     font.pixelSize: 12
                                 }

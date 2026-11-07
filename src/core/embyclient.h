@@ -322,6 +322,17 @@ signals:
                              const QVariantList &views);
     void serverItemsReceived(const QString &serverUrl, const QString &accountId,
                              const QString &viewId, const QVariantList &items);
+    // 首页聚合请求失败(网络/超时/服务器错误,重试耗尽后):与「空结果」
+    // 区分——空结果发 *Received 空列表,失败发 *Failed,聚合方据失败
+    // 信号沿用缓存行并统计不可达服务器(全灭判定)。
+    void serverViewsFailed(const QString &serverUrl, const QString &accountId);
+    void serverItemsFailed(const QString &serverUrl, const QString &accountId,
+                           const QString &viewId);
+    // 条目详情/分集拉取失败(重试耗尽):此前失败静默,详情页永远停在
+    // 加载态;页面据此换失败态并提供重试。
+    void itemDetailFailed(const QString &serverUrl, const QString &itemId);
+    void episodesFailed(const QString &serverUrl, const QString &accountId,
+                        const QString &seasonId);
     // 续播目标(见 fetchNextUp):items 字段 id/name/seasonNo/episodeNo;
     // 失败/无目标发空列表。
     void nextUpReceived(const QString &serverUrl, const QString &accountId,

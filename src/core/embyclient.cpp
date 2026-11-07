@@ -1031,7 +1031,10 @@ void EmbyClient::fetchEpisodes(const QString &serverUrl, const QString &accountI
             fillItems(episodesModelFor(key, accountId, seasonId), doc, false, true, key, userId);
             qInfo() << "Emby: episodes =" << episodesModelFor(key, accountId, seasonId)->count() << "on" << key;
             emit episodesReceived(key, accountId, seasonId);
-        }, nullptr, QStringLiteral("获取分集"));
+        },
+        // 失败:通知页面解除选集加载门(否则剧集页永远停在加载动画)。
+        [this, key, accountId, seasonId] { emit episodesFailed(key, accountId, seasonId); },
+        QStringLiteral("获取分集"));
 }
 
 // ---------- 跨服务器只读拉取(首页聚合用,结果经信号返回) ----------
@@ -1060,8 +1063,8 @@ void EmbyClient::fetchServerViews(const QString &serverUrl, const QString &accou
             qInfo() << "Emby: serverViews =" << out.size() << "on" << serverUrl;
             emit serverViewsReceived(serverUrl, accountId, out);
         },
-        // 失败:发空视图推进聚合计数,原因经 serverRequestFailed 通知。
-        [this, serverUrl, accountId] { emit serverViewsReceived(serverUrl, accountId, QVariantList()); },
+        // 失败:发 serverViewsFailed(区别于空视图),原因经 serverRequestFailed 通知。
+        [this, serverUrl, accountId] { emit serverViewsFailed(serverUrl, accountId); },
         QStringLiteral("获取媒体库视图"));
 }
 
@@ -1134,8 +1137,8 @@ void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accou
                          << "account" << accountId << "view" << viewName << "id" << viewId;
             emit serverItemsReceived(serverUrl, accountId, viewId, items);
         },
-        // 失败:发空条目推进聚合计数,原因经 serverRequestFailed 通知。
-        [this, serverUrl, accountId, viewId] { emit serverItemsReceived(serverUrl, accountId, viewId, QVariantList()); },
+        // 失败:发 serverItemsFailed(区别于空结果),原因经 serverRequestFailed 通知。
+        [this, serverUrl, accountId, viewId] { emit serverItemsFailed(serverUrl, accountId, viewId); },
         QStringLiteral("获取首页行"));
 }
 
@@ -1491,7 +1494,10 @@ void EmbyClient::fetchItemDetail(const QString &serverUrl, const QString &token,
                 },
                 [this, key, m]() mutable { emit itemDetailReady(key, m); },
                 QStringLiteral("获取父级海报"));
-        }, nullptr, QStringLiteral("获取条目详情"));
+        },
+        // 失败:通知页面换失败态(此前静默,详情页永远停在加载动画)。
+        [this, key, itemId] { emit itemDetailFailed(key, itemId); },
+        QStringLiteral("获取条目详情"));
 }
 
 // 首个 MediaSource 的质量摘要写入 map

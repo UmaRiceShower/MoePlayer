@@ -56,6 +56,16 @@ class AccountManager : public QObject
     // showHidden 是"临时露出隐藏项"的运行时开关(Alt+S,不持久化):
     // 打开后所有页面照常显示隐藏项,便于集中管理。
     Q_PROPERTY(bool showHidden READ showHidden WRITE setShowHidden NOTIFY hiddenChanged)
+    // 首页聚合状态:拉取进行中 / 整轮结束后一行未有且确有服务器不可达
+    Q_PROPERTY(bool homeFetchActive READ homeFetchActive NOTIFY homeFetchStateChanged)
+    Q_PROPERTY(bool homeLoadFailed READ homeLoadFailed NOTIFY homeFetchStateChanged)
+    Q_PROPERTY(int homeUnreachableCount READ homeUnreachableCount NOTIFY homeFetchStateChanged)
+    // 参与本轮聚合的服务器全部不可达(区别于部分不可达):有缓存时首页
+    // 据此显示「离线,内容为缓存」横幅,部分不可达显示「N 个服务器无响应」。
+    Q_PROPERTY(bool homeAllUnreachable READ homeAllUnreachable NOTIFY homeFetchStateChanged)
+    // 会话级不可达服务器(视图失败标记,探测恢复/视图成功摘除):
+    // 服务器管理页徽标用;与每轮的 homeUnreachableCount 不同源。
+    Q_PROPERTY(QVariantList unreachableServers READ unreachableServers NOTIFY serverReachabilityChanged)
 public:
     // history 为播放历史本地存储(拉取结果写入其中,不持有所有权)。
     explicit AccountManager(EmbyClient *client, PlaybackHistory *history,
@@ -172,6 +182,13 @@ public:
     Q_INVOKABLE bool folderHidden(const QString &folderId) const;
     Q_INVOKABLE void setFolderHidden(const QString &folderId, bool hidden);
     bool showHidden() const { return m_showHidden; }
+    bool homeFetchActive() const { return m_homeFetchActive; }
+    bool homeLoadFailed() const { return m_homeLoadFailed; }
+    int homeUnreachableCount() const { return m_homeUnreachable.size(); }
+    bool homeAllUnreachable() const { return m_homeAllUnreachable; }
+    QVariantList unreachableServers() const;
+    // 行级重试:重拉单个首页行的条目(不占聚合计数,在途去重)。
+    Q_INVOKABLE void retryHomeRow(const QString &accountId, const QString &viewId);
     void setShowHidden(bool show);
 
     Q_INVOKABLE QVariantMap credsForServer(const QString &serverUrl) const;
@@ -192,6 +209,10 @@ signals:
     void accountLoginFinished(bool ok, const QString &message);
     // 首页聚合行就绪(见 fetchHomeRows)。
     void homeRowsReady();
+    // 首页聚合状态变化(进行中/失败/不可达服务器数,见三个 home* 属性)。
+    void homeFetchStateChanged();
+    // 会话级不可达服务器集合变化(标记/恢复)。
+    void serverReachabilityChanged();
     // 某个账号的服务器建议到位(见 fetchHomeRows)。
     void suggestionsUpdated();
     // 播放历史拉取批次结束(见 fetchPlaybackHistory);拉取中的进度经
@@ -248,6 +269,8 @@ private:
     void finishLatestBatch(const QString &accountId);
     // 首页聚合串行化:结束本轮,飞行中排队的触发重跑一次。
     void finishHomeFetch();
+    // 对不可达服务器做轻量探测(/System/Info/Public),恢复即摘标+重拉首页。
+    void probeUnreachableServers();
     // 文件夹结构(见 folders 属性)。
     struct FolderInfo {
         QString id;
@@ -329,6 +352,20 @@ const QString &accountId) const;
     // (Qt 报 "Object or context destroyed during incubation")。
     bool m_homeFetchActive = false;
     bool m_homeFetchQueued = false;
+    // 本轮聚合中视图请求失败的服务器(去重);整轮结束且一行未有 → 全灭
+    // 判定(homeLoadFailed),首页显示「无法连接 + 重试」而非白屏。
+    QStringList m_homeUnreachable;
+    bool m_homeLoadFailed = false;
+    bool m_homeAllUnreachable = false;
+    // 会话级不可达集合:视图失败标记,30s 后台探测(/System/Info/Public,
+    // 轻端点)或下次视图成功摘除;探测成功顺带重拉首页恢复数据。
+    QSet<QString> m_unreachableServers;
+    QSet<QString> m_probingServers; // 探测在途去重
+    QTimer m_probeTimer;
+    // 首页行级失败:条目请求失败的行键(accountId|viewId),出紧凑失败行;
+    // 行重试在途集合(重试回执不占聚合计数,单独拦截)。
+    QSet<QString> m_homeFailedRows;
+    QSet<QString> m_homeRetryRows;
     int m_homeLimit = MoePlayer::kHomePerLibraryLimit;
     int m_homePending = 0; // 聚合请求未完成计数
     int m_homeGen = 0; // 聚合代次:重叠重拉时丢弃旧代次的回调

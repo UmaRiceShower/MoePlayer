@@ -88,6 +88,9 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
 {
     m_homeRowsModel = new HomeRowsModel(this);
     m_customHomeRowsModel = new HomeRowsModel(this);
+    // 不可达服务器后台探测:30s 周期,仅在有标记时运行(恢复即停)。
+    m_probeTimer.setInterval(30000);
+    connect(&m_probeTimer, &QTimer::timeout, this, [this] { probeUnreachableServers(); });
     // 自定义库规则/模式热改:由现有行集重聚合,不重拉网络。
     connect(m_config, &ConfigManager::customLibrariesChanged,
             this, [this] { rebuildCustomHomeRows(); });
@@ -337,6 +340,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     // 同服务器多账号时信号无 id,仅该服唯一账号才自动重登(避免错账号)。
     connect(m_client, &EmbyClient::serverRequestFailed, this,
             [this](const QString &serverUrl, const QString &message) {
+                m_probingServers.remove(serverUrl); // 探测失败:释放在途位,下周期再探
                 if (!message.contains(QLatin1String("401")))
                     return;
                 // 找出该服唯一账号(多账号时无法定位,不自动重登)。
@@ -427,6 +431,19 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     // (只回填未命名的,不覆盖用户已填/已改的名字);同服多账号只回填首个。
     connect(m_client, &EmbyClient::serverPublicInfoReceived, this,
             [this](const QString &serverUrl, const QString &name, const QString &version) {
+                // 探测回执:在途标记清除;被标不可达的服务器恢复 → 摘标并重拉
+                // 首页数据(缓存先显,增量覆盖,不打断当前内容)。
+                m_probingServers.remove(serverUrl);
+                if (m_unreachableServers.remove(serverUrl)) {
+                    qInfo() << "AccountManager: 服务器恢复可达" << serverUrl;
+                    emit serverReachabilityChanged();
+                    if (m_homeFetchActive)
+                        m_homeFetchQueued = true;
+                    else
+                        fetchHomeRows(m_homeLimit);
+                }
+                if (m_unreachableServers.isEmpty() && m_probeTimer.isActive())
+                    m_probeTimer.stop();
                 if (!version.isEmpty())
                     m_serverVersion.insert(serverUrl, version);
                 if (!name.isEmpty()) {
@@ -495,6 +512,9 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 if (m_homeViews.contains(accountId))
                     return; // 本代已处理(旧代残留同数据回调),避免重复计数/发请求
                 m_homeViews.insert(accountId, views);
+                // 视图成功:摘除会话级不可达标记(若在)。
+                if (m_unreachableServers.remove(serverUrl))
+                    emit serverReachabilityChanged();
                 --m_homePending;
                 for (const auto &v : views) {
                     ++m_homePending; // 每库一个条目请求
@@ -510,6 +530,45 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                                                    [this, accountId]() { finishLatestBatch(accountId); });
                     }
                 }
+                maybeAssembleHomeRows();
+            });
+    // 视图请求失败(区别于空视图):不入 m_homeViews——组装时该服沿用
+    // 缓存行,网络抖动不清空旧数据;记不可达服务器(全灭判定用)。
+    connect(m_client, &EmbyClient::serverViewsFailed, this,
+            [this](const QString &serverUrl, const QString &accountId) {
+                if (m_homeReqGen.value(accountId) != m_homeGen)
+                    return; // 无对应账号或属过期代次,丢弃
+                if (m_homeViews.contains(accountId))
+                    return; // 本代已处理,避免重复递减计数
+                if (!m_homeUnreachable.contains(serverUrl))
+                    m_homeUnreachable.append(serverUrl);
+                // 会话级标记:管理页徽标 + 启动后台探测(恢复自动摘标)。
+                if (!m_unreachableServers.contains(serverUrl)) {
+                    m_unreachableServers.insert(serverUrl);
+                    emit serverReachabilityChanged();
+                }
+                if (!m_probeTimer.isActive())
+                    m_probeTimer.start();
+                --m_homePending;
+                maybeAssembleHomeRows();
+            });
+    // 条目请求失败:不入 m_homeRowByKey——该行沿用缓存条目;记行级失败
+    // 标(无缓存的行出紧凑失败行,带行内重试),仅结算在途票。
+    connect(m_client, &EmbyClient::serverItemsFailed, this,
+            [this](const QString &serverUrl, const QString &accountId, const QString &viewId) {
+                Q_UNUSED(serverUrl)
+                if (m_homeReqGen.value(accountId) != m_homeGen)
+                    return;
+                const QString key = accountId + QLatin1Char('|') + viewId;
+                // 行级重试失败回执:不占计数,保持失败标。
+                if (m_homeRetryRows.remove(key)) {
+                    maybeAssembleHomeRows();
+                    return;
+                }
+                if (m_homeRowByKey.contains(key))
+                    return; // 本代已处理,避免重复递减计数
+                m_homeFailedRows.insert(key);
+                --m_homePending;
                 maybeAssembleHomeRows();
             });
     // 服务器建议到位:存账号建议列表并通知(hero 轮播用)。不参与
@@ -536,8 +595,19 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 if (m_homeReqGen.value(accountId) != m_homeGen)
                     return; // 过期代次,丢弃
                 const QString key = accountId + QLatin1Char('|') + viewId;
+                // 行级重试回执:不占聚合计数,直接更新行数据并重组装。
+                if (m_homeRetryRows.remove(key)) {
+                    m_homeFailedRows.remove(key);
+                    QVariantMap row;
+                    row.insert(QStringLiteral("viewId"), viewId);
+                    row.insert(QStringLiteral("items"), items);
+                    m_homeRowByKey.insert(key, row);
+                    maybeAssembleHomeRows();
+                    return;
+                }
                 if (m_homeRowByKey.contains(key))
                     return; // 本代已处理(旧代残留),避免重复递减计数
+                m_homeFailedRows.remove(key); // 成功即清失败标(同代重拉场景)
                 QVariantMap row;
                 row.insert(QStringLiteral("viewId"), viewId);
                 row.insert(QStringLiteral("items"), items);
@@ -765,7 +835,8 @@ QVariantList AccountManager::visibleHomeRows() const
             continue;
         // 无海报条目在展示层过滤(开关):m_homeRows 与行缓存保持原样,
         // 切换即时生效且可逆;整行滤空则丢行。
-        if (hideNoImage) {
+        // 失败壳行(items 空 + loadFailed)豁免过滤:滤掉后行内重试无处点。
+        if (hideNoImage && !row.value(QStringLiteral("loadFailed")).toBool()) {
             QVariantList items;
             for (const QVariant &iv : row.value(QStringLiteral("items")).toList()) {
                 if (!iv.toMap().value(QStringLiteral("posterId")).toString().isEmpty())
@@ -906,6 +977,12 @@ void AccountManager::rebuildCustomHomeRows(bool final)
 
     for (const QVariant &rv : orig) {
         const QVariantMap row = rv.toMap();
+        // 失败壳行(items 空 + loadFailed)无条件透传为未匹配原行:进桶
+        // 只会出空桶,透传才能让行内重试在自定义库模式下可达。
+        if (row.value(QStringLiteral("loadFailed")).toBool()) {
+            plainRows.append(row);
+            continue;
+        }
         const QString viewName = row.value(QStringLiteral("viewName")).toString();
         const QString collType = row.value(QStringLiteral("collectionType")).toString();
         const int bucketIdx = matchBucket(buckets, viewName, collType);
@@ -1223,6 +1300,10 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
         return;
     }
     m_homeFetchActive = true;
+    m_homeUnreachable.clear();
+    m_homeLoadFailed = false;
+    m_homeAllUnreachable = false;
+    emit homeFetchStateChanged();
     qInfo() << "AccountManager: 首页聚合启动" << m_accounts.size() << "个账号,每库" << m_homeLimit << "条";
     // 重叠重拉(排序/增删快速操作)时旧代次的回调可能仍在途,其归位索引已
     // 失效,须按代次丢弃;否则会污染本次聚合的视图与计数。
@@ -1231,6 +1312,8 @@ void AccountManager::fetchHomeRows(int perLibraryLimit)
     m_homeViews.clear();
     m_homeRowByKey.clear();
     m_homeAccountOrder.clear();
+    m_homeFailedRows.clear();
+    m_homeRetryRows.clear();
     m_homePending = 0;
     // 先展示缓存(上次成功数据),随后增量刷新逐行覆盖;无缓存则清空等待。
     // 缓存与当前展示相同则不 emit(避免无意义重建:重登/重复拉取常返回
@@ -1327,10 +1410,78 @@ void AccountManager::finishHomeFetch()
 {
     qDebug() << "AccountManager: 首页聚合完成,行数" << m_homeRows.size();
     m_homeFetchActive = false;
+    // 全灭判定:整轮结束一行未有且确有服务器视图请求失败(网络问题),
+    // 区别于「所有库真的为空」(无失败记录则不亮失败态)。
+    m_homeLoadFailed = m_homeRows.isEmpty() && !m_homeUnreachable.isEmpty();
+    // 参与本轮聚合的服务器(去重)全部不可达 → 全灭;有缓存行时首页亮
+    // 离线横幅,部分不可达亮部分横幅。
+    QStringList participating;
+    for (const auto &ord : m_homeAccountOrder) {
+        const QString url = ord.toMap().value(QStringLiteral("serverUrl")).toString();
+        if (!participating.contains(url))
+            participating.append(url);
+    }
+    m_homeAllUnreachable = !participating.isEmpty()
+                           && m_homeUnreachable.size() >= participating.size();
+    if (m_homeAllUnreachable)
+        qWarning() << "AccountManager: 首页聚合全灭," << m_homeUnreachable.size()
+                   << "个服务器不可达" << m_homeUnreachable;
+    else if (!m_homeUnreachable.isEmpty())
+        qWarning() << "AccountManager: 首页聚合部分不可达," << m_homeUnreachable.size()
+                   << "/" << participating.size() << m_homeUnreachable;
+    emit homeFetchStateChanged();
     if (m_homeFetchQueued) {
         m_homeFetchQueued = false;
         fetchHomeRows(m_homeLimit);
     }
+}
+
+QVariantList AccountManager::unreachableServers() const
+{
+    QVariantList out;
+    for (const auto &url : m_unreachableServers)
+        out.append(url);
+    return out;
+}
+
+// 后台探测:对每个不可达服务器发一次公开信息请求(轻端点,无凭据)。
+// 成功回执在 serverPublicInfoReceived 里摘标并重拉首页;失败静默,
+// 下一周期再探(在途去重防堆积)。
+void AccountManager::probeUnreachableServers()
+{
+    if (m_unreachableServers.isEmpty()) {
+        m_probeTimer.stop();
+        return;
+    }
+    for (const auto &url : m_unreachableServers) {
+        if (m_probingServers.contains(url))
+            continue;
+        m_probingServers.insert(url);
+        m_client->fetchServerPublicInfo(url);
+    }
+}
+
+// 行级重试:重拉单个首页行的条目。不占聚合计数——回执经
+// m_homeRetryRows 拦截,单独更新该行,避免把已完成的聚合拉回在途态。
+void AccountManager::retryHomeRow(const QString &accountId, const QString &viewId)
+{
+    const AccountInfo *a = accountById(accountId);
+    if (!a)
+        return;
+    const QString key = accountId + QLatin1Char('|') + viewId;
+    if (m_homeRetryRows.contains(key))
+        return; // 在途去重
+    QString viewName;
+    for (const auto &v : m_homeViews.value(accountId)) {
+        const QVariantMap vm = v.toMap();
+        if (vm.value(QStringLiteral("id")).toString() == viewId) {
+            viewName = vm.value(QStringLiteral("name")).toString();
+            break;
+        }
+    }
+    m_homeRetryRows.insert(key);
+    m_client->fetchServerItems(a->serverUrl, accountId, a->token, a->userId,
+                               viewId, viewName, m_homeLimit);
 }
 
 // 账号顺序变化(拖拽/上移下移/删除)时按新顺序本地重排首页聚合行。
@@ -1805,9 +1956,28 @@ void AccountManager::maybeAssembleHomeRows()
                     }
                 }
             }
-            // 行内无条目:库无内容(空库/权限不可见/请求失败),不占首页行。
-            if (items.isEmpty())
+            // 行内无条目:真空库不占首页行;但请求失败且无缓存可沿用的行
+            // 出紧凑失败行(loadFailed),UI 显示「加载失败 · 重试」而非消失。
+            if (items.isEmpty()) {
+                if (!fresh && m_homeFailedRows.contains(key)) {
+                    QVariantMap row;
+                    row.insert(QStringLiteral("viewId"), viewId);
+                    row.insert(QStringLiteral("viewName"), viewName);
+                    row.insert(QStringLiteral("collectionType"),
+                               vm.value(QStringLiteral("collectionType")).toString());
+                    row.insert(QStringLiteral("accountId"), accountId);
+                    row.insert(QStringLiteral("serverUrl"), serverUrl);
+                    row.insert(QStringLiteral("serverName"), serverName);
+                    row.insert(QStringLiteral("posterId"),
+                               serverPosterId(accountId,
+                                              vm.value(QStringLiteral("posterId")).toString()));
+                    row.insert(QStringLiteral("items"), items);
+                    row.insert(QStringLiteral("loading"), false);
+                    row.insert(QStringLiteral("loadFailed"), true);
+                    out.append(row);
+                }
                 continue;
+            }
             QVariantMap row;
             row.insert(QStringLiteral("viewId"), viewId);
             row.insert(QStringLiteral("viewName"), viewName);
@@ -2333,9 +2503,16 @@ QVariantList AccountManager::loadHomeCache()
 
 void AccountManager::saveHomeCache()
 {
-    if (m_homeRows.isEmpty())
+    // 失败壳行(items 空 + loadFailed)不落盘:缓存先显以它为准,落盘会
+    // 让下次启动在网络正常时也重现失败行。缓存只存完整可依赖集合。
+    QVariantList rows;
+    for (const QVariant &v : m_homeRows) {
+        if (!v.toMap().value(QStringLiteral("loadFailed")).toBool())
+            rows.append(v);
+    }
+    if (rows.isEmpty())
         return;
-    m_persist.saveCache(kHomeCacheName, m_homeRows);
+    m_persist.saveCache(kHomeCacheName, rows);
 }
 
 // 删号后重写:过滤掉该账号的行并落盘(空表也落——否则缓存原样复活
@@ -2344,7 +2521,8 @@ void AccountManager::saveHomeCacheWithout(const QString &accountId)
 {
     QVariantList rows;
     for (const QVariant &v : m_homeRows) {
-        if (v.toMap().value(QStringLiteral("accountId")).toString() != accountId)
+        if (v.toMap().value(QStringLiteral("accountId")).toString() != accountId
+            && !v.toMap().value(QStringLiteral("loadFailed")).toBool()) // 失败壳行不落盘(同 saveHomeCache)
             rows.append(v);
     }
     m_persist.saveCache(kHomeCacheName, rows);

@@ -910,6 +910,119 @@ Item {
         }
     }
 
+    // ---- 网络异常态 ----
+    Item {
+        id: netState
+        visible: root.visibleAccountCount > 0 && AccountManager.homeRows.count === 0
+                 && (AccountManager.homeFetchActive || AccountManager.homeLoadFailed)
+        anchors.fill: parent
+
+        Column {
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: -root.navH / 2
+            spacing: 0
+
+            BusyIndicator {
+                anchors.horizontalCenter: parent.horizontalCenter
+                width: 48
+                height: 48
+                running: AccountManager.homeFetchActive
+                visible: running
+            }
+
+            Item { width: 1; height: 28 }
+
+            AppText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: AccountManager.homeFetchActive ? "正在连接服务器…" : "无法连接服务器"
+                color: Theme.textPrimary
+                font.pixelSize: 15
+            }
+
+            Item { width: 1; height: 8 }
+
+            AppText {
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: !AccountManager.homeFetchActive
+                text: AccountManager.homeUnreachableCount + " 个服务器均无响应，请检查网络或代理设置"
+                color: Theme.textMuted
+                font.pixelSize: 13
+            }
+
+            Item { width: 1; height: 36; visible: !AccountManager.homeFetchActive }
+
+            Button {
+                id: retryBtn
+                anchors.horizontalCenter: parent.horizontalCenter
+                visible: !AccountManager.homeFetchActive
+                width: 150
+                height: 40
+                text: "重试"
+                onClicked: AccountManager.fetchHomeRows(ConfigManager.homeLibraryLimit)
+                background: Rectangle {
+                    radius: 20
+                    color: retryBtn.pressed || retryBtn.hovered
+                           ? Theme.accentDeep : Theme.accent
+                }
+                contentItem: AppText {
+                    text: retryBtn.text
+                    color: Theme.accentInk
+                    font.pixelSize: 14
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+    }
+
+    // ---- 断网横幅(有缓存行可显示但有服务器不可达)----
+    // 全灭:提示内容为缓存;部分不可达:提示几服无响应。拉取在途不亮
+    // (避免闪烁),整轮结算后亮;数据恢复后自动消失。
+    Rectangle {
+        id: offlineBanner
+        z: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: root.navH + 8
+        width: Math.min(bannerRow.implicitWidth + 36, parent.width - 80)
+        height: bannerRow.implicitHeight + 18
+        radius: 11
+        color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.94)
+        border.color: Theme.danger
+        border.width: 1
+        visible: !AccountManager.homeFetchActive && AccountManager.homeUnreachableCount > 0
+                 && AccountManager.homeRows.count > 0
+
+        Row {
+            id: bannerRow
+            anchors.centerIn: parent
+            spacing: 14
+
+            AppText {
+                anchors.verticalCenter: parent.verticalCenter
+                color: Theme.textPrimary
+                font.pixelSize: 13
+                text: AccountManager.homeAllUnreachable
+                      ? "无法连接服务器，显示的是缓存内容"
+                      : AccountManager.homeUnreachableCount + " 个服务器无响应，部分内容可能不是最新"
+            }
+            AppText {
+                anchors.verticalCenter: parent.verticalCenter
+                color: retryTap.pressed ? Theme.accentDeep : Theme.accent
+                font.pixelSize: 13
+                font.bold: true
+                text: "重试"
+                MouseArea {
+                    id: retryTap
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: AccountManager.fetchHomeRows(ConfigManager.homeLibraryLimit)
+                }
+            }
+        }
+    }
+
     // 可见账号数(隐藏功能):0 = 无账号或全部隐藏且未露出 → 首页按
     // "无账号"处理(显示欢迎页)。Alt+S 露出(showHidden)时全部计入。
     // 依赖:accounts(accountsChanged)与 showHidden(hiddenChanged)。
@@ -1001,7 +1114,9 @@ Item {
             readonly property int vPad: root.gridVPad(cardH)
             // 实际显示行数:条目填不满设定行数时按实际行数收,不留空行
             readonly property int shownLines: root.gridShownLines(libRow.modelData.items.length, width)
-            height: shownLines * cardH + (shownLines - 1) * gap + vPad * 2
+            // 行级失败(无缓存可沿用):紧凑占位高,网格不渲染。
+            readonly property bool loadFailed: libRow.modelData.loadFailed === true
+            height: loadFailed ? 44 : shownLines * cardH + (shownLines - 1) * gap + vPad * 2
             clip: true
             GridView {
                 id: rowItems
@@ -1056,6 +1171,32 @@ Item {
                 color: Theme.textMuted
                 font.pixelSize: 13
                 text: "加载中…"
+            }
+            // 行级失败:紧凑「加载失败 · 重试」,只重拉这一行。
+            Row {
+                anchors.centerIn: parent
+                spacing: 10
+                visible: rowGridWrap.loadFailed
+                AppText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "加载失败"
+                    color: Theme.textMuted
+                    font.pixelSize: 13
+                }
+                AppText {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "重试"
+                    color: rowRetryTap.pressed ? Theme.accentDeep : Theme.accent
+                    font.pixelSize: 13
+                    font.bold: true
+                    MouseArea {
+                        id: rowRetryTap
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: AccountManager.retryHomeRow(libRow.modelData.accountId,
+                                                               libRow.modelData.viewId)
+                    }
+                }
             }
         }
     }
