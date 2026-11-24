@@ -321,12 +321,26 @@ ApplicationWindow {
                 return
             delete root._pendingUrls[id]
             const m = Object.assign({}, meta)
-            // 延续当前选择:音轨/内封字幕按同类序号下推(-2 显式关保留);
-            // 当前集用外挂字幕时字幕不覆盖,用协商默认(URL 逐集不同)。
+            // 延续当前选择:音轨/字幕按同类序号下推(-2 显式关保留)。
             if (m.selectedAudioOrdinal !== undefined)
                 m.selectedAudioOrdinal = root._curAudioOrdinal
-            if (m.selectedSubtitleOrdinal !== undefined && root._curSubtitleUrl === "")
+            if (m.selectedSubtitleOrdinal !== undefined)
                 m.selectedSubtitleOrdinal = root._curSubtitleOrdinal
+            // 外挂字幕:DeliveryUrl 逐集不同,协商默认不带(e01/自动连播的
+            // 协商不带选集参数)。当前集用外挂字幕时,按同一 ordinal 从本集
+            // subtitleStreams 取该集自己的外挂地址补上;该序号的流非外挂
+            // 则清空 URL(走内封按 ordinal 选中)。不补则自动连播无字幕。
+            if (root._curSubtitleUrl !== "" && root._curSubtitleOrdinal >= 0) {
+                const subs = (m.subtitleStreams || [])
+                const st = subs[root._curSubtitleOrdinal]
+                const raw = (st && st.isExternal) ? (st.deliveryUrl || "") : ""
+                // 交给 C++ 解析:按账号当前线路取基址(多线路不能用身份
+                // serverUrl)+ 补 api_key(已有则不追加)。
+                m.selectedSubtitleUrl = raw === ""
+                    ? ""
+                    : EmbyClient.resolveSubtitleUrl(m.serverUrl, m.userId || "",
+                                                    raw, m.token || "")
+            }
             m.type = "Episode"
             // 账号随协商结果下推(playbackReady 的 meta 不含 accountId):占位集
             // 的连播/续链/全季拉取都要按账号定位,不能只在首集带。

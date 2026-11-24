@@ -1013,8 +1013,11 @@ void MpvClient::handleJson(Session *s, const QJsonObject &obj)
                            QStringLiteral("insert-at"), index};
             // 外挂字幕作为文件本地选项随条目携带(同 hook 路径的
             // file-local-options/sub-file)。
-            if (!s->preloadSub.isEmpty())
+            if (!s->preloadSub.isEmpty()) {
                 cmd.append(QJsonObject{{QStringLiteral("sub-file"), s->preloadSub}});
+                // 该条目加载时字幕已随条目携带,file-loaded 不再补挂。
+                s->subProvidedItemId = s->preloadId;
+            }
             sendJson(s, QJsonObject{{QStringLiteral("command"), cmd},
                                     {QStringLiteral("request_id"),
                                      kPlaylistInsertRequestId}});
@@ -1172,6 +1175,11 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         } else if (name == QLatin1String("glsl-shaders")) {
             // 链被改动(mpv 内快捷键/外部):重算挂载数与门槛判定。
             requestSuperResState(s);
+        } else if (name == QLatin1String("track-list")) {
+            // 轨集合变化:外挂字幕经 URL 异步下载,file-loaded 时点尚不在
+            // track-list(选轨落空);到达后按同一 ordinal 序列重应用一次。
+            if (data.isArray() && !data.toArray().isEmpty())
+                applyTrackSelection(s, data.toArray());
         }
         return;
     }
@@ -1227,9 +1235,16 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
                                    ? s->meta.value(QStringLiteral("selectedSubtitleOrdinal")).toInt()
                                    : -1;
             const QString subUrl = s->meta.value(QStringLiteral("selectedSubtitleUrl")).toString();
-            if (subOrd >= 0 && !subUrl.isEmpty())
+            // 该条目加载时已随 sub-file 携带字幕(见 subProvidedItemId):跳过,
+            // 否则 track-list 出现两条相同外挂轨。
+            const bool subProvided =
+                !s->subProvidedItemId.isEmpty()
+                && s->subProvidedItemId == s->meta.value(QStringLiteral("itemId")).toString();
+            if (subOrd >= 0 && !subUrl.isEmpty() && !subProvided)
                 sendJson(s, QJsonObject{{QStringLiteral("command"),
                                          QJsonArray{QStringLiteral("sub-add"), subUrl}}});
+            if (subProvided)
+                s->subProvidedItemId.clear();
         }
         // 续播:仅用户点播的集(meta 带 resumePositionTicks)seek 到上次
         // 位置;连播项协商不带该键,从零开始。
@@ -1348,6 +1363,11 @@ void MpvClient::observe(Session *s)
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("observe_property"), 9,
                                         QStringLiteral("playlist-pos")}}});
+    // id 10:track-list——外挂字幕异步到达(URL 下载完成后才进列表),
+    // 到达时按 ordinal 重应用选轨(file-loaded 时点选不到会漏)。
+    sendJson(s, QJsonObject{{QStringLiteral("command"),
+                             QJsonArray{QStringLiteral("observe_property"), 10,
+                                        QStringLiteral("track-list")}}});
     // id 4-8 只服务内嵌(超分回读/UI 镜像);外部模式 OSC 自管,不发
     // (每个 observe = 每条变化一条 IPC 流量,外部纯浪费)。
     if (!s->embedded)
@@ -1645,6 +1665,10 @@ void MpvClient::deliverEpisodeUrl(const QString &sessionKey, const QString &item
     }
     if (!meta.isEmpty())
         s->episodeMeta.insert(itemId, meta);
+    // 经 hook 应答带字幕的外挂 URL:lua 以 file-local-options/sub-file
+    // 随本次加载挂载,file-loaded 不再补 sub-add(防重复轨)。
+    if (!subtitleUrl.isEmpty())
+        s->subProvidedItemId = itemId;
     // 换集真实地址同步进会话(后续 loadfile 吃 s->url/s->headers,
     // 不同步会一直拉首集或已过期地址)。
     if (!url.isEmpty()) {
@@ -1755,7 +1779,13 @@ void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
                 return t.value(QStringLiteral("id")).toInt(-1);
             ++n;
         }
-        qWarning() << "MpvClient: track-list 未找到" << type << "轨道 ordinal" << ordinal;
+        // 外挂字幕在途(URL 异步下载未完成):此时选不到是预期,不刷警告;
+        // track-list 变化观察会在字幕到达后重应用。
+        const bool pendingExternalSub = type == QLatin1String("sub")
+                                        && !s->meta.value(QStringLiteral("selectedSubtitleUrl"))
+                                                .toString().isEmpty();
+        if (!pendingExternalSub)
+            qWarning() << "MpvClient: track-list 未找到" << type << "轨道 ordinal" << ordinal;
         return -1;
     };
 

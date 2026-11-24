@@ -172,6 +172,12 @@ public:
                                       const QString &token, const QString &userId,
                                       const QString &viewId, const QString &viewName,
                                       int limit);
+    // 外挂字幕地址解析(换集沿用所选外挂字幕用):按账号当前线路解析
+    // 相对路径(多线路时取 activeUrl,不是身份 serverUrl),补 api_key
+    // (已有则不追加)。QML 侧不得自行拼 serverUrl。
+    Q_INVOKABLE QString resolveSubtitleUrl(const QString &serverUrl, const QString &userId,
+                                           const QString &deliveryUrl,
+                                           const QString &token) const;
     // 拉取剧集续播目标(服务器 NextUp:优先最近观看未看完的集,其次下一个未看集),
     // 结果经 nextUpReceived 返回,用于详情页定位上次播放的季/集。
     Q_INVOKABLE void fetchNextUp(const QString &serverUrl, const QString &accountId,

@@ -1099,6 +1099,17 @@ void EmbyClient::fetchLatestMedia(const QString &serverUrl, const QString &accou
         }, std::move(onFail), QStringLiteral("拉取最新入库"), false, MoePlayer::kSlowNetworkTimeoutMs);
 }
 
+QString EmbyClient::resolveSubtitleUrl(const QString &serverUrl, const QString &userId,
+                                       const QString &deliveryUrl,
+                                       const QString &token) const
+{
+    if (deliveryUrl.isEmpty())
+        return {};
+    const QString base = m_baseUrlResolver ? m_baseUrlResolver(serverUrl.trimmed(), userId)
+                                           : serverUrl.trimmed();
+    return withApiKeyParam(token, absolutePlaybackUrl(base, deliveryUrl));
+}
+
 void EmbyClient::fetchServerItems(const QString &serverUrl, const QString &accountId,
                                   const QString &token, const QString &userId,
                                   const QString &viewId, const QString &viewName, int limit)

@@ -170,6 +170,10 @@ private:
         // on_load hook 请求中的文件 id(script-message moe-url 记录;
         // file-loaded 时以此把 QML 协商 meta 归位到本文件)。
         QString pendingFileId;
+        // 已随条目加载携带外挂字幕(sub-file)的条目 id:hook 应答路径与
+        // 预加载改写路径都会带上,file-loaded 若正是该条目则不再补
+        // sub-add(否则同一字幕挂两次,track-list 出现重复外挂轨)。
+        QString subProvidedItemId;
         // QML 协商结果缓存(id -> meta):file-loaded 按 pendingFileId 归位。
         QHash<QString, QVariantMap> episodeMeta;
         // eof 结束判定:播完条目的 playlist_entry_id(按 id 在播放列表
