@@ -260,6 +260,10 @@ private:
     static QString deobfuscate(const QString &cipher);
     // 首页聚合:全部请求完成后按账号顺序组装 homeRows 并发 homeRowsReady。
     void maybeAssembleHomeRows();
+    // 合并调度:条目/视图回执密集到达时,80ms 窗口合并为一次组装,
+    // 避免每次回执都全量重排+桶聚合把 GUI 线程挤成低帧率。
+    void scheduleAssembleHomeRows();
+    QTimer m_assembleTimer;
     // 由原始行集(visibleHomeRows 结果)构建自定义聚合行并写入
     // m_customHomeRowsModel;配置/隐藏变化时也要重跑(不重拉网络)。
     // final=true 时才发 info 级汇总(聚合完成/配置变更等一次性事件);

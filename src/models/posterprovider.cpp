@@ -33,12 +33,12 @@
 
 namespace {
 // 共享缓存设施(线程安全;缓存读写可能来自 GUI 或线程池线程):
-// - 内存层:解码后的 QImage,按缓存键 LRU 淘汰,上限 96MB;
+// - 内存层:解码后的 QImage,按缓存键 LRU 淘汰,上限 192MB;
 // - 磁盘层:CacheLocation/emby-images/<键哈希>.img,30 天 TTL;
 // - 回源闸:最多 16 张图同时回源。封面与 API 请求共用服务器连接,
 //   无闸时一屏几十张图同时拉取会挤占 JSON 请求带宽;缓存命中不占名额。
 QMutex g_memMutex;
-constexpr int kCacheMaxBytes = 96 * 1024 * 1024; // 内存缓存上限
+constexpr int kCacheMaxBytes = 192 * 1024 * 1024; // 内存缓存上限(覆盖预创建带活跃海报集)
 constexpr int kFetchConcurrency = 16; // 回源并发
 QCache<QString, QImage> g_memCache(kCacheMaxBytes);
 QSemaphore g_fetchGate(kFetchConcurrency);

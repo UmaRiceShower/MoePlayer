@@ -91,6 +91,10 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
     // 不可达服务器后台探测:30s 周期,仅在有标记时运行(恢复即停)。
     m_probeTimer.setInterval(30000);
     connect(&m_probeTimer, &QTimer::timeout, this, [this] { probeUnreachableServers(); });
+    // 组装合并窗口:首调用起 80ms,窗口内到达的回执合并为一次组装。
+    m_assembleTimer.setSingleShot(true);
+    m_assembleTimer.setInterval(80);
+    connect(&m_assembleTimer, &QTimer::timeout, this, [this] { maybeAssembleHomeRows(); });
     // 自定义库规则/模式热改:由现有行集重聚合,不重拉网络。
     connect(m_config, &ConfigManager::customLibrariesChanged,
             this, [this] { rebuildCustomHomeRows(); });
@@ -504,7 +508,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 const AccountInfo *a = accountById(accountId);
                 if (!a && m_homeReqGen.value(accountId) == m_homeGen) {
                     --m_homePending;
-                    maybeAssembleHomeRows();
+                    scheduleAssembleHomeRows();
                     return;
                 }
                 if (!a || m_homeReqGen.value(accountId) != m_homeGen)
@@ -530,7 +534,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                                                    [this, accountId]() { finishLatestBatch(accountId); });
                     }
                 }
-                maybeAssembleHomeRows();
+                scheduleAssembleHomeRows();
             });
     // 视图请求失败(区别于空视图):不入 m_homeViews——组装时该服沿用
     // 缓存行,网络抖动不清空旧数据;记不可达服务器(全灭判定用)。
@@ -550,7 +554,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 if (!m_probeTimer.isActive())
                     m_probeTimer.start();
                 --m_homePending;
-                maybeAssembleHomeRows();
+                scheduleAssembleHomeRows();
             });
     // 条目请求失败:不入 m_homeRowByKey——该行沿用缓存条目;记行级失败
     // 标(无缓存的行出紧凑失败行,带行内重试),仅结算在途票。
@@ -562,14 +566,14 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 const QString key = accountId + QLatin1Char('|') + viewId;
                 // 行级重试失败回执:不占计数,保持失败标。
                 if (m_homeRetryRows.remove(key)) {
-                    maybeAssembleHomeRows();
+                    scheduleAssembleHomeRows();
                     return;
                 }
                 if (m_homeRowByKey.contains(key))
                     return; // 本代已处理,避免重复递减计数
                 m_homeFailedRows.insert(key);
                 --m_homePending;
-                maybeAssembleHomeRows();
+                scheduleAssembleHomeRows();
             });
     // 服务器建议到位:存账号建议列表并通知(hero 轮播用)。不参与
     // homePending 计数(建议失败不影响行聚合完成),代次过滤见 m_homeSuggReqGen。
@@ -588,7 +592,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 if (accountIndexById(accountId) < 0) {
                     if (m_homeReqGen.value(accountId) == m_homeGen) {
                         --m_homePending; // 删号在途票结算(同 views 回调)
-                        maybeAssembleHomeRows();
+                        scheduleAssembleHomeRows();
                     }
                     return;
                 }
@@ -602,7 +606,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                     row.insert(QStringLiteral("viewId"), viewId);
                     row.insert(QStringLiteral("items"), items);
                     m_homeRowByKey.insert(key, row);
-                    maybeAssembleHomeRows();
+                    scheduleAssembleHomeRows();
                     return;
                 }
                 if (m_homeRowByKey.contains(key))
@@ -613,7 +617,7 @@ AccountManager::AccountManager(EmbyClient *client, PlaybackHistory *history,
                 row.insert(QStringLiteral("items"), items);
                 m_homeRowByKey.insert(key, row);
                 --m_homePending;
-                maybeAssembleHomeRows();
+                scheduleAssembleHomeRows();
             });
 }
 
@@ -1901,6 +1905,12 @@ void AccountManager::onAllEpisodesParsed(const QString &serverUrl, const QString
     m_playbackHistory->upsertItems(serverUrl, accountId,
                                    historyItemsWithPosterIds(items, accountId));
     m_historyFlushTimer.start();
+}
+
+void AccountManager::scheduleAssembleHomeRows()
+{
+    if (!m_assembleTimer.isActive())
+        m_assembleTimer.start();
 }
 
 void AccountManager::maybeAssembleHomeRows()
