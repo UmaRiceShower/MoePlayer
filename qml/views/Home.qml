@@ -15,20 +15,213 @@ Item {
     property var heroWant: []
     property double heroPendingSince: 0
     property int heroCenter: 0   // 当前中心索引镜像(根级函数读不到 header 里的 id)
-    readonly property int heroKeepRadius: 1   // 前排除 = 当前中心 ±1(pathItemCount 3)
+    // 前排除半径随可见卡数:三卡 ±1、五卡队列 ±2(在屏卡不被挂起替换)。
+    readonly property int heroKeepRadius: root.heroMode === "queue" ? 2 : 1
     property bool heroHovered: false            // heroHover 的镜像(见 HoverHandler)
     ListModel { id: heroModel }
     readonly property real navH: Constants.homeNavH
     // hero 高按应用宽度计算(横向海报比例):首页可滚动,视图高度不构成约束;
     // 窄窗随宽度收缩,卡片保持满带宽。
     // 用窗口宽度而非父宽:页面首帧布局时父宽度尚未赋值,避免首帧 0 高布局。
+    // 模式读取收敛到根属性一处:单例就绪后重估根属性并级联下游绑定,
+    // 避免各绑定在首帧各自直读单例的时序面。
+    readonly property string heroMode: ConfigManager.homeHeroMode
     readonly property real heroH: (root.Window && root.Window.width > 0
-                                   ? root.Window.width : 1280) * Constants.homeHeroWidthRatio
+                                   ? root.Window.width : 1280)
+                                  * (root.heroMode === "queue" ? Constants.homeHeroWidthRatioQueue
+                                     : root.heroMode === "split" ? Constants.homeHeroWidthRatioSplit
+                                     : Constants.homeHeroWidthRatio)
+    // 左图右信息:仅宽窗分栏;窄窗退回三卡轮播(响应式)。
+    readonly property bool splitActive: root.heroMode === "split"
+                                        && (root.Window ? root.Window.width : 1280) >= Constants.homeHeroSplitMinW
+    // split 模式的当前索引(无 PathView,由计时器/缩略图点击驱动)。
+    property int splitIndex: 0
+    readonly property int splitCur: Math.max(0, Math.min(root.splitIndex, heroModel.count - 1))
+    // split 面板操作:播放 = 详情到达即起播;详情 = 仅进详情。
+    function splitOpen(autoPlay) {
+        const m = heroModel.get(root.splitCur)
+        if (!m)
+            return
+        ApplicationWindow.window.pushDetail(m.id, m.posterId || "", m.name,
+                                            m.serverUrl, m.accountId, false, autoPlay)
+    }
 
     // ---- 行几何单一来源:委托高度与滚动条精确跨度同用这一套公式 ----
     readonly property int homeLines: Math.max(1, Math.min(5, ConfigManager.homeRowLines))
+
+    // ---- 服务器分段模型(段 = 面板 + 段头 + 该服的行) ----
+    // 由 homeRowsFilter 分组生成;原位 diff(段按 key 对齐、行按库键对齐),
+    // 聚合期逐行到达只更新对应行,不整页重建委托(图片不重载)。
+    // custom 跨服桶无服可分,退化为每桶一段(段头 = 桶名 + 跨服聚合)。
+    ListModel { id: sectionModel }
+    Component { id: sectionRowsComp; ListModel {} }
+
+    function hostOf(url) {
+        return (url || "").replace(/^https?:\/\//, "").replace(/\/$/, "")
+    }
+    function accountIconFor(serverUrl) {
+        const list = AccountManager.accounts
+        for (let i = 0; i < list.length; ++i) {
+            if (list[i].serverUrl === serverUrl)
+                return list[i].icon || ""
+        }
+        return ""
+    }
+    // 行键归一化:ListModel 角色集由首项定型,缺键行会让委托读到旧槽值
+    // (与 hero 角色归一化同因);分段内所有行统一补齐默认键。
+    function normalizeRow(row) {
+        const out = {}
+        const keys = ["viewId", "viewName", "collectionType", "accountId", "serverUrl",
+                      "serverName", "posterId", "custom", "loading", "loadFailed"]
+        for (const k of keys)
+            out[k] = row[k] === undefined ? (k === "custom" || k === "loading" || k === "loadFailed" ? false : "") : row[k]
+        out.items = row.items || []
+        // 内容签名:比较用(JS 侧数组完整序列化;ListModel 角色里的
+        // QQmlListModel 不可枚举,不能直接 stringify 取回对象)。
+        out._sig = JSON.stringify(out)
+        return out
+    }
+    // 触发合并:聚合期 homeRowsReady/countChanged 每帧多次,合并到
+    // 事件循环尾部一次执行,避免同帧重复全量分组。
+    // 滚动/惯性期间不执行:段重建与委托增删会把减速动画挤成低帧率,
+    // 等滚动停止后结算(移动标志覆盖拖拽与惯性全过程)。
+    property bool _regroupQueued: false
+    function regroupSections() {
+        if (_regroupQueued)
+            return
+        _regroupQueued = true
+        Qt.callLater(function () { _regroupQueued = false; _regroupNow() })
+    }
+    function _regroupNow() {
+        if (pageList.moving || pageList.flicking) {
+            _regroupQueued = true
+            regroupIdleTimer.start()
+            return
+        }
+        _regroupQueued = false
+        _regroupNowBody()
+    }
+    Timer {
+        id: regroupIdleTimer
+        interval: 200
+        repeat: false
+        onTriggered: root._regroupNow()
+    }
+    function _regroupNowBody() {
+        const groups = []
+        const index = {}
+        for (let i = 0; i < homeRowsFilter.rowCount(); ++i) {
+            const raw = homeRowsFilter.rowAt(i)
+            if (!raw || !raw.viewId)
+                continue
+            const custom = raw.custom === true
+            const key = custom ? "custom|" + raw.viewName : raw.serverUrl
+            let g = index[key]
+            if (!g) {
+                g = { key: key, custom: custom,
+                      name: custom ? raw.viewName : raw.serverName,
+                      domain: custom ? "跨服聚合" : hostOf(raw.serverUrl),
+                      icon: custom ? "" : accountIconFor(raw.serverUrl),
+                      accountNames: {}, rows: [] }
+                index[key] = g
+                groups.push(g)
+            }
+            if (raw.serverName && !custom)
+                g.accountNames[raw.serverName] = true
+            g.rows.push(normalizeRow(raw))
+        }
+        for (let i = 0; i < groups.length; ++i) {
+            const g = groups[i]
+            if (i >= sectionModel.count || sectionModel.get(i).key !== g.key) {
+                sectionModel.insert(i, {
+                    key: g.key, name: g.name, domain: g.domain, icon: g.icon,
+                    meta: g.custom ? "" : Object.keys(g.accountNames).join("、")
+                                          + " · " + g.rows.length + " 库",
+                    rowsModel: sectionRowsComp.createObject(sectionModel) })
+            } else if (sectionModel.get(i).meta !== (g.custom ? "" : Object.keys(g.accountNames).join("、")
+                                          + " · " + g.rows.length + " 库")) {
+                sectionModel.setProperty(i, "meta", Object.keys(g.accountNames).join("、")
+                                          + " · " + g.rows.length + " 库")
+            }
+            const rm = sectionModel.get(i).rowsModel
+            for (let j = 0; j < g.rows.length; ++j) {
+                const row = g.rows[j]
+                if (j < rm.count && rm.get(j).viewId === row.viewId
+                    && rm.get(j).accountId === row.accountId) {
+                    // 内容未变不落:set 会级联 modelData 重估 → rowItems
+                    // 重算 → GridView 模型重置 → 委托重建/图片重载。
+                    if (rm.get(j)._sig !== row._sig)
+                        rm.set(j, row)
+                } else {
+                    rm.insert(j, row)
+                }
+            }
+            while (rm.count > g.rows.length)
+                rm.remove(rm.count - 1)
+        }
+        while (sectionModel.count > groups.length)
+            sectionModel.remove(sectionModel.count - 1)
+        refreshRowActivity()
+        updateActiveLib()
+    }
+
+    // 吸顶细条的位置指示:nav 线以下第一行对应的库(chip 高亮)。
+    // 滚动期 contentY 每帧变,遍历段×行节流至 120ms 一次。
+    property string activeLibKey: ""
+    property bool _activeLibDirty: false
+    function updateActiveLib() {
+        if (_activeLibDirty)
+            return
+        _activeLibDirty = true
+        activeLibTimer.start()
+    }
+    Timer {
+        id: activeLibTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            root._activeLibDirty = false
+            root._updateActiveLibNow()
+        }
+    }
+    // 滚动/布局变化时逐行重算激活态(行委托的 recomputeActive)。
+    // 遍历成本 = 段数×行数次 mapToItem(微秒级),滚动帧可承受。
+    function refreshRowActivity() {
+        for (let i = 0; i < sectionRep.count; ++i) {
+            const sec = sectionRep.itemAt(i)
+            if (!sec)
+                continue
+            const rows = sec.rowsRepeater
+            if (!rows)
+                continue
+            for (let j = 0; j < rows.count; ++j) {
+                const row = rows.itemAt(j)
+                if (row)
+                    row.recomputeActive()
+            }
+        }
+    }
+    function _updateActiveLibNow() {
+        const line = pageList.contentY + Constants.homeNavH + 80
+        let best = ""
+        for (let i = 0; i < sectionRep.count; ++i) {
+            const sec = sectionRep.itemAt(i)
+            if (!sec)
+                continue
+            const rows = sec.rowsRepeater
+            if (!rows)
+                continue
+            for (let j = 0; j < rows.count; ++j) {
+                const row = rows.itemAt(j)
+                if (row && row.colY <= line)
+                    best = row.modelData.serverUrl + "|" + row.modelData.viewId
+            }
+        }
+        if (best !== root.activeLibKey)
+            root.activeLibKey = best
+    }
     function gridCols(rowW) {
-        const gap = Constants.cellGap
+        const gap = Constants.homeCellGap
         const availW = rowW - Constants.homeRowHoverPad
         // 列数按卡宽下限取(保 minW),超上限时 +1 列回收
         let n = Math.max(1, Math.floor((availW + gap) / (Constants.rowCardMinW + gap)))
@@ -37,7 +230,7 @@ Item {
         return n
     }
     function gridCardW(rowW) {
-        return (rowW - Constants.homeRowHoverPad) / gridCols(rowW) - Constants.cellGap
+        return (rowW - Constants.homeRowHoverPad) / gridCols(rowW) - Constants.homeCellGap
     }
     function gridVPad(cardH) {
         // hover 放大溢出(卡高×3%)+ 光晕外探(2.5×1.06)+ 1px 余量
@@ -125,7 +318,8 @@ Item {
     // 默认值"补齐(兜底聚合条目与服务器建议条目的字段集本来就不一样)。
     readonly property var heroRoleDefaults: ({
         "id": "", "name": "", "backdropId": "", "parentBackdropId": "", "posterId": "",
-        "year": 0, "serverUrl": "", "accountId": ""
+        "year": 0, "serverUrl": "", "accountId": "",
+        "overview": "", "rating": 0, "runtimeTicks": 0
     })
     function heroRows(items) {
         const keys = {}
@@ -215,6 +409,15 @@ Item {
     onLibFilterChanged: {
         homeRowsFilter.refilter()
         root.rebuildTop()
+        root.regroupSections()
+    }
+    // 分段随行集合变化重算(过滤词改变行集合;行数据到达走 homeRowsReady)。
+    // QSortFilterProxyModel 无 countChanged,用行增删信号。
+    Connections {
+        target: homeRowsFilter
+        function onRowsInserted() { root.regroupSections() }
+        function onRowsRemoved() { root.regroupSections() }
+        function onCustomActiveChanged() { root.regroupSections() }
     }
 
     // hero 跟随过滤的条件:查询命中某服名(媒体库名的查询不动推荐)。
@@ -330,6 +533,7 @@ Item {
         target: AccountManager
         function onHomeRowsReady() {
             root.rebuildTop()
+            root.regroupSections()
         }
         function onSuggestionsUpdated() {
             root.rebuildTop()
@@ -510,12 +714,17 @@ Item {
         contentWidth: width
         contentHeight: pageCol.height
         ScrollBar.vertical: MoeScrollBar {}
+        onContentYChanged: {
+            root.refreshRowActivity()
+            root.updateActiveLib()
+        }
 
         Column {
             id: pageCol
             width: pageList.width
-            // 行间间距:标题与上一行海报间距(6)>= 标题与自身海报间距(4)。
-            spacing: Constants.homeRowGap
+            // 布局变化(行高随数据到位变化)同样刷新激活态。
+            onHeightChanged: root.refreshRowActivity()
+            spacing: Constants.homeSectionGap
 
             // hero 轮播 + 媒体库节(顶部一屏,随内容滚动,常驻加载 3 张图)。
             // 高度只依赖窗口宽度与常量:首次布局即最终尺寸,后续不翻转。
@@ -527,7 +736,9 @@ Item {
             clip: false
             readonly property real cardH: root.heroH * Constants.homeHeroCardH
             readonly property real cardW: Math.min(cardH * Constants.homeHeroCardAspect,
-                                                   width * Constants.homeHeroCardWCap)
+                                                   width * (root.heroMode === "queue"
+                                                            ? Constants.homeHeroCardWCapQueue
+                                                            : Constants.homeHeroCardWCap))
             // 媒体库节高 = 标题行高 + 间距 + 库卡高 + 底部留白(常量构成,稳定)。
             readonly property real mediaSecH: mediaTitleRow.height + mediaLib.spacing
                                               + Constants.homeMediaCardH + Constants.homeMediaBottomPad
@@ -541,11 +752,12 @@ Item {
                 anchors.topMargin: Constants.homeHeroTopPad
                 height: root.heroH
                 model: heroModel
-                        onCurrentIndexChanged: {
+                visible: !root.splitActive // split 形态走独立面板(无 PathView)
+                onCurrentIndexChanged: {
                     root.heroCenter = currentIndex   // 根级函数读不到本 id,用镜像
                     root.flushHero(false)            // 轮播走开即结算挂起的替换
                 }
-                pathItemCount: 3
+                pathItemCount: root.heroMode === "queue" ? 5 : 3
                 preferredHighlightBegin: 0.5
                 preferredHighlightEnd: 0.5
                 highlightRangeMode: PathView.StrictlyEnforceRange
@@ -570,8 +782,180 @@ Item {
                 delegate: HeroCard {}
             }
 
-            // 圆点指示+hover/点击切换。
+            // ===== 左图右信息(split 形态,宽窗)=====
+            // 左:当前条目 16:9 卡;右:标题/年份评分时长/简介/播放·详情/
+            // 轮播队列缩略图(点缩略图直接跳该条)。
+            Item {
+                id: splitPanel
+                visible: root.splitActive
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.topMargin: Constants.homeHeroTopPad
+                height: root.heroH
+                readonly property var cur: heroModel.count > 0 ? heroModel.get(root.splitCur) : null
+                readonly property string curBackdrop: {
+                    if (!cur)
+                        return ""
+                    const id = cur.backdropId || cur.parentBackdropId || cur.posterId || ""
+                    return id ? "image://emby/" + id + "~w" + Constants.homeHeroBackdropW : ""
+                }
+
+                Item {
+                    id: splitCard
+                    anchors.left: parent.left
+                    anchors.leftMargin: Constants.rowLeftMargin
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width * 0.46
+                    height: width * 9 / 16
+                    CrossfadeImage {
+                        anchors.fill: parent
+                        source: splitPanel.curBackdrop
+                        fillMode: Image.PreserveAspectCrop
+                        cornerRadius: 16
+                        duration: 400
+                        asynchronous: true
+                        cache: false
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.splitOpen(false)
+                    }
+                }
+                Column {
+                    anchors.left: splitCard.right
+                    anchors.leftMargin: 24
+                    anchors.right: parent.right
+                    anchors.rightMargin: Constants.rowLeftMargin + 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: 10
+
+                    AppText {
+                        width: parent.width
+                        text: splitPanel.cur ? splitPanel.cur.name : ""
+                        color: Theme.textPrimary
+                        font.pixelSize: 22
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                    AppText {
+                        text: {
+                            const m = splitPanel.cur
+                            if (!m)
+                                return ""
+                            const parts = []
+                            if (m.year > 0)
+                                parts.push(m.year)
+                            if (m.rating > 0)
+                                parts.push("★ " + m.rating.toFixed(1))
+                            const mins = Math.round((m.runtimeTicks || 0) / 6e8)
+                            if (mins > 0)
+                                parts.push(mins >= 60 ? Math.floor(mins / 60) + " 小时 "
+                                                      + (mins % 60) + " 分" : mins + " 分钟")
+                            return parts.join(" · ")
+                        }
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                    }
+                    AppText {
+                        width: parent.width
+                        text: splitPanel.cur ? splitPanel.cur.overview : ""
+                        color: Theme.textMuted
+                        font.pixelSize: 13
+                        wrapMode: Text.Wrap
+                        maximumLineCount: 5
+                        elide: Text.ElideRight
+                    }
+                    Row {
+                        spacing: 12
+                        topPadding: 4
+                        Button {
+                            id: splitPlayBtn
+                            width: 108
+                            height: 36
+                            text: "播放"
+                            onClicked: root.splitOpen(true)
+                            background: Rectangle {
+                                radius: 18
+                                color: splitPlayBtn.pressed || splitPlayBtn.hovered
+                                       ? Theme.accentDeep : Theme.accent
+                            }
+                            contentItem: AppText {
+                                text: splitPlayBtn.text
+                                color: Theme.accentInk
+                                font.pixelSize: 14
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        Button {
+                            id: splitDetailBtn
+                            width: 108
+                            height: 36
+                            text: "详情"
+                            onClicked: root.splitOpen(false)
+                            background: Rectangle {
+                                radius: 18
+                                color: "transparent"
+                                border.color: Theme.borderSoft
+                                border.width: 1
+                            }
+                            contentItem: AppText {
+                                text: splitDetailBtn.text
+                                color: Theme.textPrimary
+                                font.pixelSize: 14
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                    }
+                    // 轮播队列缩略图:接下来 4 条,点击即跳(等价圆点指示)。
+                    Row {
+                        spacing: 10
+                        topPadding: 6
+                        visible: heroModel.count > 1
+                        Repeater {
+                            model: Math.max(0, Math.min(4, heroModel.count - 1))
+                            delegate: Item {
+                                required property int index
+                                readonly property var m: heroModel.get((root.splitCur + index + 1) % heroModel.count)
+                                width: 96
+                                height: 54
+                                Image {
+                                    anchors.fill: parent
+                                    source: {
+                                        const id = m.backdropId || m.parentBackdropId || m.posterId || ""
+                                        return id ? "image://emby/" + id : ""
+                                    }
+                                    sourceSize: Qt.size(192, 108)
+                                    asynchronous: true
+                                    fillMode: Image.PreserveAspectCrop
+                                }
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 6
+                                    color: "transparent"
+                                    border.color: thumbMouse.containsMouse ? Theme.accent : Theme.borderSoft
+                                    border.width: 1
+                                }
+                                MouseArea {
+                                    id: thumbMouse
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.splitIndex = (root.splitCur + index + 1) % heroModel.count
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 圆点指示+hover/点击切换(split 形态由队列缩略图替代)。
             Row {
+                visible: !root.splitActive
                 z: 7
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.top: parent.top
@@ -672,7 +1056,12 @@ Item {
                 repeat: true
                 running: heroModel.count > 1 && !root.heroHovered
                          && root.StackView.status === StackView.Active
-                onTriggered: heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
+                onTriggered: {
+                    if (root.splitActive)
+                        root.splitIndex = (root.splitIndex + 1) % heroModel.count
+                    else
+                        heroPv.currentIndex = (heroPv.currentIndex + 1) % heroModel.count
+                }
             }
             // ===== 媒体库列举(hero 下方):标题 + 库图片横排(库名常显,不随 hover) =====
             Column {
@@ -805,8 +1194,9 @@ Item {
         }
 
             Repeater {
-                model: homeRowsFilter // 恒定对象,过滤走谓词(见 homeRowsFilter 注释)
-                delegate: LibraryRow {}
+                id: sectionRep
+                model: sectionModel // 分段模型(由 homeRowsFilter 分组,见 regroupSections)
+                delegate: LibrarySection {}
             }
         }
     }
@@ -825,6 +1215,77 @@ Item {
             anchors.bottom: parent.bottom
             height: 1
             color: Theme.borderSoft
+        }
+    }
+
+    // 库卡吸顶细条:滚过媒体库卡条后浮现(nav 下 44px),chip = 库小图
+    // + 服·库名,点击进库页;当前视口所在行对应 chip 高亮作位置指示。
+    Rectangle {
+        id: libChipBar
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: topBar.bottom
+        height: 44
+        z: 9
+        visible: pageList.contentY > heroCar.height - Constants.homeNavH
+        color: ThemeStore.background.baseTop
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: 1
+            color: Theme.borderSoft
+        }
+        ListView {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 16
+            orientation: ListView.Horizontal
+            spacing: 8
+            clip: true
+            model: AccountManager.homeRows
+            delegate: Item {
+                required property var modelData
+                width: chipRow.implicitWidth + 18
+                height: 30
+                y: 7 // 条高 44 - chip 高 30 的一半(委托创建早期 parent 未就位,不用锚)
+                readonly property bool active: root.activeLibKey
+                                               === modelData.serverUrl + "|" + modelData.viewId
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 8
+                    color: parent.active ? Qt.rgba(Theme.accent.r, Theme.accent.g, Theme.accent.b, 0.12) : "transparent"
+                    border.color: parent.active ? Theme.accent : "transparent"
+                    border.width: 1
+                }
+                Row {
+                    id: chipRow
+                    anchors.centerIn: parent
+                    spacing: 6
+                    Image {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 18
+                        height: 26
+                        source: modelData.posterId ? "image://emby/" + modelData.posterId : ""
+                        sourceSize: Qt.size(36, 52)
+                        asynchronous: true
+                        fillMode: Image.PreserveAspectCrop
+                    }
+                    AppText {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: (modelData.serverName !== "" ? modelData.serverName + " · " : "")
+                              + modelData.viewName
+                        color: parent.active ? Theme.accent : Theme.textMuted
+                        font.pixelSize: 12
+                    }
+                }
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.openLibrary(modelData.viewId, modelData.serverUrl,
+                                                modelData.viewName, modelData.accountId)
+                }
+            }
         }
     }
 
@@ -1038,6 +1499,96 @@ Item {
         return n
     }
 
+    // 服务器分段:一块浮起面板 = 段头(图标 26 + 服名 17 粗 + 账号·N库
+    // + 分隔线 + 右端域名)+ 该服的库行。面板用静态半透明 surface,不做
+    // 实时模糊。custom 跨服桶一段一桶(段头 = 桶名,右端「跨服聚合」)。
+    component LibrarySection: Item {
+        id: libSec
+        required property var modelData
+        // 吸顶细条定位用:段内行 Repeater 暴露给根级遍历。
+        readonly property alias rowsRepeater: rowsRep
+        width: parent ? parent.width : 0
+        height: secInner.implicitHeight + 28 // 上下内边距 14×2
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 16
+            color: Qt.rgba(Theme.surface.r, Theme.surface.g, Theme.surface.b, 0.55)
+            border.color: Theme.borderSoft
+            border.width: 1
+        }
+        Column {
+            id: secInner
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: 14
+            spacing: Constants.homeSectionHeaderGap
+
+            // 段头:图标 + 服名 + 账号·N库 + 分隔线补满 + 右端域名小字。
+            Item {
+                width: parent.width
+                height: 30
+                ServerIcon {
+                    id: secIcon
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 26
+                    height: 26
+                    radius: 8
+                    icon: libSec.modelData.icon
+                    fallbackText: (libSec.modelData.name || "?").charAt(0)
+                }
+                AppText {
+                    id: secName
+                    anchors.left: secIcon.right
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: libSec.modelData.name
+                    color: Theme.textPrimary
+                    font.pixelSize: 17
+                    font.bold: true
+                }
+                AppText {
+                    id: secMeta
+                    anchors.left: secName.right
+                    anchors.leftMargin: 10
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: text !== ""
+                    text: libSec.modelData.meta
+                    color: Theme.textMuted
+                    font.pixelSize: 12
+                }
+                Rectangle {
+                    anchors.left: secMeta.visible ? secMeta.right : secName.right
+                    anchors.leftMargin: 12
+                    anchors.right: secDomain.left
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    height: 1
+                    color: Theme.borderSoft
+                }
+                AppText {
+                    id: secDomain
+                    anchors.right: parent.right
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: libSec.modelData.domain
+                    color: Theme.textMuted
+                    font.pixelSize: 11
+                }
+            }
+            Column {
+                width: parent.width
+                spacing: Constants.homeRowGap
+                Repeater {
+                    id: rowsRep
+                    model: libSec.modelData.rowsModel
+                    delegate: LibraryRow {}
+                }
+            }
+        }
+    }
+
     // 库行(一个媒体库):行头文字(库名)+ 该库条目横向卡片行。
     component LibraryRow: Column {
         id: libRow
@@ -1045,14 +1596,65 @@ Item {
         width: parent ? parent.width : 0
         // 视口门控:壳高由几何公式定死(与卡是否实例化无关),离屏行的
         // 卡片/海报不创建,内存与 ListView 按需持平;回滚经磁盘缓存快速重现。
-        // 带余量 = 上方半屏 + 下方 1 屏
-        readonly property bool rowActive: libRow.y + libRow.height > pageList.contentY - pageList.height * 0.5
-                                          && libRow.y < pageList.contentY + pageList.height * 1.5
+        // 带余量 = 上方半屏 + 下方 1 屏。行激活由根级 refreshRowActivity
+        // 在滚动/布局变化时逐行重算(mapToItem 的坐标依赖不被 QML 绑定
+        // 追踪,只读绑定会冻结在首帧值,勿回退为属性绑定)。
+        property real colY: 0
+        property bool rowActive: false
+        function recomputeActive() {
+            const y = libRow.mapToItem(pageCol, 0, 0).y
+            libRow.colY = y
+            libRow.rowActive = y + libRow.height > pageList.contentY - pageList.height * 0.5
+                               && y < pageList.contentY + pageList.height * 1.5
+        }
+        Component.onCompleted: recomputeActive()
+        // 入场错落:行首次滚入视口开启 900ms 窗口,窗口内创建的卡按列序
+        // 级差淡入+上移;每行只跑一次,滚动过程中无动画。
+        property bool enteredOnce: false
+        Timer {
+            interval: 900
+            repeat: false
+            running: libRow.rowActive && !libRow.enteredOnce
+            onTriggered: libRow.enteredOnce = true
+        }
+        // 离带宽限:出带后保留卡片 8s——快速往返滚动不重建委托、不重载
+        // 图片;超时未回带才释放(常驻卡数仍由带宽主导)。
+        property bool everActive: false
+        property bool holdCards: false
+        onRowActiveChanged: {
+            if (rowActive) {
+                everActive = true
+                holdCards = false
+                holdTimer.stop()
+            } else if (everActive && !holdCards) {
+                holdCards = true
+                holdTimer.start()
+            }
+        }
+        Timer {
+            id: holdTimer
+            interval: 8000
+            repeat: false
+            onTriggered: libRow.holdCards = false
+        }
+        // 行条目双形态归一:ListModel 角色里的对象数组会被 Qt 转成
+        // QQmlListModel(官方:角色可含列表数据),无 slice()/length——
+        // 统一还原为 JS 数组再消费。
+        readonly property var rowItems: {
+            const src = libRow.modelData.items
+            if (!src)
+                return []
+            if (Array.isArray(src))
+                return src
+            const out = []
+            for (let i = 0; i < src.count; ++i)
+                out.push(src.get(i))
+            return out
+        }
         // 标题贴近自身海报(下间距 < 与上一节的上间距)。
         spacing: Constants.homeRowTitleGap
 
-        // 行头(Column 子项不可上下锚定,故包一层 Item 做水平布局):
-        // 左库名 + 右「查看全部 ›」链接(进入对应媒体库)。
+        // 行头:左库名(服名已上提到段头)+ 发丝线拉到右缘 + 右端「查看全部 ›」。
         Item {
             height: Constants.rowTitleH
             width: parent.width
@@ -1064,20 +1666,28 @@ Item {
                 anchors.right: seeAllLink.left
                 anchors.rightMargin: Constants.homeRowTitlePad
                 anchors.verticalCenter: parent.verticalCenter
-                text: (libRow.modelData.custom === true
-                       ? ""
-                       : (libRow.modelData.serverName !== ""
-                          ? libRow.modelData.serverName + " · " : "")) + libRow.modelData.viewName
+                text: libRow.modelData.viewName
                 color: Theme.textPrimary
                 font.pixelSize: Constants.homeRowTitlePx
                 font.bold: true
                 elide: Text.ElideRight
             }
+            // 发丝线:标题右缘 → 「查看全部」左缘,画出每行起止。
+            Rectangle {
+                anchors.left: rowTitle.right
+                anchors.leftMargin: Constants.homeRowTitlePad
+                anchors.right: seeAllLink.left
+                anchors.rightMargin: Constants.homeRowTitlePad
+                anchors.verticalCenter: parent.verticalCenter
+                height: 1
+                color: Theme.borderSoft
+                visible: seeAllLink.visible
+            }
             AppText {
                 id: seeAllLink
                 visible: libRow.modelData.custom !== true
                 anchors.right: parent.right
-                anchors.rightMargin: Constants.rowLeftMargin + Constants.homeRowHoverPad / 2 + Constants.cellGap / 2
+                anchors.rightMargin: Constants.rowLeftMargin + Constants.homeRowHoverPad / 2 + Constants.homeCellGap / 2
                 anchors.verticalCenter: parent.verticalCenter
                 text: "查看全部 ›"
                 color: seeAllMouse.hovered ? Theme.accent : Theme.textMuted
@@ -1104,7 +1714,7 @@ Item {
             width: libRow.width - Constants.rowLeftMargin * 2
             // 几何公式全部来自根级单一来源(不各自推导,防漂移)。
             readonly property int lines: root.homeLines
-            readonly property int gap: Constants.cellGap
+            readonly property int gap: Constants.homeCellGap
             readonly property int cols: root.gridCols(width)
             // GridView 按 floor(width/cellWidth) 布列(每格都含 gap)——
             // cellWidth 必须精确等分(width/cols),gap 折进格内,否则公式列数
@@ -1113,7 +1723,7 @@ Item {
             readonly property real cardH: Constants.gridCardH(cardW)
             readonly property int vPad: root.gridVPad(cardH)
             // 实际显示行数:条目填不满设定行数时按实际行数收,不留空行
-            readonly property int shownLines: root.gridShownLines(libRow.modelData.items.length, width)
+            readonly property int shownLines: root.gridShownLines(libRow.rowItems.length, width)
             // 行级失败(无缓存可沿用):紧凑占位高,网格不渲染。
             readonly property bool loadFailed: libRow.modelData.loadFailed === true
             height: loadFailed ? 44 : shownLines * cardH + (shownLines - 1) * gap + vPad * 2
@@ -1130,19 +1740,42 @@ Item {
                 cellWidth: width / parent.cols - 0.5
                 cellHeight: parent.cardH + parent.gap
                 reuseItems: true
-                model: libRow.rowActive ? libRow.modelData.items.slice(0, parent.lines * parent.cols) : []
+                model: libRow.everActive && (libRow.rowActive || libRow.holdCards)
+                       ? libRow.rowItems.slice(0, parent.lines * parent.cols) : []
                 delegate: Item {
+                    id: cardCell
                     required property var modelData
                     required property int index
                     width: rowItems.cellWidth
                     height: rowItems.cellHeight
                     z: pc.hovered ? 2 : 0
+                    // 入场错落:仅行入场窗口内创建的卡执行(复用/后续不重复)。
+                    // 只做位移不淡入:整卡 opacity 动画要离屏合成,且淡入
+                    // 期间卡不可见,快滚时卡区会短暂空白。
+                    transform: Translate { id: cardTr }
+                    Component.onCompleted: {
+                        if (!libRow.enteredOnce) {
+                            cardTr.y = 8
+                            enterAnim.delay = (index % rowGridWrap.cols) * 30
+                            enterAnim.start()
+                        }
+                    }
+                    GridView.onReused: {
+                        enterAnim.stop()
+                        cardTr.y = 0
+                    }
+                    SequentialAnimation {
+                        id: enterAnim
+                        property int delay: 0
+                        PauseAnimation { duration: enterAnim.delay }
+                        NumberAnimation { target: cardTr; property: "y"; to: 0; duration: 180 }
+                    }
                     PosterCard {
                         id: pc
                         // 格内居中:卡间距拆半到卡两侧,首/末卡距缘各 gap/2,左右对称。
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: rowItems.cellWidth - Constants.cellGap
-                        height: rowItems.cellHeight - Constants.cellGap
+                        width: rowItems.cellWidth - Constants.homeCellGap
+                        height: rowItems.cellHeight - Constants.homeCellGap
                         model: parent.modelData
                         index: parent.index
                         showActions: false

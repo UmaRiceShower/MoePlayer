@@ -163,6 +163,21 @@ bool validateCustomLibrariesMode(const QVariant &v)
     return s == QLatin1String("on") || s == QLatin1String("only") || s == QLatin1String("off");
 }
 
+QVariantList optionsHeroMode()
+{
+    return QVariantList{
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("三卡轮播") }, { QStringLiteral("key"), QStringLiteral("carousel") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("五卡队列") }, { QStringLiteral("key"), QStringLiteral("queue") }},
+        QVariantMap{{ QStringLiteral("label"), QStringLiteral("左图右信息") }, { QStringLiteral("key"), QStringLiteral("split") }},
+    };
+}
+
+bool validateHeroMode(const QVariant &v)
+{
+    const QString s = v.toString();
+    return s == QLatin1String("carousel") || s == QLatin1String("queue") || s == QLatin1String("split");
+}
+
 QVariantList optionsLibrarySortOrder()
 {
     return optionsFrom({

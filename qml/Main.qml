@@ -361,7 +361,8 @@ ApplicationWindow {
     }
 
     // 打开详情页:记录浏览服务器与账号(全局搜索路由),防抖在调用方。
-    function pushDetail(itemId, posterId, title, serverUrl, accountId, fromSearch) {
+    // autoPlay = 详情到达即起播(hero 左图右信息的「播放」按钮)。
+    function pushDetail(itemId, posterId, title, serverUrl, accountId, fromSearch, autoPlay) {
         if (serverUrl)
             root.currentServerUrl = serverUrl
         if (accountId)
@@ -373,7 +374,8 @@ ApplicationWindow {
             title: title,
             serverUrl: serverUrl || root.currentServerUrl,
             accountId: accountId || root.currentAccountId,
-            fromSearch: fromSearch === true
+            fromSearch: fromSearch === true,
+            autoPlay: autoPlay === true
         }
         const cur = stackView.currentItem
         if (fromSearch === true && cur && cur.fromSearch === true) {

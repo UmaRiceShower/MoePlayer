@@ -89,6 +89,8 @@ QVariantMap parseHomeItem(const QJsonObject &o, const QString &idPrefix)
     m.insert(QStringLiteral("rating"), o.value(QLatin1String("CommunityRating")).toDouble(0));
     m.insert(QStringLiteral("year"), o.value(QLatin1String("ProductionYear")).toInt(0));
     m.insert(QStringLiteral("runtimeTicks"), o.value(QLatin1String("RunTimeTicks")).toDouble(0));
+    // 简介:hero 左图右信息形态的信息面板用(建议/列表请求已带 Overview)。
+    m.insert(QStringLiteral("overview"), o.value(QLatin1String("Overview")).toString());
     m.insert(QStringLiteral("favorite"), ud.value(QLatin1String("IsFavorite")).toBool(false));
     {
         const QString d = o.value(QLatin1String("DateLastMediaAdded")).toString();

@@ -68,6 +68,13 @@ void HomeRowsFilterModel::refilter()
     endFilterChange();
 }
 
+QVariantMap HomeRowsFilterModel::rowAt(int row) const
+{
+    // 走代理自身 data():由它完成 proxy→source 的映射(过滤/双源切换下
+    // 直接拿代理 index 喂 sourceModel 会错位)。
+    return data(index(row, 0), Qt::UserRole + 1).toMap();
+}
+
 bool HomeRowsFilterModel::filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const
 {
     if (!m_filtering && m_maxRows > 0 && sourceRow >= m_maxRows)

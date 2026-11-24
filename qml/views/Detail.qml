@@ -134,6 +134,9 @@ Item {
     // detail 是否已加载完成(首次进入/切集前为 false → 显示加载动画,
     // 到达后一次性渲染完整结构,避免介绍/演员逐块出现推动按钮位置)。
     property bool loaded: false
+    // 打开即起播(hero 左图右信息「播放」):详情首次到达后自动续播,
+    // 一次性消耗。
+    property bool autoPlay: false
     // 详情拉取失败(网络/超时):加载动画换失败态+重试;reload/切集复位。
     property bool loadFailed: false
     // 分集拉取失败:解除选集加载门(页面照常渲染),选集条显示重试。
@@ -2744,6 +2747,14 @@ Item {
             root.loadFailed = false
             root.applyDetail(d)
             root.refreshSeriesPlayText()
+            if (root.autoPlay) {
+                root.autoPlay = false
+                // 剧集走续播定位(分集表/续播集解析),电影/分集直接续播。
+                if (root.detail.type === "Series")
+                    root.playSeries()
+                else
+                    root.startPlayback(true)
+            }
         }
         // 详情拉取失败:仅未渲染时换失败态;已渲染内容下的静默重拉
         // (播放后刷新)失败不打断现有页面。

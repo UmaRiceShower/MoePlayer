@@ -38,6 +38,9 @@ public:
 
     //! 查询词变化后调用(谓词闭包捕获查询词,此处仅触发重过滤)。
     Q_INVOKABLE void refilter();
+    //! 取过滤后第 row 行的整行 map(HomeRowsModel RowRole 透传),
+    //! 供 QML 侧分段分组枚举;越界返回空 map。
+    Q_INVOKABLE QVariantMap rowAt(int row) const;
 
 protected:
     bool filterAcceptsRow(int sourceRow, const QModelIndex &sourceParent) const override;

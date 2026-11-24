@@ -66,6 +66,12 @@ QtObject {
     // 宽度预算:使中心卡宽恰达卡宽上限对应的 hero 高(≈0.33×窗口宽);
     // 窄窗时 hero 高收缩、卡片保持满带宽,宽窗由高度预算/上限决定。
     readonly property real homeHeroWidthRatio: homeHeroCardWCap / homeHeroCardAspect / homeHeroCardH
+    // 五卡队列:中心卡收窄至 0.40 窗宽,pathItemCount 5(同屏推荐 1→5)。
+    readonly property real homeHeroCardWCapQueue: 0.40
+    readonly property real homeHeroWidthRatioQueue: homeHeroCardWCapQueue / homeHeroCardAspect / homeHeroCardH
+    // 左图右信息:hero 区高 ~680px@2540 宽;窄窗(<1100)退回三卡轮播。
+    readonly property real homeHeroWidthRatioSplit: 0.27
+    readonly property int homeHeroSplitMinW: 1100
     readonly property int homeHeroTopPad: homeNavH + 12 // hero 区顶部留白(顶栏实面,卡顶贴栏下缘)
     readonly property real homeHeroPathStartX: 0.12       // 路径左弧 x 比例
     readonly property real homeHeroPathCenterX: 0.5       // 路径中弧 x 比例
@@ -102,14 +108,19 @@ QtObject {
     readonly property int homeRowTitlePx: 16              // 行标题字号
     readonly property int homeRowTitlePad: 12             // 标题与「查看全部」间距
     readonly property int homeSeeAllPx: 13                // 「查看全部」字号
-    readonly property int homeRowGap: 6                   // 行间间距
-    readonly property int homeRowTitleGap: 4              // 标题与条目行间距
+    readonly property int homeRowGap: 10                  // 段内行间间距
+    readonly property int homeRowTitleGap: 6              // 标题与条目行间距
     readonly property int homeRowHoverPad: 16             // 条目行 hover 垂直溢出缓冲
 
+    // ---- 分段语法(段间 32 > 段头→首行 14 > 行间 10 > 标题→卡 6)----
+    readonly property int homeSectionGap: 32                // 段间距(面板间物理边界)
+    readonly property int homeSectionHeaderGap: 14          // 段头与首行间距
+    readonly property int homeCellGap: 36                   // 首页行卡间距(仅首页,库/搜索页用 cellGap)
+
     // ---- 库行卡片尺寸 ----
-    readonly property int rowCardMinW: 140                 // 首页行卡宽下限
+    readonly property int rowCardMinW: 185                 // 首页行卡宽下限
     readonly property int posterCardReqW: 340
-    readonly property int rowCardMaxW: 165                 // 首页行卡宽上限
+    readonly property int rowCardMaxW: 205                 // 首页行卡宽上限
     readonly property int rowTitleH: 24                   // 行标题行高
     readonly property int rowSpacing: 12                  // 条目卡间距
     readonly property int rowLeftMargin: 16               // 行内容左边距
