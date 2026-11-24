@@ -1159,12 +1159,19 @@ Window {
     Shortcut { sequences: ["Shift+Right"]; onActivated: { root.wake(); MpvClient.command(["no-osd", "seek", 1, "exact"], root.sessionKey) } }
     Shortcut { sequences: ["Up"]; onActivated: root.adjustVolume(5) }
     Shortcut { sequences: ["Down"]; onActivated: root.adjustVolume(-5) }
-    Shortcut { sequences: ["0", "Shift+*", "Shift+8"]; onActivated: root.adjustVolume(2) }
-    Shortcut { sequences: ["9", "/"]; onActivated: root.adjustVolume(-2) }
+    // 多写法行与集跳行同理:候选排列可能命中多条 → 只发歧义信号。
+    Shortcut { sequences: ["0", "Shift+*", "Shift+8"]
+        onActivated: root.adjustVolume(2); onActivatedAmbiguously: root.adjustVolume(2) }
+    Shortcut { sequences: ["9", "/"]
+        onActivated: root.adjustVolume(-2); onActivatedAmbiguously: root.adjustVolume(-2) }
     Shortcut { sequences: ["M"]; onActivated: MpvClient.command(["osd-auto", "cycle", "mute"], root.sessionKey) }
     Shortcut { sequences: ["F"]; onActivated: root.toggleFullscreen() }
-    Shortcut { sequences: [">", "Return", "Shift+>", "Shift+."]; onActivated: root.episodeJump(1) }
-    Shortcut { sequences: ["<", "Shift+<", "Shift+,"]; onActivated: root.episodeJump(-1) }
+    // `>`/`<` 需 Shift 才能输入,真实按键的候选排列同时命中符号写法与
+    // 基础键写法(与 Ctrl++ 同机制),只发 activatedAmbiguously。
+    Shortcut { sequences: [">", "Return", "Shift+>", "Shift+."]
+        onActivated: root.episodeJump(1); onActivatedAmbiguously: root.episodeJump(1) }
+    Shortcut { sequences: ["<", "Shift+<", "Shift+,"]
+        onActivated: root.episodeJump(-1); onActivatedAmbiguously: root.episodeJump(-1) }
     Shortcut { sequences: ["Esc"]; onActivated: {
         if (root.visibility === Window.FullScreen)
             root.toggleFullscreen()
@@ -1184,7 +1191,10 @@ Window {
         delegate: Shortcut {
             required property var modelData
             sequence: modelData.hotkey
+            // 与 mpvKeys 同理:热键若改用带移位符号的写法,候选排列会
+            // 命中多条,只发 activatedAmbiguously。
             onActivated: ConfigManager.setValue("superRes", modelData.key)
+            onActivatedAmbiguously: ConfigManager.setValue("superRes", modelData.key)
         }
     }
     // 其余 mpv 默认键位:[键序列数组] → mpv 命令数组,批量注册。
@@ -1192,6 +1202,11 @@ Window {
     // "Shift+基础键"——按键事件给哪种(移位后符号键码+Shift,或基础键
     // +Shift)随平台/布局不定;裸符号序列不可达(该符号本就须按 Shift
     // 才能输入,事件恒带 Shift 修饰)。
+    // 同一物理键的多种写法会同时命中:Qt 的 QShortcutMap 按原生键位排列
+    // 生成候选序列(Wayland: Ctrl+Shift+= 同时给出 Ctrl+Shift++ 与
+    // Ctrl++,后者来自把移位符号当作基础键的兼容排列),命中多条时只发
+    // activatedAmbiguously 而非 activated。delegate 两个信号接同一处理,
+    // 多写法才不会互相吞掉。
     readonly property var mpvKeys: [
         // 帧步进 / 倍速(mpv: [ ] { } BS)
         [["."], ["frame-step"]], [[","], ["frame-back-step"]],
@@ -1223,7 +1238,7 @@ Window {
         // 字幕:延迟 / 字号 / 位置 / 可见性 / 切轨
         [["Z"], ["add", "sub-delay", -0.1]], [["X"], ["add", "sub-delay", 0.1]],
         [["Shift+Z"], ["add", "sub-delay", 0.1]],
-        [["Ctrl++", "Ctrl+Shift++", "Ctrl+Shift+="], ["add", "audio-delay", 0.1]],
+        [["Ctrl++", "Ctrl+Shift++", "Ctrl+Shift+=", "Ctrl+="], ["add", "audio-delay", 0.1]],
         [["Ctrl+-"], ["add", "audio-delay", -0.1]],
         [["Shift+G"], ["add", "sub-scale", 0.1]], [["Shift+F"], ["add", "sub-scale", -0.1]],
         [["R"], ["add", "sub-pos", -1]], [["Shift+R"], ["add", "sub-pos", 1]],
@@ -1265,18 +1280,23 @@ Window {
     readonly property var cmdPrefixes: ["osd-auto", "no-osd", "osd-msg", "osd-bar",
         "osd-msg-bar", "raw", "expand-properties", "repeatable", "nonrepeatable",
         "nonscalable", "async", "sync"]
+    // 转发一条键位命令:唤醒(可能隐去控制栏)后补 osd-auto 前缀再发给 mpv。
+    function fireMpvKey(modelData) {
+        root.wake()
+        let c = modelData[1].slice()
+        if (root.cmdPrefixes.indexOf(c[0]) < 0 && c[0] !== "set_property" && c[0] !== "get_property")
+            c.unshift("osd-auto")
+        MpvClient.command(c, root.sessionKey)
+    }
     Instantiator {
         model: root.mpvKeys
         delegate: Shortcut {
             required property var modelData
             sequences: modelData[0]
-            onActivated: {
-                root.wake()
-                let c = modelData[1].slice()
-                if (root.cmdPrefixes.indexOf(c[0]) < 0 && c[0] !== "set_property" && c[0] !== "get_property")
-                    c.unshift("osd-auto")
-                MpvClient.command(c, root.sessionKey)
-            }
+            // 歧义信号与 activated 同处理:同一物理键命中多个候选写法时
+            // QShortcutMap 只发 activatedAmbiguously(见上方键位表注释)。
+            onActivated: root.fireMpvKey(modelData)
+            onActivatedAmbiguously: root.fireMpvKey(modelData)
         }
     }
 }
