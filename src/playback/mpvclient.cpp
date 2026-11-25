@@ -178,6 +178,9 @@ void MpvClient::selectTrack(const QString &itemId, const QString &type, int mpvI
         return;
     const QString prop = type == QLatin1String("audio") ? QStringLiteral("aid")
                                                         : QStringLiteral("sid");
+    // 用户手动选择优先于在途补选:外挂字幕下载失败时轨道永不出现,
+    // 补选标记会一直为真并把手动切换的轨道改回 meta 初值,故清标记。
+    s->trackSelectionPending = false;
     sendJson(s, QJsonObject{{QStringLiteral("command"),
                              QJsonArray{QStringLiteral("set_property"), prop,
                                         mpvId < 0 ? QStringLiteral("no")
@@ -1176,9 +1179,10 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
             // 链被改动(mpv 内快捷键/外部):重算挂载数与门槛判定。
             requestSuperResState(s);
         } else if (name == QLatin1String("track-list")) {
-            // 轨集合变化:外挂字幕经 URL 异步下载,file-loaded 时点尚不在
-            // track-list(选轨落空);到达后按同一 ordinal 序列重应用一次。
-            if (data.isArray() && !data.toArray().isEmpty())
+            // 轨集合变化:仅在外挂字幕选轨未落实时重放(URL 异步下载,
+            // file-loaded 时点轨道尚不存在)。落实后的轨道变化来自用户
+            // 手动切换,重放会把选择改回 meta 初值,故不做。
+            if (s->trackSelectionPending && data.isArray() && !data.toArray().isEmpty())
                 applyTrackSelection(s, data.toArray());
         }
         return;
@@ -1219,6 +1223,9 @@ void MpvClient::handleEvent(Session *s, const QJsonObject &ev)
         }
         // 文件就绪即查 track-list,匹配 Emby 所选轨(两模式共享;外部经
         // IPC 同样可行——修正外部模式正数 ordinal 选轨静默丢弃的缺口)。
+        // 外挂字幕可能尚未下载完成(轨道未出现),先记选轨未落实;
+        // track-list 变化观察据此决定是否重放。
+        s->trackSelectionPending = true;
         sendJson(s, QJsonObject{
                         {QStringLiteral("command"),
                          QJsonArray{QStringLiteral("get_property"),
@@ -1796,9 +1803,13 @@ void MpvClient::applyTrackSelection(Session *s, const QJsonArray &trackList)
                                  QJsonArray{QStringLiteral("set_property"),
                                             QStringLiteral("aid"),
                                             QStringLiteral("no")}}});
+    const QString subUrl = s->meta.value(QStringLiteral("selectedSubtitleUrl")).toString();
     const int wantAid = audioOrdinal >= 0 ? idAtOrdinal(QStringLiteral("audio"), audioOrdinal) : -1;
     const int wantSid = subOrdinal == -2 ? -1
                                          : idAtOrdinal(QStringLiteral("sub"), subOrdinal);
+    // 选轨是否仍在等外挂字幕到达:有 URL、ordinal>=0 但轨道尚未出现。
+    // 只有这种情形需要 track-list 变化时重放;其余(含内封缺轨)不重放。
+    s->trackSelectionPending = subOrdinal >= 0 && !subUrl.isEmpty() && wantSid < 0;
     // 目标轨已是当前选中轨时跳过 set:mpv 对同值设置也打印 Track switched
     // (src/player/command.c:6635 直接 mp_switch_track 无值比较),避免重复噪音。
     const auto currentlySelected = [&](const QString &type) -> int {
@@ -1980,6 +1991,23 @@ void MpvClient::command(const QVariantList &params, const QString &itemId)
     if (!s) {
         qDebug() << "MpvClient: 无会话,忽略 command";
         return;
+    }
+    // 键位切轨(cycle sub/audio,set_property aid/sid)也是手动选择:
+    // 与 selectTrack 同样清在途补选标记,否则外挂字幕下载失败时这些
+    // 切换会被 track-list 重放改回 meta 初值。属性名在命令第二参;
+    // 前缀(osd-auto 等)是独立 token,不影响该位置。
+    for (int i = 0; i + 1 < params.size(); ++i) {
+        const QString t = params.at(i).toString();
+        const QString prop = params.at(i + 1).toString();
+        const bool isCycle = (t == QLatin1String("cycle") || t == QLatin1String("cycle-values"))
+                             && (prop == QLatin1String("sub") || prop == QLatin1String("audio")
+                                 || prop == QLatin1String("video"));
+        const bool isSet = t == QLatin1String("set_property")
+                           && (prop == QLatin1String("sid") || prop == QLatin1String("aid"));
+        if (isCycle || isSet) {
+            s->trackSelectionPending = false;
+            break;
+        }
     }
     QJsonArray arr;
     for (const QVariant &p : params)

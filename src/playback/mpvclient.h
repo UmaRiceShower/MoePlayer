@@ -174,6 +174,10 @@ private:
         // 预加载改写路径都会带上,file-loaded 若正是该条目则不再补
         // sub-add(否则同一字幕挂两次,track-list 出现重复外挂轨)。
         QString subProvidedItemId;
+        // 外挂字幕选轨未落实(URL 异步下载,file-loaded 时点轨道不存在):
+        // 为 true 时 track-list 变化才重放选轨;落实后置 false,否则用户
+        // 手动切换的轨道会被改回 meta 里的初始选择。
+        bool trackSelectionPending = false;
         // QML 协商结果缓存(id -> meta):file-loaded 按 pendingFileId 归位。
         QHash<QString, QVariantMap> episodeMeta;
         // eof 结束判定:播完条目的 playlist_entry_id(按 id 在播放列表
